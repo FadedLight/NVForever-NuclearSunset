@@ -33,7 +33,7 @@ use crate::anim_play::{BlendPlayer, BoundClip, Clip};
 use crate::data::GameData;
 use crate::model::ModelCtx;
 use crate::nif_material::NifMaterial;
-use crate::nif_spawn::{affine, build_mesh, is_editor_marker, shaded_model, shape_material, shape_material_reusing_tangents, shape_props, shape_skin, to_bevy, Props};
+use crate::nif_spawn::{affine, is_editor_marker, shaded_model, shape_material, shape_material_reusing_tangents, shape_props, to_bevy, AdmittedShape, NumericRejections, Props};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::DynamicSkinnedMeshBounds;
 use bevy::math::Affine3A;
@@ -846,6 +846,7 @@ impl ActorCtx<'_, '_> {
                 || is_editor_marker(by_block.get(&b).and_then(|o| o.name.as_deref()))
         };
         let mut out = PreparedPart::default();
+        let mut rejected = NumericRejections::default();
         // `Prn` on the root node (actors.md §1.2).
         if let Some(r) = objects.iter().find(|o| o.parent.is_none()) {
             out.root = affine(&r.transform);
@@ -904,7 +905,7 @@ impl ActorCtx<'_, '_> {
             }
             // The actor's clips may fade this shape's material alpha (Mr. House's screens).
             props.alpha_gated = crate::nif_spawn::material_alpha_controlled(&file, &dec, o.block);
-            let Some((mut mesh, _tris)) = build_mesh(data) else { continue };
+            let Some(AdmittedShape { mut mesh, skin, .. }) = rejected.admit(o.block, &dec, shape, data) else { continue };
             // Hair-shader shapes (hair, beards, eyebrows) carry a mask in their vertex
             // colours, not a colour [observed: red 0.04–0.39 with green and blue at 1 in
             // `hairbase.nif` and `beardmustachecurly.nif`; multiplied in, the hair turns
@@ -913,6 +914,9 @@ impl ActorCtx<'_, '_> {
                 mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
             }
             let (material, missing) = shape_material(&props, &mut mesh, &mut m.textures, &m.data, &mut m.images, m.formats.as_deref());
+            if !rejected.accept_mesh(o.block, &mesh) {
+                continue;
+            }
             if let Some(t) = missing {
                 self.cache.failures.push(format!("{path}: texture {t} not loaded"));
             }
@@ -929,7 +933,7 @@ impl ActorCtx<'_, '_> {
             if !cap && caps > 0 && first_mixed_report(path, o.block) {
                 info!("actor parts: {path}: shape {:?} hides {caps} cap partitions beside {} drawn", o.name.as_deref().unwrap_or(""), partitions.len() - caps);
             }
-            let skin = shape_skin(&dec, shape, mesh.count_vertices()).and_then(|skin| {
+            let skin = skin.and_then(|skin| {
                 let names: Option<Vec<String>> = skin.bones.iter().map(|b| by_block.get(b).and_then(|o| o.name.clone())).collect();
                 let names = names?;
                 let binds = skin.insert_into(&mut mesh);
@@ -964,6 +968,7 @@ impl ActorCtx<'_, '_> {
         // itself (Mister Handy's jet, `fxmrhandyjetaddon.nif`: scrolling flames,
         // refraction clouds, billboards; #2228), so a creature draws it as a playing model
         // ([`PreparedPart::plays_itself`]).
+        rejected.report(path);
         out.plays_itself = out.shapes.iter().all(|s| s.skin.is_none())
             && (!crate::model::free_material_tracks(&file, &dec).is_empty()
                 || !crate::model::free_transform_tracks(&file, &dec).is_empty()

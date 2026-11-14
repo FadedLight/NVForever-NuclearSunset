@@ -14,7 +14,7 @@ use crate::anim_play::{Clip, MaterialTarget, MaterialTrack, OwnCycle, Playing};
 use crate::material_anim::{MaterialSlot, RigMaterials};
 use crate::data::GameData;
 use crate::nif_material::NifMaterial;
-use crate::nif_spawn::{affine, build_mesh, is_editor_marker, shaded_model, shape_material_with, shape_props, shape_skin, to_bevy, StoreTextures, TextureSource};
+use crate::nif_spawn::{affine, is_editor_marker, shaded_model, shape_material_with, shape_props, to_bevy, AdmittedShape, NumericRejections, StoreTextures, TextureSource};
 use crate::texture::{worker_texture, TextureCache, TextureSnapshot, WorkerTextures};
 use bevy::asset::AssetHandleProvider;
 use bevy::image::CompressedImageFormats;
@@ -1573,6 +1573,7 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
     // Shapes without any property beside shaded ones: editor geometry (`Props::is_helper`).
     let shaded = shaded_model(&file, &dec);
     let mut editor_shapes: Vec<String> = Vec::new();
+    let mut rejected = NumericRejections::default();
     for o in objects.iter().filter(|o| !o.is_node) {
         // Walk to the root: accumulate the transform below the root's own and look
         // for hidden ancestors.
@@ -1623,7 +1624,7 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
             first_textures += props.use_first_person_textures(|p| game.vfs.exists(p));
             first_worn += props.first_person_texture_count();
         }
-        let Some((mut mesh, tris)) = build_mesh(data) else { continue };
+        let Some(AdmittedShape { mut mesh, triangles: tris, skin }) = rejected.admit(o.block, &dec, shape, data) else { continue };
         // A morphing shape: its mesh stays readable in the main world so that
         // `morph::play_vertex_morphs` can rewrite its vertices.
         let morph = morph_of.get(&o.block).filter(|g| g.num_vertices == mesh.count_vertices()).map(|g| {
@@ -1638,6 +1639,9 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
             })
         });
         let (material, _missing) = shape_material_with(&props, &mut mesh, sink);
+        if !rejected.accept_mesh(o.block, &mesh) {
+            continue;
+        }
         if let Some(VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
             for v in p {
                 let q = (out.root * t).transform_point3(Vec3::from_array(*v));
@@ -1647,7 +1651,6 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
                 });
             }
         }
-        let skin = shape_skin(&dec, shape, mesh.count_vertices());
         if skin.is_some() {
             out.skinned += 1;
         }
@@ -1722,6 +1725,7 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
     if !swaps.is_empty() {
         info!("{path}: texture swap: {} entr(ies), {} shape(s) retextured: {}", swaps.len(), swapped.len(), swapped.join(", "));
     }
+    rejected.report(path);
     out.rig = rig.map(|(r, _)| r);
     Ok(out)
 }

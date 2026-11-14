@@ -5,6 +5,8 @@ pub enum Intent {
     Pending,
     Scroll,
     Assign,
+    /// An actual painted scrollbar marker owns this contact, not body scrolling.
+    Control,
 }
 impl Intent {
     pub fn observe(&mut self, delta: [f32; 2], age: u64) {

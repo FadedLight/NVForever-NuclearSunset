@@ -380,6 +380,8 @@ pub struct DataState {
     /// Each tab's selected row and first row shown, and how many rows fit when last drawn.
     sel: [usize; 5],
     first: [usize; 5],
+    /// Direct scrollbar view movement, independent of the selected gameplay row.
+    manual_list: Option<(usize, usize)>,
     fit: [usize; 5],
     /// The selected row is boxed (the pointer is on it, or a key moved it).
     boxed: bool,
@@ -1173,6 +1175,20 @@ impl DataState {
     pub fn selection(&self, tab: usize) -> (usize, bool) {
         (self.sel.get(tab).copied().unwrap_or(0), self.challenges)
     }
+    pub fn list_scroll(&self, tab: usize) -> Option<usize> {
+        (tab >= QUESTS && tab < self.first.len()).then(|| self.first[tab])
+    }
+    pub(crate) fn scroll_list_by(&mut self, tab: usize, by: super::scrollbar::ScrollBy) -> bool {
+        let Some(view) = self.shown.as_ref().filter(|v| v.tab == tab).or_else(|| self.prepared.as_ref().map(|p|&p.view).filter(|v|v.tab==tab)) else { return false };
+        let Body::List { rows, .. } = &view.body else { return false };
+        let now = self.first[tab];
+        let page = self.fit[tab].max(1);
+        let Some(to) = by.value(now as f64, rows.len().saturating_sub(page) as f64, page as f64) else { return false };
+        self.first[tab] = to as usize;
+        self.manual_list = Some((tab, self.sel[tab]));
+        self.pointer_pick = true;
+        now != self.first[tab]
+    }
 
     /// The active quest, for a save (`crate::save`): a ForceActiveQuest the Pip-Boy has
     /// not taken yet wins, as it would on the Pip-Boy's next refresh, and the game's copy
@@ -1616,7 +1632,15 @@ fn take_input(st: &mut DataState, tab: usize, l: &Lists, game: &mut Game, input:
     }
     if len > 0 {
         st.sel[tab] = st.sel[tab].min(len - 1);
-        st.first[tab] = model::keep_in_view(st.sel[tab], st.first[tab].min(len - 1), st.fit[tab]);
+        if st.manual_list.is_some_and(|(old_tab, selected)| old_tab != tab || (selected != st.sel[tab] && !st.pointer_pick)) {
+            st.manual_list = None;
+        }
+        if st.manual_list.is_some() {
+            st.first[tab] = st.first[tab].min(len.saturating_sub(st.fit[tab].max(1)));
+            st.manual_list = Some((tab, st.sel[tab]));
+        } else {
+            st.first[tab] = model::keep_in_view(st.sel[tab], st.first[tab].min(len - 1), st.fit[tab]);
+        }
     }
     let shows = pane_key(st, tab, l);
     scroll_pane(st, tab, shows, pane);
@@ -3139,7 +3163,15 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, origin: Vec2, height: f32, ba
         }
         if first > 0 || first + fit < rows.len() {
             let bar_x = if bar_left { 0.0 } else { LIST_W - SCROLLBAR };
-            scroll_bar(p, c, bar_x, height, first as f32 / rows.len() as f32, fit as f32 / rows.len() as f32);
+            let from = first as f32 / rows.len() as f32;
+            let part = fit as f32 / rows.len() as f32;
+            scroll_bar(p, c, bar_x, height, from, part);
+            if let Some(tab) = tab {
+                let (top, h) = bar_marker(height, from, part);
+                let track = Rect::new(bar_x, ARROW_H+4.0, bar_x+SCROLLBAR, height-ARROW_H-4.0);
+                super::scrollbar::hits(p, Page::Data, tab, Rect::new(bar_x,0.0,bar_x+SCROLLBAR,height),track,
+                    Rect::new(bar_x,top,bar_x+SCROLLBAR,(top+h).min(track.max.y)),origin);
+            }
         }
     });
     fit
@@ -3206,10 +3238,11 @@ fn bar_run(height: f32) -> f32 {
 
 /// A scroll bar's marker in a bar `height` high: its top and height for the part shown
 /// (`part`) from `from` (shares of the whole).
-fn bar_marker(height: f32, from: f32, part: f32) -> (f32, f32) {
+pub(super) fn bar_marker(height: f32, from: f32, part: f32) -> (f32, f32) {
     let run = bar_run(height);
     (ARROW_H + 4.0 + run * from.clamp(0.0, 1.0), (run * part.clamp(0.0, 1.0)).max(8.0))
 }
+pub(super) fn bar_track(height: f32) -> (f32, f32) { (ARROW_H+4.0, height-ARROW_H-4.0) }
 
 /// The places on a scroll bar at `x`, `height` high ([`scroll_bar`]) that take the
 /// pointer: the arrows, the track above and below the marker, and the marker (as wide as

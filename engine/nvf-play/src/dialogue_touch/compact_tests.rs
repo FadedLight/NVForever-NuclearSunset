@@ -15,7 +15,7 @@ use bevy::ui::{
     widget::measure_text_system,
 };
 
-fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Entity) {
+pub(super) fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins,
@@ -114,7 +114,7 @@ fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Entity) {
     settle(&mut app);
     (app, window)
 }
-fn settle(app: &mut App) {
+pub(super) fn settle(app: &mut App) {
     for _ in 0..6 {
         app.update();
     }
@@ -122,7 +122,7 @@ fn settle(app: &mut App) {
 fn rectangle(node: &ComputedNode, transform: &UiGlobalTransform) -> Rect {
     Rect::from_center_size(transform.transform_point2(Vec2::ZERO), node.size())
 }
-fn rows(app: &mut App) -> Vec<(usize, Rect)> {
+pub(super) fn rows(app: &mut App) -> Vec<(usize, Rect)> {
     let mut query = app
         .world_mut()
         .query::<(&Row, &ComputedNode, &UiGlobalTransform)>();
@@ -147,7 +147,7 @@ fn fully_visible(app: &mut App) -> Vec<(usize, Rect)> {
         .filter(|(_, r)| r.min.y >= view.min.y - 0.01 && r.max.y <= view.max.y + 0.01)
         .collect()
 }
-fn send(app: &mut App, window: Entity, id: u64, phase: TouchPhase, position: Vec2) {
+pub(super) fn send(app: &mut App, window: Entity, id: u64, phase: TouchPhase, position: Vec2) {
     app.world_mut().write_message(TouchInput {
         window,
         id,

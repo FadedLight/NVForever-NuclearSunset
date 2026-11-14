@@ -438,6 +438,11 @@ fn on_touch_row_press(press: On<PointerPress>, rows: Query<&RowButton>, active: 
     if press.pointer.id!=super::touch_items::POINTER || press.button!=PointerButton::Primary || !admission.allows() {return;}
     if let (Some(touch),Ok(row),Some(menu))=(touch.as_deref_mut(),rows.get(press.entity),active.0.as_ref()) {touch.capture_row(menu,row.0);}
 }
+
+#[cfg(test)]
+pub(super) fn binding_fixture_row(world: &mut World, index: usize) -> Entity {
+    world.spawn(RowButton(index)).observe(on_row_over).observe(on_touch_row_press).observe(on_row_click).id()
+}
 fn on_row_click(
     click: On<PointerClick>,
     rows: Query<&RowButton>,
@@ -489,7 +494,7 @@ pub fn draw(
     mut forms: Local<Option<super::stats::read::Forms>>,
     (repair, modding, mut script): (Res<super::repair::PipRepair>, Res<super::item_mod::PipItemMod>, Option<ResMut<crate::script::ScriptState>>),
     (hold, hotkeys): (Res<HotkeyHold>, Res<Hotkeys>),
-    (pip, mut logged, mut drawn_with): (Res<PipBoy>, Local<String>, Local<Option<crate::pad::Labels>>),
+    (pip, mut logged, mut drawn_with, mut scroll): (Res<PipBoy>, Local<String>, Local<Option<crate::pad::Labels>>, Option<ResMut<super::scrollbar::ItemsScroll>>),
 ) {
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
     let _canvas = crate::interface::original_units();
@@ -497,7 +502,7 @@ pub fn draw(
     // The hints' set and keys follow the input device: a change of labels draws again.
     let labels = crate::pad::labels();
     let relabelled = drawn_with.replace(labels) != Some(labels);
-    if added.get(body).is_err() && !relabelled && !active.is_changed() && !repair.is_changed() && !modding.is_changed() && !hold.is_changed() && !hotkeys.is_changed() {
+    if added.get(body).is_err() && !relabelled && !active.is_changed() && !repair.is_changed() && !modding.is_changed() && !hold.is_changed() && !hotkeys.is_changed() && scroll.as_ref().is_none_or(|s|!s.is_changed()) {
         return;
     }
     if forms.is_none() {
@@ -557,7 +562,9 @@ pub fn draw(
     // The rows' heights and the first row drawn: the selection is always drawn, rows of
     // two lines taking more room (owner's playtest list 7 item 15).
     let heights = row_heights(&mut c, m);
-    let first = if m.pointer_pick { m.scroll[Side::Player as usize].min(heights.len()) } else { first_shown(&heights, m.scroll[Side::Player as usize], m.selected[Side::Player as usize], LIST.height()) };
+    let first = scroll.as_mut().map(|s|s.bypass_change_detection().resolve(m, &heights, LIST.height())).unwrap_or_else(|| {
+        if m.pointer_pick { m.scroll[Side::Player as usize].min(heights.len()) } else { first_shown(&heights, m.scroll[Side::Player as usize], m.selected[Side::Player as usize], LIST.height()) }
+    });
     if active.is_changed() {
         info!("pipboy items: heading HP {hp}, DT {dt}; rows {first}.. of {} drawn", heights.len());
     }
@@ -569,7 +576,7 @@ pub fn draw(
             Card::new(CAPS.0, CAPS.1, label("sInventoryCaps", "Caps"), caps.to_string()),
         ];
         frame::heading(p, &mut c, Page::Items.title(), &cards);
-        list(p, &mut c, m, first, &heights);
+        list(p, &mut c, m, first, &heights, pip.tab());
         // The hotkey panel hides the picture, the badge and the hints (`IM_ButtonRect`).
         if let (true, Some(k)) = (panel, hold.slot) {
             info!("pipboy hotkeys: panel drawn, key {} chosen{}", k + 1, hold.said.as_ref().map_or_else(String::new, |s| format!(", says {s:?}")));
@@ -730,7 +737,7 @@ pub fn first_shown(heights: &[f32], first: usize, selected: usize, room: f32) ->
     first
 }
 
-fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, heights: &[f32]) {
+fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, heights: &[f32], tab: usize) {
     let bright = c.bright();
     let line = amber(LINE);
     let x0 = MAIN.min.x + LIST.min.x + ROW_X;
@@ -764,7 +771,14 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, 
     // The scroll bar, only while some rows do not show.
     if let Some((from, part)) = scroll_part(first, fit, rows.len()) {
         let (x, top) = (MAIN.min.x + LIST.min.x, MAIN.min.y + LIST.min.y);
-        p.spawn((at(x, top, SCROLLBAR, LIST.height()), Pickable::IGNORE)).with_children(|b| super::data::scroll_bar(b, c, 0.0, LIST.height(), from, part));
+        p.spawn((at(x, top, SCROLLBAR, LIST.height()), Pickable::IGNORE)).with_children(|b| {
+            super::data::scroll_bar(b, c, 0.0, LIST.height(), from, part);
+            let (marker_top, marker_height) = super::data::bar_marker(LIST.height(), from, part);
+            let (track_top, track_bottom) = super::data::bar_track(LIST.height());
+            let track = Rect::new(0.0, track_top, SCROLLBAR, track_bottom);
+            let marker = Rect::new(0.0, marker_top, SCROLLBAR, (marker_top+marker_height).min(track.max.y));
+            super::scrollbar::hits(b, Page::Items, tab, Rect::new(0.0,0.0,SCROLLBAR,LIST.height()), track, marker, Vec2::new(x,top));
+        });
     }
 }
 

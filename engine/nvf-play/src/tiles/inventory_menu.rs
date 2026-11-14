@@ -646,6 +646,7 @@ pub(crate) struct Written {
 /// The decision every reader shares, and what the page keeps.
 #[derive(Resource)]
 pub struct InventoryTiles {
+    navigation_scroll: Option<(TileId,crate::menu::model::Category,crate::menu::model::RowKey,f64)>,
     /// The menu, while the page is ready to display this frame ([`settle`]).
     pub ready: Option<TileId>,
     /// The menu painted by the last drawing (`super::draw`): what the player sees.
@@ -669,8 +670,14 @@ pub struct InventoryTiles {
 
 impl Default for InventoryTiles {
     fn default() -> Self {
-        InventoryTiles { ready: None, shown: None, pieces: Vec::new(), view: MenuTiles::new(&PATHS), cut: None, cut_until: None, modal: false, others: false, written: Written::default() }
+        InventoryTiles { navigation_scroll:None,ready: None, shown: None, pieces: Vec::new(), view: MenuTiles::new(&PATHS), cut: None, cut_until: None, modal: false, others: false, written: Written::default() }
     }
+}
+impl InventoryTiles {
+    pub(crate) fn queue_navigation_scroll(&mut self,category:crate::menu::model::Category,row:crate::menu::model::RowKey,value:f64) {
+        self.navigation_scroll=self.written.menu.filter(|_|value.is_finite()).map(|menu|(menu,category,row,value.max(0.0)));
+    }
+    pub(crate) fn clear_navigation_scroll(&mut self) {self.navigation_scroll=None;}
 }
 
 /// The tiles of [`required_paths`], or why the page cannot be drawn.
@@ -726,6 +733,13 @@ pub(crate) fn page(ui: &mut Ui, new: Option<Shown>, late: bool, tiles: &mut Inve
         tiles.view.rewrite(ui);
     }
     if late {
+        if let Some((owner,category,row,value))=tiles.navigation_scroll.take() {
+            let list=&s.list.lists[Side::Player as usize];
+            if owner==menu && list.category==category && list.selected.and_then(|i|list.rows.get(i)).is_some_and(|r|r.key==row) {
+                tiles.view.scroll_to(Side::Player,value);
+                tiles.view.rewrite(ui);
+            }
+        }
         ui.update();
         // Every final pass, so readiness is about the tree that is about to be painted.
         let pieces = fonts.set_out(ui, menu);
@@ -1074,6 +1088,7 @@ pub(crate) struct Feed {
     /// Where the pointer was last frame, and the tile under it then.
     last_at: Option<(f64, f64)>,
     under: Option<TileId>,
+    touch_drag: bool,
 }
 
 /// What the page's tile input reads of the Pip-Boy.
@@ -1088,6 +1103,7 @@ pub(crate) struct FeedPip<'w> {
     modding: Option<Res<'w, PipItemMod>>,
     wheel: Option<Res<'w, crate::menu::WheelHold>>,
     touch:Option<ResMut<'w,crate::pipboy::touch_items::TouchItems>>,
+    admission: crate::pipboy::touch_items::Admission<'w>,
 
 }
 
@@ -1131,6 +1147,17 @@ pub(crate) fn touch_target(tiles:&InventoryTiles,ui:&Ui,menu:TileId,point:Vec2,m
         }
     },|row|match row {Some(NativeRow::Inventory{guard,..}) if !guard.selected=>Some(model.focus==guard.side && model.selected[guard.side as usize]==guard.index),_=>None},
     |row|match row {Some(NativeRow::Inventory{guard,..})=>model.row_is(&guard),Some(NativeRow::InventorySurface{needs_selection,..})=>!needs_selection,_=>true})
+        .map(|target| target.with_control(|tile| matches!(items_tile(ui,&tiles.view,&tiles.written.tabs,tile),Some(ItemsTile::Bar(BarPiece::Marker)))))
+}
+pub(crate) fn touch_navigation(tiles:&InventoryTiles,ui:&Ui)->Vec<crate::pipboy::tab_swipe::Region> {
+    use crate::pipboy::tab_swipe::{native_region,Kind};
+    let title=ui.find_tile(TITLE);
+    tiles.pieces.iter().filter_map(|p| {
+        let kind=if Some(p.tile)==title {Kind::Sections}
+            else if matches!(items_tile(ui,&tiles.view,&tiles.written.tabs,p.tile),Some(ItemsTile::Tab(_))) {Kind::Subtabs}
+            else {return None};
+        native_region(p,kind)
+    }).collect()
 }
 /// The page's tile input, on a frame it takes it ([`takes`]): see the module notes. The Pip-Boy's
 /// pointer and its test aid are only read here.
@@ -1138,7 +1165,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
     if !switch.inventory {
         return;
     }
-    let FeedPip { pip, screen, aid, paused, active, repair, modding, wheel, mut touch } = from;
+    let FeedPip { pip, screen, aid, paused, active, repair, modding, wheel, mut touch, admission } = from;
     let Some(rt) = script.rt.as_mut() else { return };
     let game = &mut rt.game;
     let closed = lists_closed(repair.as_deref(), modding.as_deref());
@@ -1156,15 +1183,23 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
         return;
     };
     let mut mobile=crate::pipboy::touch_scroll::native_frame(touch.as_deref(),&devices.mouse);
+    if !admission.allows_contact(touch.as_ref().and_then(|t|t.contact_id())) { mobile=Default::default(); }
+    // Armed assignment proposes a guarded item for explicit confirmation. It
+    // cannot also dispatch the native page's select/use/drop button click.
+    if touch.as_ref().is_some_and(|t| t.binding_slot().is_some()) { mobile.tap = false; }
     if mobile.tap {
         let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,m));
         mobile.tap=touch.as_ref().is_some_and(|t|t.native_release_valid(target));
+    }
+    if mobile.control && mobile.started {
+        let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,m));
+        mobile.started=target.is_some_and(|t|t.control()) && touch.as_ref().is_some_and(|t|t.native_release_valid(target));
     }
     let pointer = mobile.at.or_else(||screen.as_ref().and_then(|s| s.pointer));
     let at = pointer.map(|p| (f64::from(p.x), f64::from(p.y)));
     if state.taking != Some(pip.frame) {
         // Where the pointer rests when the page comes up is no move onto a row.
-        *state = Feed { taking: Some(pip.frame), last_at: at, under: None };
+        *state = Feed { taking: Some(pip.frame), last_at: at, under: None, touch_drag: false };
     }
     // The test aid's click (`crate::pipboy::drive_pointer`): 1 is its press's frame.
     let aid_press = aid.click == 1 && !aid.right;
@@ -1172,7 +1207,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
     let held = mobile.held || aid_press || devices.mouse.pressed(MouseButton::Left);
     let mut input = fnv_ui::input::Input {
         at,
-        press: mobile.tap || aid_press || devices.mouse.just_pressed(MouseButton::Left),
+        press: mobile.press() || aid_press || devices.mouse.just_pressed(MouseButton::Left),
         shift: devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight),
         ..Default::default()
     };
@@ -1197,8 +1232,9 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
     log_report(ui, &report);
     let tiles = &mut *tiles;
     let tabs = &tiles.written.tabs;
-    if !held {
+    if !held || (state.touch_drag && !mobile.control) {
         tiles.view.drag = None;
+        state.touch_drag = false;
     }
     // At most one row click acts a frame: the commands apply later, on rows the first may change.
     let mut row_acted = false;
@@ -1265,6 +1301,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
                 pressed_marker = true;
                 let list_tile = tiles.view.list_tile(ui, Side::Player);
                 tiles.view.drag = at.filter(|_| held && matches!(c.by, fnv_ui::input::By::Pointer)).zip(list_tile).and_then(|((_, y), l)| list::marker_grab(ui, menu, l, y));
+                state.touch_drag = mobile.control && tiles.view.drag.is_some();
             }
             ItemsTile::Bar(piece) => {
                 let value = tiles.view.value(Side::Player);
@@ -1290,7 +1327,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
             }
         }
     }
-    if let Some((_, Some(to))) = report.over {
+    if let Some((_, Some(to))) = report.over.filter(|_| !mobile.control) {
         match items_tile(ui, &tiles.view, tabs, to) {
             Some(ItemsTile::Tab(i)) => {
                 out.hovered.write(TabHovered(i));
@@ -1981,7 +2018,7 @@ mod tests {
                 if matches!(cmd.0,crate::menu::model::Command::One){seen.ones+=1;}
                 seen.used+=usize::from(m.apply(&mut sim.world,cmd.0).used.is_some());
             }}
-            touch.assign_pending(&active,&mut keys);
+            touch.assign_pending(&active,&mut keys,&mut sim.world);
         }
         let mut sim=crate::sim::test_world::sim((1..=12).map(|i|{let mut b=crate::sim::test_world::item_base(0xF200+i);b.name=Some(format!("Item {i:02}"));b}).collect(),vec![]);
         for i in 1..=12 {sim.world.add_item(FormId::PLAYER_REF,FormId(0xF200+i),3).unwrap();}
@@ -2049,6 +2086,92 @@ mod tests {
         use crate::pipboy::touch_items::TouchItems;
         assert!(app.world_mut().resource_mut::<TouchItems>().event(&bevy::input::touch::TouchInput{
             window:Entity::PLACEHOLDER,id,phase,position:point,force:None},100));
+    }
+    fn swipe_navigation(app:&mut bevy::prelude::App,id:u64,start:Vec2,delta:Vec2){
+        use bevy::input::touch::TouchPhase;
+        native_guard_event(app,id,TouchPhase::Started,start);app.update();app.update();
+        native_guard_event(app,id,TouchPhase::Moved,start+delta);
+        native_guard_event(app,id,TouchPhase::Ended,start+delta);
+        for _ in 0..6 {app.update();}
+    }
+    fn repaint_navigation_inventory(app:&mut bevy::prelude::App){
+        let tab=app.world().resource::<PipBoy>().tab();
+        let drawing={let m=app.world().resource::<ActiveMenu>().0.as_ref().unwrap();let mut d=shown(m.list(Side::Player).rows.len(),m.selected[Side::Player as usize]);
+            d.tab=tab;d.list.lists[Side::Player as usize].category=m.category[Side::Player as usize];d.list.pointer_pick=m.pointer_pick;d.list.navigated=m.navigated;
+            d.list.lists[Side::Player as usize].rows=m.list(Side::Player).rows.iter().enumerate().map(|(i,r)|item_menu::RowShown{key:RowKey::at(&m.list(Side::Player).rows,i).unwrap(),name:r.name.clone(),text:r.name.clone(),equipped:false}).collect();d};
+        let mut tiles=app.world_mut().remove_resource::<InventoryTiles>().unwrap();
+        {let mut script=app.world_mut().resource_mut::<ScriptState>();let menu=run(&mut script.rt.as_mut().unwrap().game.ui_tree,Some(drawing),&mut tiles).unwrap();tiles.shown=Some(menu);}
+        app.insert_resource(tiles);
+    }
+    #[test]
+    fn actual_native_tab_swipe_tap_vertical_and_cancel_have_one_action_owner(){
+        use bevy::{input::touch::TouchPhase,prelude::*};
+        for mode in 0..4 {
+            let NativeInventoryFixture{mut app,tab,..}=native_inventory_fixture();
+            app.world_mut().resource_mut::<crate::pipboy::tab_swipe::Options>().enabled=true;
+            let region={let t=app.world().resource::<InventoryTiles>();let script=app.world().resource::<ScriptState>();
+                touch_navigation(t,&script.rt.as_ref().unwrap().game.ui_tree).into_iter().find(|r|r.rect.contains(tab)).expect("actual painted tab text region")};
+            assert_eq!(region.kind,crate::pipboy::tab_swipe::Kind::Subtabs);
+            native_guard_event(&mut app,270,TouchPhase::Started,tab);app.update();app.update();
+            assert_eq!(app.world().resource::<PipBoy>().tab(),2,"provisional press must not change native tab");
+            match mode {
+                0=>{native_guard_event(&mut app,270,TouchPhase::Moved,tab-Vec2::X*60.);native_guard_event(&mut app,270,TouchPhase::Ended,tab-Vec2::X*60.);},
+                1=>native_guard_event(&mut app,270,TouchPhase::Ended,tab),
+                2=>{native_guard_event(&mut app,270,TouchPhase::Moved,tab-Vec2::Y*60.);native_guard_event(&mut app,270,TouchPhase::Ended,tab);},
+                _=>{native_guard_event(&mut app,270,TouchPhase::Moved,tab-Vec2::X*60.);native_guard_event(&mut app,270,TouchPhase::Canceled,tab-Vec2::X*60.);},
+            }
+            for _ in 0..6 {app.update();}
+            assert_eq!(app.world().resource::<PipBoy>().tab(),match mode {0=>3,1=>4,_=>2});
+            let seen=app.world().resource::<NativeGuardSeen>();
+            assert_eq!(seen.tabs,usize::from(mode<2));assert_eq!((seen.ones,seen.used),(0,0));
+            assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+            for i in 1..=12 {assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(0xF200+i)).unwrap(),3);}
+        }
+    }
+    #[test]
+    fn actual_painted_native_title_swipe_changes_main_section_without_consuming_inventory(){
+        let NativeInventoryFixture{mut app,..}=native_inventory_fixture();
+        app.world_mut().resource_mut::<crate::pipboy::tab_swipe::Options>().enabled=true;
+        let title={let t=app.world().resource::<InventoryTiles>();let script=app.world().resource::<ScriptState>();
+            touch_navigation(t,&script.rt.as_ref().unwrap().game.ui_tree).into_iter().find(|r|r.kind==crate::pipboy::tab_swipe::Kind::Sections).expect("actual painted title").rect.center()};
+        swipe_navigation(&mut app,271,title,Vec2::X*60.);
+        assert_eq!(app.world().resource::<PipBoy>().page,Page::Stats);
+        assert_eq!(app.world().resource::<NativeGuardSeen>().tabs,1);
+        assert_eq!(app.world().resource::<NativeGuardSeen>().used,0);
+    }
+    #[test]
+    fn actual_native_swipe_return_restores_inventory_row_identity_and_scroll_after_category_route(){
+        let NativeInventoryFixture{mut app,tab,..}=native_inventory_fixture();
+        app.world_mut().resource_mut::<crate::pipboy::tab_swipe::Options>().enabled=true;
+        {
+            let mut active=app.world_mut().resource_mut::<ActiveMenu>();let model=active.0.as_mut().unwrap();
+            model.selected[Side::Player as usize]=6;model.scroll[Side::Player as usize]=3;
+        }
+        let expected={let m=app.world().resource::<ActiveMenu>().0.as_ref().unwrap();RowKey::at(&m.list(Side::Player).rows,6).unwrap()};
+        repaint_navigation_inventory(&mut app);
+        {
+            let mut tiles=app.world_mut().remove_resource::<InventoryTiles>().unwrap();
+            assert!(tiles.view.scroll_to(Side::Player,3.0));
+            {let mut script=app.world_mut().resource_mut::<ScriptState>();let ui=&mut script.rt.as_mut().unwrap().game.ui_tree;
+                tiles.view.rewrite(ui);run(ui,None,&mut tiles).unwrap();
+                assert_eq!(ui.find_tile(LIST).and_then(|l|list::value_shown(ui,l)),Some(3.0));}
+            app.insert_resource(tiles);
+        }
+        swipe_navigation(&mut app,272,tab,-Vec2::X*60.);
+        assert_eq!(app.world().resource::<PipBoy>().tab(),3);
+        assert_eq!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().category[Side::Player as usize],Category::Misc);
+        // Repaint the actual new category into the same native tile tree before returning.
+        repaint_navigation_inventory(&mut app);
+        swipe_navigation(&mut app,273,tab,Vec2::X*60.);
+        assert_eq!(app.world().resource::<PipBoy>().tab(),2);
+        let model=app.world().resource::<ActiveMenu>().0.as_ref().unwrap();
+        assert_eq!(RowKey::at(&model.list(Side::Player).rows,model.selected[Side::Player as usize]),Some(expected));
+        assert_eq!(model.scroll[Side::Player as usize],3);
+        assert_eq!((app.world().resource::<NativeGuardSeen>().ones,app.world().resource::<NativeGuardSeen>().used),(0,0));
+        repaint_navigation_inventory(&mut app);
+        let tiles=app.world().resource::<InventoryTiles>();let script=app.world().resource::<ScriptState>();let ui=&script.rt.as_ref().unwrap().game.ui_tree;
+        assert_eq!(tiles.view.value(Side::Player),3.0);
+        assert_eq!(ui.find_tile(LIST).and_then(|l|list::value_shown(ui,l)),Some(3.0),"actual repainted native scroll must match bookmark");
     }
     #[test]
     fn native_row_release_cannot_use_a_repainted_neighbor_and_a_fresh_tap_uses_only_that_row_once(){
@@ -2118,6 +2241,92 @@ mod tests {
     }
 
 
+    fn native_scrollbar_fixture() -> (bevy::prelude::App, Vec2) {
+        let NativeInventoryFixture { mut app, .. } = native_inventory_fixture();
+        let mut script = app.world_mut().remove_resource::<ScriptState>().unwrap();
+        let mut tiles = app.world_mut().remove_resource::<InventoryTiles>().unwrap();
+        script.rt.as_mut().unwrap().game.ui_tree = tree_changed(|xml| xml
+            .replace("<image name=\"lb_scrollbar\">", "<image name=\"lb_scrollbar\"><x>270</x><width>20</width><height>200</height>")
+            .replace("<image name=\"scrollbar_vert_marker\"/>", r#"<image name="scrollbar_vert_marker"><target>&true;</target><width>20</width><height>40</height><_step_height>20</_step_height><y><copy src="parent()" trait="_current_value"/><mul>20</mul></y></image>"#)
+            .replace("<hotrect name=\"scrollbar_vert_page_down\"/>", r#"<hotrect name="scrollbar_vert_page_down"><target>&true;</target><y>40</y><width>20</width><height>160</height></hotrect>"#));
+        let model = app.world().resource::<ActiveMenu>().0.as_ref().unwrap();
+        redraw_mobile_inventory(model, &mut script, &mut tiles);
+        let ui = &script.rt.as_ref().unwrap().game.ui_tree;
+        let list_tile = tiles.view.list_tile(ui, Side::Player).unwrap();
+        let marker = list::child(ui, list::child(ui, list_tile, list::SCROLLBAR).unwrap(), list::MARKER).unwrap();
+        let rect = super::super::layout::layout(ui, marker, &|_,_,_| (0.0,0.0), true).into_iter().find(|p| p.tile==marker).unwrap().rect;
+        let point = Vec2::new((rect.left+rect.width*0.5) as f32, (rect.top+rect.height*0.5) as f32);
+        assert!(touch_target(&tiles,ui,tiles.shown.unwrap(),point,model).unwrap().control(), "actual painted native marker must authorize Control");
+        app.insert_resource(script).insert_resource(tiles);
+        fn repaint(active:bevy::prelude::Res<ActiveMenu>,mut script:bevy::prelude::ResMut<ScriptState>,mut tiles:bevy::prelude::ResMut<InventoryTiles>) {
+            redraw_mobile_inventory(active.0.as_ref().unwrap(), &mut script, &mut tiles);
+        }
+        app.add_systems(bevy::prelude::Update, repaint.after(feed));
+        (app, point)
+    }
+
+    #[test]
+    fn actual_native_marker_queued_drag_scrolls_painted_list_without_selection_use_or_assignment() {
+        use bevy::input::touch::TouchPhase;
+        let (mut app, point) = native_scrollbar_fixture();
+        // A complete OS batch may arrive before the first point is projected.
+        native_guard_event(&mut app, 190, TouchPhase::Started, point);
+        native_guard_event(&mut app, 190, TouchPhase::Moved, point+Vec2::new(0.0,80.0));
+        native_guard_event(&mut app, 190, TouchPhase::Ended, point+Vec2::new(0.0,80.0));
+        for _ in 0..7 { app.update(); }
+        let tiles = app.world().resource::<InventoryTiles>();
+        assert_eq!(tiles.view.value(Side::Player),4.0,"the real native marker drag changed the list view");
+        assert!(tiles.view.drag.is_none(),"projected Ended releases the native drag");
+        let script=app.world().resource::<ScriptState>();let ui=&script.rt.as_ref().unwrap().game.ui_tree;
+        let list_tile=tiles.view.list_tile(ui,Side::Player).unwrap();
+        assert_eq!(list::value_shown(ui,list_tile),Some(4.0),"the actual native tree paints the same value");
+        let marker=list::child(ui,list::child(ui,list_tile,list::SCROLLBAR).unwrap(),list::MARKER).unwrap();
+        assert_eq!(ui.tile(marker).get("y").unwrap().num(),80.0,"the actual marker's model position follows the scroll");
+        assert_eq!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().selected[Side::Player as usize],0);
+        let seen=app.world().resource::<NativeGuardSeen>();assert_eq!((seen.selects,seen.used,seen.ones),(0,0,0));
+        assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+        assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(0xF201)).unwrap(),3);
+    }
+
+    #[test]
+    fn actual_native_scrollbar_page_tap_and_hardware_mouse_keep_same_authoritative_view() {
+        use bevy::input::touch::TouchPhase;
+        use bevy::prelude::*;
+        let (mut app, point) = native_scrollbar_fixture();
+        let down = point+Vec2::new(0.0,100.0);
+        native_guard_event(&mut app,191,TouchPhase::Started,down);
+        native_guard_event(&mut app,191,TouchPhase::Ended,down);
+        for _ in 0..5 {app.update();}
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),2.0,"a guarded actual page-region tap pages the list");
+        assert_eq!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().selected[Side::Player as usize],0);
+        app.world_mut().resource_mut::<PipBoyScreen>().pointer=Some(down);
+        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
+        // InputPlugin owns edge reset; its real WindowEvent is the hardware press source.
+        app.world_mut().write_message(bevy::input::mouse::MouseButtonInput {button:MouseButton::Left,state:bevy::input::ButtonState::Pressed,window:Entity::PLACEHOLDER});
+        app.update();
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left),"scrollbar never clears physical mouse ownership");
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),4.0,"the physical mouse pages the same native view once");
+    }
+
+    #[test]
+    fn actual_native_touch_marker_releases_before_hardware_mouse_takes_a_new_action() {
+        use bevy::{input::touch::TouchPhase,prelude::*};
+        let (mut app,point)=native_scrollbar_fixture();
+        native_guard_event(&mut app,192,TouchPhase::Started,point);app.update();app.update();
+        native_guard_event(&mut app,192,TouchPhase::Moved,point+Vec2::new(0.0,60.0));app.update();app.update();
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),3.0);
+        assert!(app.world().resource::<InventoryTiles>().view.drag.is_some());
+        let mouse=point+Vec2::new(0.0,100.0);
+        app.world_mut().resource_mut::<PipBoyScreen>().pointer=Some(mouse);
+        app.world_mut().write_message(bevy::input::mouse::MouseButtonInput{button:MouseButton::Left,state:bevy::input::ButtonState::Pressed,window:Entity::PLACEHOLDER});
+        app.update();
+        assert!(app.world().resource::<InventoryTiles>().view.drag.is_none(),"canceled touch drag cannot inherit the physical left hold");
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),5.0,"hardware page action still executes exactly once");
+        app.world_mut().resource_mut::<PipBoyScreen>().pointer=Some(point);app.update();
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),5.0,"subsequent physical motion cannot resume the old finger's marker drag");
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+    }
+
     #[test]
     fn native_inventory_action_button_keeps_its_painted_selected_row_until_release(){
         use bevy::prelude::*;use bevy::input::touch::TouchPhase;
@@ -2155,4 +2364,5 @@ mod tests {
         assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(0xF201)).unwrap(),3);
     }
 
+    include!("inventory_menu/touch_binding_tests.rs");
 }

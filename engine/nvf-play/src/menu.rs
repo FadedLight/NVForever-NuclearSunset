@@ -270,7 +270,8 @@ pub(crate) fn add_open_and_keys<M>(app: &mut App, before: impl IntoScheduleConfi
         .add_message::<ItemUsed>()
         .add_message::<crate::ui_sounds::UiSound>()
         .add_message::<crate::crime::ItemsTaken>()
-        .add_systems(Update, (before, open_menus, (quantity_keys, menu_keys, apply_input).chain().run_if(menu_open)).chain());
+        .add_systems(Update, (before, open_menus, (quantity_keys, menu_keys, apply_input).chain().run_if(menu_open)).chain().in_set(MenuSystems))
+        .add_systems(OnExit(PlayState::Menu),close_menu);
 }
 
 /// Whether one of these menus is open.

@@ -269,6 +269,11 @@ impl MenuTiles {
     pub fn value(&self, side: Side) -> f64 {
         self.views[side as usize].value
     }
+    /// Current list value, upper bound and page extent, independent of selection.
+    pub fn scroll_extent(&self, side: Side) -> (f64, f64, f64) {
+        let view = &self.views[side as usize];
+        (view.value, view.counts.most(), view.counts.visible)
+    }
 
     /// Set a list's scroll, held in its bar's range (the bar's pieces, the marker's drag): the
     /// view's own, no command of the model's. Returns whether it moved.

@@ -9,6 +9,7 @@ use bevy::asset::uuid::Uuid;
 use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use std::collections::VecDeque;
+mod binding;
 
 /// Wrapper-owned touch UI capture; absent keeps desktop/headless behavior unchanged.
 #[derive(Resource, Default)]
@@ -51,6 +52,7 @@ pub const POINTER: bevy::picking::pointer::PointerId =
 pub struct Point {
     pub phase: TouchPhase,
     pub position: Vec2,
+    pub age_ms: u64,
     previous: Option<Vec2>,
     scrolling: bool,
 }
@@ -90,6 +92,7 @@ pub struct TouchItems {
     native_target: Option<super::touch_scroll::NativeTarget>,
     session: Option<Session>,
     flat_geometry: Option<(Vec2, Vec2)>,
+    binding: binding::Binding,
     pub message: String,
 }
 impl TouchItems {
@@ -103,12 +106,27 @@ impl TouchItems {
         if self.frame.started {
             self.native_owner = Some(target.is_some());
             self.native_target = target;
+            if target.is_some_and(|t| t.control()) { self.claim_control(); }
         }
         let owner = self.native_owner.unwrap_or(false);
-        self.frame.native = owner && target.is_some();
+        self.frame.control = self.contact.is_some_and(|c| c.intent == Intent::Control);
+        self.frame.native = owner && (target.is_some() || self.frame.control);
         self.frame.initially_selected = self.native_target.and_then(|t| t.selected);
         self.frame.tap &= self.native_release_valid(target);
         owner
+    }
+    /// Called only by a painted scrollbar marker's native classifier or press observer.
+    pub fn claim_control(&mut self) {
+        if let Some(contact) = self.contact.as_mut() { contact.intent = Intent::Control; }
+        for point in &mut self.points { point.scrolling = false; }
+        self.projected_scroll = None;
+        self.scroll_remainder = 0.0;
+        self.row = None;
+        self.drop_slot = None;
+        self.suppress = true;
+        self.frame.control = true;
+        self.frame.scrolling = false;
+        self.frame.tap = false;
     }
     pub fn native_release_valid(&self, target: Option<super::touch_scroll::NativeTarget>) -> bool {
         self.native_target
@@ -149,10 +167,14 @@ impl TouchItems {
     pub fn busy(&self) -> bool {
         self.contact.is_some_and(|c| !c.ended)
     }
+    pub fn pending_contact(&self) -> bool {
+        self.busy() || !self.points.is_empty() || self.projected.is_some()
+    }
     pub fn position(&self) -> Option<Vec2> {
         self.contact.map(|c| c.at)
     }
     pub fn cancel(&mut self) {
+        self.binding = binding::Binding::default();
         self.cancel_pointer |= self.contact.is_some();
         self.contact = None;
         self.points.clear();
@@ -209,6 +231,7 @@ impl TouchItems {
         let mut point = Point {
             phase: event.phase,
             position: event.position,
+            age_ms: now.saturating_sub(c.started),
             previous: Some(previous),
             scrolling: c.intent == Intent::Scroll,
         };
@@ -266,6 +289,17 @@ impl TouchItems {
             }
         }
     }
+    /// Retire only this contact's virtual actions after a navigation axis wins.
+    pub fn suppress_navigation(&mut self) {
+        self.suppress=true;
+        self.frame=PointerFrame::default();
+        self.projected_scroll=None;
+        self.scroll_remainder=0.0;
+        self.row=None;
+        self.drop_slot=None;
+        self.native_owner=None;
+        self.native_target=None;
+    }
     pub fn take_projected(&mut self) -> Option<(Point, Option<Vec2>)> {
         let projected = self.projected.take();
         if let Some((p, at)) = projected {
@@ -273,10 +307,11 @@ impl TouchItems {
                 at: self.projected_scroll.map(|(anchor, _)| anchor).or(at),
                 started: p.phase == TouchPhase::Started && at.is_some(),
                 tap: p.phase == TouchPhase::Ended && !self.suppress && at.is_some(),
-                held: self.busy(),
+                held: matches!(p.phase, TouchPhase::Started | TouchPhase::Moved) && at.is_some(),
                 scrolling: p.scrolling,
                 native: false,
                 initially_selected: None,
+                control: self.contact.is_some_and(|c| c.intent == Intent::Control),
             };
         }
         projected
@@ -285,7 +320,7 @@ impl TouchItems {
         std::mem::take(&mut self.cancel_pointer)
     }
     pub fn suppress_click(&self) -> bool {
-        self.suppress
+        self.suppress || self.binding_slot().is_some()
     }
     pub fn capture_row(&mut self, menu: &crate::menu::model::MenuModel, index: usize) {
         if self.contact.is_none() || menu.mode != Mode::Inventory || menu.quantity.is_some() {
@@ -309,7 +344,9 @@ impl TouchItems {
             self.suppress = true;
         }
     }
-    pub fn assign_pending(&mut self, active: &ActiveMenu, hotkeys: &mut Hotkeys) -> bool {
+    pub fn assign_pending(&mut self, active: &ActiveMenu, hotkeys: &mut Hotkeys, world: &mut fnv_sim::World<'_>) -> bool {
+        self.propose_binding(active);
+        if self.binding_slot().is_some() { return false; }
         if !self.contact.is_some_and(|c| c.ended) {
             return false;
         }
@@ -333,14 +370,12 @@ impl TouchItems {
             self.message = "This item cannot be assigned to that slot.".into();
             return false;
         }
-        match hotkeys.assign(
-            slot,
-            Slot {
-                item: row.item.0,
-                mods: row.mods,
-            },
-            row.kind,
-        ) {
+        let candidate = Slot { item: row.item.0, mods: row.mods };
+        if !binding::available(world, candidate) {
+            self.message = "That item is no longer carried; drag again.".into();
+            return false;
+        }
+        match hotkeys.assign(slot, candidate, row.kind) {
             Ok(_) => {
                 self.message = format!("Slot {}: {}", slot + 1, row.name);
                 true
@@ -350,6 +385,33 @@ impl TouchItems {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod scrollbar_phase_tests {
+    use super::*;
+    #[test]
+    fn queued_complete_contact_publishes_each_points_own_held_state_and_control_stays_sticky() {
+        let mut touch=TouchItems::default();
+        let mut input=TouchInput{window:Entity::PLACEHOLDER,id:500,phase:TouchPhase::Started,position:Vec2::new(20.0,40.0),force:None};
+        assert!(touch.event(&input,0));
+        input.phase=TouchPhase::Moved;input.position.y=120.0;assert!(touch.event(&input,50));
+        input.phase=TouchPhase::Ended;assert!(touch.event(&input,60));
+        assert!(!touch.busy(),"all OS points may already be queued");
+        touch.project(Some);touch.take_projected();
+        assert!(touch.pointer_frame().started && touch.pointer_frame().held,"the queued Started point is still a held press");
+        touch.claim_control();
+        touch.project(Some);touch.take_projected();
+        assert!(touch.pointer_frame().held && touch.pointer_frame().control);
+        assert!(!touch.pointer_frame().scrolling);
+        assert!(touch.take_scroll().is_none(),"marker movement cannot also become body scrolling");
+        assert_eq!(touch.pointer_frame().at,Some(Vec2::new(20.0,120.0)),"control uses raw projected motion, not a row-scroll anchor");
+        touch.update_hold(1000);touch.release_over(Some(2));
+        assert!(touch.drop_slot.is_none(),"holding a marker cannot arm item assignment");
+        touch.project(Some);touch.take_projected();
+        assert!(!touch.pointer_frame().held && !touch.pointer_frame().tap);
+        touch.cancel();assert!(!touch.pointer_frame().control);
     }
 }
 

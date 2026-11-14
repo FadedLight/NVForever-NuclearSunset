@@ -932,6 +932,13 @@ impl PlayerBody {
     pub fn first_person_root(&self) -> Option<Entity> {
         self.body.as_ref()?.first.as_ref().map(|f| f.root)
     }
+    /// A tried-and-missing native raise clip cannot support direct manipulation.
+    /// Unknown still uses the ordinary rig.clip load/female-to-male fallback.
+    pub fn pipboy_clip_missing(&self) -> bool {
+        self.body.as_ref().and_then(|body| body.first.as_ref()
+            .and_then(|rig|rig.clips.get(&ClipKey::PipBoy(body.female))))
+            .is_some_and(Option::is_none)
+    }
 
     /// The root entities of the rigs built (the body's, then the arms rig's).
     pub fn roots(&self) -> Vec<Entity> {
@@ -1118,6 +1125,7 @@ fn draw_warm_pose(
     children: Query<&Children>,
     mut meshes: Query<(Has<NoFrustumCulling>, &mut Mesh3d)>,
     cameras: Query<(&GlobalTransform, &Projection), With<nvf_play::PlayerCamera>>,
+    sizing: Option<Res<nvf_play::pipboy::touch_presentation::PipBoySize>>,
 ) {
     let Some(t) = pip.warm_clip() else { return };
     let Ok((cam, projection)) = cameras.single() else { return };
@@ -1169,7 +1177,7 @@ fn draw_warm_pose(
         }
     } else if let (Some([_, inner]), Projection::Perspective(p)) = (rig.lens, projection) {
         if let Ok(mut lens) = transforms.get_mut(inner) {
-            let k = arms_magnification(p.fov, PIPBOY_FOV);
+            let k = arms_magnification(p.fov, sizing.as_deref().map_or(PIPBOY_FOV, |s| s.device_fov(PIPBOY_FOV)));
             lens.scale = Vec3::new(k, 1.0, k);
         }
     }
@@ -1700,6 +1708,18 @@ fn land_mine_grip() -> (Quat, Vec3) {
     (Quat::from_rotation_x(240f32.to_radians()), Vec3::new(4.4, -3.9, 4.5))
 }
 
+// Shared by ordinary and direct arm poses: the real Animator samples the clip
+// at this absolute time; it never advances an owned finger pose on its own.
+fn set_pipboy_layer(a: &mut Animator, clip: &Arc<Clip>, time: f32) {
+    let i=a.want(clip,TAG_PIPBOY,1.0,Mode::Once,0.0);
+    (a.layers[i].rate,a.layers[i].time)=(0.0,time);
+}
+fn ease_pipboy_layer(a:&mut Animator,time:f32) {
+    for layer in a.layers.iter_mut().filter(|layer|layer.tag==TAG_PIPBOY) {
+        (layer.weight,layer.ease)=(1.0,pipboy_ease(time));
+    }
+}
+
 /// Pose `rig` for the frame, apply the weapon events, place it at its root; returns the
 /// eye (game space): the camera node in first person, between the eyes in third. With
 /// it, in first person while an idle drives the camera node, the node's rotation (game
@@ -1972,9 +1992,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
     // The Pip-Boy: its clip at the time the Pip-Boy is at, over the rest (its tracks'
     // priority is above the others' [observed: 98]); it does not turn the view.
     if let Some((c, t)) = &pipboy {
-        let i = a.want(&c.clip, TAG_PIPBOY, 1.0, Mode::Once, 0.0);
-        let l = &mut a.layers[i];
-        (l.rate, l.time) = (0.0, *t);
+        set_pipboy_layer(a, &c.clip, *t);
     }
     a.end();
     // Movement clips play at the speed the character actually moves [hypothesis: the
@@ -2005,9 +2023,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
         }
     }
     if let Some((_, t)) = pipboy {
-        for l in a.layers.iter_mut().filter(|l| l.tag == TAG_PIPBOY) {
-            (l.weight, l.ease) = (1.0, pipboy_ease(t));
-        }
+        ease_pipboy_layer(a, t);
     }
     a.pose();
     // A Land Mine weapon sits turned in the first-person hand: the clips leave the frag
@@ -2455,7 +2471,7 @@ fn drive_body(
         ResMut<nvf_play::furniture::PlayerSeat>,
         Res<nvf_play::pipboy::PipBoy>,
         Query<&Projection, With<nvf_play::PlayerCamera>>,
-        (Option<Res<nvf_play::free_cam::FirstPersonFov>>, Option<Res<crate::Args>>),
+        (Option<Res<nvf_play::free_cam::FirstPersonFov>>, Option<Res<crate::Args>>, Option<Res<nvf_play::pipboy::touch_presentation::PipBoySize>>),
         Option<Res<nvf_play::combat::PlayerLimbs>>,
         (Res<crate::death_cam::DeathCam>, Res<crate::player_knockdown::PlayerKnockdown>),
         (Option<Res<nvf_play::aim_zoom::AimZoom>>, Option<Res<nvf_play::combat::Combat>>, Option<ResMut<nvf_play::aim_zoom::TrueSights>>, Option<Res<nvf_play::aim_zoom::Scope>>, Option<ResMut<nvf_play::aim_zoom::Scope3d>>, Option<Res<nvf_play::aim_zoom::LensSway>>),
@@ -2904,12 +2920,12 @@ fn drive_body(
         });
         // The console's `fov` can ask for another first-person field of view; otherwise
         // the settings page's (`--viewmodel-fov`).
-        let (asked_fov, args) = first_fov;
+        let (asked_fov, args, pip_size) = first_fov;
         let first_fov = asked_fov.and_then(|f| f.0).or_else(|| args.map(|a| a.viewmodel_fov)).unwrap_or(FIRST_PERSON_FOV);
         let k = match (pip.on_arm() && pip.warming.is_none(), vfov) {
             (true, Some(v)) => {
                 let normal = arms_magnification(v, first_fov);
-                normal + (arms_magnification(v, PIPBOY_FOV) - normal) * pipboy_ease(pip.clip_time)
+                normal + (arms_magnification(v, pip_size.as_deref().map_or(PIPBOY_FOV, |s| s.device_fov(PIPBOY_FOV))) - normal) * pipboy_ease(pip.clip_time)
             }
             (false, Some(v)) => arms_magnification(v, first_fov),
             _ => 1.0,
@@ -3294,3 +3310,7 @@ mod movement_camera_tests;
 
 #[cfg(test)]
 mod sequence_consumer_tests;
+
+#[cfg(test)]
+#[path="player_body/arm_gesture_tests.rs"]
+mod arm_gesture_tests;

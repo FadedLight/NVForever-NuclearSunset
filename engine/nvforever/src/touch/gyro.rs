@@ -12,13 +12,15 @@ use nvf_play::{
 use std::collections::HashSet;
 
 pub(super) const BUTTON: usize = 18;
-const KEYS: [&str; 6] = [
+const KEYS: [&str; 8] = [
     "touch-gyro-v1",
     "touch-gyro-sensitivity-v1",
     "touch-gyro-ads-v1",
     "touch-gyro-toggle-v1",
     "touch-gyro-ads-only-v1",
     "touch-gyro-recenter-v1",
+    "touch-gyro-invert-x-v1",
+    "touch-gyro-invert-y-v1",
 ];
 
 #[derive(Resource, Clone, Copy, PartialEq)]
@@ -29,6 +31,8 @@ pub(super) struct Options {
     toggle: bool,
     ads_only: bool,
     recenter: u64,
+    invert_x: bool,
+    invert_y: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -39,6 +43,8 @@ impl Default for Options {
             toggle: false,
             ads_only: true,
             recenter: 0,
+            invert_x: false,
+            invert_y: false,
         }
     }
 }
@@ -200,6 +206,8 @@ pub(super) fn install(app: &mut App) {
             "Gyro only while aiming",
             "Apply motion only when the engine actually has weapon sights raised. Releasing aim discards pending motion.",
         ),
+        (6, "Invert gyro X", "Reverse horizontal motion aiming only. Touch, mouse and controller inversion remain independent."),
+        (7, "Invert gyro Y", "Reverse vertical motion aiming only. Recenter keeps your current view and these preferences."),
     ] {
         settings::add_setting(
             app,
@@ -213,12 +221,16 @@ pub(super) fn install(app: &mut App) {
                 get: match index {
                     0 => |w| w.resource::<Options>().enabled,
                     3 => |w| w.resource::<Options>().toggle,
-                    _ => |w| w.resource::<Options>().ads_only,
+                    4 => |w| w.resource::<Options>().ads_only,
+                    6 => |w| w.resource::<Options>().invert_x,
+                    _ => |w| w.resource::<Options>().invert_y,
                 },
                 set: match index {
                     0 => |w, v| w.resource_mut::<Options>().enabled = v,
                     3 => |w, v| w.resource_mut::<Options>().toggle = v,
-                    _ => |w, v| w.resource_mut::<Options>().ads_only = v,
+                    4 => |w, v| w.resource_mut::<Options>().ads_only = v,
+                    6 => |w, v| w.resource_mut::<Options>().invert_x = v,
+                    _ => |w, v| w.resource_mut::<Options>().invert_y = v,
                 },
             },
         );
@@ -433,7 +445,11 @@ fn poll(
                 }
                 if requested && fresh && sample.available {
                     let gain = options.sensitivity * if aimed { options.ads } else { 1.0 };
-                    look.radians = (Vec2::new(sample.x, sample.y) * gain)
+                    let signs = Vec2::new(
+                        if options.invert_x { -1.0 } else { 1.0 },
+                        if options.invert_y { -1.0 } else { 1.0 },
+                    );
+                    look.radians = (Vec2::new(sample.x, sample.y) * gain * signs)
                         .clamp(Vec2::splat(-1.0), Vec2::splat(1.0));
                 }
             }
@@ -489,13 +505,17 @@ fn captions(
 }
 
 #[cfg(test)]
+#[path = "gyro/inversion_tests.rs"]
+mod inversion_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use bevy::{
         input::InputPlugin,
         window::{AppLifecycle, WindowFocused},
     };
-    fn scene(toggle: bool) -> (App, Entity, Vec2) {
+    pub(super) fn scene(toggle: bool) -> (App, Entity, Vec2) {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputPlugin, bevy::state::app::StatesPlugin))
             .insert_state(nvf_play::PlayState::Playing)
@@ -556,7 +576,7 @@ mod tests {
             .center(Target::Button(BUTTON), Vec2::splat(1000.0));
         (app, w, p)
     }
-    fn finger(app: &mut App, w: Entity, p: Vec2, id: u64, phase: TouchPhase) {
+    pub(super) fn finger(app: &mut App, w: Entity, p: Vec2, id: u64, phase: TouchPhase) {
         app.world_mut().write_message(TouchInput {
             window: w,
             position: p,
@@ -565,7 +585,7 @@ mod tests {
             force: None,
         });
     }
-    fn activate(app: &mut App, w: Entity, p: Vec2, toggle: bool) {
+    pub(super) fn activate(app: &mut App, w: Entity, p: Vec2, toggle: bool) {
         finger(app, w, p, 1, TouchPhase::Started);
         if toggle {
             finger(app, w, p, 1, TouchPhase::Ended);
@@ -573,7 +593,7 @@ mod tests {
         app.update();
         app.update();
     }
-    fn delta(app: &App) -> Vec2 {
+    pub(super) fn delta(app: &App) -> Vec2 {
         app.world().resource::<nvf_play::player::GyroLook>().radians
     }
     #[test]

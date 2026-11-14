@@ -287,6 +287,7 @@ impl StatsView {
     pub fn list_most(&self, tab: usize) -> usize {
         self.lens[tab].saturating_sub(self.rows_shown[tab])
     }
+    pub fn list_page(&self, tab: usize) -> usize { self.rows_shown.get(tab).copied().unwrap_or(1) }
 
     /// How many rows the view that draws a tab's list shows at once: each view gives its own, as
     /// with the description's bound, and what is scrolled stays within it.
@@ -1054,6 +1055,9 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, v: &StatsView, tab: usize, ro
         }
         spots.push((up, Spot::ListUp));
         spots.push((down, Spot::ListDown));
+        super::scrollbar::hits(p, Page::Stats, tab, Rect::from_corners(up.min, down.max),
+            Rect::new(r.min.x,up.max.y,r.min.x+ARROW.x,down.min.y),
+            Rect::new(r.min.x,my,r.min.x+ARROW.x,my+mh),Vec2::ZERO);
     }
 }
 

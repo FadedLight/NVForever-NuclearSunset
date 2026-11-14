@@ -1,4 +1,7 @@
 //! Touch dialogue view and release-only gestures [design: android-dialogue-accessibility.md].
+#[cfg(test)]
+#[path = "dialogue_touch/split_tests.rs"]
+mod split_tests;
 use crate::dialogue::{ListId, ViewInput};
 use crate::dialogue_menu::DialogueMenu;
 use crate::ui_pointer::{Button, PointerState};
@@ -94,6 +97,7 @@ fn set_mode(w: &mut World, name: &str) -> bool {
 }
 
 pub(crate) fn install(app: &mut App) {
+    crate::dialogue_split::install(app);
     app.init_resource::<TouchDialogue>()
         .init_resource::<TouchLayout>()
         .init_resource::<TouchFrame>()
@@ -173,6 +177,9 @@ struct Guard {
     size: Vec2,
     density: f32,
     device: crate::bindings::InputDevice,
+    split: crate::dialogue_split::Frame,
+    side: crate::dialogue_split::Side,
+    safe: crate::touch_safe_area::SafeInsets,
 }
 struct Gesture {
     id: u64,
@@ -259,15 +266,13 @@ type InputGates<'w> = (
     Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     Option<Res<'w, crate::pad::PlatformInputGate>>,
 );
+type Availability<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::creator::CreatorMenu>>);
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn read(
     settings: Res<TouchDialogue>,
     menu: Res<DialogueMenu>,
     (bindings, touch_switch, platform): InputGates<'_>,
-    state: Option<Res<State<crate::PlayState>>>,
-    paused: Option<Res<crate::pause::Paused>>,
-    script: Option<Res<crate::script::ScriptState>>,
-    creator: Option<Res<crate::creator::CreatorMenu>>,
+    (state, paused, script, creator): Availability<'_>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     targets: Query<(Entity, TargetData)>,
     pointers: Query<(Entity, Ref<PointerState>)>,
@@ -285,6 +290,7 @@ fn read(
     mut gestures: ResMut<Gestures>,
     mut frame: ResMut<TouchFrame>,
     cameras: Query<&Camera>,
+    (split, split_options, safe): (Res<crate::dialogue_split::Frame>, Res<crate::dialogue_split::Options>, Res<crate::touch_safe_area::SafeInsets>),
 ) {
     *frame = TouchFrame::default();
     let Ok((window_id, window)) = windows.single() else {
@@ -331,6 +337,9 @@ fn read(
         size: Vec2::new(window.width(), window.height()),
         density: window.scale_factor(),
         device,
+        split: *split,
+        side: split_options.side,
+        safe: *safe,
     };
     let fresh = gestures.guard.as_ref() != Some(&guard);
     gestures.guard = Some(guard);
@@ -540,6 +549,8 @@ struct DrawKey {
     list: Option<ListId>,
     settings: TouchDialogue,
     layout: TouchLayout,
+    split: crate::dialogue_split::Frame,
+    ui_scale: f32,
 }
 fn row_colors(short: bool, selected: bool) -> (Color, Color) {
     if selected {
@@ -589,6 +600,7 @@ fn draw(
     gestures: Res<Gestures>,
     mut captions: Query<&mut Text, With<ConfirmCaption>>,
     mut reveal: ResMut<RevealRequest>,
+    (split, ui_scale): (Res<crate::dialogue_split::Frame>, Option<Res<UiScale>>),
 ) {
     let confirm_label = if gestures.armed == Some(menu.selected) {
         "Confirm selection"
@@ -612,6 +624,8 @@ fn draw(
             list: menu.list.clone(),
             settings: *settings,
             layout: *layout,
+            split: *split,
+            ui_scale: ui_scale.as_deref().map_or(1.0,|s|s.0),
         });
     if key != *shown {
         reveal.0 = true;
@@ -620,24 +634,33 @@ fn draw(
         }
         if let Some(key) = &key {
             let v = &key.view;
-            commands
-                .spawn((
+            let mut panel = Node {
+                position_type: PositionType::Absolute,
+                left: percent(2.0),
+                width: percent(96.0),
+                bottom: px(12.0),
+                height: percent(layout.height),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(px(layout.padding)),
+                row_gap: px(layout.gap),
+                ..default()
+            };
+            if let Some(rect) = key.split.panel {
+                let scale = if key.ui_scale.is_finite() && key.ui_scale>0.0 {key.ui_scale}else{1.0};
+                panel.left=px(rect.min.x/scale);
+                panel.top=px(rect.min.y/scale);
+                panel.bottom=Val::Auto;
+                panel.width=px(rect.width()/scale);
+                panel.height=px(rect.height()/scale);
+            }
+            let mut root = commands.spawn((
                     Root,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: percent(2.0),
-                        width: percent(96.0),
-                        bottom: px(12.0),
-                        height: percent(layout.height),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::all(px(layout.padding)),
-                        row_gap: px(layout.gap),
-                        ..default()
-                    },
+                    panel,
                     GlobalZIndex(2400),
                     BackgroundColor(Color::srgba(0.015, 0.025, 0.025, 0.95)),
-                ))
-                .with_children(|p| {
+                ));
+            if let Some(camera)=key.split.ui_camera { root.insert(UiTargetCamera(camera)); }
+            root.with_children(|p| {
                     text(p, &v.speaker, 18.0, Color::WHITE);
                     text(
                         p,

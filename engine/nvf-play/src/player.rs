@@ -858,17 +858,18 @@ pub(crate) fn mouse_look(
     } else {
         Vec2::ZERO
     };
-    let (delta, s) = if gyro_radians != Vec2::ZERO {
-        (delta * s + gyro_radians, 1.0)
+    let (delta, s, inv) = if gyro_radians != Vec2::ZERO {
+        // Invert device counts before mixing: gyro has its own independent signs.
+        let device = Vec2::new(delta.x, if bindings.invert_y { -delta.y } else { delta.y });
+        (device * s + gyro_radians, 1.0, false)
     } else {
-        (delta, s)
+        (delta, s, bindings.invert_y)
     };
     if !grabbed || !playing || locks.looking || delta == Vec2::ZERO {
         return;
     }
     // A conversation's zoom as it eases out: the picture moves as far as it does unzoomed.
     let s = s * talk.as_deref().map_or(1.0, crate::dialogue_zoom::DialogueZoom::look_scale);
-    let inv = bindings.invert_y;
     if control.orbit.held {
         let o = &mut control.orbit;
         let (yaw, pitch) = look_with(o.yaw, o.pitch, delta, s, inv);
@@ -1650,6 +1651,47 @@ mod tests {
             grab_mode: CursorGrabMode::Confined, ..default()
         }));
         app
+    }
+    #[test]
+    fn gyro_signs_are_independent_of_device_inversion_in_the_actual_look_route() {
+        for inverted in [false, true] {
+            for gx in [-0.02, 0.02] {
+                for gy in [-0.01, 0.01] {
+                    let mut app = gyro_look_app();
+                    {
+                        let mut bindings = app.world_mut().resource_mut::<Bindings>();
+                        bindings.invert_y = inverted;
+                        bindings.mouse_sensitivity = 0.01;
+                    }
+                    app.world_mut().resource_mut::<GyroLook>().radians = Vec2::new(gx, gy);
+                    app.world_mut().resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(10.0, 5.0);
+                    app.update();
+                    let player = app.world().resource::<Player>();
+                    assert!((player.heading - (1.1 + gx)).abs() < 1e-6);
+                    let device_pitch = if inverted { 0.05 } else { -0.05 };
+                    assert!((player.pitch - (device_pitch - gy)).abs() < 1e-6);
+                    assert_eq!(app.world().resource::<Bindings>().invert_y, inverted);
+                    assert_eq!(app.world().resource::<AccumulatedMouseMotion>().delta, Vec2::new(10.0, 5.0));
+                }
+            }
+        }
+    }
+    #[test]
+    fn gyro_does_not_change_the_controller_or_zero_sensor_inversion_route() {
+        for inverted in [false, true] {
+            let mut app = gyro_look_app();
+            app.world_mut().resource_mut::<Bindings>().invert_y = inverted;
+            app.world_mut().resource_mut::<Bindings>().mouse_sensitivity = 0.01;
+            app.world_mut().resource_mut::<GyroLook>().radians = Vec2::ZERO;
+            app.world_mut().resource_mut::<AccumulatedMouseMotion>().delta = Vec2::new(10.0, 5.0);
+            app.update();
+            assert!((app.world().resource::<Player>().pitch - if inverted { 0.05 } else { -0.05 }).abs() < 1e-6);
+            let mut controller = gyro_look_app();
+            controller.world_mut().resource_mut::<Bindings>().device = crate::bindings::InputDevice::Controller;
+            controller.world_mut().resource_mut::<Bindings>().invert_y = inverted;
+            controller.update();
+            assert_eq!((controller.world().resource::<Player>().heading, controller.world().resource::<Player>().pitch), (1.0, 0.0));
+        }
     }
     #[test]
     fn gyro_uses_the_live_look_route_with_independent_gain_and_preserves_script_axes() {

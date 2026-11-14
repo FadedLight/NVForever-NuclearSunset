@@ -138,7 +138,7 @@ pub const SECTIONS: &[Section] = &[
             "touch-dialogue",
             "dialogue-choice-text-size",
             "dialogue-subtitle-text-size",
-            "dialogue-touch-choice",
+            "dialogue-touch-choice", "dialogue-speaker-side",
         ],
     ),
     section(
@@ -158,6 +158,7 @@ pub const SECTIONS: &[Section] = &[
             "weapon-lower",
             "field-of-view",
             "viewmodel-field-of-view",
+            "touch-pipboy-size-v1", "touch-pipboy-tab-swipes",
         ],
     ),
     section(
@@ -235,10 +236,11 @@ pub const SECTIONS: &[Section] = &[
         Some("Touch"),
         &[
             "touch-practice-v1",
-            "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray",
+            "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
             "touch-bottom-swipe-target-v1",
             "touch-pipboy-swipe-v1",
             "touch-pipboy-distance-v1",
+            "touch-direct-pipboy-v1", "touch-world-activation-v1",
             "touch-icon-family",
             "adaptive-touch-actions",
             "lockpick-touch",
@@ -249,6 +251,8 @@ pub const SECTIONS: &[Section] = &[
             "touch-gyro-toggle-v1",
             "touch-gyro-ads-only-v1",
             "touch-gyro-recenter-v1",
+            "touch-gyro-invert-x-v1",
+            "touch-gyro-invert-y-v1",
             "touch-analog-movement-v1",
             "touch-fire-drag-look-v1",
             "touch-auto-move-lock-v1",
@@ -322,18 +326,18 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     ]),
     section(MOBILE_TAB, Some("Movement and gestures"), &[
         "touch-analog-movement-v1", "touch-fire-drag-look-v1",
-        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1",
+        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-world-activation-v1",
     ]),
     section(MOBILE_TAB, Some("Gyroscope"), &[
         "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1",
-        "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1",
+        "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1",
     ]),
     section(MOBILE_TAB, Some("Inventory and quick access"), &[
-        "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray",
-        "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1",
+        "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
+        "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1", "touch-pipboy-size-v1", "touch-pipboy-tab-swipes", "touch-direct-pipboy-v1",
     ]),
     section(MOBILE_TAB, Some("Dialogue"), &[
-        "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice",
+        "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side",
     ]),
     section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size"]),
     section(MOBILE_TAB, Some("Interface size"), &[
@@ -582,15 +586,18 @@ mod tests {
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with.
-    const KNOWN: [(&str, &str); 149] = [
+    const KNOWN: [(&str, &str); 157] = [
         ("touch-practice-v1", "Controller"),
         ("touch-hotbar", "Controls"),
         ("touch-hotbar-slots", "Controls"),
         ("touch-hotbar-size", "Controls"),
         ("touch-hotbar-tray", "Controls"),
+        ("touch-tray-editor-v1", "Controls"),
         ("touch-bottom-swipe-target-v1", "Controls"),
         ("touch-pipboy-swipe-v1", "Controller"),
         ("touch-pipboy-distance-v1", "Controller"),
+        ("touch-direct-pipboy-v1", "Controls"),
+        ("touch-world-activation-v1", "Controls"),
 
         ("detached-camera", "Gameplay"),
         ("menu-pause", "Gameplay"),
@@ -615,6 +622,7 @@ mod tests {
         ("dialogue-choice-text-size", "Gameplay"),
         ("dialogue-subtitle-text-size", "Gameplay"),
         ("dialogue-touch-choice", "Gameplay"),
+        ("dialogue-speaker-side", "Gameplay"),
         ("true-iron-sights", "Gameplay"),
         ("scope-3d", "Gameplay"),
         ("button-style", "Controller"),
@@ -632,6 +640,8 @@ mod tests {
         ("touch-gyro-toggle-v1", "Controller"),
         ("touch-gyro-ads-only-v1", "Controller"),
         ("touch-gyro-recenter-v1", "Controller"),
+        ("touch-gyro-invert-x-v1", "Controller"),
+        ("touch-gyro-invert-y-v1", "Controller"),
         ("touch-analog-movement-v1", "Touch"),
         ("touch-fire-drag-look-v1", "Touch"),
         ("touch-auto-move-lock-v1", "Touch"),
@@ -671,6 +681,8 @@ mod tests {
         ("grade", "Display"),
         ("field-of-view", "Display"),
         ("viewmodel-field-of-view", "Display"),
+        ("touch-pipboy-size-v1", "Gameplay"),
+        ("touch-pipboy-tab-swipes", "Gameplay"),
         ("ui-scale", "Display"),
         ("menu-scale", "Display"),
         ("hud-health-size-v1", "Display"),
@@ -793,9 +805,9 @@ mod tests {
         );
         let gameplay = keys(&list, &l, "Gameplay");
         let dialogue = gameplay.iter().position(|k| k == "[Dialogue]").unwrap();
-        assert_eq!(&gameplay[dialogue..dialogue+11], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
+        assert_eq!(&gameplay[dialogue..dialogue+12], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
             "dialogue-look", "dialogue-recentre", "dialogue-zoom", "lip-sync", "touch-dialogue",
-            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice"]);
+            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side"]);
         assert_eq!(
             keys(&list, &l, "Audio"),
             [
@@ -818,10 +830,11 @@ mod tests {
                 .chain([
                     "[Touch]",
                     "touch-practice-v1",
-                    "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray",
+                    "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
                     "touch-bottom-swipe-target-v1",
                     "touch-pipboy-swipe-v1",
                     "touch-pipboy-distance-v1",
+            "touch-direct-pipboy-v1", "touch-world-activation-v1",
                     "touch-icon-family",
                     "adaptive-touch-actions",
                     "lockpick-touch",
@@ -832,6 +845,8 @@ mod tests {
                     "touch-gyro-toggle-v1",
                     "touch-gyro-ads-only-v1",
                     "touch-gyro-recenter-v1",
+                    "touch-gyro-invert-x-v1",
+                    "touch-gyro-invert-y-v1",
                     "touch-analog-movement-v1",
                     "touch-fire-drag-look-v1",
                     "touch-auto-move-lock-v1",
@@ -854,7 +869,7 @@ mod tests {
                 .path()
         };
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
-        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice"] {assert_eq!(at(key), "Gameplay > Dialogue");}
+        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side"] {assert_eq!(at(key), "Gameplay > Dialogue");}
         assert_eq!(at("head-bob"), "Gameplay > Camera");
         assert_eq!(at("hud-red"), "Display > Interface");
         for key in [
@@ -886,7 +901,7 @@ mod tests {
         assert_eq!(at("touch-pipboy-distance-v1"), "Controls > Touch");
         assert_eq!(at("touch-icon-family"), "Controls > Touch");
         assert_eq!(at("adaptive-touch-actions"), "Controls > Touch");
-        for key in ["touch-gyro-v1","touch-gyro-sensitivity-v1","touch-gyro-ads-v1","touch-gyro-toggle-v1","touch-gyro-ads-only-v1","touch-gyro-recenter-v1"] {
+        for key in ["touch-gyro-v1","touch-gyro-sensitivity-v1","touch-gyro-ads-v1","touch-gyro-toggle-v1","touch-gyro-ads-only-v1","touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1"] {
             assert_eq!(at(key), "Controls > Touch");
         }
         assert_eq!(at("touch-analog-movement-v1"), "Controls > Touch");
@@ -988,14 +1003,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_149_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_157_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 149);
+        assert_eq!(indices.len(), 157);
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();
@@ -1007,7 +1022,7 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 44);
+        assert_eq!(mobile_keys.len(), 52);
         for (index, row) in list.iter().enumerate() {
             if !mobile_keys.contains(row.key) {
                 assert_eq!(mobile.placement_of(index), resolve_desktop_layout(&list).placement_of(index));

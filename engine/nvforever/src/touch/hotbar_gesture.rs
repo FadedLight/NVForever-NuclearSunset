@@ -50,6 +50,13 @@ impl Gesture {
     pub fn busy(&self) -> bool {
         self.contact.is_some()
     }
+    pub fn owner(&self) -> Option<u64> { self.contact.map(|c|c.id) }
+    /// Read only: ordinary Outcome/end semantics remain unchanged. Binding waits
+    /// for this particular contact's valid release even after its hold tick fired.
+    pub fn valid_release(&self,id:u64,p:[f32;2],size:[f32;2])->bool {
+        self.contact.is_some_and(|c|c.id==id&&!c.cancelled&&c.size==size&&c.bounds.contains(p)
+            &&(p[0]-c.origin[0]).hypot(p[1]-c.origin[1])<=12.0)
+    }
     pub fn start(
         &mut self,
         id: u64,

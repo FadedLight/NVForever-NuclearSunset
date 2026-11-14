@@ -19,6 +19,7 @@ public final class GameActivity extends NativeActivity {
     private AndroidGyro gyro;
     private AndroidPerformance performance;
     private volatile float touchBottomDp = 24.0f;
+    private volatile String touchInsetsSnapshot = "1,0,0,0,0,0,0";
     private final ViewTreeObserver.OnGlobalLayoutListener touchInsetsObserver = this::refreshTouchInsets;
     private final Handler loadingHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean restartQueued = new AtomicBoolean();
@@ -206,12 +207,24 @@ public final class GameActivity extends NativeActivity {
     private void updateTouchInsets(WindowInsets insets) {
         int bottom = Math.max(insets.getSystemWindowInsetBottom(), Math.max(insets.getSystemGestureInsets().bottom, insets.getMandatorySystemGestureInsets().bottom));
         if (insets.getDisplayCutout() != null) bottom = Math.max(bottom, insets.getDisplayCutout().getSafeInsetBottom());
+        int left = Math.max(insets.getSystemWindowInsetLeft(), Math.max(insets.getSystemGestureInsets().left, insets.getMandatorySystemGestureInsets().left));
+        int top = Math.max(insets.getSystemWindowInsetTop(), Math.max(insets.getSystemGestureInsets().top, insets.getMandatorySystemGestureInsets().top));
+        int right = Math.max(insets.getSystemWindowInsetRight(), Math.max(insets.getSystemGestureInsets().right, insets.getMandatorySystemGestureInsets().right));
+        if (insets.getDisplayCutout() != null) {
+            left = Math.max(left, insets.getDisplayCutout().getSafeInsetLeft());
+            top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
+            right = Math.max(right, insets.getDisplayCutout().getSafeInsetRight());
+        }
+        android.view.View decor = getWindow().getDecorView();
+        // One immutable physical-pixel snapshot; native validates size and converts scale.
+        touchInsetsSnapshot = "1," + decor.getWidth() + "," + decor.getHeight() + "," + left + "," + top + "," + right + "," + bottom;
         touchBottomDp = bottom / Math.max(0.1f, getResources().getDisplayMetrics().density);
     }
     public String controllerDevices() { return controllers == null ? "" : controllers.snapshot(); }
     public String performanceState() { return performance == null ? "" : performance.snapshot(); }
     public String gyroSample(String command) { return gyro == null ? "" : gyro.poll(command); }
     public String touchSafeBottom() { return Float.toString(touchBottomDp); }
+    public String touchSafeInsets() { return touchInsetsSnapshot; }
     public String startupArgs() { String args = getIntent().getStringExtra("args"); return args == null ? "[]" : args; }
     public String restartEngine(String args) {
         try {

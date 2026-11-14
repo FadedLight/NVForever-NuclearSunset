@@ -48,6 +48,8 @@ impl Default for Options {
 }
 #[derive(Resource)]
 pub(super) struct SafeBottom(pub f32);
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct PublishSafeBottom;
 impl Default for SafeBottom {
     fn default() -> Self {
         Self(24.0)
@@ -307,18 +309,63 @@ fn visual(
     }
 }
 
-#[cfg(target_os = "android")]
-fn insets(mut safe: ResMut<SafeBottom>, time: Res<Time<Real>>, mut last: Local<f64>) {
-    let now = time.elapsed_secs_f64();
-    if *last != 0.0 && now - *last < 0.2 {
-        return;
+#[cfg(any(target_os = "android", test))]
+fn insets(
+    common: Res<nvf_play::touch_safe_area::SafeInsets>,
+    mut safe: ResMut<SafeBottom>,
+) {
+    if common.bottom.is_finite() {
+        safe.0 = common.bottom.clamp(0.0, 512.0);
     }
-    *last = now;
-    if let Ok(value) = crate::android::activity_string("touchSafeBottom", None) {
-        if let Ok(bottom) = value.parse::<f32>() {
-            if bottom.is_finite() {
-                safe.0 = bottom.clamp(0.0, 512.0);
-            }
+}
+
+#[cfg(any(target_os = "android", test))]
+fn install_insets(app: &mut App) {
+    app.init_resource::<nvf_play::touch_safe_area::SafeInsets>()
+        .init_resource::<SafeBottom>()
+        .add_systems(
+            PreUpdate,
+            insets
+                .in_set(PublishSafeBottom)
+                .after(nvf_play::touch_safe_area::Publish)
+                .before(super::TouchInputSystems),
+        );
+}
+
+#[cfg(test)]
+mod common_inset_tests {
+    use super::*;
+    use nvf_play::touch_safe_area::{Publish, SafeInsets};
+
+    #[derive(Resource, Default)]
+    struct NextBottom(f32);
+    #[derive(Resource, Default)]
+    struct Seen(Vec<f32>);
+
+    fn publish(next: Res<NextBottom>, mut common: ResMut<SafeInsets>) {
+        common.bottom = next.0;
+    }
+    fn raw_consumer(bottom: Res<SafeBottom>, mut seen: ResMut<Seen>) {
+        seen.0.push(bottom.0);
+    }
+
+    #[test]
+    fn common_snapshot_reaches_bottom_handle_before_same_frame_raw_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NextBottom>()
+            .init_resource::<Seen>();
+        install_insets(&mut app);
+        app.add_systems(PreUpdate, publish.in_set(Publish))
+            .add_systems(PreUpdate, raw_consumer.in_set(super::super::TouchInputSystems));
+        assert_eq!(app.world().resource::<SafeBottom>().0, 24.0);
+        for (published, expected) in [(0.0, 0.0), (32.0, 32.0), (8.0, 8.0), (f32::NAN, 8.0), (700.0, 512.0)] {
+            app.world_mut().resource_mut::<NextBottom>().0 = published;
+            app.update();
+            assert_eq!(app.world().resource::<Seen>().0.last(), Some(&expected));
+            let bounds = handle(Vec2::new(792.0, 800.0), expected);
+            assert_eq!(bounds.center().y, 800.0 - expected - 36.0);
+            assert!(bounds.max.y < 800.0 - expected);
         }
     }
 }
@@ -341,7 +388,7 @@ pub(super) fn install(app: &mut App) {
         .add_systems(Startup, spawn)
         .add_systems(Update, visual);
     #[cfg(target_os = "android")]
-    app.add_systems(Update, insets);
+    install_insets(app);
     settings::add_setting(app, Setting {
         key: "touch-pipboy-swipe-v1", group: "Controller", label: "Bottom swipe handle",
         note: "Show a bottom handle. Drag upward and release to open the chosen destination. Android system navigation stays available.",

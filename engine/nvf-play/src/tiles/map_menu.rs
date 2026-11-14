@@ -1572,6 +1572,17 @@ pub struct MapTiles {
     told: Option<(usize, Result<(), String>)>,
     written: Written,
 }
+impl MapTiles {
+    pub fn list_scroll(&self) -> Option<f64> {
+        self.written.shown.as_ref().filter(|s| s.tab >= data::QUESTS)?;
+        Some(self.written.views[self.written.list().index()].value)
+    }
+    pub(crate) fn scroll_list_by(&mut self, by: crate::pipboy::scrollbar::ScrollBy) -> bool {
+        if self.list_scroll().is_none() { return false; }
+        let view = self.written.view();
+        by.value(view.value, view.counts.most(), view.counts.visible).is_some_and(|to| view.scroll_to(to))
+    }
+}
 
 /// The tiles of [`required_paths`] for tab `tab`, or why the page cannot be drawn.
 fn check_file(ui: &Ui, cut: Option<&str>, tab: Option<usize>) -> Result<Vec<TileId>, String> {
@@ -2171,6 +2182,7 @@ fn rebuild_menu(game: &mut fnv_game::Game<'_>) {
 pub(crate) struct Feed {
     /// The page took input last frame, in this frame of the Pip-Boy.
     taking: Option<Frame>,
+    touch_drag: bool,
 }
 
 /// What the page's tile input reads of the Pip-Boy.
@@ -2182,6 +2194,7 @@ pub(crate) struct FeedPip<'w> {
     paused: Option<Res<'w, crate::pause::Paused>>,
     bindings: Option<Res<'w, crate::bindings::Bindings>>,
     touch:Option<Res<'w,crate::pipboy::touch_items::TouchItems>>,
+    admission: crate::pipboy::touch_items::Admission<'w>,
 
 }
 
@@ -2214,13 +2227,24 @@ pub(crate) fn touch_target(tiles:&MapTiles,ui:&Ui,menu:TileId,point:Vec2,data:&D
             Some(NativeRow::DataButton{kind:hint.kind as u8,list:shown.list.index(),group:shown.group,key:shown.selected.and_then(|i|shown.rows.get(i)).map(|r|r.key),context:data.touch_action_context(shown.tab)})},
         _=>None,
     },|_|None,|_|true)
+        .map(|target| target.with_control(|tile|matches!(data_tile(ui,&tiles.written,tile),Some(DataTile::ListBar(BarPiece::Marker)|DataTile::PaneBar(BarPiece::Marker)))))
+}
+pub(crate) fn touch_navigation(tiles:&MapTiles,ui:&Ui)->Vec<crate::pipboy::tab_swipe::Region> {
+    use crate::pipboy::tab_swipe::{native_region,Kind};
+    let title=ui.find_tile(TITLE);
+    tiles.pieces.iter().filter_map(|p| {
+        let kind=if Some(p.tile)==title {Kind::Sections}
+            else if matches!(data_tile(ui,&tiles.written,p.tile),Some(DataTile::Tab(_))) {Kind::Subtabs}
+            else {return None};
+        native_region(p,kind)
+    }).collect()
 }
 /// The page's tile input, on a frame it takes it ([`takes`]): see the module notes.
 pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from: FeedPip, mut tiles: ResMut<MapTiles>, devices: Devices, mut out: FeedOut, mut state: Local<Feed>) {
     if !switch.map {
         return;
     }
-    let FeedPip { pip, screen, aid, paused, bindings, touch } = from;
+    let FeedPip { pip, screen, aid, paused, bindings, touch, admission } = from;
     let Some(rt) = script.rt.as_mut() else { return };
     let game = &mut rt.game;
     let over_data = pip.open() && pip.page == Page::Data && modal_over(game.menu);
@@ -2250,18 +2274,23 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
     // With Controller chosen the hand-built page ignores the mouse pointer; so does this one.
     let controller = bindings.as_ref().is_some_and(|b| b.device == crate::bindings::InputDevice::Controller);
     let mut mobile=crate::pipboy::touch_scroll::native_frame(touch.as_deref(),&devices.mouse);
+    if !admission.allows_contact(touch.as_ref().and_then(|t|t.contact_id())) { mobile=Default::default(); }
     if mobile.tap {
         let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,data));
         mobile.tap=touch.as_ref().is_some_and(|t|t.native_release_valid(target));
     }
+    if mobile.control && mobile.started {
+        let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,data));
+        mobile.started=target.is_some_and(|t|t.control()) && touch.as_ref().is_some_and(|t|t.native_release_valid(target));
+    }
     let pointer = mobile.at.or_else(||screen.as_ref().and_then(|s| s.pointer)).filter(|_| !controller);
     let at = pointer.map(|p| (f64::from(p.x), f64::from(p.y)));
     if state.taking != Some(pip.frame) {
-        *state = Feed { taking: Some(pip.frame) };
+        *state = Feed { taking: Some(pip.frame), touch_drag: false };
     }
     let aid_press = aid.click == 1 && !aid.right;
     let held = mobile.held || aid_press || devices.mouse.pressed(MouseButton::Left);
-    let mut input = fnv_ui::input::Input { at, press: mobile.tap || aid_press || devices.mouse.just_pressed(MouseButton::Left), ..Default::default() };
+    let mut input = fnv_ui::input::Input { at, press: mobile.press() || aid_press || devices.mouse.just_pressed(MouseButton::Left), ..Default::default() };
     let pad_menu = crate::pad::MenuAt { code: Some(fnv_game::game::menus::MAP), tab: pip.tab() };
     let physical = frame_keys(&mut input, &devices, game, pad_menu);
     let report = fnv_game::ui_input::step(game, &[menu], &input, &fnv_ui::input::no_measure);
@@ -2279,9 +2308,10 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
         .collect();
     let over = report.over.map(|(from, to)| (from.and_then(|t| data_tile(ui, w, t)), to.and_then(|t| data_tile(ui, w, t))));
     let hints: Vec<(Slot, ButtonKind)> = w.shown.as_ref().map(|s| s.hints.iter().map(|h| (h.slot, h.kind)).collect()).unwrap_or_default();
-    if !held {
+    if !held || (state.touch_drag && !mobile.control) {
         tiles.drag = None;
         tiles.pane_drag = None;
+        state.touch_drag = false;
     }
     let mut row_acted = false;
     let mut pressed_marker = false;
@@ -2305,6 +2335,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
                 pressed_marker = true;
                 let list_tile = ui.find_tile(tiles.written.list().path());
                 tiles.drag = at.filter(|_| held && by_pointer).zip(list_tile).and_then(|((_, y), l)| list::marker_grab(ui, menu, l, y));
+                state.touch_drag = mobile.control && tiles.drag.is_some();
             }
             DataTile::ListBar(piece) => {
                 let value = tiles.written.view().value;
@@ -2316,6 +2347,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
                 pressed_marker = true;
                 let pane = tiles.written.shown.as_ref().map_or(&Pane::None, |s| &s.pane);
                 tiles.pane_drag = at.filter(|_| held && by_pointer).and_then(|(_, y)| pane_grab(ui, menu, pane, y));
+                state.touch_drag = mobile.control && tiles.pane_drag.is_some();
             }
             DataTile::PaneBar(piece) => {
                 if let Some(part) = pane_part(piece) {
@@ -2332,7 +2364,7 @@ pub(crate) fn feed(mut script: ResMut<ScriptState>, switch: Res<TileMenus>, from
             data.push_act(Act::PaneTo(v as f32));
         }
     }
-    if let Some((was, is)) = over {
+    if let Some((was, is)) = over.filter(|_| !mobile.control) {
         let w = &tiles.written;
         // Off the selected row: no longer boxed, as the hand-built row's pointer leaving.
         if let Some(DataTile::Row(j)) = was.filter(|_| was != is) {
@@ -2409,6 +2441,7 @@ pub(crate) fn setup(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("map_menu/tab_swipe_tests.rs");
     use crate::pipboy::frame::Hint;
     use fnv_ui::MemSource;
 

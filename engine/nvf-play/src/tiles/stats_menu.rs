@@ -1787,6 +1787,7 @@ pub(crate) struct Feed {
     /// The row the pointer last selected, while it stays on it.
     acted: Option<usize>,
     drag: Option<MarkerDrag>,
+    touch_drag: bool,
     /// Where the pointer was last frame, and the tile under it then.
     last_at: Option<(f64, f64)>,
     under: Option<TileId>,
@@ -1841,6 +1842,7 @@ pub(crate) struct FeedPip<'w> {
     aid: Res<'w, PipBoyAid>,
     paused: Option<Res<'w, crate::pause::Paused>>,
     touch:Option<Res<'w,crate::pipboy::touch_items::TouchItems>>,
+    admission: crate::pipboy::touch_items::Admission<'w>,
 
 }
 
@@ -1854,6 +1856,17 @@ pub(crate) fn touch_target(tiles:&StatsTiles,ui:&Ui,menu:TileId,point:Vec2,view:
             _=>None,
         }
     },|_|None,|_|true)
+        .map(|target| target.with_control(|tile| tiles.written.paths.is_some_and(|p|matches!(stats_tile(ui,&p,&tiles.written.rows,tile),Some(StatsTile::Marker|StatsTile::ListBar(BarPiece::Marker))))))
+}
+pub(crate) fn touch_navigation(tiles:&StatsTiles,ui:&Ui)->Vec<crate::pipboy::tab_swipe::Region> {
+    use crate::pipboy::tab_swipe::{native_region,Kind};
+    let Some(paths)=tiles.written.paths else {return Vec::new()};
+    tiles.pieces.iter().filter_map(|p| {
+        let kind=if p.tile==paths.title {Kind::Sections}
+            else if matches!(stats_tile(ui,&paths,&tiles.written.rows,p.tile),Some(StatsTile::Tab(_))) {Kind::Subtabs}
+            else {return None};
+        native_region(p,kind)
+    }).collect()
 }
 /// The page's tile input, on a frame it takes it ([`takes`]): see the module notes.
 #[allow(clippy::too_many_arguments)]
@@ -1867,7 +1880,7 @@ pub(crate) fn feed(
     (mut tabs, mut hovered, mut asks): (MessageWriter<PipBoyInput>, MessageWriter<TabHovered>, MessageWriter<stats::UseHint>),
     mut state: Local<Feed>,
 ) {
-    let FeedPip { pip, screen, aid, paused, touch } = from;
+    let FeedPip { pip, screen, aid, paused, touch, admission } = from;
     let Some(rt) = script.rt.as_mut() else { return };
     let game = &mut rt.game;
     let modal = eligible(*switch, &pip) && pip.open() && modal_over(game.menu);
@@ -1883,9 +1896,14 @@ pub(crate) fn feed(
         return;
     };
     let mut mobile=crate::pipboy::touch_scroll::native_frame(touch.as_deref(),&devices.mouse);
+    if !admission.allows_contact(touch.as_ref().and_then(|t|t.contact_id())) { mobile=Default::default(); }
     if mobile.tap {
         let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,&view));
         mobile.tap=touch.as_ref().is_some_and(|t|t.native_release_valid(target));
+    }
+    if mobile.control && mobile.started {
+        let target=mobile.at.and_then(|at|touch_target(&tiles,&game.ui_tree,menu,at,&view));
+        mobile.started=target.is_some_and(|t|t.control()) && touch.as_ref().is_some_and(|t|t.native_release_valid(target));
     }
     let pointer = mobile.at.or_else(||screen.as_ref().and_then(|s| s.pointer));
     let taking = (pip.frame, tab, view.reputation);
@@ -1902,7 +1920,7 @@ pub(crate) fn feed(
     let at = pointer.map(|p| (f64::from(p.x), f64::from(p.y)));
     let mut input = fnv_ui::input::Input {
         at,
-        press: mobile.tap || aid_press || devices.mouse.just_pressed(MouseButton::Left),
+        press: mobile.press() || aid_press || devices.mouse.just_pressed(MouseButton::Left),
         shift: devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight),
         ..Default::default()
     };
@@ -1920,7 +1938,7 @@ pub(crate) fn feed(
     log_report(ui, &report);
     let rows = &tiles.written.rows;
     let what = |t: TileId| stats_tile(ui, &p, rows, t);
-    if let Some((_, Some(to))) = report.over {
+    if let Some((_, Some(to))) = report.over.filter(|_| !mobile.control) {
         if let Some(StatsTile::Tab(i)) = what(to) {
             hovered.write(TabHovered(i));
         }
@@ -1942,7 +1960,7 @@ pub(crate) fn feed(
     let in_sight = tiles.written.geometry.as_ref().map_or(0..usize::MAX, |g| g.top..g.top + g.visible);
     let under_row = row_to_hover(under_row, &in_sight);
     // Only a real change touches the view, which the page's other readers watch.
-    match follow_hover(&mut state.acted, under_row, settled) {
+    match if mobile.control { None } else { follow_hover(&mut state.acted, under_row, settled) } {
         Some(HoverAct::Select(i)) => {
             view.select(tab, i);
             view.highlight = true;
@@ -1954,8 +1972,9 @@ pub(crate) fn feed(
         view.select(tab, i);
         view.highlight = true;
     }
-    if !held {
+    if !held || (state.touch_drag && !mobile.control) {
         state.drag = None;
+        state.touch_drag = false;
     }
     let mut pressed_marker = false;
     for c in report.clicks.iter().filter(|c| ui.is_live(c.tile)) {
@@ -1978,6 +1997,7 @@ pub(crate) fn feed(
             StatsTile::Marker => {
                 pressed_marker = true;
                 state.drag = at.filter(|_| held && matches!(c.by, fnv_ui::input::By::Pointer)).and_then(|(_, y)| marker_grab(ui, &p, BarOf::Description, y));
+                state.touch_drag = mobile.control && state.drag.is_some();
             }
             StatsTile::Switch => view.switch(),
             StatsTile::Sub(i) => view.status = i,
@@ -2001,6 +2021,7 @@ pub(crate) fn feed(
             StatsTile::ListBar(BarPiece::Marker) => {
                 pressed_marker = true;
                 state.drag = at.filter(|_| held && matches!(c.by, fnv_ui::input::By::Pointer)).and_then(|(_, y)| marker_grab(ui, &p, BarOf::List, y));
+                state.touch_drag = mobile.control && state.drag.is_some();
             }
         }
     }
@@ -2041,6 +2062,7 @@ pub(super) fn parse_cut(v: &str) -> (String, Option<f32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("stats_menu/tab_swipe_tests.rs");
     use fnv_ui::input::{no_measure, By, Input, Pointer};
     use fnv_ui::MemSource;
 

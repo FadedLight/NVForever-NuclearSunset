@@ -38,16 +38,19 @@ impl Default for Preferences {
 impl Preferences {
     pub(super) fn tray_available(&self) -> bool { self.enabled && self.tray }
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 struct Placement {
     center: Vec2,
     pins: [bool; SLOTS],
+    extra:serde_json::Value,
 }
+impl PartialEq for Placement {fn eq(&self,other:&Self)->bool {self.encode()==other.encode()}}
 impl Default for Placement {
     fn default() -> Self {
         Self {
             center: Vec2::new(0.5, 0.82),
             pins: [false; SLOTS],
+            extra:serde_json::json!({}),
         }
     }
 }
@@ -69,6 +72,7 @@ impl Placement {
             center: Vec2::new(x, y).clamp(Vec2::splat(0.05), Vec2::splat(0.95)),
             ..default()
         };
+        out.extra=value.clone();
         let pins = value.get("pins")?.as_array()?;
         if pins.len() != SLOTS {
             return None;
@@ -80,28 +84,40 @@ impl Placement {
         Some(out)
     }
     fn encode(&self) -> serde_json::Value {
-        serde_json::json!({"version":1,"center":[self.center.x,self.center.y],"pins":self.pins})
+        let mut out=if self.extra.is_object(){self.extra.clone()}else{serde_json::json!({})};
+        out["version"]=serde_json::json!(1);out["center"]=serde_json::json!([self.center.x,self.center.y]);out["pins"]=serde_json::json!(self.pins);out
     }
     fn save(&self) {
         let Some(home) = std::env::var_os(fnv_install::HOME_ENV) else {
             return;
         };
         let path = std::path::PathBuf::from(home).join("touch-hotbar.json");
-        let result = (|| -> Result<(), String> {
-            use std::io::Write;
-            fnv_install::guard_write(&path, None).map_err(|e| e.to_string())?;
+        let result = self.save_to(&path);
+        if result.is_err() {
+            warn!("touch hotbar placement could not be saved");
+        }
+    }
+    fn save_to(&self,path:&std::path::Path)->Result<(),String> {
+        use std::io::Write;
+            fnv_install::guard_write(path, None).map_err(|e| e.to_string())?;
+            let mut encoded=self.encode();
+            if path.exists() {
+                if std::fs::metadata(path).map_err(|e|e.to_string())?.len()>8192 {return Err("Existing tray pin settings exceed bounds; kept unchanged".into())}
+                let mut old:serde_json::Value=serde_json::from_slice(&std::fs::read(path).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+                Self::decode(&old).ok_or("Unknown tray pin settings; kept unchanged")?;
+                for key in ["version","center","pins"] {old[key]=encoded[key].clone();}
+                encoded=old;
+            }
+            let bytes=serde_json::to_vec_pretty(&encoded).map_err(|e|e.to_string())?;
+            if bytes.len()>8192 {return Err("Tray pin settings exceed bounds".into())}
             let tmp = path.with_extension("json.tmp");
             fnv_install::guard_write(&tmp, None).map_err(|e| e.to_string())?;
             let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-            file.write_all(&serde_json::to_vec_pretty(&self.encode()).map_err(|e| e.to_string())?)
+            file.write_all(&bytes)
                 .and_then(|_| file.sync_all())
                 .map_err(|e| e.to_string())?;
             drop(file);
             std::fs::rename(tmp, path).map_err(|e| e.to_string())
-        })();
-        if result.is_err() {
-            warn!("touch hotbar placement could not be saved");
-        }
     }
 }
 /// The input session is independent of the opt-in bar and its fitted geometry.
@@ -111,9 +127,14 @@ struct MenuTouchSession {
     tab: usize,
     frame: Frame,
 }
+#[derive(Clone, Copy)]
+struct BindingOrigin {id:u64,slot:usize,released:bool}
 #[derive(Resource, Default)]
 struct Bar {
     placement: Placement,
+    active_tray:Option<super::layout::Placement>,
+    safe_area:nvf_play::touch_safe_area::SafeInsets,
+    preview:bool,
     gesture: Gesture,
     ignored: HashSet<u64>,
     context: Option<usize>,
@@ -131,19 +152,40 @@ struct Bar {
     occupied: Vec<packing::Occupied>,
     capture_drain: u8,
     request_opening: bool,
+    pending_binding: Option<usize>,
+    binding_origin:Option<BindingOrigin>,
+    binding_slot: Option<usize>,
     message: String,
 }
 impl Bar {
     fn observe_hold(&mut self, now: u64) {
         if let Some(outcome) = self.gesture.tick(now) {
             if self.outcomes.is_empty() {
+                if let Outcome::Context(slot)=outcome {
+                    if self.mode==2&&slot!=AMMO_SWAP {
+                        self.binding_origin=self.gesture.owner().map(|id|BindingOrigin{id,slot,released:false});
+                    }
+                }
                 self.outcomes.push(outcome);
             }
             self.capture_drain = 2;
         }
     }
+    fn retire_binding_request(&mut self) {
+        let retiring=self.binding_origin.is_some()||self.pending_binding.is_some();
+        if let Some(origin)=self.binding_origin.take() {
+            self.outcomes.retain(|outcome|!matches!(outcome,
+                Outcome::Context(slot)|Outcome::Tap(Target::Slot(slot)) if *slot==origin.slot));
+        }
+        self.pending_binding=None;
+        if retiring {self.capture_drain=2;}
+    }
+    fn cancel_binding_owner(&mut self,id:u64) {
+        if self.binding_origin.is_some_and(|origin|origin.id==id) {self.retire_binding_request();}
+    }
     fn captures_actions(&self) -> bool {
         self.context.is_some()
+            || self.binding_origin.is_some_and(|origin|!origin.released)
             || self.moving
             || self.tray_open
             || self.capture_drain > 0
@@ -169,7 +211,28 @@ impl Bar {
         self.moving = false;
         self.capture_drain = 0;
         self.request_opening = false;
+        self.pending_binding = None;
+        self.binding_origin = None;
+        self.binding_slot = None;
     }
+}
+// Shared by early raw admission, late dispatch and the final arm handoff.
+// A quantity prompt keeps ordinary item/prompt ingress; only binding retires.
+fn enforce_binding_context(bar:&mut Bar,items:&mut TouchItems,pip:Option<&PipBoy>,active:Option<&ActiveMenu>)->bool {
+    let menu=active.and_then(|a|a.0.as_ref()).filter(|m|m.mode==Mode::Inventory);
+    let reason=if menu.is_some_and(|m|m.quantity.is_some()) {
+        Some("Finish the quantity prompt before binding a slot.")
+    } else if menu.is_none() || pip.is_none_or(|p|p.phase!=Phase::Up||p.page!=Page::Items) {
+        Some("Open ITEMS to bind a slot, then tap the slot again.")
+    } else {None};
+    if let Some(reason)=reason {
+        let pending=bar.binding_origin.is_some()||bar.pending_binding.is_some()||items.binding_slot().is_some();
+        bar.retire_binding_request();
+        if items.binding_slot().is_some(){items.cancel_binding();}
+        bar.binding_slot=None;
+        if pending {items.message=reason.into();}
+        false
+    } else {true}
 }
 #[derive(Clone, PartialEq)]
 struct FittingKey {
@@ -180,6 +243,8 @@ struct FittingKey {
     tray: bool,
     center: Vec2,
     occupied: Vec<packing::Occupied>,
+    safe_area:nvf_play::touch_safe_area::SafeInsets,
+    profile_epoch:u64,
 }
 #[derive(Resource, Default)]
 pub(super) struct Occlusion {
@@ -208,10 +273,11 @@ struct Geometry {
     bounds: Rect,
 }
 fn usable(size: Vec2, bar: &Bar) -> Option<Vec2> {
-    if !size.is_finite() || !bar.safe_bottom.is_finite() {
+    let s=bar.safe_area;
+    if !size.is_finite() || !bar.safe_bottom.is_finite() || [s.left,s.top,s.right,s.bottom].into_iter().any(|v|!v.is_finite() || v<0.0) {
         return None;
     }
-    let size = Vec2::new(size.x, size.y - bar.safe_bottom.max(0.) - 64.);
+    let size = Vec2::new(size.x-s.left-s.right, size.y-s.top-s.bottom.max(bar.safe_bottom.max(0.))-64.);
     (size.min_element() >= 96.).then_some(size)
 }
 fn rect2(r: Rect) -> packing::Rect2 {
@@ -226,18 +292,26 @@ fn bevy_rect(r: packing::Rect2) -> Rect {
     Rect::from_corners(Vec2::new(r.x, r.y), Vec2::new(r.x + r.w, r.y + r.h))
 }
 fn fit(size: Vec2, prefs: &Preferences, bar: &Bar) -> Option<packing::Resolved> {
+    let raw_size=size;
     let size = usable(size, bar)?;
-    packing::fit(
+    let origin=Vec2::new(bar.safe_area.left,bar.safe_area.top);
+    let (anchor,scale)=bar.active_tray.as_ref().map_or((bar.placement.center,prefs.scale),|t|((t.center*raw_size-origin)/size,t.scale));
+    let occupied:Vec<_>=bar.occupied.iter().map(|s|packing::Occupied {rect:packing::Rect2{x:s.rect.x-origin.x,y:s.rect.y-origin.y,..s.rect},radius:s.radius}).collect();
+    let mut resolved=packing::fit(
         size.to_array(),
-        bar.placement.center.to_array(),
-        (size.min_element() * 0.11 * prefs.scale).clamp(48., 96.),
+        anchor.to_array(),
+        (size.min_element() * 0.11 * scale).clamp(48., 96.),
         prefs.count + usize::from(prefs.tray),
-        &bar.occupied,
-    )
+        &occupied,
+    )?;
+    for cell in &mut resolved.cells {cell.x+=origin.x;cell.y+=origin.y;}
+    resolved.panel.x+=origin.x;resolved.panel.y+=origin.y;
+    Some(resolved)
 }
 fn geometry(size: Vec2, prefs: &Preferences, bar: &Bar) -> Option<Geometry> {
     let raw_size = size;
     let size = usable(size, bar)?;
+    let origin=Vec2::new(bar.safe_area.left,bar.safe_area.top);
     let fitted = if bar.fitting_key.is_some() {
         bar.resolved.clone()?
     } else {
@@ -271,7 +345,7 @@ fn geometry(size: Vec2, prefs: &Preferences, bar: &Bar) -> Option<Geometry> {
                 .cells
                 .iter()
                 .map(|r| packing::Occupied {
-                    rect: *r,
+                    rect: packing::Rect2{x:r.x-origin.x,y:r.y-origin.y,..*r},
                     radius: 0.,
                 })
                 .collect::<Vec<_>>();
@@ -286,21 +360,22 @@ fn geometry(size: Vec2, prefs: &Preferences, bar: &Bar) -> Option<Geometry> {
                     pinned
                         .into_iter()
                         .zip(pin_layout.cells)
-                        .map(|(i, r)| (i, bevy_rect(r))),
+                        .map(|(i, r)| (i, bevy_rect(packing::Rect2{x:r.x+origin.x,y:r.y+origin.y,..r}))),
                 );
             }
         }
     }
     let bounds = bevy_rect(fitted.panel);
-    let context = if bar.context.is_some() {
+    let context = if bar.context.is_some() || bar.binding_slot.is_some() {
+        let count = 4;
         let width = (size.x * 0.42).clamp(220., 360.).min(size.x - 16.);
         let height = 48.;
-        let top = (bounds.min.y - height * 4. - 12.).clamp(4., (size.y - height * 4. - 4.).max(4.));
-        (0..4)
+        let top = (bounds.min.y - height * count as f32 - 12.).clamp(origin.y+4., (origin.y+size.y - height * count as f32 - 4.).max(origin.y+4.));
+        (0..count)
             .map(|i| {
                 Rect::from_corners(
-                    Vec2::new((size.x - width) * 0.5, top + i as f32 * height),
-                    Vec2::new((size.x + width) * 0.5, top + (i + 1) as f32 * height),
+                    Vec2::new(origin.x+(size.x - width) * 0.5, top + i as f32 * height),
+                    Vec2::new(origin.x+(size.x + width) * 0.5, top + (i + 1) as f32 * height),
                 )
             })
             .collect()
@@ -329,16 +404,23 @@ pub(super) struct Bridge<'w, 's> {
     active: Option<Res<'w, ActiveMenu>>,
     pip: Option<Res<'w, PipBoy>>,
     fresh: Option<Res<'w, nvf_play::menu::FreshMenu>>,
+    paused: Option<Res<'w, nvf_play::pause::Paused>>,
+    script: Option<Res<'w, nvf_play::script::ScriptState>>,
     time: Res<'w, Time<Real>>,
     safe: Option<Res<'w, super::drawer::SafeBottom>>,
     occlusion: ResMut<'w, Occlusion>,
     capture: ResMut<'w, OverlayCapture>,
     requests: MessageReader<'w, 's, UtilityTrayRequest>,
+    edit:ResMut<'w,super::tray_editor::Requests>,
+    preview:Res<'w,super::tray_editor::PreviewMode>,
+    safe_area:Option<Res<'w,nvf_play::touch_safe_area::SafeInsets>>,
 }
 impl Bridge<'_, '_> {
     pub fn cancel(&mut self) {
         self.requests.clear();
         self.bar.cancel();
+        self.edit.0=false;
+        if self.preview.0 {self.bar.mode=3;self.bar.preview=true;}
         self.items.cancel();
         self.publish_capture();
         self.occlusion.rects.clear();
@@ -346,6 +428,7 @@ impl Bridge<'_, '_> {
     pub fn captures_actions(&self) -> bool {
         self.bar.captures_actions()
     }
+    pub fn take_editor_request(&mut self)->bool {std::mem::take(&mut self.edit.0)}
     fn publish_capture(&mut self) {
         publish_capture(
             &self.bar,
@@ -355,7 +438,16 @@ impl Bridge<'_, '_> {
         );
     }
     pub fn apply_tray_request(&mut self, open: bool) -> bool {
+        if self.bar.preview {return false}
         if open && (self.bar.mode == 0 || !self.prefs.tray_available()) { return false; }
+        if open {
+            // Retire canonical binding state before the queued-open batch owns
+            // releases. Dismissal must never resurrect an old slot request.
+            self.bar.retire_binding_request();
+            self.bar.binding_slot=None;
+            if self.items.binding_slot().is_some(){self.items.cancel_binding();}
+            else{self.items.cancel();}
+        }
         if self.bar.tray_open != open {
             if open {
                 // This request owns the opening batch, including old held releases.
@@ -384,6 +476,7 @@ impl Bridge<'_, '_> {
     pub fn blocks(&self, rect: Rect) -> bool {
         self.occlusion.blocks(rect)
     }
+    pub fn items_pending(&self) -> bool { self.items.pending_contact() }
     pub fn prepare(
         &mut self,
         size: Vec2,
@@ -393,17 +486,27 @@ impl Bridge<'_, '_> {
         gyro_enabled: bool,
         extra: &[(Rect, f32)],
     ) {
+        let preview=self.preview.0 && allowed;
+        let playing=playing || preview;
+        self.bar.active_tray=config.tray_supported.then(||config.tray.clone());
+        self.bar.preview=preview;
+        self.bar.safe_area=self.safe_area.as_deref().copied().unwrap_or_default();
         self.bar.request_opening = false;
+        enforce_binding_context(&mut self.bar,&mut self.items,self.pip.as_deref(),self.active.as_deref());
+        self.bar.binding_slot = self.items.binding_slot();
         let inventory = self
             .active
             .as_ref()
             .and_then(|a| a.0.as_ref())
             .is_some_and(|m| m.mode == Mode::Inventory)
             && self.pip.as_ref().is_some_and(|p| p.phase == Phase::Up);
+        let allowed = allowed && !self.paused.as_ref().is_some_and(|p| p.0)
+            && !(inventory && self.script.as_ref().and_then(|s| s.rt.as_ref())
+                .is_some_and(|rt| nvf_play::tiles::stats_menu::modal_over(rt.game.menu)));
         let menu_touch = self.pip.as_ref().filter(|_| {
             allowed && !playing && inventory && size.is_finite() && size.min_element() >= 64.
         }).map(|pip| MenuTouchSession { page: pip.page, tab: pip.tab(), frame: pip.frame });
-        let mode = if !allowed || !self.prefs.enabled {
+        let mode = if preview {3} else if !allowed || !self.prefs.enabled || !config.tray.visible {
             0
         } else if playing {
             1
@@ -461,10 +564,12 @@ impl Bridge<'_, '_> {
             size,
             safe,
             count: self.prefs.count,
-            scale: self.prefs.scale,
+            scale: self.bar.active_tray.as_ref().map_or(self.prefs.scale,|t|t.scale),
             tray: self.prefs.tray,
-            center: self.bar.placement.center,
+            center: self.bar.active_tray.as_ref().map_or(self.bar.placement.center,|t|t.center),
             occupied: occupied.clone(),
+            safe_area:self.bar.safe_area,
+            profile_epoch:config.profile_epoch,
         };
         if mode != self.bar.mode
             || menu_touch != self.bar.menu_touch
@@ -475,6 +580,7 @@ impl Bridge<'_, '_> {
             self.cancel();
         }
         if self.bar.fitting_key.as_ref() != Some(&key) {
+            self.bar.retire_binding_request();
             self.bar.gesture.cancel();
             self.bar.outcomes.clear();
             self.items.cancel();
@@ -520,6 +626,7 @@ impl Bridge<'_, '_> {
     }
     pub fn event(&mut self, event: &TouchInput, unclaimed: bool) -> bool {
         self.publish_capture();
+        if self.bar.preview {return true}
         if self.bar.request_opening { return true; }
         let consumed = self.route_event(event, unclaimed);
         self.publish_capture();
@@ -587,6 +694,15 @@ impl Bridge<'_, '_> {
             if event.phase != TouchPhase::Canceled {
                 self.bar.observe_hold(now);
             }
+            let valid=self.bar.gesture.valid_release(event.id,event.position.to_array(),size);
+            if event.phase==TouchPhase::Canceled||!valid {
+                self.bar.cancel_binding_owner(event.id);
+            } else if event.phase==TouchPhase::Ended {
+                if let Some(origin)=self.bar.binding_origin.as_mut().filter(|o|o.id==event.id) {
+                    origin.released=true;
+                    self.bar.capture_drain=2;
+                }
+            }
             match event.phase {
                 TouchPhase::Moved => {
                     self.bar
@@ -608,6 +724,11 @@ impl Bridge<'_, '_> {
                             self.bar.capture_drain = 2;
                         }
                         if self.bar.outcomes.is_empty() {
+                            if let Outcome::Tap(Target::Slot(slot))=o {
+                                if self.bar.mode==2&&slot!=AMMO_SWAP {
+                                    self.bar.binding_origin=Some(BindingOrigin{id:event.id,slot,released:true});
+                                }
+                            }
                             self.bar.outcomes.push(o);
                         }
                     }
@@ -650,6 +771,9 @@ impl Bridge<'_, '_> {
                     self.bar.ignored.insert(event.id);
                 }
             } else {
+                // A newer owned UI press supersedes a released request that has
+                // not yet passed its drain. Active binding has no pending origin.
+                self.bar.retire_binding_request();
                 let size = self.bar.size.to_array();
                 self.bar.gesture.start(
                     event.id,
@@ -695,7 +819,9 @@ fn publish_capture(
     capture: &mut OverlayCapture,
     occlusion: &mut Occlusion,
 ) {
-    let captured = bar.captures_actions();
+    // Binding's three explicit buttons consume their own raw contacts. Keep the
+    // item surface admitted so its next guarded tap can propose an item.
+    let captured = bar.captures_actions() && items.binding_slot().is_none();
     capture.0 = captured;
     occlusion.capturing = captured;
     if captured {
@@ -707,6 +833,8 @@ pub(super) fn install(app: &mut App) {
     app.init_resource::<bevy::picking::pointer::PointerMap>()
         .init_resource::<Occlusion>()
         .init_resource::<Preferences>()
+        .init_resource::<super::tray_editor::Requests>()
+        .init_resource::<super::tray_editor::PreviewMode>()
         .init_resource::<Bar>()
         .init_resource::<TouchItems>()
         .init_resource::<OverlayCapture>()
@@ -714,6 +842,8 @@ pub(super) fn install(app: &mut App) {
         .add_message::<UtilityTrayRequest>()
         .add_message::<nvf_play::weapon_wheel::TouchHotkey>()
         .add_systems(Startup, load)
+        .add_systems(PreUpdate,migrate_tray.after(super::drawer::PublishSafeBottom).before(super::tray_editor::PublishMode).before(super::TouchInputSystems))
+        .add_systems(PreUpdate,publish_preview.in_set(PreviewPublication).after(super::TouchInputSystems).after(nvf_play::pad::InputSwitchSystems::Switch).before(nvf_play::pipboy::TouchPointerSet).before(bevy::ui::UiSystems::Focus))
         .add_systems(
             Update,
             dispatch
@@ -809,20 +939,87 @@ pub(super) fn install(app: &mut App) {
                 13,
                 |w| {
                     settings::choice_part(
-                        ((w.resource::<Preferences>().scale * 100.0 - 60.0) / 10.0)
+                        ((current_scale(w) * 100.0 - 60.0) / 10.0)
                             .round()
                             .clamp(0.0, 12.0) as usize,
                         13,
                     )
                 },
                 |w, v| {
-                    w.resource_mut::<Preferences>().scale =
-                        (60 + settings::choice_index(v, 13) * 10) as f32 / 100.0
+                    set_scale(w,(60 + settings::choice_index(v, 13) * 10) as f32 / 100.0)
                 },
                 |v| format!("{}%", 60 + settings::choice_index(v, 13) * 10),
             ),
         ),
     );
+}
+fn current_scale(world:&World)->f32 {
+    if world.get_resource::<super::tray_editor::Ready>().is_some_and(|r|r.0) {
+        if let Some(scale)=world.get_resource::<super::Layout>().and_then(super::Layout::committed_tray_scale) {return scale}
+    }
+    world.resource::<Preferences>().scale
+}
+fn set_scale(world:&mut World,scale:f32) {
+    let mut accepted=true;
+    if world.get_resource::<super::tray_editor::Ready>().is_some_and(|r|r.0) {
+        if let Some(mut layout)=world.get_resource_mut::<super::Layout>() {
+            if layout.editor.is_some() {layout.message="Use Smaller/Larger in the preview, then Save or Cancel before changing the size setting.".into();return}
+            if !layout.config.tray_supported {layout.message="This tray uses a newer version; kept unchanged".into();return}
+            if layout.config.tray_explicit && layout.config.tray_supported {
+                let before=layout.config.tray.scale;layout.config.tray.scale=scale;
+                if !layout.tray_editing() {
+                    if let Err(error)=layout.save() {layout.config.tray.scale=before;layout.message=format!("Could not save tray size: {error}");accepted=false;}
+                }
+            }
+        }
+    }
+    if accepted {world.resource_mut::<Preferences>().scale=scale;}
+}
+fn migrate_tray(layout:Option<ResMut<super::Layout>>,bar:Res<Bar>,prefs:Res<Preferences>,windows:Query<&Window,With<bevy::window::PrimaryWindow>>,safe:Option<Res<super::drawer::SafeBottom>>) {
+    let Some(mut layout)=layout else {return};
+    if layout.config.tray_explicit || !layout.config.tray_supported || layout.editor.is_some() {return}
+    let Ok(window)=windows.single() else {return};
+    let size=Vec2::new(window.width(),window.height());
+    if !size.is_finite() || size.min_element()<96.0 {return}
+    let height=(size.y-safe.as_ref().map_or(0.0,|s|s.0).max(0.0)-64.0).max(1.0);
+    layout.config.tray.center=Vec2::new(bar.placement.center.x,bar.placement.center.y*height/size.y);
+    layout.config.tray.scale=prefs.scale;
+}
+#[derive(SystemSet,Debug,Clone,Copy,PartialEq,Eq,Hash)]
+pub(super) struct PreviewPublication;
+type PreviewMirrors<'w> = (ResMut<'w,TouchItems>,ResMut<'w,OverlayCapture>,ResMut<'w,Occlusion>);
+type PreviewAdmission<'w> = (Option<Res<'w,super::TouchState>>,Option<Res<'w,nvf_play::bindings::Bindings>>,Option<Res<'w,nvf_play::pad::TouchDeviceSwitch>>);
+fn publish_preview(layout:Option<ResMut<super::Layout>>,mut bar:ResMut<Bar>,prefs:Res<Preferences>,modal:Option<Res<super::modal::Capture>>,platform:Option<Res<nvf_play::pad::PlatformInputGate>>, (state,bindings,switch):PreviewAdmission<'_>, (mut items,mut capture,mut occlusion):PreviewMirrors<'_>) {
+    let Some(mut layout)=layout else {return};
+    if !layout.tray_editing() {
+        layout.tray_preview=None;
+        if bar.mode==3 || bar.preview {
+            bar.cancel();bar.preview=false;items.cancel();occlusion.rects.clear();
+            publish_capture(&bar,&mut items,&mut capture,&mut occlusion);
+        }
+        return;
+    }
+    if !layout.tray_admitted || modal.as_deref().is_some_and(super::modal::Capture::blocking)
+        || platform.as_deref().is_some_and(|g|!g.allows_actions())
+        || !super::tray_editor::preview_allowed(state.as_deref(),bindings.as_deref(),switch.as_deref()) {
+        layout.cancel_editor_drag();layout.tray_preview=None;
+        // prepare may have selected an ordinary mode while preview was blocked.
+        // Never publish that live bar through the open editor transaction.
+        bar.cancel();bar.preview=false;items.cancel();occlusion.rects.clear();
+        publish_capture(&bar,&mut items,&mut capture,&mut occlusion);
+        return;
+    }
+    bar.mode=3;bar.preview=true;
+    if bar.active_tray.as_ref()!=Some(&layout.config.tray) {
+        bar.active_tray=Some(layout.config.tray.clone());
+        if let Some(key)=bar.fitting_key.as_mut() {key.center=layout.config.tray.center;key.scale=layout.config.tray.scale;}
+        bar.resolved=fit(bar.size,&prefs,&bar);
+    }
+    layout.tray_preview=geometry(bar.size,&prefs,&bar).map(|g|super::tray_editor::Preview {bounds:g.bounds,slots:g.slots.into_iter().map(|(_,r)|r).chain(g.tray).collect()});
+    // Drawn preview, parent exclusions and the next core pointer route share the
+    // final fitted result, including same-frame movement/resize.
+    occlusion.rects=layout.tray_preview.as_ref().map_or_else(Vec::new,|p|p.slots.clone());
+    items.cancel();publish_capture(&bar,&mut items,&mut capture,&mut occlusion);
 }
 fn load(mut commands: Commands, mut bar: ResMut<Bar>) {
     commands.spawn(nvf_play::pipboy::touch_items::POINTER);
@@ -845,17 +1042,24 @@ fn load(mut commands: Commands, mut bar: ResMut<Bar>) {
 }
 fn dispatch(
     input: ControlInput,
-    (mut bar, mut items): (ResMut<Bar>, ResMut<TouchItems>),
+    (active,paused,script,pip): (Option<Res<ActiveMenu>>,Option<Res<nvf_play::pause::Paused>>,
+        Option<Res<nvf_play::script::ScriptState>>,Option<Res<PipBoy>>),
+    (mut bar, mut items,mut edit): (ResMut<Bar>, ResMut<TouchItems>,ResMut<super::tray_editor::Requests>),
     (mut capture, mut occlusion): (ResMut<OverlayCapture>, ResMut<Occlusion>),
-    (mut hotkeys, sim): (ResMut<Hotkeys>, Res<nvf_play::sim::SimState>),
-    (touch, time): (
+    (mut hotkeys, mut sim): (ResMut<Hotkeys>, ResMut<nvf_play::sim::SimState>),
+    (touch, time, physical): (
         Option<Res<nvf_play::pad::TouchDeviceSwitch>>,
         Res<Time<Real>>,
+        Option<Res<nvf_play::pipboy::touch_scroll::PhysicalPriority>>,
     ),
     mut out: MessageWriter<nvf_play::weapon_wheel::TouchHotkey>,
 ) {
+    if bar.preview {bar.gesture.cancel();bar.outcomes.clear();items.cancel();publish_capture(&bar,&mut items,&mut capture,&mut occlusion);return}
     if input.controller()
         || input.suppressed()
+        || paused.as_ref().is_some_and(|p| p.0)
+        || (bar.mode == 2 && script.as_ref().and_then(|s| s.rt.as_ref())
+            .is_some_and(|rt| nvf_play::tiles::stats_menu::modal_over(rt.game.menu)))
         || touch.as_ref().is_some_and(|t| !t.allows_actions())
     {
         bar.cancel();
@@ -866,15 +1070,28 @@ fn dispatch(
     let now = time.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
     items.update_hold(now);
     bar.observe_hold(now);
+    enforce_binding_context(&mut bar,&mut items,pip.as_deref(),active.as_deref());
+    if physical.as_ref().is_some_and(|p|p.active)
+        && (bar.binding_origin.is_some()||bar.pending_binding.is_some()||items.binding_slot().is_some()) {
+        bar.retire_binding_request();
+        if items.binding_slot().is_some(){items.cancel_binding();}
+    }
     for outcome in std::mem::take(&mut bar.outcomes) {
         match outcome {
             Outcome::Context(slot) => {
-                bar.context = Some(slot);
+                if bar.mode == 2 && slot != AMMO_SWAP {
+                    bar.pending_binding = Some(slot);
+                } else {
+                    bar.context = Some(slot);
+                }
                 bar.capture_drain = 2;
             }
             Outcome::Tap(Target::Slot(slot)) => {
                 if bar.mode == 1 && slot < SLOTS {
                     out.write(nvf_play::weapon_wheel::TouchHotkey(slot));
+                } else if bar.mode == 2 && slot != AMMO_SWAP {
+                    bar.pending_binding = Some(slot);
+                    bar.capture_drain = 2;
                 }
             }
             Outcome::Tap(Target::Tray) => {
@@ -883,6 +1100,23 @@ fn dispatch(
             }
             Outcome::Tap(Target::Context(action)) => {
                 bar.capture_drain = 2;
+                if items.binding_slot().is_some() {
+                    match action {
+                        0 => { if let Some(active) = active.as_deref() { items.confirm_binding(active, &mut hotkeys,&mut sim.world); } }
+                        1 => items.choose_binding_again(),
+                        2 => items.cancel_binding(),
+                        _ => {
+                            if let Some(slot) = items.binding_slot().filter(|s| *s != AMMO_SWAP) {
+                                hotkeys.0[slot] = None;
+                                bar.placement.pins[slot] = false;
+                                bar.placement.save();
+                                items.cancel_binding();
+                                items.message = "Slot cleared.".into();
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let Some(slot) = bar.context.take() else {
                     continue;
                 };
@@ -909,8 +1143,8 @@ fn dispatch(
                         }
                     }
                     2 => {
-                        bar.moving = true;
-                        bar.message = "Drag the bar to reposition it.".into();
+                        edit.0=true;
+                        bar.message = "Opening the tray layout editor.".into();
                     }
                     _ => {}
                 }
@@ -920,13 +1154,27 @@ fn dispatch(
     publish_capture(&bar, &mut items, &mut capture, &mut occlusion);
 }
 fn assign(
-    active: Option<Res<ActiveMenu>>,
+    mut sim: Option<ResMut<nvf_play::sim::SimState>>,
+    (active,pip): (Option<Res<ActiveMenu>>,Option<Res<PipBoy>>),
     mut items: ResMut<TouchItems>,
     mut hotkeys: ResMut<Hotkeys>,
+    mut bar: ResMut<Bar>,
 ) {
-    if let Some(active) = active {
-        items.assign_pending(&active, &mut hotkeys);
+    let binding_allowed=enforce_binding_context(&mut bar,&mut items,pip.as_deref(),active.as_deref());
+    if bar.mode != 2 || !binding_allowed {
+        bar.retire_binding_request();
+        if items.binding_slot().is_some() { items.cancel_binding(); }
+    } else if !bar.captures_actions() && !bar.gesture.busy()
+        && bar.binding_origin.is_some_and(|o|o.released&&Some(o.slot)==bar.pending_binding) {
+        if let Some(slot) = bar.pending_binding.take() {
+            bar.binding_origin=None;
+            items.arm_binding(slot);
+        }
     }
+    if let Some((active, sim)) = active.zip(sim.as_deref_mut()) {
+        items.assign_pending(&active, &mut hotkeys, &mut sim.world);
+    }
+    bar.binding_slot = items.binding_slot();
 }
 
 #[derive(Component)]
@@ -938,6 +1186,7 @@ struct Picture {
     geometry: Geometry,
     entries: Vec<(usize, String, i32, bool)>,
     context: Option<usize>,
+    binding: Option<(usize, bool, String)>,
     pinned: [bool; SLOTS],
     message: String,
 }
@@ -954,7 +1203,7 @@ fn draw(
     roots: Query<Entity, With<Visual>>,
     mut previous: Local<DrawCache>,
 ) {
-    if bar.mode == 0 || !prefs.enabled {
+    if bar.mode == 0 || (!prefs.enabled && !bar.preview) {
         for e in &roots {
             commands.entity(e).despawn();
         }
@@ -1010,6 +1259,7 @@ fn draw(
         geometry: g.clone(),
         entries: entries.clone(),
         context: bar.context,
+        binding: items.binding_slot().map(|slot| (slot, items.binding_ready(), items.binding_label().to_owned())),
         pinned: bar.placement.pins,
         message: if bar.tray_open && !bar.placement.pins.iter().any(|p| *p) {
             "No pins yet. Hold an Aid slot to pin it.".into()
@@ -1031,7 +1281,8 @@ fn draw(
             &mut commands,
             *r,
             &format!(
-                "{} {}{}",
+                "{}{} {}{}",
+                if items.binding_slot() == Some(*slot) { "[BIND] " } else { "" },
                 slot + 1,
                 name,
                 if count > 1 {
@@ -1061,7 +1312,11 @@ fn draw(
             true,
         );
     }
-    if let Some(slot) = bar.context {
+    if items.binding_slot().is_some() {
+        for (index, (r, label)) in g.context.into_iter().zip(["Confirm binding", "Choose another item", "Cancel binding", "Clear slot"]).enumerate() {
+            tile(&mut commands, r, label, None, index != 0 || items.binding_ready());
+        }
+    } else if let Some(slot) = bar.context {
         let pin = if bar.placement.pins[slot] {
             "Unpin consumable"
         } else {
@@ -1155,17 +1410,26 @@ pub(super) fn tray_open_collision_fixture(world: &World) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn test_anchor(world: &World) -> Vec2 { world.resource::<Bar>().placement.center }
+pub(super) fn test_anchor(world: &World) -> Vec2 {
+    let bar=world.resource::<Bar>();
+    bar.active_tray.as_ref().map_or(bar.placement.center,|tray|tray.center)
+}
+#[cfg(test)]
+pub(super) fn test_occlusion(world:&World)->(bool,Vec<Rect>) {
+    let occlusion=world.resource::<Occlusion>();(occlusion.capturing,occlusion.rects.clone())
+}
 #[cfg(test)]
 pub(super) fn test_ui_owners_retired(world: &World) -> bool {
     let bar = world.resource::<Bar>();
     !bar.moving && bar.move_id.is_none() && bar.move_original.is_none()
         && bar.context.is_none() && bar.ignored.is_empty() && !bar.gesture.busy()
+        && world.get_resource::<super::Layout>().is_none_or(|layout|!layout.tray_editing())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("hotbar/tray_layout_tests.rs");
     #[test]
     fn installing_the_custom_pointer_initializes_its_map_without_replacing_existing_entries() {
         use bevy::picking::pointer::{PointerId, PointerMap};
@@ -1490,4 +1754,294 @@ untouched=keep me
         assert!(!app.world().resource::<OverlayCapture>().0);
         assert!(app.world().resource::<ItemCaptureReceipt>().admitted);
     }
+}
+
+
+#[cfg(test)]
+mod binding_release_tests {
+    use super::*;
+    use bevy::input::{InputPlugin,mouse::MouseButtonInput,ButtonState};
+    use bevy::state::app::StatesPlugin;
+    use bevy::window::{PrimaryWindow,WindowResolution};
+
+    // Full wrapper raw reader -> Bridge -> actual Gesture -> dispatch -> assign.
+    // There is no second test raw reader, injected Outcome or fake hardware hold.
+    fn app()->(App,Entity) {
+        let mut app=App::new();
+        app.add_plugins((MinimalPlugins,InputPlugin,StatesPlugin))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(std::time::Duration::from_millis(100)))
+            .insert_state(nvf_play::PlayState::Menu)
+            .init_resource::<nvf_play::bindings::Bindings>()
+            .init_resource::<Hotkeys>()
+            .init_resource::<nvf_play::pipboy::PipBoyAid>()
+            .init_resource::<nvf_play::pipboy::PointerMoved>()
+            .add_message::<bevy::window::WindowFocused>()
+            .add_message::<bevy::window::AppLifecycle>();
+        let mut forms=fnv_sim::FormStore::default();
+        let player=fnv_sim::FormId::PLAYER_BASE;
+        forms.bases.insert(player,fnv_sim::forms::BaseForm{id:player,sig:*b"NPC_",edid:None,
+            name:Some("Owned binding fixture".into()),script:None,prompt:None,voice_filter:false,
+            data:fnv_sim::forms::BaseData::Actor(fnv_sim::forms::ActorBase{entries:vec![],attributes:None})});
+        let item=fnv_sim::FormId(0xF203);
+        forms.bases.insert(item,fnv_sim::forms::BaseForm{id:item,sig:*b"ALCH",edid:None,name:Some("Owned quantity stack".into()),
+            script:None,prompt:None,voice_filter:false,data:fnv_sim::forms::BaseData::Item(fnv_sim::forms::Item{
+                kind:fnv_sim::forms::ItemKind::Aid,value:None,money:None,weight:None,slots:None,projectile:None,
+                health:None,non_playable:false,cant_drop:false,armor_class:default(),power_armor:false,
+                armor_dr:None,armor_dt:None,weapon_damage:None,weight_mods:[0.;3],drawable:false,not_for_npcs:false,
+                thrown:false,quest_item:false,icon:None,placed_count:None,teaches:None,cant_be_taken:false,
+                modulates_voice:false,weapon_traits:None})});
+        let forms=Box::leak(Box::new(forms));let refs=Box::leak(Box::new(fnv_sim::RefTable::default()));
+        let mut sim=nvf_play::sim::SimState{forms,refs,world:fnv_sim::World::new(forms,refs,fnv_sim::SimConfig::default())};
+        sim.world.add_item(fnv_sim::FormId::PLAYER_REF,item,10).unwrap();
+        let model=nvf_play::menu::model::MenuModel::open_inventory(&mut sim.world).unwrap();
+        app.insert_resource(sim).insert_resource(ActiveMenu(Some(model)));
+        let mut pip=PipBoy::default();pip.phase=Phase::Up;pip.page=Page::Items;
+        app.insert_resource(pip);
+        let camera=app.world_mut().spawn_empty().id();
+        app.insert_resource(nvf_play::pipboy::PipBoyScreen{image:Handle::default(),camera,on_model:false,pointer:None,scale:1.});
+        let window=app.world_mut().spawn((Window{resolution:WindowResolution::new(1000,600),..default()},PrimaryWindow)).id();
+        app.add_plugins((super::super::TouchControlsPlugin,nvf_play::pipboy::touch_scroll::TouchPointerPlugin));
+        app.insert_resource(settings::SettingsFile(None));
+        app.update();
+        *app.world_mut().resource_mut::<Bar>()=Bar::default();
+        app.world_mut().resource_mut::<Preferences>().enabled=true;
+        app.update();
+        assert_eq!(app.world().resource::<Bar>().mode,2);
+        (app,window)
+    }
+    fn edge(app:&mut App,window:Entity,id:u64,phase:TouchPhase,p:Vec2) {
+        app.world_mut().write_message(TouchInput{window,id,phase,position:p,force:None});
+    }
+    fn idle(app:&mut App,frames:usize){for _ in 0..frames{app.update();}}
+    fn assert_unarmed(app:&App){
+        assert_eq!(app.world().resource::<TouchItems>().binding_slot(),None);
+        assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+    }
+    fn fresh_tap(app:&mut App,window:Entity,id:u64){
+        let p=test_slot_center(app.world(),0);
+        edge(app,window,id,TouchPhase::Started,p);app.update();
+        edge(app,window,id,TouchPhase::Ended,p);app.update();
+        assert_unarmed(app);
+        idle(app,4);
+        assert_eq!(app.world().resource::<TouchItems>().binding_slot(),Some(0),"a genuinely released fresh slot tap still arms");
+        assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+    }
+    #[test]
+    fn actual_raw_inventory_slot_hold_waits_for_original_valid_release_and_post_release_drain(){
+        let (mut app,w)=app();let p=test_slot_center(app.world(),0);
+        edge(&mut app,w,610,TouchPhase::Started,p);app.update();
+        for _ in 0..10{
+            app.update();assert_unarmed(&app);
+            if app.world().resource::<Bar>().pending_binding.is_some(){
+                assert!(app.world().resource::<Bar>().captures_actions(),"pending held owner must also exclude underlying item use");
+                assert!(app.world().resource::<OverlayCapture>().0);
+            }
+        }
+        assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));
+        // An actual second raw contact cannot start the underlying item pointer
+        // while the original slot is still held, even after many drain frames.
+        let size=Vec2::new(1000.,600.);
+        let background={let layout=&app.world().resource::<super::super::layout::Layout>().config;
+            let bar=app.world().resource::<Bar>();let prefs=app.world().resource::<Preferences>();
+            let g=geometry(size,prefs,bar).unwrap();
+            (100..900).step_by(40).flat_map(|x|(100..500).step_by(40).map(move|y|Vec2::new(x as f32,y as f32)))
+                .find(|point|!g.slots.iter().any(|(_,r)|r.contains(*point))&&!g.tray.is_some_and(|r|r.contains(*point))
+                    &&!g.context.iter().any(|r|r.contains(*point))
+                    &&layout.hit_filtered(*point,size,false,false,|_|true).is_none()
+                    &&![false,true].iter().any(|help|super::super::layout::utility_rect(*help,size).contains(*point))).unwrap()};
+        edge(&mut app,w,611,TouchPhase::Started,background);app.update();
+        edge(&mut app,w,611,TouchPhase::Ended,background);app.update();
+        assert_eq!(app.world().resource::<TouchItems>().contact_id(),None);
+        let touch_actions=app.world_mut().resource_mut::<bevy::ecs::message::Messages<bevy::picking::pointer::PointerInput>>()
+            .drain().filter(|event|event.pointer_id==nvf_play::pipboy::touch_items::POINTER
+                &&matches!(event.action,bevy::picking::pointer::PointerAction::Press(_)|bevy::picking::pointer::PointerAction::Release(_))).count();
+        assert_eq!(touch_actions,0,"no native/handbuilt item click can be produced beneath the captured hold");
+        edge(&mut app,w,610,TouchPhase::Ended,p);app.update();assert_unarmed(&app);
+        assert!(!app.world().resource::<Bar>().gesture.busy());
+        idle(&mut app,4);
+        assert_eq!(app.world().resource::<TouchItems>().binding_slot(),Some(0));
+        assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+        assert!(app.world().resource::<bevy::ecs::message::Messages<nvf_play::weapon_wheel::TouchHotkey>>().is_empty());
+    }
+    #[test]
+    fn actual_raw_pending_slot_cancellation_drag_resize_and_tick_cancel_never_replay_binding(){
+        for reason in ["cancel","drag","fit","tick_cancel"] {
+            let (mut app,w)=app();let p=test_slot_center(app.world(),0);
+            edge(&mut app,w,620,TouchPhase::Started,p);app.update();
+            idle(&mut app,if reason=="tick_cancel"{4}else{6});
+            assert_unarmed(&app);
+            if reason!="tick_cancel"{assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));}
+            match reason {
+                "cancel"|"tick_cancel"=>edge(&mut app,w,620,TouchPhase::Canceled,p),
+                "drag"=>{
+                    edge(&mut app,w,620,TouchPhase::Moved,p+Vec2::new(30.,0.));
+                    edge(&mut app,w,620,TouchPhase::Moved,p);
+                    edge(&mut app,w,620,TouchPhase::Ended,p);
+                },
+                _=>{app.world_mut().resource_mut::<Preferences>().scale=1.1;edge(&mut app,w,620,TouchPhase::Ended,p);},
+            }
+            app.update();idle(&mut app,5);
+            assert_unarmed(&app);
+            assert!(app.world().resource::<Bar>().pending_binding.is_none(),"{reason}: pending request retired");
+            assert!(app.world().resource::<Bar>().binding_origin.is_none(),"{reason}: no stale origin");
+            assert!(app.world().resource::<Bar>().outcomes.is_empty());
+            fresh_tap(&mut app,w,621);
+        }
+    }
+    #[test]
+    fn actual_mouse_intent_cancels_pending_binding_without_clearing_physical_button(){
+        let (mut app,w)=app();let p=test_slot_center(app.world(),0);
+        edge(&mut app,w,630,TouchPhase::Started,p);app.update();idle(&mut app,6);
+        assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));
+        app.world_mut().write_message(MouseButtonInput{window:w,button:MouseButton::Middle,state:ButtonState::Pressed});
+        app.update();
+        assert_unarmed(&app);
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Middle));
+        edge(&mut app,w,630,TouchPhase::Ended,p);app.update();idle(&mut app,4);
+        assert_unarmed(&app);assert!(app.world().resource::<Bar>().pending_binding.is_none());
+        app.world_mut().write_message(MouseButtonInput{window:w,button:MouseButton::Middle,state:ButtonState::Released});
+        idle(&mut app,3);
+        fresh_tap(&mut app,w,631);
+    }
+    #[test]
+    fn actual_raw_stats_and_data_slots_refuse_binding_with_items_feedback_then_fresh_items_tap_works(){
+        for page in [Page::Stats,Page::Data] {
+            for held in [false,true] {
+                let (mut app,w)=app();app.world_mut().resource_mut::<PipBoy>().page=page;app.update();
+                let p=test_slot_center(app.world(),0);
+                edge(&mut app,w,640,TouchPhase::Started,p);app.update();
+                if held {idle(&mut app,7);}
+                edge(&mut app,w,640,TouchPhase::Ended,p);app.update();idle(&mut app,4);
+                assert_unarmed(&app);
+                assert!(app.world().resource::<Bar>().pending_binding.is_none());
+                assert!(app.world().resource::<Bar>().binding_origin.is_none());
+                assert!(app.world().resource::<TouchItems>().message.contains("Open ITEMS"));
+                app.world_mut().resource_mut::<PipBoy>().page=Page::Items;app.update();
+                fresh_tap(&mut app,w,641);
+            }
+        }
+    }
+    fn quantity(active:&mut ActiveMenu,sim:&mut nvf_play::sim::SimState) {
+        let model=active.0.as_mut().unwrap();
+        let result=model.apply(&mut sim.world,nvf_play::menu::model::Command::Drop);
+        assert!(result.used.is_none());
+        assert!(model.quantity.is_some(),"the real native stack-drop rule must open the prompt");
+    }
+    fn open_quantity(app:&mut App) {
+        app.world_mut().resource_scope(|world,mut active:Mut<ActiveMenu>| {
+            let mut sim=world.resource_mut::<nvf_play::sim::SimState>();quantity(&mut active,&mut sim);
+        });
+    }
+    #[derive(Resource)]struct LateQuantity(bool);
+    fn late_quantity(mut flag:ResMut<LateQuantity>,mut active:ResMut<ActiveMenu>,mut sim:ResMut<nvf_play::sim::SimState>){
+        if std::mem::take(&mut flag.0){quantity(&mut active,&mut sim);}
+    }
+    fn free_menu_point(app:&App)->Vec2 {
+        let size=Vec2::new(1000.,600.);let config=&app.world().resource::<super::super::layout::Layout>().config;
+        let bar=app.world().resource::<Bar>();let prefs=app.world().resource::<Preferences>();let g=geometry(size,prefs,bar).unwrap();
+        (100..900).step_by(40).flat_map(|x|(100..500).step_by(40).map(move|y|Vec2::new(x as f32,y as f32)))
+            .find(|point|!g.slots.iter().any(|(_,r)|r.contains(*point))&&!g.tray.is_some_and(|r|r.contains(*point))
+                &&!g.context.iter().any(|r|r.contains(*point))&&config.hit_filtered(*point,size,false,false,|_|true).is_none()
+                &&![false,true].iter().any(|help|super::super::layout::utility_rect(*help,size).contains(*point))).unwrap()
+    }
+    #[test]
+    fn actual_quantity_interrupts_active_pending_and_late_binding_but_fresh_raw_prompt_pointer_survives(){
+        use bevy::picking::pointer::{PointerAction,PointerInput};
+        use bevy::ecs::message::Messages;
+        for state in ["active","pending","late"] {
+            let (mut app,w)=app();let p=test_slot_center(app.world(),0);
+            // Use actual flat projection and the real PreUpdate pointer driver.
+            app.world_mut().spawn((nvf_play::pipboy::FlatScreen,ComputedNode{size:Vec2::new(1000.,600.),..default()},UiGlobalTransform::from_xy(500.,300.)));
+            app.add_systems(Last,nvf_play::pipboy::flat_pointer);
+            app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:w,key_code:KeyCode::F12,
+                logical_key:bevy::input::keyboard::Key::F12,state:ButtonState::Pressed,text:None,repeat:false});
+            app.update();
+            if state=="active" {fresh_tap(&mut app,w,650);open_quantity(&mut app);}
+            else {
+                edge(&mut app,w,650,TouchPhase::Started,p);app.update();
+                if state=="pending" {idle(&mut app,6);assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));open_quantity(&mut app);}
+                else {edge(&mut app,w,650,TouchPhase::Ended,p);
+                    app.insert_resource(LateQuantity(true)).add_systems(Update,late_quantity.before(dispatch));}
+            }
+            app.update();idle(&mut app,3);
+            assert_unarmed(&app);
+            assert!(app.world().resource::<Bar>().pending_binding.is_none());
+            assert!(app.world().resource::<Bar>().binding_origin.is_none());
+            assert!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().quantity.is_some());
+            assert!(!app.world().resource::<OverlayCapture>().0,"quantity must not become a permanent overlay capture");
+            assert!(app.world().resource::<Bar>().menu_touch.is_some(),"ordinary prompt ingress stays admitted");
+            edge(&mut app,w,650,TouchPhase::Ended,p);app.update();idle(&mut app,3);
+            let old_releases=app.world_mut().resource_mut::<Messages<PointerInput>>().drain()
+                .filter(|p|p.pointer_id==nvf_play::pipboy::touch_items::POINTER&&matches!(p.action,PointerAction::Release(_))).count();
+            assert_eq!(old_releases,0,"interrupted binding cannot release into the prompt");
+            let point=free_menu_point(&app);
+            edge(&mut app,w,651,TouchPhase::Started,point);app.update();
+            assert!(app.world().resource::<TouchItems>().owns(651));
+            app.update();edge(&mut app,w,651,TouchPhase::Ended,point);app.update();idle(&mut app,3);
+            let releases=app.world_mut().resource_mut::<Messages<PointerInput>>().drain()
+                .filter(|p|p.pointer_id==nvf_play::pipboy::touch_items::POINTER&&matches!(p.action,PointerAction::Release(_))).count();
+            assert_eq!(releases,1,"fresh ordinary prompt contact reaches the actual projected pointer boundary");
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+            assert_eq!(app.world_mut().resource_mut::<nvf_play::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF,fnv_sim::FormId(0xF203)).unwrap(),10);
+            assert_unarmed(&app);
+        }
+    }
+
+    #[test]
+    fn actual_mode2_queued_tray_open_retires_held_released_and_active_binding_without_replay_or_lost_pins(){
+        for state in ["held","released","active"] {
+            let (mut app,w)=app();
+            app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:w,key_code:KeyCode::F12,
+                logical_key:bevy::input::keyboard::Key::F12,state:ButtonState::Pressed,text:None,repeat:false});
+            app.update();
+            let assigned=nvf_play::hotkeys::Slot{item:0xF203,mods:0};
+            app.world_mut().resource_mut::<Hotkeys>().assign(0,assigned,Some(fnv_sim::forms::ItemKind::Aid)).unwrap();
+            app.world_mut().resource_mut::<Bar>().placement.pins[0]=true;
+            let saved_hotkeys=app.world().resource::<Hotkeys>().0;
+            let saved_pins=app.world().resource::<Bar>().placement.pins;
+            let p=test_slot_center(app.world(),0);
+            edge(&mut app,w,810,TouchPhase::Started,p);app.update();
+            if state=="held" {idle(&mut app,6);assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));}
+            else {
+                edge(&mut app,w,810,TouchPhase::Ended,p);app.update();
+                if state=="active" {idle(&mut app,4);assert_eq!(app.world().resource::<TouchItems>().binding_slot(),Some(0));}
+                else {assert_eq!(app.world().resource::<Bar>().pending_binding,Some(0));}
+            }
+            // The real request reader must retire binding before this old raw
+            // release reaches the opening batch, not after Update dispatch.
+            app.world_mut().write_message(UtilityTrayRequest(true));
+            edge(&mut app,w,810,TouchPhase::Ended,p);app.update();
+            assert!(app.world().resource::<Bar>().tray_open);
+            assert!(app.world().resource::<Bar>().pending_binding.is_none());
+            assert!(app.world().resource::<Bar>().binding_origin.is_none());
+            assert!(app.world().resource::<Bar>().binding_slot.is_none());
+            assert_eq!(app.world().resource::<TouchItems>().binding_slot(),None);
+            assert!(app.world().resource::<OverlayCapture>().0);
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+            assert_eq!(app.world().resource::<Hotkeys>().0,saved_hotkeys);
+            assert_eq!(app.world().resource::<Bar>().placement.pins,saved_pins);
+            let outside=free_menu_point(&app);
+            edge(&mut app,w,811,TouchPhase::Started,outside);app.update();
+            assert!(!app.world().resource::<Bar>().tray_open);
+            edge(&mut app,w,811,TouchPhase::Ended,outside);app.update();
+            app.update(); // the known post-close drain reaches neutral here
+            assert!(!app.world().resource::<OverlayCapture>().0);
+            assert!(!app.world().resource::<super::super::TouchState>().ui_capture);
+            assert!(app.world().resource::<Bar>().pending_binding.is_none());
+            assert!(app.world().resource::<Bar>().binding_origin.is_none());
+            assert_eq!(app.world().resource::<TouchItems>().binding_slot(),None);
+            idle(&mut app,2);
+            assert_eq!(app.world().resource::<TouchItems>().binding_slot(),None,"{state}: dismissal cannot revive a canceled binding");
+            let fresh=test_slot_center(app.world(),0);
+            edge(&mut app,w,812,TouchPhase::Started,fresh);app.update();
+            edge(&mut app,w,812,TouchPhase::Ended,fresh);app.update();idle(&mut app,4);
+            assert_eq!(app.world().resource::<TouchItems>().binding_slot(),Some(0),"fresh slot controls remain usable");
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+            assert_eq!(app.world().resource::<Hotkeys>().0,saved_hotkeys);
+            assert_eq!(app.world().resource::<Bar>().placement.pins,saved_pins);
+            assert!(app.world().resource::<bevy::ecs::message::Messages<nvf_play::weapon_wheel::TouchHotkey>>().is_empty());
+            assert_eq!(app.world_mut().resource_mut::<nvf_play::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF,fnv_sim::FormId(0xF203)).unwrap(),10);
+        }
+    }
+
 }

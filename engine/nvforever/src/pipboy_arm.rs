@@ -634,13 +634,34 @@ impl Posed {
 /// posed as the arm's bones hold them this frame. The test aid's target (`PipBoyAid`)
 /// stands in for the window's pointer. A window pointer asleep under the controller
 /// (`nvf_play::pad::pointer`, #2310) is on nothing.
+fn pointer_pose(mesh: &Mesh, joints: Option<&[Mat4]>, world: Mat4) -> Option<Posed> {
+    if mesh.primitive_topology()!=bevy::render::render_resource::PrimitiveTopology::TriangleList || !world.is_finite() || !world.row(3).abs_diff_eq(Vec4::W,1e-6) {return None;}
+    let Some(VertexAttributeValues::Float32x3(positions))=mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {return None};
+    let Some(VertexAttributeValues::Float32x2(uvs))=mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {return None};
+    if positions.is_empty() || positions.len()!=uvs.len() || !positions.iter().flatten().all(|v|v.is_finite()) || !uvs.iter().flatten().all(|v|v.is_finite()) {return None;}
+    if mesh.indices().is_some_and(|indices| !indices.len().is_multiple_of(3) || indices.iter().any(|i|i>=positions.len())) {return None;}
+    if let Some(joints)=joints {
+        let Some(VertexAttributeValues::Uint16x4(indices))=mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX) else {return None};
+        let Some(VertexAttributeValues::Float32x4(weights))=mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT) else {return None};
+        if indices.len()!=positions.len() || weights.len()!=positions.len() || !joints.iter().all(|m|m.is_finite()) {return None;}
+        if indices.iter().zip(weights).any(|(index,weight)|index.iter().zip(weight).any(|(i,w)|!w.is_finite() || (*w!=0.0 && usize::from(*i)>=joints.len()))) {return None;}
+        for (index,weight) in indices.iter().zip(weights) {
+            let mut matrix=Mat4::ZERO;
+            for k in 0..4 {if let Some(joint)=joints.get(usize::from(index[k])) {matrix+=*joint*weight[k];}}
+            if !matrix.is_finite() || !matrix.row(3).abs_diff_eq(Vec4::W,1e-6) {return None;}
+        }
+    }
+    let shape=Posed::new(mesh,joints,world)?;
+    shape.points.iter().all(|p|p.is_finite()).then_some(shape)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn follow_pointer(
     pip: Res<PipBoy>,
     screen: Option<ResMut<PipBoyScreen>>,
-    cams: Query<(&Camera, &GlobalTransform), With<PlayerCamera>>,
+    cams: Query<(Entity, &Camera, &GlobalTransform), With<PlayerCamera>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    parts: Query<(&PipBoyPart, &PartMesh, &GlobalTransform, Option<&SkinnedMesh>)>,
+    parts: Query<(Entity, &PipBoyPart, &PartMesh, &GlobalTransform, Option<&SkinnedMesh>, Option<&Visibility>, Option<&InheritedVisibility>)>,
     globals: Query<&GlobalTransform>,
     binds: Res<Assets<SkinnedMeshInverseBindposes>>,
     mouse: nvf_play::pad::ActionButtons<MouseButton>,
@@ -648,7 +669,10 @@ fn follow_pointer(
     mut aid_over: Local<Option<Page>>,
     mut out: MessageWriter<PipBoyInput>,
     (pad_pointer, mut touch): (Option<Res<nvf_play::pad::pointer::PadPointer>>, Option<ResMut<nvf_play::pipboy::touch_items::TouchItems>>),
+    #[cfg(any(target_os = "android", test))] mut geometry: Option<ResMut<crate::touch::pipboy_model::Geometry>>,
 ) {
+    #[cfg(any(target_os = "android", test))]
+    if let Some(geometry) = geometry.as_deref_mut() { *geometry = default(); }
     let mouse = mouse.snapshot();
     let Some(mut screen) = screen else { return };
     let was_over = aid_over.take();
@@ -660,23 +684,70 @@ fn follow_pointer(
     if !pip.open() {
         return;
     }
-    let (Ok((cam, at)), Ok(window)) = (cams.single(), windows.single()) else { return };
-    let posed: Vec<(PipBoyPart, Posed)> = parts
+    let (Ok((camera_entity, cam, at)), Ok(window)) = (cams.single(), windows.single()) else { return };
+    #[cfg(any(target_os = "android", test))]
+    let mut admitted = Vec::new();
+    let posed: Vec<(PipBoyPart, Posed, bool)> = parts
         .iter()
-        .filter(|(p, ..)| matches!(p, PipBoyPart::Screen | PipBoyPart::Button(_)))
-        .filter_map(|(p, mesh, gt, skin)| {
-            let joints: Option<Vec<Mat4>> = skin.and_then(|s| {
+        .filter(|(_, p, ..)| matches!(p, PipBoyPart::Screen | PipBoyPart::Button(_)) || (cfg!(any(target_os = "android", test)) && matches!(p, PipBoyPart::ScrollKnob)))
+        .filter_map(|(entity, p, mesh, gt, skin, visible, inherited)| {
+            // A present skin without a complete pose is unavailable, not rigid.
+            let joints = if let Some(s) = skin {
                 let inv = binds.get(&s.inverse_bindposes)?;
-                s.joints.iter().zip(inv.iter()).map(|(j, ib)| globals.get(*j).ok().map(|g| g.to_matrix() * *ib)).collect()
-            });
-            Some((*p, Posed::new(&mesh.0, joints.as_deref(), gt.to_matrix())?))
+                if inv.len() != s.joints.len() || inv.is_empty() { return None; }
+                let pose: Vec<Mat4> = s.joints.iter().zip(inv.iter()).map(|(j, ib)| globals.get(*j).ok().map(|g| g.to_matrix() * *ib)).collect::<Option<_>>()?;
+                if !pose.iter().all(|m| m.is_finite()) { return None; }
+                Some(pose)
+            } else { None };
+            let shape = pointer_pose(&mesh.0, joints.as_deref(), gt.to_matrix())?;
+            let touch_visible = cam.is_active && visible.is_some_and(|v| *v != Visibility::Hidden) && inherited.is_some_and(|v| v.get());
+            #[cfg(any(target_os = "android", test))]
+            if touch_visible {
+                if let Some(bounds) = crate::touch::pipboy_model::Geometry::projected_bounds(cam, at, &shape.points, window.resolution.size()) {
+                    let triangles = if *p == PipBoyPart::Screen {
+                        shape.triangles.iter().filter_map(|[a,b,c]| Some([
+                            cam.world_to_viewport(at, *shape.points.get(*a)?).ok()?,
+                            cam.world_to_viewport(at, *shape.points.get(*b)?).ok()?,
+                            cam.world_to_viewport(at, *shape.points.get(*c)?).ok()?,
+                        ])).collect()
+                    } else { Vec::new() };
+                    admitted.push((entity, *p, bounds, triangles));
+                }
+            }
+            #[cfg(not(any(target_os = "android", test)))]
+            let _ = (entity, visible, inherited, camera_entity);
+            Some((*p, shape, touch_visible))
         })
         .collect();
+    #[cfg(any(target_os = "android", test))]
+    if let Some(geometry) = geometry.as_deref_mut() {
+        use crate::touch::pipboy_model::ButtonTarget;
+        geometry.size = window.resolution.size();
+        geometry.image = Some(screen.image.id());
+        geometry.page = Some(pip.page);
+        geometry.tab = pip.tab();
+        geometry.camera = Some(camera_entity);
+        for (entity, part, bounds, triangles) in admitted {
+            geometry.entities.push(entity);
+            match part {
+                PipBoyPart::Button(page) => {
+                    if let Some(old) = geometry.buttons.iter_mut().find(|b| b.page == page) {
+                        old.bounds = old.bounds.union(bounds);
+                    } else { geometry.buttons.push(ButtonTarget { page, bounds }); }
+                }
+                PipBoyPart::ScrollKnob => geometry.knob = Some(geometry.knob.map_or(bounds, |old| old.union(bounds))),
+                PipBoyPart::Screen => { geometry.screen = Some(geometry.screen.map_or(bounds, |old| old.union(bounds))); geometry.screen_triangles.extend(triangles); }
+                _ => {}
+            }
+        }
+        geometry.entities.sort_unstable();
+        geometry.entities.dedup();
+    }
     // Where the pointer is: the test aid's target, else the window's pointer.
     let target = aid.target.and_then(|t| {
         let world = match t {
-            AidTarget::Button(page) => posed.iter().find(|(p, _)| *p == PipBoyPart::Button(page)).and_then(|(_, s)| s.middle()),
-            AidTarget::Canvas(c) => posed.iter().find(|(p, _)| *p == PipBoyPart::Screen).and_then(|(_, s)| s.at_uv(c / CANVAS * UV_EXTENT)),
+            AidTarget::Button(page) => posed.iter().find(|(p, ..)| *p == PipBoyPart::Button(page)).and_then(|(_, s, _)| s.middle()),
+            AidTarget::Canvas(c) => posed.iter().find(|(p, ..)| *p == PipBoyPart::Screen).and_then(|(_, s, _)| s.at_uv(c / CANVAS * UV_EXTENT)),
         }?;
         cam.world_to_viewport(at, world).ok()
     });
@@ -686,7 +757,7 @@ fn follow_pointer(
     if let Some(touch) = touch.as_deref_mut() {
         touch.project(|position| {
             let ray=cam.viewport_to_world(at,position).ok()?;
-            let hit=posed.iter().filter_map(|(part,mesh)|mesh.hit(ray.origin,Vec3::from(ray.direction)).map(|(distance,uv)|(distance,*part,uv))).min_by(|a,b|a.0.total_cmp(&b.0));
+            let hit=posed.iter().filter(|(_,_,visible)|*visible).filter_map(|(part,mesh,_)|mesh.hit(ray.origin,Vec3::from(ray.direction)).map(|(distance,uv)|(distance,*part,uv))).min_by(|a,b|a.0.total_cmp(&b.0));
             match hit {Some((_,PipBoyPart::Screen,uv))=>canvas_point(uv),_=>None}
         });
     }
@@ -694,7 +765,7 @@ fn follow_pointer(
     let cursor = if aid.target.is_some() { target } else { window.cursor_position().filter(|_| !sleeping) };
     let Some(ray) = cursor.and_then(|c| cam.viewport_to_world(at, c).ok()) else { return };
     let (origin, dir) = (ray.origin, Vec3::from(ray.direction));
-    let hit = posed.iter().filter_map(|(p, s)| s.hit(origin, dir).map(|(t, uv)| (t, *p, uv))).min_by(|a, b| a.0.total_cmp(&b.0));
+    let hit = posed.iter().filter_map(|(p, s, _)| s.hit(origin, dir).map(|(t, uv)| (t, *p, uv))).min_by(|a, b| a.0.total_cmp(&b.0));
     let clicked = mouse.just_pressed(MouseButton::Left) || (aid.click == 3 && matches!(aid.target, Some(AidTarget::Button(_))));
     match hit {
         Some((_, PipBoyPart::Screen, uv)) => screen.pointer = canvas_point(uv),
@@ -719,7 +790,7 @@ fn follow_pointer(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn capped_warm_app(covered: bool, device: bool) -> App {
@@ -1138,6 +1209,31 @@ mod tests {
         app.update();
     }
 
+    /// Projection/command fixture supplies an explicit on-model screen. It does
+    /// not run show_screen or claim first-person body/wear ownership coverage.
+    pub(crate) fn model_control_fixture() -> App {
+        let mut app=App::new();
+        let mut pip=PipBoy::default(); pip.phase=nvf_play::pipboy::Phase::Up; pip.page=Page::Items;
+        app.init_resource::<PipBoyAid>().init_resource::<Assets<SkinnedMeshInverseBindposes>>()
+            .init_resource::<ButtonInput<MouseButton>>().add_message::<PipBoyInput>()
+            .insert_resource(pip)
+            .insert_resource(PipBoyScreen {image:Handle::default(),camera:Entity::PLACEHOLDER,on_model:true,pointer:None,scale:1.0})
+            .add_systems(Update,follow_pointer.in_set(nvf_play::pipboy::PointerSet))
+            .add_systems(Update,(|mut input:MessageReader<PipBoyInput>,mut pip:ResMut<PipBoy>| {
+                for &command in input.read() {pip.apply(command);}
+            }).in_set(nvf_play::PlaySet::Ui));
+        app.world_mut().spawn((Window::default(),PrimaryWindow));
+        let mut camera=Camera::default();
+        camera.computed.clip_from_view=bevy::camera::CameraProjection::get_clip_from_view(&PerspectiveProjection::default());
+        camera.computed.target_info=Some(bevy::camera::RenderTargetInfo {physical_size:UVec2::new(1280,960),scale_factor:1.0});
+        app.world_mut().spawn((camera,GlobalTransform::IDENTITY,PlayerCamera));
+        for page in Page::ALL {
+            app.world_mut().spawn((PipBoyPart::Button(page),PartMesh(square()),GlobalTransform::from_translation(Vec3::new(page.index() as f32*3.0-3.0,-2.5,-10.0)),Visibility::Visible,InheritedVisibility::VISIBLE));
+        }
+        app.world_mut().spawn((PipBoyPart::Screen,PartMesh(square()),GlobalTransform::from(Transform::from_xyz(0.0,2.0,-10.0).with_scale(Vec3::new(3.0,2.0,1.0))),Visibility::Visible,InheritedVisibility::VISIBLE));
+        app
+    }
+
     fn lit(app: &App, glows: [Entity; 3]) -> [bool; 3] {
         glows.map(|g| *app.world().get::<Visibility>(g).unwrap() != Visibility::Hidden)
     }
@@ -1165,4 +1261,6 @@ mod tests {
         frame(&mut app);
         assert_eq!(lit(&app, glows), [true, true, true], "down, all glow");
     }
+    include!("pipboy_arm/pointer_pose_safety_tests.rs");
+
 }

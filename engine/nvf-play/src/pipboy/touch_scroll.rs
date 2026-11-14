@@ -6,7 +6,9 @@ pub mod gesture;
 pub struct TouchPointerPlugin;
 impl Plugin for TouchPointerPlugin {
     fn build(&self, app: &mut App) {
+        super::tab_swipe::install(app);
         app.init_resource::<WheelFrame>()
+            .add_message::<super::PipBoyInput>()
             .init_resource::<PhysicalPriority>()
             .init_resource::<ButtonInput<MouseButton>>()
             .add_message::<bevy::input::mouse::MouseWheel>()
@@ -90,6 +92,7 @@ pub struct NativeTarget {
     row: Option<NativeRow>,
     pub selected: Option<bool>,
     pub valid: bool,
+    control: bool,
 }
 impl NativeTarget {
     pub fn at(
@@ -115,8 +118,15 @@ impl NativeTarget {
             row,
             selected: selected(row),
             valid: valid(row),
+            control: false,
         })
     }
+    /// The menu's real tile classifier marks its actual draggable marker only.
+    pub fn with_control(mut self, is_marker: impl FnOnce(fnv_ui::TileId) -> bool) -> Self {
+        self.control = is_marker(self.tile);
+        self
+    }
+    pub fn control(&self) -> bool { self.control }
     pub fn same_target(&self, other: &Self) -> bool {
         self.valid
             && other.valid
@@ -124,6 +134,7 @@ impl NativeTarget {
             && self.tile == other.tile
             && self.region == other.region
             && self.row == other.row
+            && self.control == other.control
     }
 }
 #[derive(Clone, Copy, Debug, Default)]
@@ -135,6 +146,10 @@ pub struct PointerFrame {
     pub scrolling: bool,
     pub native: bool,
     pub initially_selected: Option<bool>,
+    pub control: bool,
+}
+impl PointerFrame {
+    pub fn press(&self) -> bool { self.tap || (self.control && self.started && self.held) }
 }
 /// Native tile input has one pointer; a real mouse button keeps its own position/action.
 pub fn native_frame(
@@ -204,19 +219,42 @@ pub struct Routing<'w> {
     repair: Option<Res<'w, super::repair::PipRepair>>,
     modding: Option<Res<'w, super::item_mod::PipItemMod>>,
     paused: Option<Res<'w, crate::pause::Paused>>,
+    items_scroll: Option<Res<'w, super::scrollbar::ItemsScroll>>,
     stats_view: Option<Res<'w, super::stats::StatsView>>,
     data_state: Option<Res<'w, super::data::DataState>>,
 }
 impl Routing<'_> {
-    pub fn native_at(&self, pip: &PipBoy, at: Option<Vec2>) -> Option<NativeTarget> {
-        let (game, switch, at) = self
+    pub fn inventory_model(&self)->Option<&crate::menu::model::MenuModel> {self.active.as_ref()?.0.as_ref()}
+    /// Read the last painted hand-built view only when it still describes this
+    /// actual model. A pending shared scroll request may precede the next paint.
+    pub fn handbuilt_inventory_scroll(&self,pip:&PipBoy)->Option<usize> {
+        if pip.page!=Page::Items || self.native_menu(pip).is_some() {return None}
+        let model=self.inventory_model()?;
+        self.items_scroll.as_ref().filter(|view|view.matches(model))?.position()
+    }
+    pub fn native_inventory_scroll(&self,pip:&PipBoy)->Option<f64> {
+        if pip.page!=Page::Items {return None}
+        self.native_menu(pip)?;
+        self.inventory.as_ref().map(|t|t.view.value(crate::menu::model::Side::Player))
+    }
+    pub fn allows_navigation(&self,pip:&PipBoy)->bool {
+        pip.phase==super::Phase::Up
+            && !self.paused.as_ref().is_some_and(|p|p.0)
+            && !self.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|m.quantity.is_some())
+            && !self.repair.as_ref().is_some_and(|r|r.is_open()) && !self.modding.as_ref().is_some_and(|m|m.is_open())
+            && !self.inventory.as_ref().is_some_and(|t|t.modal || t.others)
+            && !self.stats.as_ref().is_some_and(|t|t.modal || t.others)
+            && !self.data.as_ref().is_some_and(|t|t.modal || t.others || t.popup_owns)
+            && self.script.as_ref().and_then(|s|s.rt.as_ref()).is_none_or(|rt|rt.game.menu.is_none_or(|menu|menu==super::menu_code(pip.page,false,false)))
+    }
+    fn native_menu(&self, pip: &PipBoy) -> Option<(&fnv_ui::Ui,fnv_ui::TileId)> {
+        let (game, switch) = self
             .script
             .as_ref()
             .and_then(|s| s.rt.as_ref())
             .map(|rt| &rt.game)
             .zip(self.switch.as_deref())
-            .zip(at)
-            .map(|((g, s), at)| (g, *s, at))?;
+            .map(|(g,s)|(g,*s))?;
         let paused = self.paused.as_ref().is_some_and(|p| p.0);
         let menu = match pip.page {
             Page::Items => self.inventory.as_ref().filter(|t| !t.others).and_then(|t| {
@@ -248,23 +286,36 @@ impl Routing<'_> {
                 .and_then(|t| crate::tiles::map_menu::takes(t, switch, pip, game, paused)),
         };
         let menu = menu?;
+        Some((&game.ui_tree,menu))
+    }
+    pub fn navigation_regions(&self,pip:&PipBoy)->Vec<super::tab_swipe::Region> {
+        let Some((ui,_))=self.native_menu(pip) else {return Vec::new()};
+        match pip.page {
+            Page::Items=>self.inventory.as_ref().map(|t|crate::tiles::inventory_menu::touch_navigation(t,ui)),
+            Page::Stats=>self.stats.as_ref().map(|t|crate::tiles::stats_menu::touch_navigation(t,ui)),
+            Page::Data=>self.data.as_ref().map(|t|crate::tiles::map_menu::touch_navigation(t,ui)),
+        }.unwrap_or_default()
+    }
+    pub fn native_at(&self, pip: &PipBoy, at: Option<Vec2>) -> Option<NativeTarget> {
+        let at=at?;
+        let (ui,menu)=self.native_menu(pip)?;
         match pip.page {
             Page::Items => crate::tiles::inventory_menu::touch_target(
                 self.inventory.as_deref()?,
-                &game.ui_tree,
+                ui,
                 menu,
                 at,
                 self.active.as_ref()?.0.as_ref()?,
             ),
             Page::Stats => crate::tiles::stats_menu::touch_target(
                 self.stats.as_deref()?,
-                &game.ui_tree,
+                ui,
                 menu,
                 at,
                 self.stats_view.as_deref()?,
             ),
             Page::Data => {
-                crate::tiles::map_menu::touch_target(self.data.as_deref()?, &game.ui_tree, menu, at, self.data_state.as_deref()?)
+                crate::tiles::map_menu::touch_target(self.data.as_deref()?, ui, menu, at, self.data_state.as_deref()?)
             }
         }
     }
@@ -564,5 +615,33 @@ mod tests {
         assert_eq!(w.lines(&pip), 0.0);
         w.clear();
         assert_eq!(w.lines(&pip), 0.0);
+    }
+
+    #[test]
+    fn armed_handbuilt_row_uses_real_press_and_click_observers_without_consumption() {
+        fn propose(mut touch: ResMut<TouchItems>, active: Res<ActiveMenu>, mut keys: ResMut<crate::hotkeys::Hotkeys>, mut sim: ResMut<crate::sim::SimState>) {
+            touch.assign_pending(&active, &mut keys, &mut sim.world);
+        }
+        let mut a = app();
+        a.add_systems(PostUpdate, propose);
+        let entity = pipboy::items::binding_fixture_row(a.world_mut(), 0);
+        a.world_mut().entity_mut(entity).insert(HitRect(Rect::new(100.0, 100.0, 300.0, 180.0)));
+        assert!(a.world_mut().resource_mut::<TouchItems>().arm_binding(0));
+        event(&mut a, TouchPhase::Started, Vec2::new(150.0, 130.0), 0);
+        event(&mut a, TouchPhase::Ended, Vec2::new(150.0, 130.0), 80);
+        flush(&mut a);
+        assert!(a.world().resource::<TouchItems>().binding_ready());
+        assert!(a.world().resource::<crate::hotkeys::Hotkeys>().0.iter().all(Option::is_none));
+        assert_eq!(a.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF, fnv_sim::FormId(0xF100)).unwrap(), 3);
+        let confirmed = a.world_mut().resource_scope(|world, mut touch: Mut<TouchItems>| {
+            world.resource_scope(|world, mut keys: Mut<crate::hotkeys::Hotkeys>| {
+                world.resource_scope(|world,mut sim:Mut<crate::sim::SimState>| {
+                    touch.confirm_binding(world.resource::<ActiveMenu>(), &mut keys,&mut sim.world)
+                })
+            })
+        });
+        assert!(confirmed);
+        assert_eq!(a.world().resource::<crate::hotkeys::Hotkeys>().0[0].unwrap().item, 0xF100);
+        assert_eq!(a.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF, fnv_sim::FormId(0xF100)).unwrap(), 3);
     }
 }

@@ -125,6 +125,8 @@ struct Channel {
     begun: usize,
     #[cfg(test)]
     cover_ready: String,
+    #[cfg(test)]
+    back_calls: usize,
 }
 impl Channel {
     fn state(&mut self) -> Result<String, String> {
@@ -186,6 +188,8 @@ impl Channel {
         }
     }
     fn back(&mut self) {
+        #[cfg(test)]
+        if self.test_mode { self.back_calls += 1; return; }
         #[cfg(target_os = "android")]
         {
             let _ = crate::android::activity_string("loadingBack", None);
@@ -307,8 +311,8 @@ fn consume_motion_and_back(
     if let Some(mut motion) = motion {
         motion.delta = Vec2::ZERO;
     }
-    if keys.just_pressed(KeyCode::Escape)
-        || pads.iter().any(|p| p.just_pressed(GamepadButton::East))
+    if gate.native_blocked() && (keys.just_pressed(KeyCode::Escape)
+        || pads.iter().any(|p| p.just_pressed(GamepadButton::East)))
     {
         channel.back();
     }
@@ -751,5 +755,35 @@ mod tests {
             assert!(app.world().resource::<Channel>().submitted.is_empty());
             assert!(!app.world().resource::<PlatformInputGate>().allows_actions());
         }
+    }
+
+    #[test]
+    fn arm_only_back_never_calls_native_loading_recovery_but_overlapping_loading_still_does() {
+        use bevy::input::{keyboard::{Key,KeyboardInput},ButtonState};
+        let (mut app,window)=scene();
+        app.world_mut().resource_mut::<Channel>().state.clear();
+        app.world_mut().resource_mut::<PlatformInputGate>().set_arm_blocked(true);
+        app.update();
+        assert!(!app.world().resource::<PlatformInputGate>().native_blocked());
+        assert!(!app.world().resource::<PlatformInputGate>().allows_actions());
+        let key=|down| KeyboardInput { key_code:KeyCode::Escape,logical_key:Key::Escape,
+            state:if down {ButtonState::Pressed} else {ButtonState::Released},
+            text:None,repeat:false,window };
+        app.world_mut().write_message(key(true));
+        app.update();
+        assert_eq!(app.world().resource::<Channel>().back_calls,0);
+        app.world_mut().write_message(key(false));
+        app.update();
+        app.world_mut().resource_mut::<Channel>().state=format!("{REQUEST}:2:1");
+        app.world_mut().write_message(key(true));
+        app.update();
+        assert!(app.world().resource::<PlatformInputGate>().native_blocked());
+        assert_eq!(app.world().resource::<Channel>().back_calls,1);
+        app.world_mut().resource_mut::<Channel>().state.clear();
+        app.update();
+        assert!(!app.world().resource::<PlatformInputGate>().native_blocked());
+        assert!(!app.world().resource::<PlatformInputGate>().allows_actions(),"native ack cannot release the arm reason");
+        app.world_mut().resource_mut::<PlatformInputGate>().set_arm_blocked(false);
+        assert!(app.world().resource::<PlatformInputGate>().allows_actions());
     }
 }

@@ -54,6 +54,10 @@ pub mod hotkey_panel;
 pub mod items;
 pub mod touch_items;
 pub mod touch_scroll;
+pub mod touch_presentation;
+pub mod tab_swipe;
+pub mod scrollbar;
+pub mod gesture;
 pub mod item_mod;
 pub mod labels;
 pub mod repair;
@@ -63,7 +67,6 @@ mod test_aid;
 pub mod transition;
 
 use crate::control::{PlayerControl, Pov};
-use crate::interface::u;
 use fnv_game::game::menus;
 use crate::menu::model::Mode;
 use crate::menu::ActiveMenu;
@@ -281,6 +284,8 @@ pub struct PipBoy {
     /// Seconds into the clip: from 0 coming up to [`HOLD_SECONDS`], held there while up,
     /// on to [`CLIP_SECONDS`] going down.
     pub clip_time: f32,
+    /// Owned direct arm preview: rendered on the real rig, without menu input.
+    manual_pose: bool,
     pub page: Page,
     /// Where the menus are shown while up.
     pub frame: Frame,
@@ -318,12 +323,12 @@ impl PipBoy {
 
     /// Whether the menus take input (coming up or up, after hidden warming) [design: this file].
     pub fn open(&self) -> bool {
-        self.warming.is_none() && matches!(self.phase, Phase::Raising | Phase::Up)
+        !self.manual_pose && self.warming.is_none() && matches!(self.phase, Phase::Raising | Phase::Up)
     }
 
     /// [design: this file] A real opening reports its page and accepts Close during a hold.
     pub fn opening(&self) -> bool {
-        matches!(self.phase, Phase::Raising | Phase::Up) && !self.warming.as_ref().is_some_and(|w| w.covered)
+        !self.manual_pose && matches!(self.phase, Phase::Raising | Phase::Up) && !self.warming.as_ref().is_some_and(|w| w.covered)
     }
 
     /// Whether to draw the device on the arm, including hidden warming [design: this file].
@@ -352,7 +357,7 @@ impl PipBoy {
     /// Move the clip on by `dt` seconds; true when the Pip-Boy reached the top or the
     /// bottom in this step.
     pub fn advance(&mut self, dt: f32) -> bool {
-        if self.warming.is_some() {
+        if self.warming.is_some() || self.manual_pose {
             return false;
         }
         match self.phase {
@@ -515,7 +520,10 @@ pub struct PipBoyPlugin;
 
 impl Plugin for PipBoyPlugin {
     fn build(&self, app: &mut App) {
+        gesture::install(app);
         app.add_plugins(touch_scroll::TouchPointerPlugin);
+        touch_presentation::install(app);
+        app.init_resource::<scrollbar::ItemsScroll>().add_plugins(scrollbar::ScrollbarPlugin);
         app.init_resource::<PipBoy>()
             .init_resource::<UsePipBoy>()
             .init_resource::<PipBoyAid>()
@@ -541,7 +549,7 @@ impl Plugin for PipBoyPlugin {
             .add_systems(
                 Update,
                 (
-                    (apply_use, follow_menu.after(crate::menu::MenuSystems), follow_frame).chain(),
+                    (apply_use, follow_menu.after(crate::menu::MenuSystems), gesture::drive, follow_frame).chain(),
                     reset_manager,
                     close_keys.run_if(|pip: Res<PipBoy>| pip.opening()).run_if(takes_keys),
                     (keys, apply_input).chain().run_if(pipboy_open).run_if(takes_keys),
@@ -689,6 +697,7 @@ fn setup_screen(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 /// The Pip-Boy is up while the player's inventory is open, and in first person (on the
 /// arm; the screen menu leaves the view alone).
 fn follow_menu(active: Res<ActiveMenu>, mut pip: ResMut<PipBoy>, mut control: ResMut<PlayerControl>, use_pipboy: Res<UsePipBoy>, sim: Option<Res<crate::sim::SimState>>) {
+    if pip.manual_pose { return; }
     let inventory = active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory);
     if inventory && !matches!(pip.phase, Phase::Raising | Phase::Up) {
         if pip.phase == Phase::Down {
@@ -909,17 +918,52 @@ pub(crate) fn apply_input(mut input: MessageReader<PipBoyInput>, mut pip: ResMut
 }
 
 /// The image's scale the flat image's crop was made for.
-#[derive(Component, Clone, Copy)]
-struct FlatCrop(f32);
+#[derive(Component, Clone, Copy, PartialEq)]
+struct FlatCrop {
+    scale: f32,
+    dimensions: Vec2,
+    safe: crate::touch_safe_area::SafeInsets,
+    window: Option<Vec2>,
+    physical: Option<(UVec2, f32)>,
+    ui_scale: f32,
+    menu_scale: f32,
+}
+impl FlatCrop {
+    fn desired(scale: f32, zoom: f32, safe: crate::touch_safe_area::SafeInsets, window: Option<&Window>, ui_scale: f32) -> Self {
+        let logical = window.map(|w| w.resolution.size());
+        Self { scale, dimensions: touch_presentation::flat_dimensions(zoom, logical, safe), safe, window: logical,
+            physical: window.map(|w| (UVec2::new(w.physical_width(), w.physical_height()), w.scale_factor())),
+            ui_scale, menu_scale: crate::interface::unit_scale() }
+    }
+    fn valid(&self) -> bool {
+        self.scale.is_finite() && self.scale > 0.0 && self.dimensions.is_finite() && self.dimensions.min_element() > 0.0
+            && self.window.is_some_and(|size| size.is_finite() && size.min_element() > 0.0
+                && self.safe.left + self.safe.right < size.x && self.safe.top + self.safe.bottom < size.y)
+            && self.physical.is_some_and(|(size, density)| size.min_element() > 0 && density.is_finite() && density > 0.0)
+            && self.ui_scale.is_finite() && self.ui_scale > 0.0
+            && self.menu_scale.is_finite() && self.menu_scale > 0.0
+            && crate::touch_safe_area::SafeInsets::from_array([self.safe.left, self.safe.top, self.safe.right, self.safe.bottom]).is_some()
+    }
+}
+
+type FlatNodes<'w, 's> = Query<'w, 's, (&'static ComputedNode, &'static UiGlobalTransform, Option<&'static FlatCrop>), With<FlatScreen>>;
+/// Read-only presentation metadata shared by the standalone flat display and
+/// pointer adapters. Crop ownership stays private to the display system.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FlatPresentation<'w, 's> {
+    crops: Query<'w, 's, &'static FlatCrop, With<FlatScreen>>,
+    nodes: FlatNodes<'w, 's>,
+    shades: Query<'w, 's, Entity, With<ScreenShade>>,
+}
 
 /// The scale of the image for the frame in use: 1 on the device; in the screen menu as
 /// many of the window's pixels as the canvas is drawn over, so the picture is not
 /// magnified, at most [`MAX_SCALE`]. The image is made again at that size, and the
 /// camera told, so the menus still lay out on the canvas's units.
-fn image_scale(pip: Res<PipBoy>, screen: Option<ResMut<PipBoyScreen>>, windows: Query<&Window, With<PrimaryWindow>>, mut images: ResMut<Assets<Image>>, mut targets: Query<&mut RenderTarget>) {
+fn image_scale(pip: Res<PipBoy>, sizing: Option<Res<touch_presentation::PipBoySize>>, screen: Option<ResMut<PipBoyScreen>>, windows: Query<&Window, With<PrimaryWindow>>, mut images: ResMut<Assets<Image>>, mut targets: Query<&mut RenderTarget>) {
     let Some(mut screen) = screen else { return };
     let want = match (pip.shown() && pip.warming.is_none() && pip.frame == Frame::Screen, windows.single()) {
-        (true, Ok(w)) => (w.physical_height() as f32 * SCREEN_IMAGE_H / 960.0 / SCREEN_CROP.y).clamp(1.0, MAX_SCALE),
+        (true, Ok(w)) => (w.physical_height() as f32 * SCREEN_IMAGE_H * sizing.as_deref().map_or(1.0, touch_presentation::PipBoySize::ratio) / 960.0 / SCREEN_CROP.y).clamp(1.0, MAX_SCALE),
         _ => 1.0,
     };
     // Steps of an eighth, so a window dragged a pixel does not remake the image.
@@ -940,12 +984,18 @@ fn image_scale(pip: Res<PipBoy>, screen: Option<ResMut<PipBoyScreen>>, windows: 
 /// Where nothing shows the model's screen, and always in the screen menu, the image is
 /// drawn flat in the middle of the window over the world blacked out, under the header's
 /// strip (docs/design/screen-menu.md §3); [`flat_pointer`] finds the pointer on it.
-fn flat_screen(
+/// Standalone consumers may pair this display system and ordinary Bevy UI layout
+/// with [`flat_pointer`]; the display alone owns the private crop metadata.
+#[allow(clippy::too_many_arguments)]
+pub fn flat_screen(
     mut commands: Commands,
     pip: Res<PipBoy>,
+    sizing: Option<Res<touch_presentation::PipBoySize>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    safe: Option<Res<crate::touch_safe_area::SafeInsets>>,
+    ui_scale: Option<Res<UiScale>>,
     screen: Option<Res<PipBoyScreen>>,
-    flat: Query<&FlatCrop, With<FlatScreen>>,
-    shades: Query<Entity, With<ScreenShade>>,
+    flat: FlatPresentation<'_, '_>,
 ) {
     let Some(screen) = screen else { return };
     // Only once the arm is all the way up: the body takes the screen a frame or more after
@@ -954,10 +1004,16 @@ fn flat_screen(
     // owner's playtest list 5, item 2).
     let want = pip.phase == Phase::Up && (pip.frame == Frame::Screen || !screen.on_model);
     // A change of the image's scale needs the image node's crop made again.
-    let stale = flat.iter().next().is_some_and(|crop| crop.0 != screen.scale);
-    match (want && !stale, flat.iter().next()) {
+    let zoom = sizing.as_deref().map_or(1.0, touch_presentation::PipBoySize::ratio);
+    let safe = safe.as_deref().copied().unwrap_or_default();
+    let wanted = FlatCrop::desired(screen.scale, zoom, safe, windows.single().ok(), ui_scale.as_deref().map_or(1.0, |s| s.0));
+    let window = wanted.window;
+    let dimensions = wanted.dimensions;
+    let padding = window.map_or(UiRect::ZERO, |s| UiRect { left: Val::Vw(100.0 * safe.left / s.x), right: Val::Vw(100.0 * safe.right / s.x), top: Val::Vh(100.0 * safe.top / s.y), bottom: Val::Vh(100.0 * safe.bottom / s.y) });
+    let stale = flat.crops.iter().next().is_some_and(|crop| *crop != wanted);
+    match (want && wanted.valid() && !stale, flat.crops.iter().next()) {
         (true, None) => {
-            for e in &shades {
+            for e in &flat.shades {
                 commands.entity(e).despawn();
             }
             // The world blacked out; in it, the canvas's image, centred.
@@ -968,16 +1024,16 @@ fn flat_screen(
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
+                padding,
                 ..default()
             };
-            let width = SCREEN_IMAGE_H * SCREEN_CROP.x / SCREEN_CROP.y;
             let crop = Rect::new(0.0, 0.0, SCREEN_CROP.x * screen.scale, SCREEN_CROP.y * screen.scale);
             commands.spawn((ScreenShade, shade, BackgroundColor(Color::BLACK.with_alpha(SHADE)), GlobalZIndex(90), Pickable::IGNORE, Name::new("Pip-Boy screen menu"))).with_children(|s| {
-                s.spawn((FlatScreen, FlatCrop(screen.scale), Node { width: u(width), height: u(SCREEN_IMAGE_H), flex_shrink: 0.0, ..default() }, ImageNode { rect: Some(crop), ..ImageNode::new(screen.image.clone()) }));
+                s.spawn((FlatScreen, wanted, Node { width: Val::Vh(dimensions.x), height: Val::Vh(dimensions.y), flex_shrink: 0.0, ..default() }, ImageNode { rect: Some(crop), ..ImageNode::new(screen.image.clone()) }));
             });
         }
         (false, Some(_)) => {
-            for e in &shades {
+            for e in &flat.shades {
                 commands.entity(e).despawn();
             }
         }
@@ -1002,6 +1058,7 @@ fn flat_point(aid: &PipBoyAid, windows: &Query<&Window, With<PrimaryWindow>>, sl
     crop_point(cursor, at.translation, computed.size())
 }
 
+type FlatPointerSizing<'w> = (Option<Res<'w, touch_presentation::PipBoySize>>, Option<Res<'w, crate::touch_safe_area::SafeInsets>>, Option<Res<'w, UiScale>>);
 /// The flat image's pointer for this frame's tile input ([`PointerSet`]), from the cursor now
 /// and the image's place as last laid out. Nothing while the device has the pointer
 /// ([`pointer_source`]). Until the image stands up the last place stays: the hand-built page
@@ -1010,20 +1067,32 @@ fn flat_point(aid: &PipBoyAid, windows: &Query<&Window, With<PrimaryWindow>>, sl
 pub fn flat_pointer(
     pip: Res<PipBoy>,
     screen: Option<ResMut<PipBoyScreen>>,
-    flat: Query<(&ComputedNode, &UiGlobalTransform), With<FlatScreen>>,
+    flat: FlatPresentation<'_, '_>,
     windows: Query<&Window, With<PrimaryWindow>>,
     aid: Res<PipBoyAid>,
     (pad_pointer, mut touch): (Option<Res<crate::pad::pointer::PadPointer>>, Option<ResMut<touch_items::TouchItems>>),
+    (sizing, safe, ui_scale): FlatPointerSizing<'_>,
 ) {
     let Some(mut screen) = screen else { return };
     if pointer_source(pip.frame, screen.on_model) != PointerSource::Flat {
         return;
     }
-    let Some((computed, at)) = flat.iter().next().filter(|_| pip.phase == Phase::Up) else { return };
+    let Some((computed, at, crop)) = flat.nodes.iter().next().filter(|_| pip.phase == Phase::Up) else {
+        if let Some(touch) = touch.as_deref_mut() { touch.cancel(); }
+        return;
+    };
     if let Some(touch) = touch.as_deref_mut() {
-        let scale = windows.single().map_or(1.0, |w| w.scale_factor());
-        touch.flat_geometry(computed.size(),at.translation);
-        touch.project(|position| crop_point(position * scale, at.translation, computed.size()));
+        let window = windows.single().ok();
+        let wanted = FlatCrop::desired(screen.scale, sizing.as_deref().map_or(1.0, touch_presentation::PipBoySize::ratio),
+            safe.as_deref().copied().unwrap_or_default(), window, ui_scale.as_deref().map_or(1.0, |s| s.0));
+        if !wanted.valid() || crop != Some(&wanted) || !computed.size().is_finite()
+            || computed.size().min_element() <= 0.0 || !at.translation.is_finite()
+        { touch.cancel(); }
+        else {
+            let scale = window.map_or(1.0, |w| w.scale_factor());
+            touch.flat_geometry(computed.size(),at.translation);
+            touch.project(|position| crop_point(position * scale, at.translation, computed.size()));
+        }
     }
     let now = flat_point(&aid, &windows, crate::pad::pointer::asleep(pad_pointer.as_deref()), computed, at);
     if screen.pointer != now {
@@ -1050,11 +1119,13 @@ pub(crate) fn drive_pointer(
     mut aid: ResMut<PipBoyAid>,
     mut moved: ResMut<PointerMoved>,
     (mut touch, touch_admission, mut touch_wheel, touch_routing, physical_priority): TouchPointerContext<'_>,
+    mut navigation: tab_swipe::Navigation,
 ) {
     moved.set_if_neq(PointerMoved(false));
     if let Some(wheel)=touch_wheel.as_deref_mut() {wheel.clear();}
     if let Some(touch)=touch.as_deref_mut() {touch.begin_frame();}
-    let Some(screen) = screen else {if let Some(touch)=touch.as_deref_mut(){touch.cancel();} return };
+    let Some(screen) = screen else {if let Some(touch)=touch.as_deref_mut(){touch.cancel();} navigation.cancel();return };
+    if touch.as_ref().is_none_or(|t|t.contact_id().is_none()) {navigation.cancel();}
     if !*spawned {
         commands.spawn(PIPBOY_POINTER);
         *spawned = true;
@@ -1063,13 +1134,18 @@ pub(crate) fn drive_pointer(
     let Some(target) = target.normalize(None) else { return };
     if let Some(touch) = touch.as_deref_mut() {
         touch.session(&pip,&screen);
-        if !touch_admission.allows_contact(touch.contact_id()) || physical_priority.as_ref().is_some_and(|p|p.active) {touch.cancel();}
+        if !touch_admission.allows_contact(touch.contact_id()) || physical_priority.as_ref().is_some_and(|p|p.active) {touch.cancel();navigation.cancel();}
         // Spawning an existing PointerId twice would split press ownership.
         // The independent touch entity is installed by the mobile plugin.
         if touch.take_cancel() {
             out.write(PointerInput::new(touch_items::POINTER, Location { target: target.clone(), position: Vec2::splat(-1.0) }, PointerAction::Cancel));
         }
         if let Some((point, at)) = touch.take_projected() {
+            let nav = navigation.observe(&pip,&screen,&point,touch.contact_id(),at,touch_routing.navigation_regions(&pip));
+            if nav {
+                touch.suppress_navigation();
+                out.write(PointerInput::new(touch_items::POINTER,Location {target:target.clone(),position:at.unwrap_or(Vec2::splat(-1.0))},PointerAction::Cancel));
+            } else {
             let scroll=touch.take_scroll();
             let position=scroll.map(|(anchor,_)|anchor).or(at).unwrap_or(Vec2::splat(-1.0));
             moved.set_if_neq(PointerMoved(true));
@@ -1089,6 +1165,7 @@ pub(crate) fn drive_pointer(
                 bevy::input::touch::TouchPhase::Canceled=>Some(PointerAction::Cancel),_=>None,
             };
             if let Some(action)=action {out.write(PointerInput::new(touch_items::POINTER,Location{target:target.clone(),position},action));}
+            }
         }
     }
     let at = screen.pointer.filter(|_| pip.open());

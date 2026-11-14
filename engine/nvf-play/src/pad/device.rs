@@ -108,6 +108,8 @@ pub enum PlatformInputSystems { Publish, Remember }
 #[derive(Resource, Default)]
 pub struct PlatformInputGate {
     active: bool,
+    native: bool,
+    arm: bool,
     cancel_pending: bool,
     touches: HashSet<u64>,
     keys: HashSet<KeyCode>,
@@ -117,7 +119,16 @@ pub struct PlatformInputGate {
 #[derive(Default)]
 struct PlatformPadHold { buttons: HashSet<GamepadButton>, analog: [bool; 4] }
 impl PlatformInputGate {
-    pub fn set_blocked(&mut self, blocked: bool) { self.cancel_pending |= blocked && !self.active; self.active = blocked; }
+    pub fn set_blocked(&mut self, blocked: bool) { self.native = blocked; self.update_active(); }
+    /// Independent owned arm capture; never changes native loading authority.
+    pub fn set_arm_blocked(&mut self, blocked: bool) { self.arm = blocked; self.update_active(); }
+    fn update_active(&mut self) {
+        let next = self.native || self.arm;
+        self.cancel_pending |= next && !self.active;
+        self.active = next;
+    }
+    /// Only loading recovery and an already-owned arm contact may use this narrower view.
+    pub fn native_blocked(&self) -> bool { self.native }
     pub fn allows_actions(&self) -> bool { !self.active }
     pub fn allows_touch(&self, id: u64) -> bool { !self.active && !self.touches.contains(&id) }
 }
@@ -1212,4 +1223,74 @@ pub(crate) mod tests {
         assert!(app.world().resource::<PlatformInputGate>().allows_touch(7), "fresh post-neutral press works without an idle frame");
     }
 
+
+    #[test]
+    fn native_and_arm_capture_reasons_overlap_and_quarantine_real_holds_until_neutral() {
+        use bevy::input::{gamepad::{RawGamepadAxisChangedEvent, RawGamepadEvent}, mouse::MouseButtonInput,
+            touch::{TouchInput, TouchPhase}, ButtonState};
+        for release_native_first in [false, true] {
+            let (mut app, pad) = observed_app(InputDevice::Controller);
+            app.world_mut().resource_mut::<Bindings>().automatic_input_switching = false;
+            app.init_resource::<PlatformInputGate>();
+            {
+                let mut gate=app.world_mut().resource_mut::<PlatformInputGate>();
+                gate.set_arm_blocked(true);
+                gate.set_blocked(true);
+            }
+            keyboard(&mut app,KeyCode::ArrowRight,true,false);
+            button(&mut app,pad,true);
+            app.world_mut().write_message(MouseButtonInput { window: Entity::PLACEHOLDER,
+                button:MouseButton::Left,state:ButtonState::Pressed });
+            app.world_mut().write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(pad,GamepadAxis::LeftStickX,0.8)));
+            app.world_mut().write_message(TouchInput { window:Entity::PLACEHOLDER,id:77,
+                phase:TouchPhase::Started,position:Vec2::new(20.,20.),force:None });
+            app.update();
+            {
+                let mut gate=app.world_mut().resource_mut::<PlatformInputGate>();
+                if release_native_first { gate.set_blocked(false); } else { gate.set_arm_blocked(false); }
+                assert!(!gate.allows_actions());
+                assert_eq!(gate.native_blocked(),!release_native_first);
+            }
+            app.update();
+            assert!(!app.world().resource::<Seen>().keys.pressed(KeyCode::ArrowRight));
+            assert_eq!(app.world().resource::<Seen>().stick,Vec2::ZERO);
+            {
+                let mut gate=app.world_mut().resource_mut::<PlatformInputGate>();
+                if release_native_first { gate.set_arm_blocked(false); } else { gate.set_blocked(false); }
+                assert!(gate.allows_actions());
+                assert!(!gate.allows_touch(77));
+            }
+            app.update();
+            let seen=app.world().resource::<Seen>();
+            assert!(!seen.keys.pressed(KeyCode::ArrowRight)&&!seen.mouse.pressed(MouseButton::Left));
+            assert_eq!(seen.pad,[false;3]);
+            assert_eq!(seen.stick,Vec2::ZERO);
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::ArrowRight));
+            assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+            assert!(app.world().get::<Gamepad>(pad).unwrap().pressed(GamepadButton::South));
+            keyboard(&mut app,KeyCode::ArrowRight,false,false);
+            button(&mut app,pad,false);
+            app.world_mut().write_message(MouseButtonInput { window:Entity::PLACEHOLDER,
+                button:MouseButton::Left,state:ButtonState::Released });
+            app.world_mut().write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(pad,GamepadAxis::LeftStickX,0.)));
+            app.world_mut().write_message(TouchInput { window:Entity::PLACEHOLDER,id:77,
+                phase:TouchPhase::Ended,position:Vec2::new(20.,20.),force:None });
+            app.update();
+            assert!(!app.world().resource::<Seen>().keys.just_released(KeyCode::ArrowRight));
+            assert!(!app.world().resource::<Seen>().mouse.just_released(MouseButton::Left));
+            assert!(!app.world().resource::<PlatformInputGate>().allows_touch(77));
+            app.update();
+            assert!(app.world().resource::<PlatformInputGate>().allows_touch(77));
+            keyboard(&mut app,KeyCode::ArrowRight,true,false);
+            button(&mut app,pad,true);
+            app.world_mut().write_message(MouseButtonInput { window:Entity::PLACEHOLDER,
+                button:MouseButton::Left,state:ButtonState::Pressed });
+            app.world_mut().write_message(RawGamepadEvent::Axis(RawGamepadAxisChangedEvent::new(pad,GamepadAxis::LeftStickX,0.8)));
+            app.update();
+            let seen=app.world().resource::<Seen>();
+            assert!(seen.keys.just_pressed(KeyCode::ArrowRight)&&seen.mouse.just_pressed(MouseButton::Left));
+            assert!(seen.pad[0]&&seen.pad[1]);
+            assert!(seen.stick.x>0.5);
+        }
+    }
 }

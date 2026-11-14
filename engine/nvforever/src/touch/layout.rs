@@ -13,6 +13,10 @@ pub struct Placement {
 pub struct Config {
     pub buttons: Vec<Placement>,
     pub stick: Placement,
+    pub tray: Placement,
+    pub(super) tray_explicit: bool,
+    pub(super) tray_supported: bool,
+    pub(super) profile_epoch: u64,
     pub floating: bool,
     pub southpaw: bool,
     pub opacity: f32,
@@ -39,6 +43,10 @@ impl Default for Config {
                 scale: 1.0,
                 visible: true,
             },
+            tray: Placement {center:Vec2::new(0.5,0.82),scale:1.0,visible:true},
+            tray_explicit:false,
+            tray_supported:true,
+            profile_epoch:0,
             floating: true,
             southpaw: false,
             opacity: 0.7,
@@ -90,6 +98,7 @@ impl Config {
         c
     }
     pub fn diameter(&self, target: Target, size: Vec2) -> f32 {
+        if target==Target::Tray {return (size.min_element()*0.11*self.tray.scale).clamp(48.0,96.0)}
         let base = if target == Target::Stick {
             (size.min_element() * 0.28).max(104.0)
         } else {
@@ -102,16 +111,19 @@ impl Config {
     pub fn placement(&self, target: Target) -> &Placement {
         match target {
             Target::Stick => &self.stick,
+            Target::Tray => &self.tray,
             Target::Button(i) => &self.buttons[i],
         }
     }
     pub fn placement_mut(&mut self, target: Target) -> &mut Placement {
         match target {
             Target::Stick => &mut self.stick,
+            Target::Tray => &mut self.tray,
             Target::Button(i) => &mut self.buttons[i],
         }
     }
     pub fn center(&self, target: Target, size: Vec2) -> Vec2 {
+        if target==Target::Tray {return self.tray.center*size}
         let r = self.diameter(target, size) * 0.5 + 4.0;
         (self.placement(target).center * size).clamp(Vec2::splat(r), size - Vec2::splat(r))
     }
@@ -185,6 +197,9 @@ impl Config {
             value["buttons"][b.text] = place(value["buttons"][b.text].clone(), p);
         }
         value["stick"] = place(value["stick"].clone(), &self.stick);
+        if self.tray_supported {
+            value["tray"]=overlay(place(value["tray"].clone(),&self.tray),json!({"version":1}));
+        }
         value["aiming"] = overlay(value["aiming"].clone(), self.aiming.encode());
         value["appearance"] = overlay(
             value["appearance"].clone(),
@@ -198,6 +213,7 @@ impl Config {
         )
     }
     pub fn apply_preset(&mut self, name: &str) {
+        self.profile_epoch=self.profile_epoch.wrapping_add(1);
         let mut fresh = Self::default();
         let positions = if name == "left" { "explorer" } else { name };
         for (i, p) in self.buttons.iter_mut().enumerate().take(9) {
@@ -245,6 +261,9 @@ impl Config {
         {
             return Err("This slot uses a newer layout version; kept unchanged".into());
         }
+        if slots[slot]["layout"]["tray"]["version"].as_u64().is_some_and(|v|v>1) {
+            return Err("This slot uses a newer tray version; kept unchanged".into());
+        }
         let name = slots[slot]["name"]
             .as_str()
             .map(str::to_owned)
@@ -254,13 +273,18 @@ impl Config {
         Ok(())
     }
     pub fn load_slot(&mut self, slot: usize) -> Result<(), String> {
+        let epoch=self.profile_epoch.wrapping_add(1);
         let value = &self.extra["profiles"][slot]["layout"];
         if value.get("profiles").is_some() {
             return Err("Nested profile libraries are not supported".into());
         }
         let mut merged = self.encode();
         merge_profile(&mut merged, value);
+        if value["tray"]["version"].as_u64().is_some_and(|v|v>1) {
+            merged["tray"]=value["tray"].clone();
+        }
         *self = Self::decode(&merged)?;
+        self.profile_epoch=epoch;
         Ok(())
     }
     pub fn rename_slot(&mut self, slot: usize) -> Result<(), String> {
@@ -334,6 +358,17 @@ impl Config {
             read(&v["buttons"][b.text], &mut c.buttons[i]);
         }
         read(&v["stick"], &mut c.stick);
+        if let Some(tray)=v.get("tray") {
+            c.tray_explicit=true;
+            match tray["version"].as_u64() {
+                Some(1)=>{
+                    read(tray,&mut c.tray);
+                    if let Some(scale)=tray["scale"].as_f64().filter(|v|v.is_finite()) {c.tray.scale=(scale as f32).clamp(0.6,1.8);}
+                },
+                Some(version) if version>1=>c.tray_supported=false,
+                _=>return Err("Invalid tray layout version; kept unchanged".into()),
+            }
+        }
         c.aiming = super::aiming::Aiming::decode(&v["aiming"]);
         if let Some(b) = v["floating"].as_bool() {
             c.floating = b;
@@ -368,6 +403,9 @@ impl Config {
                 return Err("Newer touch settings kept unchanged".into());
             }
             Self::decode(&old)?;
+            if old["tray"]["version"].as_u64().is_some_and(|v|v>1) && self.encode()["tray"]!=old["tray"] {
+                return Err("Newer tray settings kept unchanged".into());
+            }
         }
         let bytes = serde_json::to_vec_pretty(&self.encode()).map_err(|e| e.to_string())?;
         if bytes.len() as u64 > super::profiles::MAX_FILE_BYTES {
@@ -384,12 +422,14 @@ impl Config {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Stick,
+    Tray,
     Button(usize),
 }
 impl Target {
     pub fn name(self) -> &'static str {
         match self {
             Self::Stick => "Movement stick",
+            Self::Tray => "Hot tray",
             Self::Button(i) => BUTTONS[i].text,
         }
     }
@@ -401,6 +441,7 @@ pub struct Editor {
     pub selected: Target,
     pub aiming: bool,
     pub styles: bool,
+    pub tray: bool,
     pub slot: usize,
     drag: Option<(u64, Vec2)>,
 }
@@ -409,6 +450,10 @@ pub struct Layout {
     pub config: Config,
     pub editor: Option<Editor>,
     pub message: String,
+    pub(super) path: Option<std::path::PathBuf>,
+    pub(super) tray_preview: Option<super::tray_editor::Preview>,
+    pub(super) tray_admitted: bool,
+    pub(super) tray_safe: nvf_play::touch_safe_area::SafeInsets,
 }
 pub const EDIT_ACTIONS: [&str; 13] = [
     "Smaller",
@@ -447,32 +492,59 @@ impl Layout {
             selected: Target::Stick,
             aiming: false,
             styles: false,
+            tray: false,
             slot: 0,
             drag: None,
         });
         self.message = "Drag a control to move it. Select it, then change its size.".into();
+    }
+    pub fn open_tray(&mut self) -> Result<(),String> {
+        if !self.config.tray_supported {return Err("This tray uses a newer version; kept unchanged".into())}
+        self.open(true);
+        if let Some(editor)=self.editor.as_mut() {editor.tray=true;editor.selected=Target::Tray;}
+        self.config.tray_explicit=true;
+        self.message="Drag the tray preview. Smaller/Larger changes slot size. Save keeps this profile; Cancel restores it.".into();
+        Ok(())
+    }
+    pub fn tray_editing(&self)->bool {self.editor.as_ref().is_some_and(|e|e.tray)}
+    /// Settings persistence sees committed state while the editor owns its draft.
+    pub(super) fn committed_tray_scale(&self)->Option<f32> {
+        let config=self.editor.as_ref().map_or(&self.config,|editor|&editor.original);
+        (config.tray_explicit && config.tray_supported).then_some(config.tray.scale)
+    }
+    pub fn cancel_editor_drag(&mut self) {if let Some(e)=self.editor.as_mut(){e.drag=None;}}
+    pub fn save(&mut self)->Result<(),String> {
+        let path=self.path.clone().or_else(||std::env::var_os(fnv_install::HOME_ENV).map(|p|std::path::PathBuf::from(p).join("touch-controls.json")))
+            .ok_or_else(||"Settings directory is unavailable".to_string())?;
+        self.config.save_to(&path)?;
+        if self.config.tray_supported {self.config.tray_explicit=true;}
+        Ok(())
     }
     pub fn event(&mut self, t: &bevy::input::touch::TouchInput, size: Vec2) {
         use bevy::input::touch::TouchPhase;
         let Some(mut e) = self.editor.take() else {
             return;
         };
+        if e.tray && (!self.tray_admitted || !t.position.is_finite()) {
+            e.drag=None;self.editor=Some(e);return;
+        }
         let mut done = false;
         match t.phase {
             TouchPhase::Started => {
-                let actions = if e.aiming || e.styles {
+                let actions = if e.tray {4} else if e.aiming || e.styles {
                     12
                 } else {
                     EDIT_ACTIONS.len()
                 };
                 if let Some(action) = (0..actions).find(|&i| {
-                    let rect = if e.aiming {
+                    let rect = if e.tray {super::tray_editor::action_rect_with(i,size,self.tray_safe)} else if e.aiming {
                         super::aiming::editor_rect(i, size)
                     } else {
                         editor_rect(i, size)
                     };
                     rect.contains(t.position)
                 }) {
+                    let action=if e.tray {[0,1,9,10][action]}else{action};
                     // A toolbar tap ends the previous finger's drag before changing its target/layout.
                     e.drag = None;
                     if e.styles && action < 9 {
@@ -531,7 +603,7 @@ impl Layout {
                             0 | 1 => {
                                 let p = self.config.placement_mut(e.selected);
                                 p.scale = (p.scale + if action == 0 { -0.1 } else { 0.1 })
-                                    .clamp(0.8, 1.8);
+                                    .clamp(if e.selected==Target::Tray {0.6}else{0.8}, 1.8);
                             }
                             2 => {
                                 self.config.opacity = if self.config.opacity >= 0.85 {
@@ -563,21 +635,19 @@ impl Layout {
                                 let aiming = self.config.aiming;
                                 let appearance = self.config.appearance.clone();
                                 let extra = self.config.extra.clone();
+                                let tray=self.config.tray.clone();
+                                let tray_explicit=self.config.tray_explicit;
+                                let tray_supported=self.config.tray_supported;
+                                let epoch=self.config.profile_epoch.wrapping_add(1);
                                 self.config = Config::preset(self.config.southpaw);
+                                self.config.tray=tray;self.config.tray_explicit=tray_explicit;self.config.tray_supported=tray_supported;self.config.profile_epoch=epoch;
                                 self.config.aiming = aiming;
                                 self.config.appearance = appearance;
                                 self.config.extra = extra;
                             }
                             9 => {
                                 // Tests use Layout without a home and never write player settings.
-                                let result = std::env::var_os(fnv_install::HOME_ENV)
-                                    .ok_or_else(|| "Settings directory is unavailable".to_string())
-                                    .and_then(|p| {
-                                        self.config.save_to(
-                                            &std::path::PathBuf::from(p)
-                                                .join("touch-controls.json"),
-                                        )
-                                    });
+                                let result = self.save();
                                 match result {
                                     Ok(()) => {
                                         self.message =
@@ -613,6 +683,10 @@ impl Layout {
                             }
                         }
                     }
+                } else if e.tray {
+                    if e.drag.is_none() && self.tray_preview.as_ref().is_some_and(|p|p.bounds.contains(t.position)) {
+                        e.drag=Some((t.id,self.tray_preview.as_ref().unwrap().bounds.center()-t.position));
+                    }
                 } else if let Some(target) = self
                     .config
                     .hit(t.position, size, e.playing, true)
@@ -629,9 +703,13 @@ impl Layout {
             }
             TouchPhase::Moved => {
                 if let Some((id, offset)) = e.drag.filter(|(id, _)| *id == t.id) {
-                    let r = self.config.diameter(e.selected, size) * 0.5 + 4.0;
-                    self.config.placement_mut(e.selected).center =
-                        ((t.position + offset).clamp(Vec2::splat(r), size - Vec2::splat(r))) / size;
+                    if e.tray {
+                        self.config.tray.center=((t.position+offset)/size).clamp(Vec2::ZERO,Vec2::ONE);
+                    } else {
+                        let r = self.config.diameter(e.selected, size) * 0.5 + 4.0;
+                        self.config.placement_mut(e.selected).center =
+                            ((t.position + offset).clamp(Vec2::splat(r), size - Vec2::splat(r))) / size;
+                    }
                     e.drag = Some((id, offset));
                 }
             }
@@ -654,6 +732,7 @@ pub fn load(mut layout: ResMut<Layout>) {
         return;
     };
     let path = std::path::PathBuf::from(home).join("touch-controls.json");
+    layout.path=Some(path.clone());
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > super::profiles::MAX_FILE_BYTES) {
         warn!("touch layout exceeds size limit; kept unchanged");
         return;

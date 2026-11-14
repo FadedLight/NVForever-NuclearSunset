@@ -1275,7 +1275,7 @@ fn touch_drag_assigns_actual_inventory_row_without_consuming_and_stale_rows_are_
     use crate::pipboy::touch_items::TouchItems;
     use bevy::input::touch::{TouchInput,TouchPhase};
     use bevy::prelude::{Res,ResMut,Entity,Vec2};
-    fn apply(active:Res<crate::menu::ActiveMenu>,mut touch:ResMut<TouchItems>,mut keys:ResMut<crate::hotkeys::Hotkeys>){touch.assign_pending(&active,&mut keys);}
+    fn apply(active:Res<crate::menu::ActiveMenu>,mut touch:ResMut<TouchItems>,mut keys:ResMut<crate::hotkeys::Hotkeys>,mut sim:ResMut<crate::sim::SimState>){touch.assign_pending(&active,&mut keys,&mut sim.world);}
     let f=fixture();let mut w=World::new(&f.forms,&f.refs,SimConfig::default());
     let m=MenuModel::open_inventory(&mut w).unwrap();let index=m.list(Side::Player).rows.iter().position(|r|r.item==FormId(AID)).unwrap();
     let initial=count(&mut w,0x14,AID);
@@ -1287,10 +1287,14 @@ fn touch_drag_assigns_actual_inventory_row_without_consuming_and_stale_rows_are_
         event.phase=TouchPhase::Ended;assert!(touch.event(&event,150));touch.release_over(Some(2));
         assert!(touch.suppress_click(),"drag release must not trigger the row's equip/use click");
         let mut model=m.clone();if stale{model.lists[Side::Player as usize].rows.rotate_left(1);}
-        let mut app=App::new();app.insert_resource(crate::menu::ActiveMenu(Some(model))).insert_resource(touch).init_resource::<crate::hotkeys::Hotkeys>().add_systems(Update,apply);app.update();
+        let mut sim=crate::sim::test_world::sim(vec![crate::sim::test_world::item_base(AID)],vec![]);
+        sim.world.add_item(FormId::PLAYER_REF,FormId(AID),initial).unwrap();
+        assert_eq!(sim.world.item_count(FormId::PLAYER_REF,FormId(AID)).unwrap(),initial);
+        let mut app=App::new();app.insert_resource(crate::menu::ActiveMenu(Some(model))).insert_resource(touch).init_resource::<crate::hotkeys::Hotkeys>().insert_resource(sim).add_systems(Update,apply);app.update();
         let slot=app.world().resource::<crate::hotkeys::Hotkeys>().0[2];
         if stale{assert_eq!(slot,None);}else{assert_eq!(slot,Some(crate::hotkeys::Slot{item:AID,mods:0}));}
         assert_eq!(count(&mut w,0x14,AID),initial,"assignment never consumes inventory");
+        assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(AID)).unwrap(),initial,"actual assignment world is not consumed");
     }
 }
 
@@ -1306,7 +1310,7 @@ fn cancelled_touch_assignment_cannot_cross_a_menu_session_or_replace_ammo_swap()
         touch.event(&event,0);touch.project(Some);touch.take_projected();touch.capture_row(&m,index);
         event.phase=TouchPhase::Ended;touch.event(&event,500);touch.release_over(Some(if cancelled{2}else{crate::hotkeys::AMMO_SWAP}));
         if cancelled{touch.cancel();}
-        let mut keys=crate::hotkeys::Hotkeys::default();assert!(!touch.assign_pending(&crate::menu::ActiveMenu(Some(m.clone())),&mut keys));assert!(keys.0.iter().all(Option::is_none));
+        let mut keys=crate::hotkeys::Hotkeys::default();assert!(!touch.assign_pending(&crate::menu::ActiveMenu(Some(m.clone())),&mut keys,&mut w));assert!(keys.0.iter().all(Option::is_none));
     }
 }
 
@@ -1314,7 +1318,7 @@ fn cancelled_touch_assignment_cannot_cross_a_menu_session_or_replace_ammo_swap()
 fn vertical_touch_browsing_cannot_assign_a_captured_row_even_when_released_over_a_hotkey(){
     use crate::pipboy::touch_items::TouchItems;
     use bevy::{prelude::{Res,ResMut,Entity,Vec2},input::touch::{TouchInput,TouchPhase}};
-    fn assign(active:Res<crate::menu::ActiveMenu>,mut touch:ResMut<TouchItems>,mut keys:ResMut<crate::hotkeys::Hotkeys>){touch.assign_pending(&active,&mut keys);}
+    fn assign(active:Res<crate::menu::ActiveMenu>,mut touch:ResMut<TouchItems>,mut keys:ResMut<crate::hotkeys::Hotkeys>,mut sim:ResMut<crate::sim::SimState>){touch.assign_pending(&active,&mut keys,&mut sim.world);}
     let f=fixture();let mut world=World::new(&f.forms,&f.refs,SimConfig::default());
     let model=MenuModel::open_inventory(&mut world).unwrap();let index=model.list(Side::Player).rows.iter().position(|r|r.item==FormId(AID)).unwrap();
     let before=count(&mut world,0x14,AID);
@@ -1324,9 +1328,13 @@ fn vertical_touch_browsing_cannot_assign_a_captured_row_even_when_released_over_
         if deliberate {touch.update_hold(500);}
         t.phase=TouchPhase::Moved;t.position.y+=100.;touch.event(&t,if deliberate{550}else{50});
         t.phase=TouchPhase::Ended;touch.event(&t,700);touch.release_over(Some(2));
+        let mut sim=crate::sim::test_world::sim(vec![crate::sim::test_world::item_base(AID)],vec![]);
+        sim.world.add_item(FormId::PLAYER_REF,FormId(AID),before).unwrap();
+        assert_eq!(sim.world.item_count(FormId::PLAYER_REF,FormId(AID)).unwrap(),before);
         let mut app=App::new();app.insert_resource(touch).insert_resource(crate::menu::ActiveMenu(Some(model.clone())))
-            .init_resource::<crate::hotkeys::Hotkeys>().add_systems(Update,assign);app.update();
+            .init_resource::<crate::hotkeys::Hotkeys>().insert_resource(sim).add_systems(Update,assign);app.update();
         assert_eq!(app.world().resource::<crate::hotkeys::Hotkeys>().0[2],deliberate.then_some(crate::hotkeys::Slot{item:AID,mods:0}));
         assert_eq!(count(&mut world,0x14,AID),before);
+        assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(AID)).unwrap(),before,"actual assignment world is not consumed");
     }
 }

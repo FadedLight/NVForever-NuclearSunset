@@ -1,0 +1,158 @@
+//! Real conversation identity, camera ownership, production Taffy draw and raw touch.
+use super::*;
+use super::compact_tests::{layout_scene,rows,send,settle};
+use crate::dialogue_split::{Options,Side};
+use crate::touch_safe_area::SafeInsets;
+use bevy::camera::{ComputedCameraValues,RenderTargetInfo};
+
+fn publish_window_targets(windows:Query<&Window,With<PrimaryWindow>>,mut cameras:Query<&mut Camera>) {
+    let w=windows.single().unwrap();
+    for mut c in &mut cameras {
+        c.computed=ComputedCameraValues { target_info:Some(RenderTargetInfo {physical_size:UVec2::new(w.physical_width(),w.physical_height()),scale_factor:w.scale_factor()}),..default() };
+    }
+}
+fn scene(side:Side,density:f32)->(App,Entity,Entity) {
+    let (mut app,window)=layout_scene(true,Vec2::new(792.0,363.0),density);
+    app.configure_sets(Update,(crate::PlaySet::Input,crate::PlaySet::Physics,crate::PlaySet::Activation,crate::PlaySet::Scripts,crate::PlaySet::Ui,crate::PlaySet::Sync).chain());
+    let mut script=crate::script::ScriptState::over_no_plugins();
+    script.rt.as_mut().unwrap().game.dialogue=Some(fnv_game::dialogue::Conversation {
+        actor:fnv_sim::FormId(42),through:None,line:None,choices:vec![],topic_list:false,lines:1,then:None,ending:false,
+    });
+    app.insert_resource(script)
+        .insert_resource(crate::dialogue_look::SpeakerFace(Some((42,[35.0,180.0,130.0]))))
+        .insert_resource(Options {side})
+        .insert_resource(SafeInsets {left:24.0,top:12.0,right:10.0,bottom:18.0})
+        .add_systems(Update,publish_window_targets.after(crate::PlaySet::Sync));
+    let world=app.world_mut().spawn((
+        crate::PlayerCamera,Camera3d::default(),Camera {order:1,..default()},
+        Transform::from_xyz(0.0,112.0,0.0),
+    )).id();
+    settle(&mut app);
+    (app,window,world)
+}
+fn panel(app:&mut App)->Rect {
+    let mut q=app.world_mut().query_filtered::<(&ComputedNode,&UiGlobalTransform),With<Root>>();
+    let (n,t)=q.single(app.world()).unwrap();
+    Rect::from_center_size(t.transform_point2(Vec2::ZERO),n.size())
+}
+fn default_camera(app:&mut App)->Option<Entity> {
+    let mut state=bevy::ecs::system::SystemState::<bevy::ui::DefaultUiCamera>::new(app.world_mut());
+    state.get(app.world()).expect("default UI camera query must be valid").get()
+}
+#[test]
+fn split_draws_real_speaker_viewport_opposite_measured_choices_at_both_densities() {
+    for side in [Side::Left,Side::Right] {
+        for density in [1.0,2.0] {
+            let (mut app,_,world)=scene(side,density);
+            let viewport=app.world().get::<Camera>(world).unwrap().viewport.as_ref().unwrap();
+            let screen=Rect::from_corners(viewport.physical_position.as_vec2(),(viewport.physical_position+viewport.physical_size).as_vec2());
+            let choices=panel(&mut app);
+            if side==Side::Left { assert!(screen.max.x<choices.min.x); }else{assert!(choices.max.x<screen.min.x);}
+            assert!(screen.min.x>=24.0*density && choices.min.x>=24.0*density);
+            assert!(screen.min.y>=12.0*density && choices.min.y>=12.0*density);
+            assert!(screen.max.x<=782.0*density && choices.max.x<=782.0*density);
+            assert!(screen.max.y<=345.0*density && choices.max.y<=345.0*density);
+            let camera=app.world().get::<Transform>(world).unwrap();
+            let face=crate::space::to_bevy([35.0,180.0,130.0]);
+            let view=camera.rotation.inverse()*(face-camera.translation);
+            assert!(view.x.abs()<0.0001 && view.y.abs()<0.0001 && view.z<0.0,"actual NPC must be centered in actual viewport");
+            let root=app.world_mut().query_filtered::<(Entity,&UiTargetCamera),With<Root>>().single(app.world()).unwrap().1.0;
+            assert_ne!(root,world);
+            assert!(app.world().get::<Camera>(root).unwrap().order>app.world().get::<Camera>(world).unwrap().order);
+            assert!(app.world().get::<bevy::ui::IsDefaultUiCamera>(root).is_none());
+            assert_eq!(default_camera(&mut app),Some(world));
+            match app.world().get::<Camera>(root).unwrap().output_mode {
+                bevy::camera::CameraOutputMode::Write {blend_state,clear_color}=>{
+                    assert_eq!(blend_state,Some(bevy::render::render_resource::BlendState::ALPHA_BLENDING));
+                    assert!(matches!(clear_color,ClearColorConfig::None));
+                },
+                _=>panic!("dialogue overlay must alpha-compose after world output"),
+            }
+            for (_,r) in rows(&mut app) {
+                assert!(r.width()>200.0*density && r.height()>=48.0*density-0.01);
+            }
+            assert_eq!((app.world().resource::<TouchDialogue>().choice_scale,app.world().resource::<TouchDialogue>().subtitle_scale),(0.85,1.0));
+        }
+    }
+}
+#[test]
+fn current_speaker_changes_reframe_and_menu_pause_free_camera_restore_prior_camera() {
+    for cause in 0..4 {
+        let (mut app,_,world)=scene(Side::Left,1.0);
+        app.world_mut().resource_mut::<crate::dialogue_look::SpeakerFace>().0=Some((42,[-60.0,200.0,155.0]));
+        app.update();
+        let transform=app.world().get::<Transform>(world).unwrap();
+        let face=crate::space::to_bevy([-60.0,200.0,155.0]);
+        let view=transform.rotation.inverse()*(face-transform.translation);
+        assert!(view.x.abs()<0.0001 && view.y.abs()<0.0001);
+        match cause {
+            0=>{app.insert_resource(State::new(crate::PlayState::Menu));},
+            1=>{app.insert_resource(crate::pause::Paused(true));},
+            2=>{app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.dialogue=None;},
+            _=>{app.insert_resource(crate::player::ViewDriven(true));},
+        }
+        app.update();
+        assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
+        assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,Quat::IDENTITY);
+        assert!(app.world().resource::<crate::dialogue_split::Frame>().ui_camera.is_none());
+    }
+}
+#[test]
+fn safe_area_orientation_and_layout_change_cancel_old_contact_then_fresh_release_works() {
+    let (mut app,window,_)=scene(Side::Left,1.0);
+    app.world_mut().resource_mut::<TouchDialogue>().confirm=false;
+    settle(&mut app);
+    let at=rows(&mut app)[0].1.center();
+    send(&mut app,window,12,TouchPhase::Started,at);
+    app.update();
+    app.world_mut().resource_mut::<Options>().side=Side::Right;
+    send(&mut app,window,12,TouchPhase::Ended,at);
+    app.update();
+    assert!(app.world().resource::<TouchFrame>().asked.pick.is_none());
+    settle(&mut app);
+    let at=rows(&mut app)[0].1.center();
+    send(&mut app,window,13,TouchPhase::Started,at);
+    app.update();
+    send(&mut app,window,13,TouchPhase::Ended,at);
+    app.update();
+    assert_eq!(app.world().resource::<TouchFrame>().asked.pick,Some(0));
+    assert!(SafeInsets::from_snapshot("1,1584,726,48,24,20,36",UVec2::new(1584,726),2.0).is_some());
+    assert!(SafeInsets::from_snapshot("1,726,1584,48,24,20,36",UVec2::new(1584,726),2.0).is_none());
+    assert!(SafeInsets::from_snapshot("1,1584,726,NaN,24,20,36",UVec2::new(1584,726),2.0).is_none());
+}
+#[test]
+fn split_choice_persists_standard_and_both_sides_without_touching_text_preferences() {
+    let path=std::env::temp_dir().join(format!("nvf-speaker-side-{}-{}.ini",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    for name in ["Standard","Speaker left","Speaker right"] {
+        let mut app=App::new();
+        install(&mut app);
+        app.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
+        let index=app.world().resource::<crate::settings::Settings>().index(crate::dialogue_split::KEY).unwrap();
+        assert!(crate::settings::pick(app.world_mut(),index,name));
+        let mut loaded=App::new();
+        install(&mut loaded);
+        loaded.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
+        crate::settings::apply_stored(loaded.world_mut());
+        assert_eq!(loaded.world().resource::<Options>().side,match name {"Speaker left"=>Side::Left,"Speaker right"=>Side::Right,_=>Side::Standard});
+        assert_eq!(loaded.world().resource::<TouchDialogue>().choice_scale,TouchDialogue::default().choice_scale);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn camera_owner_handoff_keeps_foreign_viewport_rotation_and_default_ui_marker() {
+    let (mut app,_,world)=scene(Side::Left,1.0);
+    let foreign=app.world_mut().spawn((Camera2d,bevy::ui::IsDefaultUiCamera,Camera {order:-5,..default()})).id();
+    let viewport=bevy::camera::Viewport {physical_position:UVec2::new(10,20),physical_size:UVec2::new(500,250),..default()};
+    let rotation=Quat::from_rotation_y(0.7);
+    app.world_mut().get_mut::<Camera>(world).unwrap().viewport=Some(viewport.clone());
+    app.world_mut().get_mut::<Transform>(world).unwrap().rotation=rotation;
+    app.insert_resource(crate::player::ViewDriven(true));
+    app.update();
+    assert!(app.world().get::<bevy::ui::IsDefaultUiCamera>(world).is_none());
+    assert!(app.world().get::<bevy::ui::IsDefaultUiCamera>(foreign).is_some());
+    assert_eq!(default_camera(&mut app),Some(foreign));
+    let actual=app.world().get::<Camera>(world).unwrap().viewport.as_ref().unwrap();
+    assert_eq!((actual.physical_position,actual.physical_size),(viewport.physical_position,viewport.physical_size));
+    assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,rotation);
+}

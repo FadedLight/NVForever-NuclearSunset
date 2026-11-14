@@ -32,6 +32,7 @@ public final class LauncherActivity extends Activity {
     private boolean busy;
     private static final int PICK_GAME = 1;
     private static final int PICK_LOG_PAIRING = 2;
+    private static final int EXPORT_LOGS = 3;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -92,6 +93,12 @@ public final class LauncherActivity extends Activity {
         token.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
         token.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(128)});
         token.setText(importedToken == null ? support.token() : importedToken); form.addView(token);
+        Button retry = new Button(this); retry.setText("Retry pending and collect fresh logs");
+        retry.setOnClickListener(v -> support.retryNow()); form.addView(retry);
+        Button export = new Button(this); export.setText("Export fresh filtered logs locally");
+        export.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip")
+            .putExtra(Intent.EXTRA_TITLE, "NVForever-diagnostics.zip"), EXPORT_LOGS)); form.addView(export);
         TextView state = new TextView(this); state.setText(support.status()); form.addView(state);
         android.widget.ScrollView scroll = new android.widget.ScrollView(this); scroll.addView(form);
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this).setTitle("LAN test logs")
@@ -127,6 +134,16 @@ public final class LauncherActivity extends Activity {
     }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_LOGS) {
+            if (result == RESULT_OK && data != null && data.getData() != null) {
+                Uri destination = data.getData();
+                status.setText("Collecting filtered logs for local export…");
+                LanDiagnostics.launcher(this).export(() -> getContentResolver().openOutputStream(destination, "w"),
+                    success -> runOnUiThread(() -> status.setText(success ? "Filtered logs exported; originals and pending reports kept"
+                        : "Export failed; originals and pending reports kept")));
+            }
+            return;
+        }
         if (request == PICK_LOG_PAIRING) {
             if (result == RESULT_OK && data != null && data.getData() != null) importLogPairing(data.getData());
             return;

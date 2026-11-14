@@ -8,8 +8,6 @@ import android.os.Looper;
 import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.view.SurfaceHolder;
-import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.ViewTreeObserver;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,12 +21,12 @@ public final class GameActivity extends NativeActivity {
     private final Handler loadingHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean restartQueued = new AtomicBoolean();
     private LoadingState loading;
-    private View loadingView;
+    private LoadingUi.CoverLease loadingCover;
     private ResultReceiver receiver;
     private AlertDialog loadingDialog;
     private boolean destroyed, resumed;
     private String loadRefusal;
-    private long committedEpoch = -1;
+    private long committedEpoch = -1, committedWindow = -1;
     private final Runnable watchdog = new Runnable() { public void run() {
         if (destroyed || loading == null) return;
         loading.tick(SystemClock.uptimeMillis());
@@ -48,8 +46,10 @@ public final class GameActivity extends NativeActivity {
         performance = new AndroidPerformance(this);
         super.onCreate(state);
         LoadingUi.immersive(this);
-        loadingView = LoadingUi.create(this);
-        addContentView(loadingView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // NativeActivity owns the application surface: Java cover frames need a
+        // separate, noninteractive Window, never children of the taken surface.
+        try { loadingCover = LoadingUi.cover(this); }
+        catch (RuntimeException unavailable) { loading.fail(); LanDiagnostics.record(this, "LOADING_COVER_FAILED", -1); }
         LanDiagnostics.record(this, "GAME_CREATED", -1);
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(touchInsetsObserver);
         refreshTouchInsets(); refreshCover();
@@ -59,6 +59,8 @@ public final class GameActivity extends NativeActivity {
         if (performance != null) performance.stop();
         resumed = false;
         if (loading != null) loading.resumed(false, SystemClock.uptimeMillis());
+        if (loadingCover != null) loadingCover.hide();
+        loadingHandler.removeCallbacks(watchdog);
         if (controllers != null) controllers.cancelHeldInput();
         super.onPause();
     }
@@ -96,6 +98,7 @@ public final class GameActivity extends NativeActivity {
         if (gyro != null) gyro.close();
         if (performance != null) performance.close();
         destroyed = true; loadingHandler.removeCallbacks(watchdog);
+        if (loadingCover != null) loadingCover.close();
         if (loadingDialog != null) loadingDialog.dismiss();
         LanDiagnostics.record(this, "GAME_DESTROYED", -1);
         getWindow().getDecorView().getViewTreeObserver().removeOnGlobalLayoutListener(touchInsetsObserver);
@@ -103,18 +106,28 @@ public final class GameActivity extends NativeActivity {
         super.onDestroy();
     }
     private void refreshCover() {
-        if (destroyed || loadingView == null || loading == null) return;
+        if (destroyed || loading == null) return;
         loadingHandler.removeCallbacks(watchdog);
-        if (!loading.blocking() && !restartQueued.get()) return;
-        loadingView.setVisibility(View.VISIBLE);
+        if (!resumed || !hasWindowFocus() || (!loading.blocking() && !restartQueued.get())) {
+            if (loadingCover != null) loadingCover.hide();
+            return;
+        }
+        if (loadingCover == null || !loadingCover.show()) { coverUnavailable(); return; }
         loadingHandler.post(watchdog);
-        if (!loading.eligible() || committedEpoch == loading.epoch()) return;
-        final long epoch = loading.epoch(); committedEpoch = epoch;
-        LoadingUi.committed(loadingView, () -> runOnUiThread(() -> {
-            if (destroyed || loading == null) return;
+        final long generation = loadingCover.generation();
+        if (!loading.eligible() || (committedEpoch == loading.epoch() && committedWindow == generation)) return;
+        final long epoch = loading.epoch(); committedEpoch = epoch; committedWindow = generation;
+        loadingCover.committed(() -> {
+            if (destroyed || loading == null || epoch != loading.epoch()) return;
             loading.overlayCommitted(epoch);
-            if (loading.eligible() && epoch == loading.epoch()) { sendLoading(RestartActivity.OVERLAY); revealIfReady(); }
-        }));
+            if (loading.eligible()) { sendLoading(RestartActivity.OVERLAY); revealIfReady(); }
+        }, this::coverUnavailable);
+    }
+    private void coverUnavailable() {
+        if (destroyed || loading == null) return;
+        loading.fail();
+        LanDiagnostics.record(this, "LOADING_COVER_FAILED", -1);
+        showLoadingBack(true);
     }
     private void sendLoading(int code) {
         if (receiver == null || loading == null) return;
@@ -143,9 +156,10 @@ public final class GameActivity extends NativeActivity {
     }
     private void revealIfReady() {
         final String ticket = loading.ticket();
-        loadingView.postOnAnimation(() -> {
+        if (loadingCover == null) return;
+        loadingCover.nextFrame(() -> {
             if (destroyed || restartQueued.get() || !loading.reveal(ticket)) return;
-            loadingView.setVisibility(View.GONE); loadingHandler.removeCallbacks(watchdog);
+            loadingCover.hide(); loadingHandler.removeCallbacks(watchdog);
             sendLoading(RestartActivity.SUBMITTED);
             LanDiagnostics.record(this, "NATIVE_CONTENT_SUBMITTED", -1);
         });
@@ -207,7 +221,8 @@ public final class GameActivity extends NativeActivity {
         if (!restartQueued.compareAndSet(false, true)) return "";
         LanDiagnostics.record(this, "RESTART_REQUESTED", android.os.Process.myPid());
         runOnUiThread(() -> {
-            loadingView.setVisibility(View.VISIBLE); LoadingUi.immersive(this);
+            if (loadingCover == null || !loadingCover.show()) { coverUnavailable(); return; }
+            LoadingUi.immersive(this);
             String request = java.util.UUID.randomUUID().toString().replace("-", "");
             try {
                 startActivity(new Intent(this, RestartActivity.class)

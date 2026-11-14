@@ -58,8 +58,8 @@ jobs:
       - name: LAN diagnostics archive, queue and HTTP controls
         shell: bash
         run: |
-          "$JAVA_HOME/bin/javac" --add-modules jdk.httpserver -encoding UTF-8 -d "$RUNNER_TEMP/java-tests" android/app/src/main/java/org/nvforever/android/DiagnosticsArchive.java android/app/src/main/java/org/nvforever/android/DiagnosticsQueue.java android/app/src/main/java/org/nvforever/android/DiagnosticsTransport.java android/app/src/main/java/org/nvforever/android/DiagnosticsSession.java android/tests/Diagnostics*Test.java
-          for control in DiagnosticsArchiveTest DiagnosticsQueueTest DiagnosticsTransportTest DiagnosticsSessionTest; do
+          "$JAVA_HOME/bin/javac" --add-modules jdk.httpserver -encoding UTF-8 -d "$RUNNER_TEMP/java-tests" android/app/src/main/java/org/nvforever/android/DiagnosticsArchive.java android/app/src/main/java/org/nvforever/android/DiagnosticsQueue.java android/app/src/main/java/org/nvforever/android/DiagnosticsTransport.java android/app/src/main/java/org/nvforever/android/DiagnosticsSession.java android/app/src/main/java/org/nvforever/android/DiagnosticsFresh.java android/tests/Diagnostics*Test.java
+          for control in DiagnosticsArchiveTest DiagnosticsQueueTest DiagnosticsTransportTest DiagnosticsSessionTest DiagnosticsFreshTest; do
             "$JAVA_HOME/bin/java" --add-modules jdk.httpserver -cp "$RUNNER_TEMP/java-tests" "org.nvforever.android.$control"
           done
       - name: Loading handoff, gyro math and thermal state controls
@@ -69,6 +69,11 @@ jobs:
           for control in HandoffCoordinatorTest GyroMotionTest AndroidPerformanceTest; do
             "$JAVA_HOME/bin/java" -cp "$RUNNER_TEMP/java-tests" "org.nvforever.android.$control"
           done
+      - name: Independent native-window loading cover controls
+        shell: bash
+        run: |
+          "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 17 -target 17 -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d "$RUNNER_TEMP/cover-tests" android/app/src/main/java/org/nvforever/android/LoadingUi.java android/app/src/main/java/org/nvforever/android/LoadingState.java android/app/src/main/java/org/nvforever/android/HandoffCoordinator.java android/tests/LoadingWindowTest.java
+          "$JAVA_HOME/bin/java" -cp "$RUNNER_TEMP/cover-tests" org.nvforever.android.LoadingWindowTest
       - name: Cross-check engine and authored input tests
         shell: bash
         run: python3 tools/android/build.py --check --tests --jobs 2

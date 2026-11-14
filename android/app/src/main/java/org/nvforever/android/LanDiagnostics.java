@@ -35,6 +35,9 @@ final class LanDiagnostics {
     private final DiagnosticsSession session;
     private volatile String status = "Off";
     private volatile long pausedGeneration = -1;
+    private final AtomicBoolean retryRequested = new AtomicBoolean();
+    private final AtomicBoolean exporting = new AtomicBoolean();
+    private String directAckPair = "", directAckSnapshot = "";
 
     static synchronized LanDiagnostics launcher(Context context) {
         if (instance == null) instance = new LanDiagnostics((android.app.Application)context.getApplicationContext());
@@ -83,50 +86,132 @@ final class LanDiagnostics {
             try { tick(); } finally { queued.set(false); }
         });
     }
+    /** Explicit launcher action; never changes pairing, consent or pending evidence. */
+    void retryNow() {
+        pausedGeneration = -1;
+        retryRequested.set(true);
+        worker.execute(this::requestTick);
+    }
+    interface ExportDestination { java.io.OutputStream open() throws java.io.IOException; }
+    interface ExportResult { void completed(boolean success); }
+    /** Explicit local export works with uploads OFF and without queue admission. */
+    void export(ExportDestination destination, ExportResult result) {
+        if (!exporting.compareAndSet(false, true)) { result.completed(false); return; }
+        worker.execute(() -> {
+            File candidate = new File(directory, "export-scratch.zip");
+            boolean success = false;
+            try {
+                if (!available(context)) throw new java.io.IOException("Test support unavailable");
+                prepareScratch(candidate);
+                DiagnosticsSession.Snapshot snapshot = session.current();
+                DiagnosticsArchive.Snapshot archive = DiagnosticsArchive.collect(new File(trustedFiles(context), "home/logs"), candidate,
+                    sourceIdentity(), runtimeSummary(), snapshot.token);
+                try (java.io.OutputStream output = destination.open()) { DiagnosticsFresh.copy(archive, candidate, output); }
+                success = true;
+            } catch (Exception ignored) { /* Never render a provider path or secret-bearing error. */ }
+            finally { deleteScratch(candidate); exporting.set(false); }
+            result.completed(success);
+        });
+    }
+    private void ensureDirectory() throws java.io.IOException {
+        if (Files.isSymbolicLink(directory.toPath()) || (!directory.isDirectory() && !directory.mkdirs()))
+            throw new java.io.IOException("Storage unavailable");
+    }
+    private void prepareScratch(File candidate) throws java.io.IOException {
+        ensureDirectory();
+        if (Files.isSymbolicLink(candidate.toPath())) throw new java.io.IOException("Scratch unavailable");
+        // Only these two generated scratch names are recycled; queue/log files are untouched.
+        Files.deleteIfExists(candidate.toPath());
+    }
+    private void deleteScratch(File candidate) {
+        try { if (!Files.isSymbolicLink(directory.toPath())) Files.deleteIfExists(candidate.toPath()); }
+        catch (Exception ignored) { }
+    }
+    private boolean active(DiagnosticsSession.Snapshot snapshot) {
+        return session.current() == snapshot && !snapshot.cancellation.isCancelled();
+    }
     private void tick() {
         DiagnosticsSession.Snapshot snapshot = session.current();
-        if (!available(context) || !snapshot.enabled || pausedGeneration == snapshot.generation) return;
-        long currentGeneration = snapshot.generation;
-        DiagnosticsTransport.Cancellation currentCancellation = snapshot.cancellation;
-        String endpoint = snapshot.endpoint, token = snapshot.token;
-        File candidate = new File(directory, "candidate.zip");
+        if (!available(context) || !snapshot.enabled
+                || (pausedGeneration == snapshot.generation && !retryRequested.get())) return;
+        boolean force = retryRequested.getAndSet(false);
+        if (force) pausedGeneration = -1;
+        File candidate = new File(directory, "live-scratch.zip");
         try {
-            if (!directory.isDirectory() && !directory.mkdirs()) throw new java.io.IOException("Storage unavailable");
-            DiagnosticsQueue queue = new DiagnosticsQueue(new File(directory, "queue"), DiagnosticsQueue.pairingKey(endpoint, token));
-            boolean capacity = queue.canEnqueue();
-            if (capacity) {
-                DiagnosticsArchive.Snapshot archive = DiagnosticsArchive.collect(new File(trustedFiles(context), "home/logs"),
-                    candidate, sourceIdentity(), runtimeSummary(), token);
-                if (!queue.containsSnapshot(archive.snapshotId)) queue.enqueue(candidate, archive.snapshotId, archive.archiveSha256);
+            prepareScratch(candidate);
+            String pair = DiagnosticsQueue.pairingKey(snapshot.endpoint, snapshot.token);
+            DiagnosticsQueue queue = null;
+            try { queue = new DiagnosticsQueue(new File(directory, "queue"), pair); }
+            catch (Exception ignored) { /* Fresh collection/export does not depend on queue repair. */ }
+            DiagnosticsFresh.Result fresh = null;
+            try {
+                fresh = DiagnosticsFresh.collect(new File(trustedFiles(context), "home/logs"), candidate,
+                    sourceIdentity(), runtimeSummary(), snapshot.token, queue);
+            } catch (Exception ignored) {
+                // Queue retries must still work if current collection fails.
+                status = "Fresh collection unavailable; original logs kept";
             }
-            if (session.current() != snapshot || currentCancellation.isCancelled()) return;
-            DiagnosticsQueue.Entry entry = queue.next(System.currentTimeMillis());
+            if (!active(snapshot)) return;
+            boolean sentFresh = false;
+            if (fresh != null && !fresh.retained
+                    && !(pair.equals(directAckPair) && fresh.archive.snapshotId.equals(directAckSnapshot))) {
+                // This is NEW evidence filtered with the CURRENT consent/token, never
+                // an old-pair queued archive. One <=16 MiB scratch upload per tick.
+                status = "Sending fresh test logs; pending reports kept";
+                try {
+                    DiagnosticsFresh.Result current = fresh;
+                    sentFresh = DiagnosticsFresh.send(current, session, snapshot, cancellation ->
+                        DiagnosticsTransport.upload(new URL(snapshot.endpoint), snapshot.token, candidate,
+                            current.archive.archiveSha256, cancellation));
+                    if (!active(snapshot)) return;
+                    if (sentFresh) { directAckPair = pair; directAckSnapshot = fresh.archive.snapshotId; }
+                } catch (Exception error) {
+                    if (!active(snapshot)) return;
+                    if (pairingRejected(error)) {
+                        pausedGeneration = snapshot.generation;
+                        status = "Pairing rejected; local export still available";
+                        return;
+                    }
+                    status = "Fresh upload failed; original and pending logs kept";
+                }
+            }
+            if (!active(snapshot)) return;
+            if (queue == null) { status = sentFresh ? "Fresh logs received; pending storage unavailable"
+                : "Pending storage unavailable; fresh local export available"; return; }
+            DiagnosticsQueue.Entry entry = queue.next(force ? Long.MAX_VALUE : System.currentTimeMillis());
             if (entry == null) {
-                status = !capacity || queue.totalCount() > queue.count() ? "Queue blocked by pending logs; originals kept"
-                    : queue.count() > 0 ? "Waiting to retry" : "Up to date";
+                if (fresh == null) status = "Fresh collection failed; originals kept; retry or export locally";
+                else if (sentFresh) status = "Fresh logs received; older pending reports kept";
+                else if (fresh != null && !fresh.retained) status = "Pending reports retained; fresh export available";
+                else status = queue.totalCount() > queue.count() ? "Older pairing retained; local export available"
+                    : queue.count() > 0 ? "Waiting to retry; local export available" : "Up to date";
                 return;
             }
-            status = "Sending test logs";
+            status = "Sending queued test logs";
             try {
-                DiagnosticsTransport.upload(new URL(endpoint), token, entry.file, entry.sha256, currentCancellation);
-                if (session.current() == snapshot && !currentCancellation.isCancelled()) {
-                    queue.acknowledge(entry);
-                    status = "Received by PC";
-                }
+                DiagnosticsTransport.upload(new URL(snapshot.endpoint), snapshot.token, entry.file, entry.sha256, snapshot.cancellation);
+                if (active(snapshot)) { queue.acknowledge(entry); status = "Received by PC"; }
             } catch (Exception error) {
-                if (session.current() == snapshot && !currentCancellation.isCancelled()) {
-                    if (error instanceof DiagnosticsTransport.UploadException && !((DiagnosticsTransport.UploadException)error).retryable) {
-                        pausedGeneration = currentGeneration;
-                        status = "Pairing rejected; check PC settings";
-                    } else { queue.failed(entry, System.currentTimeMillis()); status = "PC unavailable; logs queued for retry"; }
+                if (active(snapshot)) {
+                    if (pairingRejected(error)) {
+                        pausedGeneration = snapshot.generation;
+                        status = "Pairing rejected; local export still available";
+                    } else {
+                        // A single rejected bundle must not pause all fresh collection.
+                        queue.failed(entry, System.currentTimeMillis());
+                        status = sentFresh ? "Fresh logs received; older report waiting to retry"
+                            : "PC unavailable or report rejected; logs kept for retry/export";
+                    }
                 }
             }
-        } catch (Exception error) {
-            if (session.current() == snapshot) status = "Diagnostics unavailable; original logs kept";
-        } finally {
-            // This generated scratch archive never contains saves. Original logs stay untouched.
-            try { if (!Files.isSymbolicLink(directory.toPath())) Files.deleteIfExists(candidate.toPath()); } catch (Exception ignored) { }
-        }
+        } catch (Exception ignored) {
+            if (active(snapshot)) status = "Pending logs retained; local export available";
+        } finally { deleteScratch(candidate); }
+    }
+    private static boolean pairingRejected(Exception error) {
+        if (!(error instanceof DiagnosticsTransport.UploadException)) return false;
+        int status = ((DiagnosticsTransport.UploadException)error).statusCode;
+        return status == 401 || status == 403;
     }
     private String sourceIdentity() throws Exception {
         String source = asset("SOURCE.txt"), nativeIdentity = "";

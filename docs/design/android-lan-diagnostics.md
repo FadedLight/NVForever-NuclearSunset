@@ -21,8 +21,10 @@ Only a worker created by the separate launcher process performs networking. The 
 process and its crash hook never wait for network. The worker checks for changes every
 30 seconds while enabled and retries queued snapshots on subsequent launcher starts.
 Turning off or changing pairing cancels the active connection. Old-pair snapshots are
-never uploaded to a new pairing. Invalid acknowledgements or pairing rejection pause
-uploads until the user saves corrected settings. Transient failures use bounded backoff.
+never uploaded to a new pairing. Invalid acknowledgements never delete pending evidence.
+HTTP 401/403 pauses pairing uploads until the user saves corrected settings or explicitly
+retries. A rejected report alone does not pause fresh collection. Transient failures
+use bounded backoff.
 
 Collection reads only strict NVForever-owned run/event/crash text filenames directly
 under the app's `home/logs`. It refuses symbolic links and leaves originals untouched.
@@ -39,10 +41,26 @@ descriptions are included. A killed old game process is expected during load han
 the successor's launch and exit evidence must be assessed separately.
 
 The generated queue is limited to four archives and 48 MiB, with a maximum 16 MiB per
-archive. A full queue stops collection rather than evicting unacknowledged snapshots.
+archive. A full or unavailable queue retains unacknowledged snapshots and still permits
+fresh filtered collection. The current enabled pairing may send that newly collected
+scratch ZIP directly, at most one per 30-second tick, independently of old pending
+entries. Old-pair archives are never reassigned. Current-generation consent and the
+exact ZIP acknowledgement are checked before accepting success. One in-memory identity
+suppresses unchanged direct uploads until the launcher process exits. Direct failures
+retain original logs and recollect on a later tick; this scratch fallback is not a new
+durable queue and does not bypass existing log rotation. At most one queued retry also
+runs per tick. Explicit Retry bypasses its backoff once without changing pairing/consent.
 Acknowledgement removes only generated queue files. The uploader never deletes original
 run logs; the engine's pre-existing log rotation still applies. A bounded history of
 acknowledged snapshot IDs prevents repeated uploads of unchanged technical content.
+
+The launcher also offers **Export fresh filtered logs locally** through Android's
+Create Document picker. This explicit action works with uploads OFF, a full queue or an
+unreachable PC. It uses exactly the same bounded collector and anonymous ZIP entries;
+no network is involved and neither pending reports nor original logs are deleted.
+Exports are serialized and limited to one pending export. A failed provider write can
+leave a partial file at the chosen destination; the app reports failure and keeps the
+original evidence. Export is a launcher control, independent of native game menu input.
 
 A Java-only support APK may reuse an already-qualified native library pair only when
 all native compilation inputs are unchanged. `SOURCE.txt` records the complete support

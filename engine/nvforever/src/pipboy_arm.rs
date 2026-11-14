@@ -655,13 +655,15 @@ fn pointer_pose(mesh: &Mesh, joints: Option<&[Mat4]>, world: Mat4) -> Option<Pos
     shape.points.iter().all(|p|p.is_finite()).then_some(shape)
 }
 
+type PointerParts<'w, 's> = Query<'w, 's, (Entity, &'static PipBoyPart, &'static PartMesh, &'static GlobalTransform, Option<&'static SkinnedMesh>, Option<&'static Visibility>, Option<&'static InheritedVisibility>)>;
+
 #[allow(clippy::too_many_arguments)]
 fn follow_pointer(
     pip: Res<PipBoy>,
     screen: Option<ResMut<PipBoyScreen>>,
     cams: Query<(Entity, &Camera, &GlobalTransform), With<PlayerCamera>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    parts: Query<(Entity, &PipBoyPart, &PartMesh, &GlobalTransform, Option<&SkinnedMesh>, Option<&Visibility>, Option<&InheritedVisibility>)>,
+    parts: PointerParts<'_, '_>,
     globals: Query<&GlobalTransform>,
     binds: Res<Assets<SkinnedMeshInverseBindposes>>,
     mouse: nvf_play::pad::ActionButtons<MouseButton>,

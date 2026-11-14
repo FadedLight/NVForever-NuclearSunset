@@ -1,5 +1,5 @@
-//! Projection/command fixtures. The base explicitly supplies on_model=true; it
-//! does not establish first-person body wear or show_screen ownership coverage.
+// Projection/command fixtures. The base explicitly supplies on_model=true; it
+// does not establish first-person body wear or show_screen ownership coverage.
 mod safety_regressions {
     use super::*;
     use crate::pipboy_arm::{PartMesh,PipBoyPart};
@@ -89,7 +89,7 @@ mod safety_regressions {
             if malformed!=2 {
                 let count=if malformed==3 {1}else{4};
                 let index:u16=if malformed==4 {7}else{0};
-                mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX,vec![[index,0,0,0];count]);
+                mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX,bevy::mesh::VertexAttributeValues::Uint16x4(vec![[index,0,0,0];count]));
                 let weight=match malformed {5=>f32::NAN,6=>0.0,7=>0.5,_=>1.0};
                 mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT,vec![[weight,0.,0.,0.];4]);
             }

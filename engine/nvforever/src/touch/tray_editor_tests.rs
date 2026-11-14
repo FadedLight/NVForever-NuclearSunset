@@ -94,7 +94,7 @@ mod tray_editor_regressions {
     #[test]
     fn actual_editor_slots_and_large_toolbar_share_safe_fitted_render_bounds() {
         for (size,count) in [(Vec2::new(792.,363.),4),(Vec2::new(1280.,720.),8),(Vec2::new(800.,1000.),4)] {
-            let (mut app,w)=mixed_hotbar_phone_scene(size,"explorer",count);
+            let (mut app,_w)=mixed_hotbar_phone_scene(size,"explorer",count);
             let safe=SafeInsets {left:20.,top:12.,right:16.,bottom:24.};app.insert_resource(safe);app.update();app.update();request(&mut app);
             let preview=app.world().resource::<Layout>().tray_preview.as_ref().unwrap().clone();
             let painted=mixed_hotbar_tiles(&mut app);
@@ -152,7 +152,7 @@ mod tray_editor_regressions {
         let mut future=c.encode();future["tray"]=serde_json::json!({"version":99,"opaque":{"keep":[1,2]}});std::fs::write(files.layout(),serde_json::to_vec(&future).unwrap()).unwrap();
         let mut future_config=layout::Config::decode(&future).unwrap();let original=future_config.encode()["tray"].clone();
         let mut layout=Layout {config:future_config.clone(),..default()};assert!(layout.open_tray().is_err());
-        future_config.hints=!future_config.hints;future_config.save_to(&files.layout()).unwrap();assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(files.layout()).unwrap()).unwrap()["tray"],original);
+        future_config.hints = !future_config.hints;future_config.save_to(&files.layout()).unwrap();assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(files.layout()).unwrap()).unwrap()["tray"],original);
         layout.open(true);
         let reset=layout::editor_rect(8,Vec2::new(792.,363.)).center();
         layout.event(&TouchInput {window:Entity::PLACEHOLDER,id:1,phase:TouchPhase::Started,position:reset,force:None},Vec2::new(792.,363.));

@@ -1,5 +1,5 @@
-//! Parent-only arbitration fixture. Pose/settle/native endpoint execution is
-//! separately covered by the existing real core tests, not a fake close handler.
+// Parent-only arbitration fixture. Pose/settle/native endpoint execution is
+// separately covered by the existing real core tests, not a fake close handler.
 struct ClosingScene {
     app: App,
     window: Entity,

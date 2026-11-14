@@ -101,7 +101,7 @@ fn actual_arm_bridge_loses_to_projected_controls_and_aborts_after_model_replacem
     let mut system =
         SystemState::<(Bridge, Res<nvf_play::pad::PlatformInputGate>)>::new(app.world_mut());
     {
-        let (mut bridge, gate) = system.get_mut(app.world_mut());
+        let (mut bridge, gate) = system.get_mut(app.world_mut()).expect("arm bridge fixture resources");
         assert!(
             !bridge.begin(&edge(TouchPhase::Started, point), size, false, Some(&gate)),
             "an actual painted header/button/scrollbar takes precedence over the closing handle"
@@ -122,7 +122,7 @@ fn actual_arm_bridge_loses_to_projected_controls_and_aborts_after_model_replacem
         .press(KeyCode::KeyW);
     app.insert_resource(crate::player_body::PlayerBody::default());
     {
-        let (mut bridge, gate) = system.get_mut(app.world_mut());
+        let (mut bridge, gate) = system.get_mut(app.world_mut()).expect("arm bridge fixture resources");
         bridge.prepare(true, Some(&gate));
         bridge.event(&edge(TouchPhase::Moved, point - Vec2::new(0., 90.)), size);
     }
@@ -174,7 +174,7 @@ fn actual_up_inventory_closing_handle_requires_unclaimed_region_and_native_scrip
     let mut system =
         SystemState::<(Bridge, Res<nvf_play::pad::PlatformInputGate>)>::new(app.world_mut());
     {
-        let (mut bridge, gate) = system.get_mut(app.world_mut());
+        let (mut bridge, gate) = system.get_mut(app.world_mut()).expect("arm bridge fixture resources");
         assert!(
             !bridge.begin(&edge, size, true, Some(&gate)),
             "native Pip-Boy lock also blocks preview"
@@ -184,7 +184,7 @@ fn actual_up_inventory_closing_handle_requires_unclaimed_region_and_native_scrip
         .resource_mut::<nvf_play::control::ControlLocks>()
         .pipboy = false;
     {
-        let (mut bridge, gate) = system.get_mut(app.world_mut());
+        let (mut bridge, gate) = system.get_mut(app.world_mut()).expect("arm bridge fixture resources");
         assert!(bridge.inventory());
         assert!(!bridge.begin(&edge, size, false, Some(&gate)));
         assert!(bridge.begin(&edge, size, true, Some(&gate)));

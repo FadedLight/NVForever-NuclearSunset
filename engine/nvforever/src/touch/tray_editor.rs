@@ -60,7 +60,7 @@ fn publish_mode(mut layout:ResMut<super::Layout>,mut mode:ResMut<PreviewMode>,wi
     let interrupted=focus.read().any(|f|viewport.is_some_and(|v|v.0==f.window))
         | lifecycle.read().any(|l|matches!(l,AppLifecycle::Suspended|AppLifecycle::Running));
     *previous=viewport;
-    layout.tray_safe=*safe;
+    layout.tray_safe = *safe;
     layout.tray_admitted=!changed && !interrupted
         && windows.single().is_ok_and(|(_,w)|w.focused && w.width()-safe.left-safe.right>=240.0 && w.height()-safe.top-safe.bottom>=160.0)
         && platform.as_deref().is_none_or(nvf_play::pad::PlatformInputGate::allows_actions);

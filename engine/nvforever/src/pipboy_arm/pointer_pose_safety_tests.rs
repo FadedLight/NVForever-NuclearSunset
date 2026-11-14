@@ -1,10 +1,10 @@
-//! Direct controls for pointer_pose's explicit Mat4 boundary. GlobalTransform is
-//! affine by type; a projective world cannot be injected through the App fixture.
+// Direct controls for pointer_pose's explicit Mat4 boundary. GlobalTransform is
+// affine by type; a projective world cannot be injected through the App fixture.
 mod pointer_pose_safety_regressions {
     use super::*;
     fn skinned_square(weights:[f32;4])->Mesh {
         let mut mesh=(*square()).clone();
-        mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX,vec![[0_u16;4];4]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_INDEX,bevy::mesh::VertexAttributeValues::Uint16x4(vec![[0_u16;4];4]));
         mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT,vec![weights;4]);mesh
     }
     #[test]

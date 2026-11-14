@@ -1040,18 +1040,21 @@ fn load(mut commands: Commands, mut bar: ResMut<Bar>) {
         }
     }
 }
+type DispatchScene<'w> = (
+    Option<Res<'w,ActiveMenu>>,Option<Res<'w,nvf_play::pause::Paused>>,
+    Option<Res<'w,nvf_play::script::ScriptState>>,Option<Res<'w,PipBoy>>,
+);
+type DispatchInputState<'w> = (
+    Option<Res<'w,nvf_play::pad::TouchDeviceSwitch>>,Res<'w,Time<Real>>,
+    Option<Res<'w,nvf_play::pipboy::touch_scroll::PhysicalPriority>>,
+);
 fn dispatch(
     input: ControlInput,
-    (active,paused,script,pip): (Option<Res<ActiveMenu>>,Option<Res<nvf_play::pause::Paused>>,
-        Option<Res<nvf_play::script::ScriptState>>,Option<Res<PipBoy>>),
+    (active,paused,script,pip): DispatchScene<'_>,
     (mut bar, mut items,mut edit): (ResMut<Bar>, ResMut<TouchItems>,ResMut<super::tray_editor::Requests>),
     (mut capture, mut occlusion): (ResMut<OverlayCapture>, ResMut<Occlusion>),
     (mut hotkeys, mut sim): (ResMut<Hotkeys>, ResMut<nvf_play::sim::SimState>),
-    (touch, time, physical): (
-        Option<Res<nvf_play::pad::TouchDeviceSwitch>>,
-        Res<Time<Real>>,
-        Option<Res<nvf_play::pipboy::touch_scroll::PhysicalPriority>>,
-    ),
+    (touch, time, physical): DispatchInputState<'_>,
     mut out: MessageWriter<nvf_play::weapon_wheel::TouchHotkey>,
 ) {
     if bar.preview {bar.gesture.cancel();bar.outcomes.clear();items.cancel();publish_capture(&bar,&mut items,&mut capture,&mut occlusion);return}

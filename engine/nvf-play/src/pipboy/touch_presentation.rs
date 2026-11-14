@@ -239,7 +239,7 @@ mod tests {
         }
     }
     fn pointer_events(app: &mut App) -> Vec<bevy::picking::pointer::PointerInput> {
-        app.world_mut().resource_mut::<Messages<bevy::picking::pointer::PointerInput>>>().drain().collect()
+        app.world_mut().resource_mut::<Messages<bevy::picking::pointer::PointerInput>>().drain().collect()
     }
 
     #[derive(Resource, Default)]

@@ -221,7 +221,7 @@ pub(crate) fn find_target(
     mut phys: Option<ResMut<PhysState>>,
     mut sim: ResMut<SimState>,
     play: Res<PlayWorld>,
-    visuals: Query<(&RefVisual, &Aabb, &GlobalTransform, &InheritedVisibility)>,
+    visuals: TargetVisuals<'_, '_>,
     mut target: ResMut<Target>,
     mut script: Option<ResMut<crate::script::ScriptState>>,
     control: Option<Res<crate::control::PlayerControl>>,

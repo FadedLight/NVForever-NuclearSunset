@@ -171,7 +171,7 @@ pub(crate) fn hits(p: &mut ChildSpawnerCommands, page: Page, tab: usize, outer: 
     pieces.push((Rect::new(outer.min.x, marker.min.y, outer.max.x, marker.max.y), Piece::Marker));
     for (rect, piece) in pieces.into_iter().filter(|(r, _)| r.width() > 0.0 && r.height() > 0.0) {
         let hit = Hit { page, tab, piece, track: Rect::from_corners(track.min+offset, track.max+offset), marker: Rect::from_corners(marker.min+offset, marker.max+offset) };
-        p.spawn((super::frame::at(rect.min.x, rect.min.y, rect.width(), rect.height()), hit, Pickable::default()))
+        p.spawn((crate::interface::at(rect.min.x, rect.min.y, rect.width(), rect.height()), hit, Pickable::default()))
             .observe(on_press).observe(on_click);
     }
 }

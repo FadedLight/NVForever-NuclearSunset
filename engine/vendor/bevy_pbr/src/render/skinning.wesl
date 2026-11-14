@@ -71,6 +71,15 @@ fn inverse_transpose_3x3m(in: mat3x3<f32>) -> mat3x3<f32> {
     let y = cross(in[2], in[0]);
     let z = cross(in[0], in[1]);
     let det = dot(in[2], z);
+    // A zero-scale joint or a vertex with no effective skin weights has no
+    // inverse. Keep its normal deterministic instead of dividing by zero.
+    if det == 0.0 {
+        return mat3x3<f32>(
+            vec3(1.0, 0.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 0.0, 1.0)
+        );
+    }
     return mat3x3<f32>(
         x / det,
         y / det,
@@ -83,13 +92,17 @@ fn skin_normals(
     world_from_local: mat4x4<f32>,
     normal: vec3<f32>,
 ) -> vec3<f32> {
-    return normalize(
-        inverse_transpose_3x3m(
-            mat3x3<f32>(
-                world_from_local[0].xyz,
-                world_from_local[1].xyz,
-                world_from_local[2].xyz
-            )
-        ) * normal
-    );
+    let transformed = inverse_transpose_3x3m(
+        mat3x3<f32>(
+            world_from_local[0].xyz,
+            world_from_local[1].xyz,
+            world_from_local[2].xyz
+        )
+    ) * normal;
+    // Missing/zero normals are admitted by the mesh path; normalize(0) is
+    // indeterminate. This also covers a collapsed weighted skin transform.
+    if all(transformed == vec3(0.0)) {
+        return vec3(0.0, 0.0, 1.0);
+    }
+    return normalize(transformed);
 }

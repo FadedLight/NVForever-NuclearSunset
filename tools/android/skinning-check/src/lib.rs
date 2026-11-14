@@ -4,8 +4,12 @@
 mod data;
 
 #[cfg(test)]
+mod normal_ir;
+
+#[cfg(test)]
 mod tests {
     use super::data;
+    use super::normal_ir::{DIVIDE_ZERO, NORMALIZE_ZERO};
     use naga::{AddressSpace, ArraySize, ShaderStage, StorageAccess, TypeInner};
     const BASELINE: &str =
         include_str!("../fixtures/skinning_before.wesl");
@@ -31,6 +35,18 @@ mod tests {
         source: &str,
         uniform: bool,
     ) -> Result<(naga::Module, naga::valid::ModuleInfo), String> {
+        compile_variant(source, uniform, false)
+    }
+    fn compile_normals(source: &str, uniform: bool) -> Result<(naga::Module, naga::valid::ModuleInfo), String> {
+        compile_variant(source, uniform, true)
+    }
+    fn compile_variant(source: &str, uniform: bool, normals: bool) -> Result<(naga::Module, naga::valid::ModuleInfo), String> {
+        let normalized = source.replace("\r\n", "\n");
+        // The original five controls protect position skinning and its buffer ABI.
+        // Keep that exact program separate from the newly live normal functions.
+        let source = if normals { normalized.as_str() } else {
+            normalized.split("@if(SKINNED)\nfn inverse_transpose_3x3m").next().ok_or("position prefix")?
+        };
         let mut resolver = wesl::resolver::VirtualResolver::new();
         for (path, text) in [
             (
@@ -44,14 +60,23 @@ mod tests {
             ("bevy_pbr::render::skinning", source),
             (
                 "bevy_pbr::probe",
-                r#"
+                if normals { r#"
+import bevy_pbr::render::skinning::{skin_model,skin_prev_model,skin_normals};
+@vertex fn vertex(@builtin(vertex_index) index:u32)->@builtin(position) vec4<f32> {
+    let p=vec4(f32(index),1.0,2.0,1.0);
+    let joints=vec4<u32>(0u,1u,0u,0u);
+    let weights=vec4(0.25,0.75,0.0,0.0);
+    let posed = skin_model(joints,weights,0u);
+    let normal = skin_normals(posed, vec3(0.0,0.0,1.0));
+    return 0.5*(posed*p+skin_prev_model(joints,weights,0u)*p)+vec4(normal*0.00001,0.0);
+}"# } else { r#"
 import bevy_pbr::render::skinning::{skin_model,skin_prev_model};
 @vertex fn vertex(@builtin(vertex_index) index:u32)->@builtin(position) vec4<f32> {
     let p=vec4(f32(index),1.0,2.0,1.0);
     let joints=vec4<u32>(0u,1u,0u,0u);
     let weights=vec4(0.25,0.75,0.0,0.0);
     return 0.5*(skin_model(joints,weights,0u)*p+skin_prev_model(joints,weights,0u)*p);
-}"#,
+}"# },
             ),
         ] {
             resolver.add_module(
@@ -280,6 +305,79 @@ import bevy_pbr::render::skinning::{skin_model,skin_prev_model};
                     }
                 }
             }
+        }
+    }    fn affine(columns: [[f32;3];3]) -> [[f32;4];4] {
+        [
+            [columns[0][0],columns[0][1],columns[0][2],0.0],
+            [columns[1][0],columns[1][1],columns[1][2],0.0],
+            [columns[2][0],columns[2][1],columns[2][2],0.0],
+            [7.0,8.0,9.0,1.0],
+        ]
+    }
+    #[test]
+    fn actual_wesl_ir_singular_and_zero_normals_are_defined_after_guard_only() {
+        for uniform in [false,true] {
+            let (before,_) = compile_normals(BASELINE,uniform).unwrap();
+            let (after,_) = compile_normals(PROPOSAL,uniform).unwrap();
+            for (matrix,normal,expected,expected_error) in [
+                ([[0.0;4];4],[0.0,0.0,1.0],[0.0,0.0,1.0],DIVIDE_ZERO),
+                (affine([[0.0,0.0,0.0],[0.0,2.0,0.0],[0.0,0.0,3.0]]),[1.0,0.0,0.0],[1.0,0.0,0.0],DIVIDE_ZERO),
+                (affine([[0.0,0.0,0.0],[0.0,0.0,0.0],[0.0,0.0,2.0]]),[0.0,1.0,0.0],[0.0,1.0,0.0],DIVIDE_ZERO),
+                (affine([[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]),[0.0,0.0,0.0],[0.0,0.0,1.0],NORMALIZE_ZERO),
+            ] {
+                assert_eq!(super::normal_ir::normal(&before,matrix,normal).unwrap_err(),expected_error,
+                    "old shader must hit this arithmetic hazard; unsupported IR never satisfies a negative");
+                let actual=super::normal_ir::normal(&after,matrix,normal).unwrap();
+                assert_eq!(actual,expected);
+                assert!(actual.into_iter().all(f32::is_finite));
+            }
+        }
+    }
+    #[test]
+    fn actual_wesl_ir_nondegenerate_rotation_nonuniform_mirror_and_tiny_scale_keep_normals() {
+        let root13=13.0_f32.sqrt();
+        for uniform in [false,true] {
+            let (before,_) = compile_normals(BASELINE,uniform).unwrap();
+            let (after,_) = compile_normals(PROPOSAL,uniform).unwrap();
+            for (columns,normal,expected) in [
+                ([[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],[0.0,0.0,1.0],[0.0,0.0,1.0]),
+                ([[0.0,1.0,0.0],[-1.0,0.0,0.0],[0.0,0.0,1.0]],[1.0,0.0,0.0],[0.0,1.0,0.0]),
+                ([[2.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,4.0]],[1.0,1.0,0.0],[3.0/root13,2.0/root13,0.0]),
+                ([[-2.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,4.0]],[1.0,0.0,0.0],[-1.0,0.0,0.0]),
+                ([[0.0000000001,0.0,0.0],[0.0,2.0,0.0],[0.0,0.0,3.0]],[1.0,0.0,0.0],[1.0,0.0,0.0]),
+            ] {
+                let a=super::normal_ir::normal(&before,affine(columns),normal).unwrap();
+                let b=super::normal_ir::normal(&after,affine(columns),normal).unwrap();
+                assert_eq!(a.map(f32::to_bits),b.map(f32::to_bits),"ordinary shader arithmetic must remain exact in this CPU evaluator");
+                for axis in 0..3 { assert!((b[axis]-expected[axis]).abs()<0.00001); }
+            }
+        }
+    }
+    #[test]
+    fn actual_ir_negative_controls_detect_either_removed_guard_without_gpu() {
+        let det_start=PROPOSAL.find("    if det == 0.0 {").unwrap();
+        let det_end=det_start+PROPOSAL[det_start..].find("\n    }").unwrap()+6;
+        let missing_det=format!("{}{}",&PROPOSAL[..det_start],&PROPOSAL[det_end..]);
+        let zero_start=PROPOSAL.find("    if all(transformed == vec3(0.0)) {").unwrap();
+        let zero_end=zero_start+PROPOSAL[zero_start..].find("\n    }").unwrap()+6;
+        let missing_zero=format!("{}{}",&PROPOSAL[..zero_start],&PROPOSAL[zero_end..]);
+        for uniform in [false,true] {
+            let (missing_det,_) = compile_normals(&missing_det,uniform).unwrap();
+            assert_eq!(super::normal_ir::normal(&missing_det,[[0.0;4];4],[0.0,0.0,1.0]).unwrap_err(),DIVIDE_ZERO);
+            let (missing_zero,_) = compile_normals(&missing_zero,uniform).unwrap();
+            assert_eq!(super::normal_ir::normal(&missing_zero,affine([[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]),[0.0;3]).unwrap_err(),NORMALIZE_ZERO);
+        }
+    }
+
+    #[test]
+    fn exact_guarded_normal_shader_emits_spirv_in_storage_and_uniform_modes() {
+        for uniform in [false,true] {
+            let (module,info) = compile_normals(PROPOSAL,uniform).unwrap();
+            let words=naga::back::spv::write_vec(&module,&info,&Default::default(),Some(&naga::back::spv::PipelineOptions {
+                shader_stage: ShaderStage::Vertex,entry_point: module.entry_points[0].name.clone(),
+            })).unwrap();
+            assert_eq!(words[0],0x0723_0203);
+            assert!(words.len()>5);
         }
     }
 }

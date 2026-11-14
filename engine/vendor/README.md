@@ -29,6 +29,18 @@ block. `std` is linked for the clock (wgpu-hal turns the crate's `std` feature o
 
 ## bevy_pbr 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
+Normal hardening in `src/render/skinning.wesl`: an exactly singular skin matrix
+uses an identity normal transform, and an exactly zero transformed normal uses +Z.
+Finite zero-scale animation and unweighted vertices can reach these cases; WGSL leaves
+runtime divide-by-zero and zero normalization indeterminate
+([WGSL floating point evaluation](https://www.w3.org/TR/WGSL/#floating-point-evaluation)).
+Nondegenerate inverse-transpose/normalization arithmetic, positions, skin weights,
+CURRENT/PREVIOUS storage layouts, buffer selection and morph gates are unchanged.
+This defines previously undefined normal directions; it does not establish a device-loss
+or Android visual-corruption cause. CPU production-WESL controls and GPU qualification
+are separate; remove/reconcile this patch when upstream provides equivalent guards.
+
+
 Bevy's 3D passes, for FSR upscaling (docs/design/fsr-upscaling.md), which draws the main
 passes at a lower resolution through `MainPassResolutionOverride`. Two changes, each marked
 by a comment starting `NVForever FSR integration`:

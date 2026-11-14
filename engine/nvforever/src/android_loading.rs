@@ -343,11 +343,16 @@ fn publish_scene(scene: Scene, shared: Res<Shared>) {
         intro.frame_ready().then_some(Phase::Film)
     } else if scene.loading.as_ref().is_some_and(|l| l.active()) {
         Some(Phase::Loading)
-    } else if scene
-        .state
-        .as_ref()
-        .is_some_and(|s| *s.get() == nvf_play::PlayState::Playing)
-        && scene.streamer.as_ref().is_some_and(|s| s.settled)
+    } else if scene.state.as_ref().is_some_and(|s| {
+        // Menus/conversations still render the settled world. Simulation pause
+        // must not strand a fresh resume epoch behind the Android cover.
+        matches!(
+            s.get(),
+            nvf_play::PlayState::Playing
+                | nvf_play::PlayState::Dialogue
+                | nvf_play::PlayState::Menu
+        )
+    }) && scene.streamer.as_ref().is_some_and(|s| s.settled)
         && scene.physics.as_ref().is_none_or(|p| p.loading_done())
         && !scene.restoring.busy()
         && scene
@@ -600,5 +605,151 @@ mod tests {
         assert_eq!(app.world().resource::<Shared>().lock().phase, None);
         // The actual menu close/PlayIntro route is covered in nvf_play::main_menu tests.
         // Main-world admission needs decoded film evidence, never the old menu's frames.
+    }
+
+    fn settled_world(app: &mut App, state: nvf_play::PlayState) {
+        app.world_mut().insert_resource(State::new(state));
+        app.world_mut().insert_resource(crate::world::Streamer {
+            radius: 0,
+            loaded: default(),
+            fades: default(),
+            fade_secs: 0.,
+            settled: true,
+            arrival: None,
+            per_frame: 1,
+            spawning: default(),
+            dying: default(),
+            ahead: default(),
+            hide: default(),
+            interior: None,
+            light_scale: 1.,
+            managed: default(),
+            manage_actors: false,
+            stats: default(),
+            buffer: default(),
+            centre: None,
+            waiting: default(),
+            model_overrides: default(),
+        });
+        app.world_mut()
+            .resource_mut::<nvf_play::main_menu::MainMenu>()
+            .open = false;
+    }
+    #[test]
+    fn background_resume_of_game_dialogue_and_menus_requires_fresh_epoch_content() {
+        use nvf_play::PlayState;
+        for (state, paused, main_menu) in [
+            (PlayState::Playing, false, false),
+            (PlayState::Dialogue, false, false),
+            (PlayState::Menu, false, false),
+            (PlayState::Menu, true, false),
+            (PlayState::Menu, true, true),
+        ] {
+            let (mut app, window) = scene();
+            settled_world(&mut app, state);
+            app.world_mut()
+                .insert_resource(nvf_play::pause::Paused(paused));
+            app.world_mut()
+                .resource_mut::<nvf_play::main_menu::MainMenu>()
+                .open = main_menu;
+            let phase = if main_menu { Phase::Menu } else { Phase::World };
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, Some(phase));
+            evidence(&mut app, 1, Some(phase), true);
+            evidence(&mut app, 1, Some(phase), true);
+            app.update();
+            assert_eq!(
+                app.world().resource::<Channel>().submitted,
+                [format!("{REQUEST}:1")]
+            );
+            app.world_mut().resource_mut::<Channel>().state.clear();
+            app.update();
+            assert!(app.world().resource::<PlatformInputGate>().allows_actions());
+
+            app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
+            app.world_mut().resource_mut::<Channel>().state = format!("{REQUEST}:2:0");
+            app.world_mut().write_message(AppLifecycle::Suspended);
+            app.world_mut().write_message(WindowFocused {
+                window,
+                focused: false,
+            });
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, None);
+            assert!(!app.world().resource::<PlatformInputGate>().allows_actions());
+            evidence(&mut app, 1, Some(phase), true);
+            evidence(&mut app, 2, Some(phase), true);
+            app.update();
+            assert_eq!(app.world().resource::<Channel>().submitted.len(), 1);
+
+            app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
+            app.world_mut().resource_mut::<Channel>().state = format!("{REQUEST}:3:1");
+            app.world_mut().write_message(AppLifecycle::Running);
+            app.world_mut().write_message(WindowFocused {
+                window,
+                focused: true,
+            });
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, Some(phase));
+            assert_eq!(app.world().resource::<Channel>().submitted.len(), 1);
+            evidence(&mut app, 1, Some(phase), true);
+            evidence(&mut app, 3, Some(phase), false);
+            app.update();
+            evidence(&mut app, 3, Some(phase), true);
+            app.update();
+            assert_eq!(app.world().resource::<Channel>().submitted.len(), 1);
+            evidence(&mut app, 3, Some(phase), true);
+            app.update();
+            assert_eq!(
+                app.world().resource::<Channel>().submitted,
+                [format!("{REQUEST}:1"), format!("{REQUEST}:3")]
+            );
+            assert!(
+                !app.world().resource::<PlatformInputGate>().allows_actions(),
+                "native submission alone cannot stand in for Java's cover acknowledgement"
+            );
+            app.world_mut().resource_mut::<Channel>().state.clear();
+            app.world_mut().write_message(WindowFocused {
+                window,
+                focused: true,
+            });
+            app.update();
+            assert!(app.world().resource::<PlatformInputGate>().allows_actions());
+        }
+    }
+    #[test]
+    fn resumed_modal_content_still_requires_settled_visible_world_and_not_loading_state() {
+        for state in [nvf_play::PlayState::Dialogue, nvf_play::PlayState::Menu] {
+            let (mut app, window) = scene();
+            settled_world(&mut app, state);
+            app.world_mut().resource_mut::<Channel>().state = format!("{REQUEST}:3:1");
+            app.world_mut()
+                .resource_mut::<crate::world::Streamer>()
+                .settled = false;
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, None);
+            evidence(&mut app, 3, Some(Phase::World), true);
+            evidence(&mut app, 3, Some(Phase::World), true);
+            app.update();
+            assert!(app.world().resource::<Channel>().submitted.is_empty());
+            app.world_mut()
+                .resource_mut::<crate::world::Streamer>()
+                .settled = true;
+            app.world_mut()
+                .insert_resource(State::new(nvf_play::PlayState::Loading));
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, None);
+            app.world_mut().insert_resource(State::new(state));
+            app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
+            app.update();
+            assert_eq!(app.world().resource::<Shared>().lock().phase, None);
+            app.world_mut().get_mut::<Window>(window).unwrap().focused = true;
+            app.update();
+            assert_eq!(
+                app.world().resource::<Shared>().lock().phase,
+                Some(Phase::World)
+            );
+            assert!(app.world().resource::<Channel>().submitted.is_empty());
+            assert!(!app.world().resource::<PlatformInputGate>().allows_actions());
+        }
     }
 }

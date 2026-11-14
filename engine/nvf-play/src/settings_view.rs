@@ -688,6 +688,9 @@ impl SettingsLayout {
 mod tests {
     use super::*;
     use crate::settings::Settings;
+    // These historical page oracles describe the unchanged desktop profile; Android
+    // grouping uses the same projection functions in settings_layout's mobile tests.
+    use crate::settings_layout::{resolve_desktop_layout as resolve_layout, DESKTOP_TAB_ORDER as TAB_ORDER};
 
     const NONE: Found = Found { search: Vec::new(), changed: Vec::new() };
 

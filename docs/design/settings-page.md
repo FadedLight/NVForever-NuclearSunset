@@ -83,6 +83,38 @@ throughout today. The later change gives Tweaks rows a placement `Tweaks › <gr
 <heading>` in `SECTIONS` and draws the groups in place of the rail; neither the
 registrations nor `resolve_layout`'s interface change for it.
 
+### Android mobile organization
+
+[design] Android uses the same dynamic settings page, adding **Mobile** after Controls.
+Desktop keeps its seven tabs and existing placements. This changes presentation only:
+all 148 known settings retain their registration order, keys, callbacks, saved values
+and defaults. Missing optional rows and empty headings stay omitted. Search, Changed,
+keyboard/controller navigation and row identity use the existing page implementation.
+
+| Mobile heading | Existing controls |
+| --- | --- |
+| Touch layout and guide | Safe practice, icon family, adaptive Aim/Block presentation |
+| Movement and gestures | Analog movement, fire drag look, run lock, optional VATS gesture |
+| Gyroscope | Enable, sensitivity, ADS, hold/toggle, ADS-only, recenter |
+| Inventory and quick access | Hotbar enable/count/size/tray, bottom swipe enable/target/distance |
+| Dialogue | Touch dialogue, choice/subtitle text size, tap-selection policy |
+| Lockpicking | Touch scheme and scale |
+| Interface size | Existing menu/UI scale and canonical health/AP/compass sizes |
+| Performance and battery | Preset, FPS, resolution, opt-in thermal response and status |
+
+The eight controller-specific registry rows remain in **Controls > Controller** on
+Android. Hardware bindings and Input Device remain in the original Controls page;
+changing devices keeps its native hidden-row projection and remapping behavior.
+The overlay cog opens the existing transactional layout editor: Style / profiles for
+appearance, Save to keep changes, Cancel to restore them. The practice note points to
+this route; there is no second editor, extra action row or new persistence schema.
+
+`settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
+original sections claim their remaining rows. One row is resolved once, with its original
+registry index. Tests exercise all 148 rows, optional sections, actual page projection,
+search/Changed/device handoff, and a real Settings callback through its original index.
+Rust execution and Android device acceptance are recorded separately from source review.
+
 ## 3. What the page lists (`settings_view.rs`)
 
 - **A row** (`RowId`) is a registered setting by its registry index, or one of the

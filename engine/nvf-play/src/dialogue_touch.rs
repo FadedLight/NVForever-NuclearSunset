@@ -17,18 +17,40 @@ pub struct TouchDialogue {
 }
 impl Default for TouchDialogue {
     fn default() -> Self {
-        Self {
-            enabled: cfg!(target_os = "android"),
-            choice_scale: 1.0,
-            subtitle_scale: 1.0,
-            confirm: true,
-        }
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 impl TouchDialogue {
+    fn for_platform(android: bool) -> Self {
+        Self { enabled: android, choice_scale: if android { 0.85 } else { 1.0 }, subtitle_scale: 1.0, confirm: true }
+    }
     /// The conversation owns raw touches; the underlying virtual menu keys must sleep.
     pub fn captures(&self, state: crate::PlayState) -> bool {
         self.enabled && state == crate::PlayState::Dialogue
+    }
+}
+/// Platform layout policy is separate from persisted text sizes. Existing saved
+/// scales are never interpreted as a request to reset density or accessibility.
+#[derive(Resource, Clone, Copy, PartialEq)]
+struct TouchLayout {
+    height: f32,
+    padding: f32,
+    gap: f32,
+    row_min: f32,
+    row_padding: f32,
+    confirm_padding: f32,
+    confirm_text: f32,
+}
+impl Default for TouchLayout {
+    fn default() -> Self { Self::for_platform(cfg!(target_os = "android")) }
+}
+impl TouchLayout {
+    fn for_platform(android: bool) -> Self {
+        if android {
+            Self { height: 75.0, padding: 8.0, gap: 4.0, row_min: 48.0, row_padding: 6.0, confirm_padding: 8.0, confirm_text: 18.0 }
+        } else {
+            Self { height: 65.0, padding: 12.0, gap: 8.0, row_min: 56.0, row_padding: 10.0, confirm_padding: 12.0, confirm_text: 20.0 }
+        }
     }
 }
 fn scale(v: f32) -> f32 {
@@ -73,6 +95,7 @@ fn set_mode(w: &mut World, name: &str) -> bool {
 
 pub(crate) fn install(app: &mut App) {
     app.init_resource::<TouchDialogue>()
+        .init_resource::<TouchLayout>()
         .init_resource::<TouchFrame>()
         .init_resource::<Gestures>()
         .init_resource::<RevealRequest>()
@@ -97,7 +120,7 @@ pub(crate) fn install(app: &mut App) {
         switches: "",
         get: |w| w.resource::<TouchDialogue>().enabled, set: |w,v| w.resource_mut::<TouchDialogue>().enabled=v, slider: None });
     add_setting(app, Setting { key: "dialogue-choice-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue choice text",
-        note: "Choice text size in the touch dialogue view, independently of conversation subtitles (75-200%).",
+        note: "Choice text size (75-200%), independent of subtitles. Android starts at 85% to fit more choices; your saved size is kept.",
         switches: "",
         get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().choice_scale),
             set: |w,v| w.resource_mut::<TouchDialogue>().choice_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
@@ -516,6 +539,7 @@ struct DrawKey {
     view: crate::dialogue_menu::MenuView,
     list: Option<ListId>,
     settings: TouchDialogue,
+    layout: TouchLayout,
 }
 fn row_colors(short: bool, selected: bool) -> (Color, Color) {
     if selected {
@@ -554,6 +578,7 @@ fn draw(
     mut commands: Commands,
     menu: Res<DialogueMenu>,
     settings: Res<TouchDialogue>,
+    layout: Res<TouchLayout>,
     roots: Query<Entity, With<Root>>,
     mut rows: Query<(&Row, &mut BorderColor, &mut BackgroundColor)>,
     mut shown: Local<Option<DrawKey>>,
@@ -586,6 +611,7 @@ fn draw(
             view: v.clone(),
             list: menu.list.clone(),
             settings: *settings,
+            layout: *layout,
         });
     if key != *shown {
         reveal.0 = true;
@@ -602,10 +628,10 @@ fn draw(
                         left: percent(2.0),
                         width: percent(96.0),
                         bottom: px(12.0),
-                        height: percent(65.0),
+                        height: percent(layout.height),
                         flex_direction: FlexDirection::Column,
-                        padding: UiRect::all(px(12.0)),
-                        row_gap: px(8.0),
+                        padding: UiRect::all(px(layout.padding)),
+                        row_gap: px(layout.gap),
                         ..default()
                     },
                     GlobalZIndex(2400),
@@ -642,7 +668,7 @@ fn draw(
                             width: percent(100.0),
                             flex_direction: FlexDirection::Column,
                             flex_shrink: 0.0,
-                            row_gap: px(8.0),
+                            row_gap: px(layout.gap),
                             ..default()
                         })
                         .with_children(|p| {
@@ -683,8 +709,8 @@ fn draw(
                                     },
                                     Node {
                                         width: percent(100.0),
-                                        min_height: px(56.0),
-                                        padding: UiRect::all(px(10.0)),
+                                        min_height: px(layout.row_min),
+                                        padding: UiRect::all(px(layout.row_padding)),
                                         border: UiRect::all(px(2.0)),
                                         flex_shrink: 0.0,
                                         ..default()
@@ -720,8 +746,8 @@ fn draw(
                             },
                             Node {
                                 width: percent(100.0),
-                                min_height: px(56.0),
-                                padding: UiRect::all(px(12.0)),
+                                min_height: px(layout.row_min),
+                                padding: UiRect::all(px(layout.confirm_padding)),
                                 flex_shrink: 0.0,
                                 ..default()
                             },
@@ -732,7 +758,7 @@ fn draw(
                                 ConfirmCaption,
                                 Text::new(confirm_label),
                                 TextFont {
-                                    font_size: FontSize::Px(20.0),
+                                    font_size: FontSize::Px(layout.confirm_text),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -1208,7 +1234,7 @@ mod tests {
         assert!(rows
             .iter()
             .enumerate()
-            .all(|(i, r)| r.0 == i && r.1 == percent(100.0) && r.2 == px(56.0)));
+            .all(|(i, r)| r.0 == i && r.1 == percent(100.0) && r.2 == px(if cfg!(target_os = "android") { 48.0 } else { 56.0 })));
         {
             let mut menu = app.world_mut().resource_mut::<DialogueMenu>();
             let v = menu.view.as_mut().unwrap();
@@ -1353,3 +1379,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "dialogue_touch/compact_tests.rs"]
+mod compact_tests;

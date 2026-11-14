@@ -7,7 +7,9 @@
 //! **Seven tabs, the original's four categories first** [design: #1953; the original's
 //! Settings opens Gameplay, Display, Audio and Controls, observed in the original's pause
 //! menu, 2026-11-09]: Gameplay, Display, Audio, Controls, then Graphics, Tweaks and Debug
-//! ([`TAB_ORDER`]). Each tab lists [`SECTIONS`] in order, a dim heading over each named
+//! ([`DESKTOP_TAB_ORDER`]). Android inserts Mobile after Controls and groups the same
+//! registered rows through [`MOBILE_SECTIONS`]; desktop placement is unchanged. Each tab
+//! lists its sections in order, a dim heading over each named
 //! one.
 //!
 //! **A row the table does not name** stays under the group it registered with, used as its
@@ -63,9 +65,18 @@ pub struct Section {
 }
 
 /// The tabs, in the order the page lists them [design: #1953].
-pub const TAB_ORDER: [&str; 7] = [
+pub const DESKTOP_TAB_ORDER: [&str; 7] = [
     "Gameplay", "Display", "Audio", "Controls", "Graphics", "Tweaks", "Debug",
 ];
+/// Android keeps the shared page and adds one home for its mobile options.
+pub const MOBILE_TAB: &str = "Mobile";
+pub const MOBILE_TAB_ORDER: [&str; 8] = [
+    "Gameplay", "Display", "Audio", "Controls", MOBILE_TAB, "Graphics", "Tweaks", "Debug",
+];
+#[cfg(target_os = "android")]
+pub const TAB_ORDER: &[&str] = &MOBILE_TAB_ORDER;
+#[cfg(not(target_os = "android"))]
+pub const TAB_ORDER: &[&str] = &DESKTOP_TAB_ORDER;
 /// The tab whose first rows are the controls' keys and buttons (`crate::bindings`), drawn
 /// by the page itself before this table's rows.
 pub const CONTROLS_TAB: &str = "Controls";
@@ -301,6 +312,38 @@ pub const SECTIONS: &[Section] = &[
     ),
 ];
 
+/// Android presentation overrides only. These rows keep their registry indices,
+/// persisted keys, defaults and callbacks; the original table still owns desktop placement.
+/// Native hardware bindings remain in Controls and use the existing device visibility.
+pub const MOBILE_SECTIONS: &[Section] = &[
+    section(MOBILE_TAB, Some("Touch layout and guide"), &[
+        "touch-practice-v1", "touch-icon-family", "adaptive-touch-actions",
+    ]),
+    section(MOBILE_TAB, Some("Movement and gestures"), &[
+        "touch-analog-movement-v1", "touch-fire-drag-look-v1",
+        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1",
+    ]),
+    section(MOBILE_TAB, Some("Gyroscope"), &[
+        "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1",
+        "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1",
+    ]),
+    section(MOBILE_TAB, Some("Inventory and quick access"), &[
+        "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray",
+        "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1",
+    ]),
+    section(MOBILE_TAB, Some("Dialogue"), &[
+        "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice",
+    ]),
+    section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size"]),
+    section(MOBILE_TAB, Some("Interface size"), &[
+        "menu-scale", "ui-scale", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
+    ]),
+    section(CONTROLS_TAB, Some("Controller"), &CONTROLLER_KEYS),
+    section(MOBILE_TAB, Some("Performance and battery"), &[
+        "mobile-performance", "mobile-fps", "mobile-resolution", "mobile-thermal-auto", "mobile-thermal-status",
+    ]),
+];
+
 /// The Controls tab's rows that are shown only while the input device is a controller
 /// (`crate::bindings::InputDevice`), after the controls' own [design: #1953].
 pub const CONTROLLER_KEYS: [&str; 8] = ["button-style", "aim-assist", "aim-slowdown", "aim-lock",
@@ -370,17 +413,28 @@ pub struct ResolvedLayout {
 /// left out, a section left with none dropped), then each tab's unnamed rows, then the
 /// unnamed groups' tabs. Every registered row is in it once.
 pub fn resolve_layout(list: &[Setting]) -> ResolvedLayout {
+    resolve_layout_with(list, TAB_ORDER, if cfg!(target_os = "android") { MOBILE_SECTIONS } else { &[] })
+}
+
+#[cfg(test)]
+pub(crate) fn resolve_desktop_layout(list: &[Setting]) -> ResolvedLayout {
+    resolve_layout_with(list, &DESKTOP_TAB_ORDER, &[])
+}
+
+fn resolve_layout_with(list: &[Setting], tab_order: &[&'static str], overrides: &[Section]) -> ResolvedLayout {
     let index: std::collections::HashMap<&str, usize> =
         list.iter().enumerate().map(|(i, s)| (s.key, i)).collect();
     let mut placements: Vec<Option<Placement>> = vec![None; list.len()];
-    let mut tabs: Vec<ResolvedTab> = TAB_ORDER
+    let mut tabs: Vec<ResolvedTab> = tab_order
         .iter()
         .map(|&name| ResolvedTab {
             name,
             sections: Vec::new(),
         })
         .collect();
-    for s in SECTIONS {
+    // A platform's named overrides claim their existing rows first; the ordinary
+    // table then fills the remaining rows without duplicating a setting or callback.
+    for s in overrides.iter().chain(SECTIONS) {
         let rows: Vec<usize> = s
             .keys
             .iter()
@@ -706,10 +760,10 @@ mod tests {
     #[test]
     fn the_seven_tabs_come_first_with_every_row_once_in_the_tables_order() {
         let list = registry(&KNOWN);
-        let l = resolve_layout(&list);
+        let l = resolve_layout_with(&list, &DESKTOP_TAB_ORDER, &[]);
         assert_eq!(
             l.tab_names(),
-            TAB_ORDER,
+            DESKTOP_TAB_ORDER,
             "no group is a tab of its own: every row is named"
         );
         assert_eq!(l.unnamed(), 0);
@@ -856,7 +910,7 @@ mod tests {
             ("head-bob", "Display"),
             ("god-mode", "Debug"),
         ]);
-        let l = resolve_layout(&list);
+        let l = resolve_layout_with(&list, &DESKTOP_TAB_ORDER, &[]);
         assert_eq!(
             keys(&list, &l, "Gameplay"),
             [
@@ -892,7 +946,7 @@ mod tests {
             ("x2", "Extras"),
             ("x3", "Mods"),
         ]);
-        let l = resolve_layout(&list);
+        let l = resolve_layout_with(&list, &DESKTOP_TAB_ORDER, &[]);
         // After Debug, in the order the groups first appear in the registry; Sound is not Audio.
         assert_eq!(l.tab_names()[7..], ["Sound", "Mods", "Extras"]);
         assert_eq!(
@@ -920,8 +974,8 @@ mod tests {
         rows.extend(names.iter().map(|n| (*n, "Tweaks")));
         rows.push(("god-mode", "Debug"));
         let list = registry(&rows);
-        let l = resolve_layout(&list);
-        assert_eq!(l.tab_names(), TAB_ORDER);
+        let l = resolve_layout_with(&list, &DESKTOP_TAB_ORDER, &[]);
+        assert_eq!(l.tab_names(), DESKTOP_TAB_ORDER);
         let shown = keys(&list, &l, "Tweaks");
         assert_eq!(shown.len(), 650, "no heading: all in one run");
         assert!(
@@ -930,4 +984,130 @@ mod tests {
         );
         assert_eq!(l.ordered_settings().count(), list.len());
     }
+
+    #[test]
+    fn android_groups_the_same_148_rows_once_without_changing_the_registry() {
+        let list = registry(&KNOWN);
+        let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
+        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
+        assert_eq!(mobile.unnamed(), 0);
+        let mut indices: Vec<_> = mobile.ordered_settings().collect();
+        assert_eq!(indices.len(), 148);
+        indices.sort_unstable();
+        assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
+        let mut mobile_keys = std::collections::HashSet::new();
+        for section in MOBILE_SECTIONS {
+            for &key in section.keys {
+                assert!(mobile_keys.insert(key), "duplicate Android placement: {key}");
+                assert!(SECTIONS.iter().any(|s| s.keys.contains(&key)), "new or misspelled key: {key}");
+                let index = list.iter().position(|s| s.key == key).unwrap();
+                assert_eq!(mobile.placement_of(index), Some(section.placement));
+            }
+        }
+        assert_eq!(mobile_keys.len(), 44);
+        for (index, row) in list.iter().enumerate() {
+            if !mobile_keys.contains(row.key) {
+                assert_eq!(mobile.placement_of(index), resolve_desktop_layout(&list).placement_of(index));
+            }
+        }
+        assert_eq!(before, list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect::<Vec<_>>());
+        assert_eq!(resolve_desktop_layout(&list).tab_names(), DESKTOP_TAB_ORDER);
+    }
+
+    #[test]
+    fn android_mobile_sections_use_existing_visibility_search_and_hardware_routes() {
+        use crate::bindings::{Control, InputDevice};
+        use crate::settings_view::{self as view, ControlRow, Found, RowId, SettingsScope, ViewEntry, Visibility};
+        let list = registry(&KNOWN);
+        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        let at = |key| list.iter().position(|s| s.key == key).unwrap();
+        let empty = Found::default();
+        let touch = view::project(&mobile, &list, SettingsScope::Tab(MOBILE_TAB), Visibility::default(), &empty);
+        let keyboard_controls = view::project(&mobile, &list, SettingsScope::Tab(CONTROLS_TAB), Visibility::default(), &empty);
+        let pad = view::project(&mobile, &list, SettingsScope::Tab(CONTROLS_TAB),
+            Visibility { device: InputDevice::Controller, ..Default::default() }, &empty);
+        assert!(!keyboard_controls.iter().any(|e| matches!(e, ViewEntry::Heading(p) if p.heading == Some("Controller"))));
+        assert!(pad.iter().any(|e| matches!(e, ViewEntry::Heading(p) if p.heading == Some("Controller"))));
+        for &key in &CONTROLLER_KEYS {
+            let entry = ViewEntry::Row(RowId::Setting(at(key)));
+            assert!(!keyboard_controls.contains(&entry));
+            assert!(pad.contains(&entry));
+        }
+        let controls = view::project(&mobile, &list, SettingsScope::Tab(CONTROLS_TAB),
+            Visibility { device: InputDevice::Controller, ..Default::default() }, &empty);
+        assert!(controls.contains(&ViewEntry::Row(RowId::Control(ControlRow::Binding(Control::Jump, InputDevice::Controller)))));
+        let search = Found { search: view::search(&mobile, &list, "controller-ads-v1", |r| r.name()), changed: Vec::new() };
+        let projected = view::project(&mobile, &list, SettingsScope::Search, Visibility::default(), &search);
+        assert!(projected.contains(&ViewEntry::Row(RowId::Control(ControlRow::Device))), "hidden pad setting keeps native device-switch route");
+        assert!(!projected.contains(&ViewEntry::Row(RowId::Setting(at("controller-ads-v1")))));
+        let (scope, selected, _) = view::normalize(&mobile, &list, SettingsScope::Tab(CONTROLS_TAB),
+            Some(RowId::Setting(at("controller-ads-v1"))), Visibility::default(), &empty);
+        assert_eq!((scope, selected), (SettingsScope::Tab(CONTROLS_TAB), Some(RowId::Control(ControlRow::Device))));
+        for (key, heading) in [
+            ("touch-practice-v1", "Touch layout and guide"), ("touch-gyro-v1", "Gyroscope"),
+            ("touch-hotbar", "Inventory and quick access"), ("touch-dialogue", "Dialogue"),
+            ("menu-scale", "Interface size"), ("mobile-performance", "Performance and battery"),
+        ] {
+            assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at(key)))));
+            assert_eq!(mobile.placement_of(at(key)).unwrap().heading, Some(heading));
+        }
+        assert!(view::rail(&mobile).contains(&view::RailItem::Tab(MOBILE_TAB)));
+        assert_eq!(view::step_selectable(&touch, Some(RowId::Setting(at("touch-practice-v1"))), 1),
+            Some(RowId::Setting(at("touch-icon-family"))));
+    }
+
+    #[test]
+    fn mobile_row_identity_still_edits_the_registered_state_and_changed_list() {
+        use bevy::prelude::*;
+        use crate::settings::{self, SettingsFile};
+        use crate::settings_view::{self as view, Found, RowId, SettingsScope, Visibility};
+        #[derive(Resource, Default)]
+        struct Consent(bool);
+        let mut app = App::new();
+        app.init_resource::<Consent>().insert_resource(SettingsFile(None));
+        for (key, group) in KNOWN {
+            let mut setting = row(key, group);
+            if key == "mobile-thermal-auto" {
+                setting.get = |world| world.resource::<Consent>().0;
+                setting.set = |world, on| world.resource_mut::<Consent>().0 = on;
+            }
+            settings::add_setting(&mut app, setting);
+        }
+        let list = app.world().resource::<Settings>().list().to_vec();
+        let baseline = app.world().resource::<Settings>().values(app.world());
+        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        assert_eq!(app.world().resource::<Settings>().values(app.world()), baseline);
+        let original_index = app.world().resource::<Settings>().index("mobile-thermal-auto").unwrap();
+        let id = RowId::Setting(original_index);
+        let (scope, chosen, _) = view::normalize(&mobile, &list, SettingsScope::Tab("Display"),
+            Some(id), Visibility::default(), &Found::default());
+        assert_eq!((scope, chosen), (SettingsScope::Tab(MOBILE_TAB), Some(id)));
+        assert_eq!(settings::flip(app.world_mut(), original_index), Some(true));
+        assert!(app.world().resource::<Consent>().0);
+        let changed = settings::changed_rows(app.world(), &baseline);
+        assert_eq!(changed, [original_index]);
+        assert_eq!(view::changed(&mobile, &changed, |_| false), [id]);
+        let found = view::search(&mobile, &list, "mobile-thermal-auto", |r| r.name());
+        assert_eq!(found, [id]);
+        assert_eq!(view::listing(&mobile, &found)[0], view::ViewEntry::Heading(Placement {
+            tab: MOBILE_TAB, subgroup: None, heading: Some("Performance and battery"),
+        }));
+        assert_eq!(app.world().resource::<Settings>().list().iter().map(|s| (s.key, s.group)).collect::<Vec<_>>(),
+            list.iter().map(|s| (s.key, s.group)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn platform_profile_and_missing_optional_mobile_rows_keep_the_shared_page() {
+        let list = registry(&[("difficulty", "Gameplay"), ("touch-gyro-v1", "Controller"), ("odd", "Mods")]);
+        let expected = resolve_layout_with(&list, TAB_ORDER,
+            if cfg!(target_os = "android") { MOBILE_SECTIONS } else { &[] });
+        assert_eq!(resolve_layout(&list), expected);
+        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        assert_eq!(keys(&list, &mobile, MOBILE_TAB), ["[Gyroscope]", "touch-gyro-v1"]);
+        assert_eq!(mobile.tab_names().last(), Some(&"Mods"));
+        assert_eq!(mobile.unnamed(), 1);
+        assert!(mobile.tab_entries(MOBILE_TAB, |_| false).is_empty(), "no orphan headings");
+    }
+
 }

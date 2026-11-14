@@ -94,6 +94,9 @@ public final class DiagnosticsArchiveTest {
             + "INFO nvforever::world: its model did not load; drawn as the error marker (each reference of it)\n"
             + "refs_no_model=3 refs_error_marker=3\n"
             + "render: model_counts_v1 phase=WORLD transition=2 refs_no_model=3 refs_error_marker=2 skinned_meshes=7\n";
+        String admission = Files.readString(Path.of("android/tests/fixtures/render-admission-line.txt"), StandardCharsets.UTF_8).stripTrailing();
+        require(admission.matches("render: gpu_admission_v1(?: [a-z_]+=[0-9]+)+"), "admission fixture is fixed numeric fields only");
+        data += admission + "\n" + admission + " token=" + secret + "\n";
         Path original = logs.resolve(name("nvforever", 1));
         Files.writeString(original, data);
         Files.writeString(logs.resolve(name("events", 1)), "render: lifecycle ready\n");
@@ -130,6 +133,8 @@ public final class DiagnosticsArchiveTest {
             "specific model-failure and marker diagnostics survive with private paths removed");
         require(text.contains("render: model_counts_v1 phase=WORLD transition=2 refs_no_model=3 refs_error_marker=2 skinned_meshes=7\n"),
             "exact numeric loading-transition discriminator survives unchanged");
+        require(java.util.regex.Pattern.compile("(?m)^" + java.util.regex.Pattern.quote(admission) + "$").matcher(text).find(),
+            "exact anchored numeric GPU admission line survives existing filter unchanged");
         require(text.contains("source_revision=" + REVISION) && text.contains("event=ENGINE_START"),
             "strict build and restart identity retained");
         require(one.snapshotId.matches("[a-f0-9]{64}") && one.archiveSha256.matches("[a-f0-9]{64}"),

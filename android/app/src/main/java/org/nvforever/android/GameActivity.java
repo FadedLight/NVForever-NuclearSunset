@@ -13,6 +13,8 @@ import android.view.ViewTreeObserver;
 import java.util.concurrent.atomic.AtomicBoolean;
 /** Only the game lives in :game; native state is fresh for every save load. */
 public final class GameActivity extends NativeActivity {
+    /** APK debug flag, independent of the native library's Rust compilation profile. */
+    public String renderDiagnosticsBuildType() { return LanDiagnostics.available(this) ? "debug" : "release"; }
     private ControllerDevices controllers;
     private AndroidGyro gyro;
     private AndroidPerformance performance;

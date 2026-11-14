@@ -73,17 +73,21 @@ fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {
 type SplitResources<'w> = (Res<'w,Options>, Res<'w,SafeInsets>, Res<'w,TouchDialogue>);
 type SceneState<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::free_cam::FreeCam>>, Option<Res<'w,crate::control::PlayerControl>>, Option<Res<'w,crate::player::ViewDriven>>);
 type SpeakerSources<'w> = (Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::dialogue_look::SpeakerFace>>, Option<Res<'w,crate::phys::PhysState>>, Option<Res<'w,crate::sim::SimState>>);
+type ResolveQueries<'w,'s> = (
+    Query<'w,'s,&'static Window,With<PrimaryWindow>>,
+    Query<'w,'s,&'static Camera,With<PlayerCamera>>,
+    DefaultUiCamera<'w,'s>,
+    Query<'w,'s,Entity,(With<Camera>,With<IsDefaultUiCamera>)>,
+    Query<'w,'s,Entity,With<OwnedDefault>>,
+    Query<'w,'s,Entity,With<OverlayCamera>>,
+);
+type ResolveOutput<'w> = (ResMut<'w,DefaultPin>,ResMut<'w,Frame>,ResMut<'w,Target>);
 fn resolve(
     mut commands: Commands, (options,safe,touch): SplitResources<'_>,
     (state,paused,free,control,driven): SceneState<'_>, menu: Res<DialogueMenu>,
     (script,face,phys,sim): SpeakerSources<'_>,
-    windows: Query<&Window,With<PrimaryWindow>>,
-    world_cameras: Query<&Camera,With<PlayerCamera>>,
-    default_ui: DefaultUiCamera,
-    default_markers: Query<Entity,(With<Camera>,With<IsDefaultUiCamera>)>,
-    own_markers: Query<Entity,With<OwnedDefault>>,
-    mut pin: ResMut<DefaultPin>,
-    overlays: Query<Entity,With<OverlayCamera>>, mut frame: ResMut<Frame>, mut target: ResMut<Target>,
+    (windows,world_cameras,default_ui,default_markers,own_markers,overlays): ResolveQueries<'_,'_>,
+    (mut pin,mut frame,mut target): ResolveOutput<'_>,
 ) {
     let mut next = Frame::default();
     target.0 = None;
@@ -148,10 +152,11 @@ fn restore(owned: Owned, cameras: &mut Query<(Entity,&mut Camera,&mut Transform)
         if transform.rotation==owned.written_rotation { transform.rotation=owned.base_rotation; }
     }
 }
+type OverlayCameras<'w,'s> = Query<'w,'s,(Entity,&'static mut Camera),(With<OverlayCamera>,Without<PlayerCamera>)>;
 fn apply(frame: Res<Frame>, target: Res<Target>, windows: Query<&Window,With<PrimaryWindow>>,
     players: Query<Entity,With<PlayerCamera>>,
     mut cameras: Query<(Entity,&mut Camera,&mut Transform),Without<OverlayCamera>>,
-    mut overlays: Query<(Entity,&mut Camera),(With<OverlayCamera>,Without<PlayerCamera>)>,mut lease: ResMut<Lease>) {
+    mut overlays: OverlayCameras<'_,'_>,mut lease: ResMut<Lease>) {
     for (entity,mut camera) in &mut overlays { camera.is_active=frame.ui_camera==Some(entity); }
     let active = frame.world.zip(target.0).zip(windows.single().ok());
     let Some(((rect,point),window))=active else {

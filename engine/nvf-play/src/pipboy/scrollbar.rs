@@ -232,7 +232,7 @@ mod tests {
         let mut model=crate::menu::model::MenuModel::open_inventory(&mut sim.world).unwrap();
         model.apply(&mut sim.world,crate::menu::model::Command::SetCategory(Side::Player,Category::Aid));
         let mut scroll=ItemsScroll::default();assert_eq!(scroll.resolve(&model,&[40.0;12],200.0),0);
-        let mut pip=PipBoy::default();pip.phase=super::super::Phase::Up;pip.page=Page::Items;pip.tabs=[0,2,0];
+        let pip=PipBoy{phase:super::super::Phase::Up,page:Page::Items,tabs:[0,2,0],..default()};
         let mut app=App::new();app.add_plugins((MinimalPlugins,ScrollbarPlugin)).insert_resource(pip)
             .insert_resource(ActiveMenu(Some(model))).insert_resource(scroll).insert_resource(sim)
             .init_resource::<ButtonInput<MouseButton>>().init_resource::<ButtonInput<KeyCode>>();

@@ -106,10 +106,11 @@ pub fn native_region(piece:&crate::tiles::draw::Piece,kind:Kind)->Option<Region>
 
 /// The pointer coordinator calls this after projection and ordinary input admission.
 /// It shares the existing touch owner, geometry and output message route.
+type NavigationStrips<'w,'s> = Query<'w,'s,(Entity,&'static Strip,&'static ComputedNode,&'static UiGlobalTransform,Option<&'static bevy::ui::CalculatedClip>,Option<&'static InheritedVisibility>)>;
 #[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct Navigation<'w,'s> {
+pub(crate) struct Navigation<'w,'s> {
     state:Option<ResMut<'w,Swipe>>, options:Option<Res<'w,Options>>,
-    nodes:Query<'w,'s,(Entity,&'static Strip,&'static ComputedNode,&'static UiGlobalTransform,Option<&'static bevy::ui::CalculatedClip>,Option<&'static InheritedVisibility>)>,
+    nodes:NavigationStrips<'w,'s>,
 }
 impl Navigation<'_,'_> {
     pub(super) fn cancel(&mut self) {if let Some(state)=self.state.as_deref_mut() {state.cancel();}}

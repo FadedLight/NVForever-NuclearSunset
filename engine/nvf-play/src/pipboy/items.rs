@@ -476,6 +476,8 @@ fn on_row_click(
     }
 }
 
+type ItemsDrawState<'w, 's> = (Res<'w, PipBoy>, Local<'s, String>, Local<'s, Option<crate::pad::Labels>>, Option<ResMut<'w, super::scrollbar::ItemsScroll>>);
+
 /// Fill the ITEMS page's body when it is new or the inventory changed.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
@@ -494,7 +496,7 @@ pub fn draw(
     mut forms: Local<Option<super::stats::read::Forms>>,
     (repair, modding, mut script): (Res<super::repair::PipRepair>, Res<super::item_mod::PipItemMod>, Option<ResMut<crate::script::ScriptState>>),
     (hold, hotkeys): (Res<HotkeyHold>, Res<Hotkeys>),
-    (pip, mut logged, mut drawn_with, mut scroll): (Res<PipBoy>, Local<String>, Local<Option<crate::pad::Labels>>, Option<ResMut<super::scrollbar::ItemsScroll>>),
+    (pip, mut logged, mut drawn_with, mut scroll): ItemsDrawState<'_, '_>,
 ) {
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
     let _canvas = crate::interface::original_units();

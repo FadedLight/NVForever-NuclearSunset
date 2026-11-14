@@ -131,7 +131,7 @@ impl TouchActivation {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-pub(super) struct Admission<'w> {
+pub(crate) struct Admission<'w> {
     bindings: Option<Res<'w, crate::bindings::Bindings>>,
     gate: Option<Res<'w, crate::pad::PlatformInputGate>>,
     switching: Option<Res<'w, crate::pad::TouchDeviceSwitch>>,

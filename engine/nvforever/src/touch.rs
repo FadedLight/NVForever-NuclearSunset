@@ -3195,8 +3195,8 @@ mod tests {
                 }
             }
             app.update();
-            assert!(hotbar::tray_open_collision_fixture(app.world()));
-            assert!(app.world().resource::<TouchState>().ui_capture);
+            assert!(hotbar::tray_open_collision_fixture(app.world()),"case{action}: opening-batch contact dismissed queued tray");
+            assert!(app.world().resource::<TouchState>().ui_capture,"case{action}: opening batch lost UI ownership");
             let control=app.world().resource::<nvf_play::control::PlayerControl>();
             assert!(!control.trigger && !control.auto_move,"case{action}: queued capture leaked a touch action");
             assert_eq!(app.world().resource::<VatsPresses>().0,0,"case{action}: VATS history leaked");
@@ -3418,4 +3418,91 @@ mod tests {
         assert_eq!(drawer_visibility(&mut app), Visibility::Inherited, "fresh gameplay restores the visible handle");
     }
 
+
+    #[test]
+    fn utility_request_quarantines_opening_batch_and_old_release_but_fresh_outside_tap_closes() {
+        let size=Vec2::new(640.,360.);
+        let (mut app,w)=mixed_hotbar_phone_scene(size,"classic",4);
+        let slot=hotbar::test_slot_center(app.world(),0);
+        let mut hotkeys=bevy::ecs::message::MessageCursor::<nvf_play::weapon_wheel::TouchHotkey>::default();
+        touch(&mut app,w,860,TouchPhase::Started,slot.x,slot.y);app.update();
+        raw_key(&mut app,w,KeyCode::F12,ButtonState::Pressed);
+        app.world_mut().write_message(hotbar::UtilityTrayRequest(true));
+        touch(&mut app,w,860,TouchPhase::Ended,slot.x,slot.y);
+        touch(&mut app,w,861,TouchPhase::Started,20.,20.); // Opening-batch outside contact.
+        app.update();
+        assert!(hotbar::tray_open_collision_fixture(app.world()),"opening events must not dismiss the new tray");
+        assert!(app.world().resource::<TouchState>().ui_capture);
+        assert!(hotkeys.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).next().is_none(),"old held slot release cannot use an item after request admission");
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+        assert!(app.world().resource::<Layout>().editor.is_none());
+        touch(&mut app,w,861,TouchPhase::Ended,20.,20.);app.update();
+        assert!(hotbar::tray_open_collision_fixture(app.world()),"release of the quarantined outside contact cannot close next frame");
+        touch(&mut app,w,862,TouchPhase::Started,20.,20.);
+        touch(&mut app,w,862,TouchPhase::Ended,20.,20.);app.update();
+        assert!(!hotbar::tray_open_collision_fixture(app.world()),"a fresh later outside tap must still dismiss");
+        assert!(app.world().resource::<TouchState>().ui_capture,"closing batch still owns its tail");
+        assert!(app.world().resource::<Layout>().editor.is_none(),"outside dismissal cannot also open the gear control");
+        app.update();app.update();
+        assert!(!app.world().resource::<TouchState>().ui_capture);
+        touch(&mut app,w,863,TouchPhase::Started,slot.x,slot.y);
+        touch(&mut app,w,863,TouchPhase::Ended,slot.x,slot.y);app.update();
+        assert_eq!(hotkeys.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).map(|m|m.0).collect::<Vec<_>>(),[0],"a new deliberate slot tap works after closing drain");
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    }
+
+    #[test]
+    fn opening_request_retires_actual_move_and_ignored_release_with_anchor_rollback() {
+        let (mut app,w)=mixed_hotbar_phone_scene(Vec2::new(640.,360.),"classic",4);
+        let anchor=hotbar::test_anchor(app.world());
+        let slot=hotbar::test_slot_center(app.world(),0);
+        touch(&mut app,w,870,TouchPhase::Started,slot.x,slot.y);app.update();
+        touch(&mut app,w,871,TouchPhase::Started,slot.x,slot.y);app.update(); // Ignored second owner.
+        for _ in 0..14 {app.update();}
+        touch(&mut app,w,870,TouchPhase::Ended,slot.x,slot.y);app.update();
+        let button={
+            let world=app.world_mut();let mut query=world.query::<(&Text,&ChildOf)>();
+            let parent=query.iter(world).find(|(t,_)|t.0=="Move bar").unwrap().1.parent();
+            let n=world.get::<Node>(parent).unwrap();
+            let (Val::Px(x),Val::Px(y),Val::Px(width),Val::Px(height))=(n.left,n.top,n.width,n.height) else {panic!("actual context button must retain pixel bounds")};
+            Vec2::new(x+width*0.5,y+height*0.5)
+        };
+        touch(&mut app,w,872,TouchPhase::Started,button.x,button.y);
+        touch(&mut app,w,872,TouchPhase::Ended,button.x,button.y);app.update();
+        {let world=app.world_mut();let mut text=world.query::<&Text>();assert!(text.iter(world).any(|t|t.0=="Drag the bar to reposition it."),"actual context Move command must execute");}
+        fn painted_slot(app:&mut App)->Vec2 {
+            mixed_hotbar_tiles(app).into_iter().find(|(label,_)|label.starts_with("1 ")).unwrap().1.center()
+        }
+        let original_rect_center=painted_slot(&mut app);
+        let slot=hotbar::test_slot_center(app.world(),0);
+        touch(&mut app,w,873,TouchPhase::Started,slot.x,slot.y);app.update();
+        let mut moved=slot;
+        for candidate in [Vec2::new(500.,150.),Vec2::new(200.,80.),Vec2::new(400.,100.),Vec2::new(250.,220.)] {
+            moved=candidate;
+            touch(&mut app,w,873,TouchPhase::Moved,moved.x,moved.y);app.update();app.update();
+            if painted_slot(&mut app)!=original_rect_center {break;}
+        }
+        assert_ne!(painted_slot(&mut app),original_rect_center,"fixture must visibly relocate the responsive bar before canceling");
+        assert_ne!(hotbar::test_anchor(app.world()),anchor,"fixture must change the live drag anchor");
+        assert!(!hotbar::test_ui_owners_retired(app.world()));
+        app.world_mut().write_message(hotbar::UtilityTrayRequest(true));
+        touch(&mut app,w,873,TouchPhase::Ended,moved.x,moved.y);
+        touch(&mut app,w,871,TouchPhase::Ended,slot.x,slot.y);app.update();
+        assert!(hotbar::tray_open_collision_fixture(app.world()));
+        assert!(hotbar::test_ui_owners_retired(app.world()),"opening quarantine must retire move, context and ignored owners whose ends it consumed");
+        assert_eq!(hotbar::test_anchor(app.world()),anchor,"canceled drag restores original anchor instead of persisting it");
+        assert_eq!(painted_slot(&mut app),original_rect_center,"opening frame must already draw the restored placement, not the dragged cache");
+        assert_eq!(hotbar::test_slot_center(app.world(),0),original_rect_center,"same-frame admission geometry follows restored visible rectangle");
+        touch(&mut app,w,874,TouchPhase::Started,20.,20.);
+        touch(&mut app,w,874,TouchPhase::Ended,20.,20.);app.update();
+        assert!(!hotbar::tray_open_collision_fixture(app.world()));
+        app.update();app.update();
+        assert!(!app.world().resource::<TouchState>().ui_capture,"no hidden moving owner may keep capture alive after fresh dismissal");
+        let slot=hotbar::test_slot_center(app.world(),0);
+        let mut reader=bevy::ecs::message::MessageCursor::<nvf_play::weapon_wheel::TouchHotkey>::default();
+        assert!(reader.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).next().is_none());
+        touch(&mut app,w,875,TouchPhase::Started,slot.x,slot.y);
+        touch(&mut app,w,875,TouchPhase::Ended,slot.x,slot.y);app.update();
+        assert_eq!(reader.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).map(|m|m.0).collect::<Vec<_>>(),[0]);
+    }
 }

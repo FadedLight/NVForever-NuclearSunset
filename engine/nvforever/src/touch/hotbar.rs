@@ -130,6 +130,7 @@ struct Bar {
     resolved: Option<packing::Resolved>,
     occupied: Vec<packing::Occupied>,
     capture_drain: u8,
+    request_opening: bool,
     message: String,
 }
 impl Bar {
@@ -167,6 +168,7 @@ impl Bar {
         }
         self.moving = false;
         self.capture_drain = 0;
+        self.request_opening = false;
     }
 }
 #[derive(Clone, PartialEq)]
@@ -355,6 +357,24 @@ impl Bridge<'_, '_> {
     pub fn apply_tray_request(&mut self, open: bool) -> bool {
         if open && (self.bar.mode == 0 || !self.prefs.tray_available()) { return false; }
         if self.bar.tray_open != open {
+            if open {
+                // This request owns the opening batch, including old held releases.
+                // A contact in that batch cannot select or dismiss the new UI.
+                self.bar.gesture.cancel();
+                self.bar.outcomes.clear();
+                self.bar.ignored.clear();
+                self.bar.context = None;
+                self.bar.move_id = None;
+                if let Some(original) = self.bar.move_original.take() {
+                    self.bar.placement.center = original;
+                    // prepare may have fitted the live drag before this request.
+                    // Geometry must resolve the restored anchor in this same frame.
+                    self.bar.fitting_key = None;
+                    self.bar.resolved = None;
+                }
+                self.bar.moving = false;
+                self.bar.request_opening = true;
+            }
             self.bar.tray_open = open;
             self.bar.capture_drain = 2;
         }
@@ -373,6 +393,7 @@ impl Bridge<'_, '_> {
         gyro_enabled: bool,
         extra: &[(Rect, f32)],
     ) {
+        self.bar.request_opening = false;
         let inventory = self
             .active
             .as_ref()
@@ -499,6 +520,7 @@ impl Bridge<'_, '_> {
     }
     pub fn event(&mut self, event: &TouchInput, unclaimed: bool) -> bool {
         self.publish_capture();
+        if self.bar.request_opening { return true; }
         let consumed = self.route_event(event, unclaimed);
         self.publish_capture();
         consumed
@@ -1130,6 +1152,15 @@ pub(super) fn reset_collision_fixture(world: &mut World) {
 #[cfg(test)]
 pub(super) fn tray_open_collision_fixture(world: &World) -> bool {
     world.resource::<Bar>().tray_open
+}
+
+#[cfg(test)]
+pub(super) fn test_anchor(world: &World) -> Vec2 { world.resource::<Bar>().placement.center }
+#[cfg(test)]
+pub(super) fn test_ui_owners_retired(world: &World) -> bool {
+    let bar = world.resource::<Bar>();
+    !bar.moving && bar.move_id.is_none() && bar.move_original.is_none()
+        && bar.context.is_none() && bar.ignored.is_empty() && !bar.gesture.busy()
 }
 
 #[cfg(test)]

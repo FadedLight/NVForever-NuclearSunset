@@ -157,6 +157,7 @@ pub const SECTIONS: &[Section] = &[
             "head-bob",
             "weapon-lower",
             "field-of-view",
+            "viewmodel-field-of-view",
         ],
     ),
     section(
@@ -581,7 +582,7 @@ mod tests {
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with.
-    const KNOWN: [(&str, &str); 148] = [
+    const KNOWN: [(&str, &str); 149] = [
         ("touch-practice-v1", "Controller"),
         ("touch-hotbar", "Controls"),
         ("touch-hotbar-slots", "Controls"),
@@ -669,6 +670,7 @@ mod tests {
         ("distant-lod", "Display"),
         ("grade", "Display"),
         ("field-of-view", "Display"),
+        ("viewmodel-field-of-view", "Display"),
         ("ui-scale", "Display"),
         ("menu-scale", "Display"),
         ("hud-health-size-v1", "Display"),
@@ -986,14 +988,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_148_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_149_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 148);
+        assert_eq!(indices.len(), 149);
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();

@@ -91,7 +91,7 @@ impl TouchActivation {
         if self.disarmed || self.point.is_none() {
             return;
         }
-        let Some(target) = target else {
+        let Some(target) = target.filter(Targeted::prompted) else {
             self.disarmed = true;
             self.target = None;
             self.held = 0.;

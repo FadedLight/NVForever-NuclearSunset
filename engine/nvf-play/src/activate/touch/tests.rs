@@ -105,6 +105,42 @@ fn count(app: &App) -> i32 {
 }
 
 #[test]
+fn upstream_hidden_target_policy_cancels_touch_confirmation_until_a_fresh_contact() {
+    let target = |action| Targeted {
+        form_id: 0xF305,
+        name: "Authored target".into(),
+        action,
+        distance: 40.0,
+        source: crate::activate::pick::Source::Bounds,
+        crime: false,
+        empty: false,
+    };
+    let point = ScreenPoint { window: Entity::PLACEHOLDER, id: 801, position: Vec2::splat(100.0) };
+    for mode in [Confirmation::Tap, Confirmation::Hold] {
+        let mut touch = TouchActivation::default();
+        touch.configure(mode);
+        touch.begin(point, None);
+        touch.publish(Some(target(crate::activate::Action::Hostile)), 0.1);
+        touch.end(true);
+        for _ in 0..8 {
+            touch.publish(Some(target(crate::activate::Action::Talk)), 0.1);
+            assert!(touch.target().is_none());
+            assert!(touch.ready.is_none());
+            assert_eq!(touch.progress(), 0.0);
+        }
+        touch.begin(ScreenPoint { id: 802, ..point }, None);
+        touch.publish(Some(target(crate::activate::Action::Talk)), 0.1);
+        if mode == Confirmation::Tap {
+            touch.end(true);
+            touch.publish(Some(target(crate::activate::Action::Talk)), 0.1);
+        } else {
+            for _ in 0..6 { touch.publish(Some(target(crate::activate::Action::Talk)), 0.1); }
+        }
+        assert_eq!(touch.ready.as_ref().map(|t| t.form_id), Some(0xF305));
+    }
+}
+
+#[test]
 fn off_reticle_screen_pick_takes_actual_stack_once_without_fire_or_native_target_replacement() {
     let (mut app, w, c) = scene(&[], [0., 0., 100.], [1., 0., 0.]);
     visual(&mut app, 0x301, [80., 20., 100.]);

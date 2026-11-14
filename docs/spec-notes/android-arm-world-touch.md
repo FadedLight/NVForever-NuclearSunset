@@ -51,6 +51,11 @@ OnActivate behavior. Native crosshair/script-sense state remains the crosshair's
 the touch candidate is separate. No new attack, sprint, range or script permission
 is introduced.
 
+[documented: activate.rs::Targeted::prompted, merged main #2570]
+The shared hidden-target policy also applies to touch prompts. A living hostile
+actor cannot acquire an interaction label, hold ring or confirmed touch action;
+once rejected, that contact must end before a fresh legal target is admitted.
+
 [hypothesis: qualification plan]
 Authored App/event tests must exercise real Animator sampling and native inventory
 and activation effects, including forward/reverse/settle/cancel/model replacement,

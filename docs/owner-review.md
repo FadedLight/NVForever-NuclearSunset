@@ -452,6 +452,27 @@ the spec it links to.
     (item 5, second part) is not built yet.
     ([pickpocket §5](spec-notes/pickpocket.md))
 
+71. **Armour only ever worn has no look on the ground (#2439).** The two floating
+    backpacks at the Fort were not the slaves' packs. They are two placed references of
+    the Slave Backpack armour (0x0013732C and 0x0013732D), 565 and 913 units up with
+    nothing under them; the record has no ground model, so its worn model was drawn there.
+    Ours now: Non-Playable armour without a ground model is not drawn or collided as a
+    world object (the player can never pick it up). It is still drawn on the slaves who
+    wear it. Playable armour without a ground model still lies as its worn model. If you
+    would rather see these two packs, they would have to be dropped to the ground (they
+    have no collision of their own). Observer check 142 asks what the original shows.
+    ([simulation §3 Item models](spec-notes/simulation.md))
+72. **A sprung trap stays sprung when drawn again (#2420).** Ranger Station Charlie's
+    door and tripwire come in with an enable parent the station's trigger script turns
+    on. The door was drawn without its door animation, so it looked shut while it was
+    open and its collision had swung away; it now opens and closes as a door. The
+    tripwire went off once only, but each cell load drew it armed again: its script asks
+    an "Open" sequence its model does not have, and that was what it showed. Ours now
+    forgets a group the model lacks and shows the one before (the sprung wire). We did
+    not see the wire fire twice or a mine re-arm in our runs; if you still see fresh
+    explosions on a second pass, note where you stand (the frag mines at the entrance
+    and the bottle-cap mine behind the door are separate placed mines). Observer check
+    143. ([doors §2](spec-notes/doors.md), [activators §5](spec-notes/activators.md))
 61. **Holstered fidgets come rarer than in the original (#2026).** NPCs standing with the
     weapon away now bite their nails, smoke and so on, by the idle tree's factions and
     chances. The tree is asked every 2 s, the drawn-weapon fidgets' pace

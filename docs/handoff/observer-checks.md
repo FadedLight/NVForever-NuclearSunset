@@ -2174,3 +2174,25 @@ heading 75) with NVFExtProbe.esp loaded, as the jip-probes sets run.
      dirt and on concrete, first and third person, and record which SOUN records play
      at each footfall (the sound log): does `FSTArmorPowerWalkL`/`R` play, instead of
      or beside the ground's step, and does anything play for the run rustle?
+
+## Added 2026-11-14 (the Fort's placed slave backpacks, #2439)
+
+142. **Are the Fort's two placed slave backpacks drawn, and where?** (P3; #2439,
+     simulation.md §3.) References 0x0013732C and 0x0013732D (NVSlaveBackpack, ARMO
+     0x00127C6A: Non-Playable, no ground model MOD2) are placed at (92047, 45622, 8260)
+     and (92159, 45555, 8608), by the blacksmith's grinding wheel, 565 and 913 units above
+     the ground [observed: the data]. Ours draws neither since #2439. To check: stand at
+     (89242, 46819, 8095) at 17:00, look south-east over the camp; are two backpacks in
+     the sky, on the ground by the grinding wheel, or nowhere? `prid 0013732C` then
+     `getpos z` and `getdisabled`.
+
+## Added 2026-11-14 (Ranger Station Charlie's door and tripwire, #2420)
+
+143. **What does a sprung tripwire look like after a cell load, and does it fire again?**
+     (P3; #2420, activators.md §5.) In RSCharlieNVDESTROYED (after the station's trigger
+     has enabled CharlieEnableParentREF 0x00126F4E), walk through the tripwire 0x00084246
+     behind the left door (OffDoorSmR02a 0x000CD068), leave the cell and come back. Is the
+     wire shown sprung or whole, does it fire its shotgun (0x00084247) again, and does
+     anything explode on a second pass (the bottle-cap mine 0x0008424C, the frag mines
+     0x00084257 and 0x00084258 by the entrance)? Ours since #2420: shown sprung, fires
+     once.

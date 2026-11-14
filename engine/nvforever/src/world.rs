@@ -1206,6 +1206,13 @@ pub fn spawn_model(
     hide: &[String],
     stats: &mut StreamStats,
 ) {
+    // Armour only ever worn (Non-Playable, no world model): its biped model would hang in
+    // the air at the reference (the Fort's slave backpacks, #2439; `fnv_world::placed::worn_only`).
+    if base.worn_only {
+        stats.refs_no_model += 1;
+        info!("world: 0x{r:08X} {}: armour only ever worn (Non-Playable, no world model), not drawn on its own", base.edid.as_deref().unwrap_or("?"));
+        return;
+    }
     let Some(path) = base.world_model_path() else {
         stats.refs_no_model += 1;
         return;

@@ -705,7 +705,7 @@ mod tests {
             assert!(request_entities(&mut app).is_empty(), "completion retires the actual request entity");
             let px = app.world().resource::<WaterPixels>();
             assert_eq!(px.last, Some(value));
-            let expected = match value { 10 => false, _ => true };
+            let expected = value != 10;
             assert_eq!(px.may_be_drawn(0.0), expected);
         }
         app.update();

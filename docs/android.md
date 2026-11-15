@@ -126,7 +126,7 @@ The current development source adds direct dragging and two-finger pinch on the
 Pip-Boy's world and local maps. Fast travel keeps its usual eligibility checks and
 confirmation.
 
-Gameplay and Mobile > Inventory menus offer **Touch barter menu** and **Touch repair
+Gameplay and Mobile > Inventory menus offer **Touch barter controls** and **Touch repair
 and weapon mods**. In barter, tap a row to select it, choose a quantity for the
 basket, review the prices and caps, then Accept. Cancel preserves carried items and
 caps. Repair and weapon-mod lists also separate selection from confirmation;

@@ -175,6 +175,19 @@ root routing cases passed. Strict engine lint and 3,142 core tests passed, with
 five existing core tests ignored. The aggregate failed: native-build success
 cannot qualify this APK. Both fixture corrections still require actual execution.
 
+[qualification] The normal integration with main `af16a793` retains those two
+fixture corrections and imports the upstream BC5 texture roles, source-alpha
+handling, terrain-height-blend option, script/VFS/audio and soft-lock watcher
+changes. Android numeric admission remains after real material selection and
+before mesh bounds/handles; checked-image allocation guards remain in place.
+The settings union has 162 unique rows, adding the terrain graphics row while
+retaining all 54 Android placements and the single Grass fires World row. Static
+comparison retains all 1,524 Main scenario records plus `android-start-options`
+and both parents' relative order; it does not execute them. This integrated source
+requires fresh strict/runtime, native and final packaging checks. The terrain
+option remains off in both presets; DLSS download remains Windows-only. No
+Android pixels, performance, save/Doc exit or loading-cure result is inferred.
+
 ## Mobile performance
 
 Android's Mobile > Performance and battery (Display > Performance on desktop)

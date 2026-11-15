@@ -162,6 +162,7 @@ pub const SECTIONS: &[Section] = &[
             "touch-pipboy-size-v1", "touch-pipboy-tab-swipes",
         ],
     ),
+    // After the tab's other headings, so the rows above keep their places (#2662).
     section("Gameplay", Some("World"), &["grass-fire"]),
     section(
         "Display",
@@ -290,6 +291,7 @@ pub const SECTIONS: &[Section] = &[
             "neon-glow",
             "sharpen",
             "anisotropic",
+            "terrain-height-blend",
             "light-shafts",
             "water-reflections",
             "water-mirror",
@@ -590,8 +592,9 @@ mod tests {
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with, plus main da13f4f8a's grass-fire row (#2567), the viewmodel
-    /// field of view and menu scale rows, and main 6b29ee76b's Physics rate row.
-    const KNOWN: [(&str, &str); 161] = [
+    /// field of view and menu scale rows, main 6b29ee76b's Physics rate row, and
+    /// the terrain height blending row from main af16a793f.
+    const KNOWN: [(&str, &str); 162] = [
         ("touch-barter-v1", "Gameplay"),
         ("touch-maintenance-v1", "Gameplay"),
         ("touch-practice-v1", "Controller"),
@@ -738,6 +741,7 @@ mod tests {
         ("neon-glow", "Graphics"),
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
+        ("terrain-height-blend", "Graphics"),
         ("light-shafts", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-mirror", "Graphics"),
@@ -813,6 +817,7 @@ mod tests {
             ]
         );
         let gameplay = keys(&list, &l, "Gameplay");
+        assert_eq!(gameplay[gameplay.len() - 2..], ["[World]", "grass-fire"]);
         let dialogue = gameplay.iter().position(|k| k == "[Dialogue]").unwrap();
         assert_eq!(&gameplay[dialogue..dialogue+12], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
             "dialogue-look", "dialogue-recentre", "dialogue-zoom", "lip-sync", "touch-dialogue",
@@ -896,6 +901,7 @@ mod tests {
         assert_eq!(at("sky-clock"), "Graphics > World");
         assert_eq!(at("quality"), "Graphics > Quality");
         assert_eq!(at("enhanced"), "Graphics > Picture");
+        assert_eq!(at("terrain-height-blend"), "Graphics > Picture", "beside the texture filtering (#2550)");
         assert_eq!(
             keys(&list, &l, "Graphics")[..4],
             ["[Quality]", "quality", "[Picture]", "enhanced"],
@@ -1014,14 +1020,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_161_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_registered_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 161);
+        assert_eq!(indices.len(), KNOWN.len());
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();

@@ -44,7 +44,8 @@ final class LanDiagnostics {
         return instance;
     }
     static boolean available(Context context) {
-        return (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        return BuildConfig.NVF_DIAGNOSTICS
+            && (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
     private LanDiagnostics(android.app.Application context) {
         this.context = context;

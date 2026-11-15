@@ -24,15 +24,20 @@ const IDLE_DETECTION_FRAMES: u8 = 8;
 
 #[derive(Resource, Clone, Copy)]
 struct Gate(bool);
-fn debug_metadata(value: Option<&str>) -> bool { value == Some("debug") }
+fn diagnostics_metadata(build_type: Option<&str>, requested: Option<&str>) -> bool {
+    build_type == Some("debug") && requested == Some("enabled")
+}
 fn enabled() -> bool {
     #[cfg(target_os = "android")]
     {
-        static DEBUG_APK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *DEBUG_APK.get_or_init(|| debug_metadata(crate::android::activity_string("renderDiagnosticsBuildType", None).ok().as_deref()))
+        static DIAGNOSTICS_APK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *DIAGNOSTICS_APK.get_or_init(|| diagnostics_metadata(
+            crate::android::activity_string("renderDiagnosticsBuildType", None).ok().as_deref(),
+            crate::android::activity_string("renderDiagnosticsUi", None).ok().as_deref(),
+        ))
     }
     #[cfg(not(target_os = "android"))]
-    { debug_metadata(None) }
+    { diagnostics_metadata(None, None) }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Trigger { Load = 1, Resume = 2, NewSkin = 3 }
@@ -102,7 +107,7 @@ impl Plugin for AndroidRenderAdmissionPlugin {
             .add_message::<AppLifecycle>().add_systems(Last, watch);
     }
     fn finish(&self, app: &mut App) {
-        // APK debug authority is independent of the Rust release build profile.
+        // Explicit diagnostics request AND APK debug authority, independent of Rust optimization.
         if !app.world().resource::<Gate>().0 { return; }
         // Installed before DefaultPlugins; the render app exists only after plugin builds.
         if let Some(render) = app.get_sub_app_mut(RenderApp) {

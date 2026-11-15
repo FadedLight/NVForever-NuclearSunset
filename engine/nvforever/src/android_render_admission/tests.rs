@@ -29,9 +29,12 @@ fn spawn(app: &mut App, skin: bool, visible: bool) -> Entity {
 }
 #[test]
 fn apk_debug_gate_is_exact_and_independent_of_native_release_profile() {
-    assert!(debug_metadata(Some("debug")));
+    assert!(diagnostics_metadata(Some("debug"), Some("enabled")));
     for value in [None, Some("release"), Some("DEBUG"), Some("debug\n"), Some("")] {
-        assert!(!debug_metadata(value));
+        assert!(!diagnostics_metadata(value, Some("enabled")));
+    }
+    for value in [None, Some("disabled"), Some("ENABLED"), Some("enabled\n"), Some("")] {
+        assert!(!diagnostics_metadata(Some("debug"), value));
     }
     let mut app = app();
     spawn(&mut app, true, true);

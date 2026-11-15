@@ -75,6 +75,7 @@ public final class LauncherActivity extends Activity {
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); }
     private void showDiagnostics() { showDiagnostics(null, null); }
     private void showDiagnostics(String importedEndpoint, String importedToken) {
+        if (!LanDiagnostics.available(this)) return;
         LanDiagnostics support = LanDiagnostics.launcher(this);
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
         int padding = (int)(16 * getResources().getDisplayMetrics().density);
@@ -134,6 +135,7 @@ public final class LauncherActivity extends Activity {
     }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if ((request == EXPORT_LOGS || request == PICK_LOG_PAIRING) && !LanDiagnostics.available(this)) return;
         if (request == EXPORT_LOGS) {
             if (result == RESULT_OK && data != null && data.getData() != null) {
                 Uri destination = data.getData();

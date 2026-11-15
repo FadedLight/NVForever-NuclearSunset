@@ -52,6 +52,7 @@ jobs:
         shell: bash
         run: |
           python3 -m unittest discover -s tools/android/tests
+          "$JAVA_HOME/bin/java" -Djava.awt.headless=true tools/android/LauncherIcons.java --check
           mkdir -p "$RUNNER_TEMP/java-tests"
           "$JAVA_HOME/bin/javac" -d "$RUNNER_TEMP/java-tests" android/app/src/main/java/org/nvforever/android/InstallConfig.java android/app/src/test/java/org/nvforever/android/InstallConfigTest.java
           "$JAVA_HOME/bin/java" -cp "$RUNNER_TEMP/java-tests" org.nvforever.android.InstallConfigTest
@@ -82,11 +83,11 @@ jobs:
         run: cargo test --manifest-path tools/android/skinning-check/Cargo.toml --target-dir target-android-cpu --locked --jobs 6
       - name: Build the signed development APK
         shell: bash
-        run: python3 tools/android/build.py --jobs 2
+        run: python3 tools/android/build.py --jobs 2 --diagnostics
       - name: Android lint and signature
         shell: bash
         run: |
-          gradle -p android --no-daemon --max-workers=2 :app:lintDebug
+          gradle -p android --no-daemon --max-workers=2 -PnvfDiagnostics=true :app:lintDebug
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
           python3 tools/android/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk > android-apk-verification.json
       - uses: actions/upload-artifact@v7

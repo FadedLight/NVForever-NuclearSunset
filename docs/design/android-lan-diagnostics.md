@@ -5,7 +5,12 @@ R5 crash loading a save created on the phone. It does not establish that crash's
 No save conversion, deletion, automatic new game, or game-data upload is involved.
 
 The launcher offers **LAN test logs**, off by default. The user supplies the paired PC's
-private IPv4 upload URL and a masked session token. Only debuggable builds expose the UI;
+private IPv4 upload URL and a masked session token. Only debuggable builds explicitly
+opted in with `-PnvfDiagnostics=true` expose the UI; the default build omits it.
+The flag also gates related pairing/export entry points and the native admission
+observer. Disabling it retains existing consent, pending archives and local crash logs;
+enabling it does not itself grant upload consent. This is independent of Rust optimization.
+Android's actual debug flag is still reported separately to native consumers;
 the INTERNET permission and cleartext network configuration exist in the debug source
 set. Release builds receive neither. The transport further restricts requests to literal
 RFC1918 IPv4 HTTP endpoints at `/api/v1/log-bundles`, with no user information, queries,

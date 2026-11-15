@@ -14,7 +14,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Only the game lives in :game; native state is fresh for every save load. */
 public final class GameActivity extends NativeActivity {
     /** APK debug flag, independent of the native library's Rust compilation profile. */
-    public String renderDiagnosticsBuildType() { return LanDiagnostics.available(this) ? "debug" : "release"; }
+    public String renderDiagnosticsBuildType() {
+        return (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 ? "debug" : "release";
+    }
+    public String renderDiagnosticsUi() { return BuildConfig.NVF_DIAGNOSTICS ? "enabled" : "disabled"; }
     private ControllerDevices controllers;
     private AndroidGyro gyro;
     private AndroidPerformance performance;

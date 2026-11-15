@@ -23,6 +23,20 @@ The final command prints the debug APK path. This is a development signing key, 
 an official release signature. A release distribution needs its own protected signing
 configuration and device qualification.
 
+Diagnostics controls are omitted by default. For an opt-in development test APK use
+`python tools/android/build.py --diagnostics`; direct Gradle builds use
+`-PnvfDiagnostics=true` (only `true` and `false` are accepted). The hosted test APK
+explicitly enables this option. LAN support additionally requires an Android
+debuggable build and the user's existing pairing/upload consent. Disabling the option
+does not erase pairing, pending reports, saves or local engine crash logs. This flag
+does not change Rust optimization, package identity or signing configuration.
+
+Android launcher icons derive from the canonical NVForever artwork. To regenerate
+them, run `java -Djava.awt.headless=true tools/android/LauncherIcons.java` from the
+repository root; `--check` checks the tracked pixels without rewriting them.
+Legacy density variants, adaptive foreground/background and Android 13 monochrome
+resources share the existing brand. Physical launcher appearance remains to be checked.
+
 The helper stages only Git-tracked JSON/YAML/TOML in this repository's schemas and lang
 folders. Do not add game files. Install the generated APK using Android's package installer
 or `adb install -r <apk>`, then use **Import game folder**. Select a folder copied from your

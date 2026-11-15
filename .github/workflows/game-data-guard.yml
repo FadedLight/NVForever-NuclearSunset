@@ -54,6 +54,21 @@ jobs:
             ':(icase)*.tiff' ':(icase)*.hdr' ':(icase)*.exr' ':(icase)*.ico' \
             ':(exclude)engine/nvforever/assets/icon.png' \
             ':(exclude)engine/nvforever/assets/nvforever.ico' \
+            ':(exclude)android/app/src/main/res/mipmap-mdpi/ic_launcher.png' \
+            ':(exclude)android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png' \
+            ':(exclude)android/app/src/main/res/mipmap-mdpi/ic_launcher_monochrome.png' \
+            ':(exclude)android/app/src/main/res/mipmap-hdpi/ic_launcher.png' \
+            ':(exclude)android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png' \
+            ':(exclude)android/app/src/main/res/mipmap-hdpi/ic_launcher_monochrome.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xhdpi/ic_launcher.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xhdpi/ic_launcher_monochrome.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxhdpi/ic_launcher_monochrome.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png' \
+            ':(exclude)android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_monochrome.png' \
             ':(exclude)engine/vendor/*')
           if [ -n "$found" ]; then
             echo "::error::Images may be screenshots or textures from the game; only the allow-list in game-data-guard.yml is accepted:"

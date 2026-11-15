@@ -140,4 +140,143 @@ mod menu_sheet_router_controls {
         assert!(app.world().resource::<TouchState>().contacts.is_empty());
         assert!(!app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().busy());
     }
+
+    #[test]
+    fn sole_raw_sheet_router_actual_mouse_yields_sheet_then_first_touch_only_restores_it() {
+        let (mut app,window,camera)=scene_with_sheet(false);let point=painted_footer(&mut app);
+        let button=underlay(&mut app,camera,point);
+        app.world_mut().get_mut::<Window>(window).unwrap().set_cursor_position(Some(point));
+        app.world_mut().write_message(MouseButtonInput {window,button:MouseButton::Left,state:ButtonState::Pressed});
+        app.update();
+        assert!(app.world().resource::<TouchState>().hardware_intent);
+        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert_eq!(*app.world().get::<PointerState>(button).unwrap(),PointerState::Pressed);
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+        app.world_mut().write_message(MouseButtonInput {window,button:MouseButton::Left,state:ButtonState::Released});
+        app.update();app.update();
+        assert_eq!(app.world().resource::<Seen>().underlay_presses,1);
+        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        raw_tap(&mut app,window,4110,point);
+        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert_eq!(app.world().resource::<Seen>().envelopes,0,"return finger performs no barter action");
+        assert_eq!(app.world().resource::<Seen>().underlay_presses,1,"return finger cannot click old underlay");
+        for _ in 0..3 {app.update();}
+        let point=painted_footer(&mut app);raw_tap(&mut app,window,4111,point);
+        assert_eq!(app.world().resource::<Seen>().envelopes,1);
+        assert!(!app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn sole_raw_sheet_router_consumed_controller_return_restores_without_an_extra_tap() {
+        let (mut app,window,camera)=scene_with_sheet(false);let point=painted_footer(&mut app);
+        let button=underlay(&mut app,camera,point);
+        app.add_plugins(nvf_play::pad::InputSwitchPlugin);
+        app.world_mut().resource_mut::<Bindings>().automatic_input_switching=true;
+        nvf_play::bindings::set_device(app.world_mut(),nvf_play::bindings::InputDevice::Controller);
+        for _ in 0..3 {app.update();}
+        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        touch(&mut app,window,4112,TouchPhase::Started,point.x,point.y);app.update();
+        assert_eq!(app.world().resource::<Bindings>().device,nvf_play::bindings::InputDevice::KeyboardMouse);
+        assert!(!app.world().resource::<nvf_play::pad::TouchDeviceSwitch>().allows_actions());
+        assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4112));
+        assert_ne!(*app.world().get::<PointerState>(button).unwrap(),PointerState::Pressed);
+        assert_eq!(app.world().resource::<Seen>().envelopes,0);
+        touch(&mut app,window,4112,TouchPhase::Ended,point.x,point.y);app.update();
+        for _ in 0..4 {app.update();}
+        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        let point=painted_footer(&mut app);raw_tap(&mut app,window,4113,point);
+        assert_eq!(app.world().resource::<Seen>().envelopes,1,"next fresh finger acts, with no second restore tap");
+        assert_eq!(app.world().resource::<Seen>().underlay_presses,0);
+    }
+
+    #[test]
+    fn sole_raw_sheet_router_pause_and_real_editor_outrank_barter_then_fresh_contact_works() {
+        for editor in [false,true] {
+            let (mut app,window,_)=scene_with_sheet(false);let point=painted_footer(&mut app);
+            touch(&mut app,window,4114,TouchPhase::Started,point.x,point.y);app.update();
+            if editor {app.world_mut().resource_mut::<Layout>().open(false);}
+            else {app.insert_resource(nvf_play::pause::Paused(true));}
+            touch(&mut app,window,4114,TouchPhase::Ended,point.x,point.y);app.update();
+            assert_eq!(app.world().resource::<Seen>().envelopes,0);
+            assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+            if editor {
+                assert!(app.world().resource::<Layout>().editor.is_some());
+                let cancel=layout::editor_rect(10,Vec2::splat(1000.)).center();
+                raw_tap(&mut app,window,4117,cancel);
+                assert!(app.world().resource::<Layout>().editor.is_none(),"actual editor Cancel returns ownership");
+            } else {app.world_mut().resource_mut::<nvf_play::pause::Paused>().0=false;}
+            for _ in 0..6 {app.update();}
+            assert_eq!(app.world().resource::<Seen>().envelopes,0,"closing priority owner cannot replay old sheet release");
+            let point=painted_footer(&mut app);raw_tap(&mut app,window,4115,point);
+            assert_eq!(app.world().resource::<Seen>().envelopes,1);
+        }
+    }
+
+    fn empty_play_world()->nvf_play::PlayWorld {
+        let plugins=Box::leak(Vec::<fnv_esm::Plugin>::new().into_boxed_slice());
+        let lo=Box::leak(Box::new(fnv_esm::LoadOrder::new(plugins).unwrap()));
+        let schema=Box::leak(Box::new(fnv_esm::Schema::load_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/fnv")).unwrap()));
+        let index=Box::leak(Box::new(fnv_world::WorldIndex::build(lo,schema)));
+        nvf_play::PlayWorld(nvf_play::PlayData {lo,schema,index,world:0,interior:None,eye:[0.;3],heading_deg:0.,pitch_deg:0.,
+            auto_walk:0.,start_at_cell_spot:false,packages:false})
+    }
+    fn actual_menu_button(app:&mut App,label:&str)->(Entity,Vec2) {
+        let world=app.world_mut();let mut texts=world.query::<(Entity,&Text)>();
+        let mut entity=texts.iter(world).find_map(|(entity,text)|(text.0==label).then_some(entity)).expect("actual MainMenu label");
+        for _ in 0..16 {
+            if world.get::<ui_pointer::Button>(entity).is_some() {
+                let node=world.get::<ComputedNode>(entity).unwrap();assert!(node.size().min_element()>0.);
+                let physical=world.get::<bevy::ui::UiGlobalTransform>(entity).unwrap().translation;
+                let mut windows=world.query_filtered::<&Window,With<PrimaryWindow>>();
+                return (entity,physical/windows.single(world).unwrap().scale_factor());
+            }
+            entity=world.get::<ChildOf>(entity).expect("label remains under actual entry button").parent();
+        }
+        panic!("MainMenu entry ancestry exceeded bound")
+    }
+    #[test]
+    fn sole_raw_sheet_router_leaves_actual_main_menu_settings_touch_reachable() {
+        let (mut app,window,_)=scene_with_sheet(false);
+        app.world_mut().resource_mut::<menu::ActiveMenu>().0=None;
+        app.insert_resource(empty_play_world())
+            .insert_resource(nvf_play::save::SaveConfig::with_dir(None))
+            .init_resource::<nvf_play::pause::Paused>().init_resource::<nvf_play::pause::PlayClock>()
+            .init_resource::<nvf_play::pause::Page>().init_resource::<nvf_play::pause::PageRequest>()
+            .init_resource::<Assets<nvf_play::music::LayeredMusic>>()
+            .add_message::<nvf_play::save::LoadRequest>().add_message::<nvf_play::intro::PlayIntro>()
+            .add_message::<bevy::app::AppExit>().add_message::<nvf_play::ui_sounds::UiSound>()
+            .insert_resource(nvf_play::main_menu::MainMenuStart).add_plugins(nvf_play::main_menu::MainMenuPlugin);
+        for _ in 0..6 {app.update();}
+        assert!(app.world().resource::<nvf_play::main_menu::MainMenu>().open);
+        let label=fnv_util::words::tr("Settings").to_string();
+        let (button,point)=actual_menu_button(&mut app,&label);
+        {let mut stack=app.world_mut().resource_mut::<bevy::ui::UiStack>();stack.uinodes=vec![button];stack.partition.clear();stack.partition.push(0..1);}
+        touch(&mut app,window,4116,TouchPhase::Started,point.x,point.y);app.update();
+        assert!(app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4116));
+        assert_eq!(*app.world().get::<PointerState>(button).unwrap(),PointerState::Pressed);
+        assert_eq!(app.world().resource::<nvf_play::pause::PageRequest>().0,Some(nvf_play::pause::Page::Settings {selected:None}),
+            "real MainMenu choose receives the unowned touch and requests its existing Settings page");
+        assert_eq!(app.world().resource::<Seen>().envelopes,0);
+        touch(&mut app,window,4116,TouchPhase::Ended,point.x,point.y);app.update();
+    }
+
+    #[test]
+    fn sole_raw_sheet_router_distinct_id_budget_quarantines_unrecordable_ids_until_real_neutral() {
+        let (mut app,window,_)=scene_with_sheet(false);let point=painted_footer(&mut app);
+        for id in 4200..4235 {touch(&mut app,window,id,TouchPhase::Started,point.x,point.y);}
+        app.update();
+        assert_eq!(app.world().resource::<Seen>().envelopes,0);
+        assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4234),
+            "ID overflow must mask even the contact that could not enter the fixed ID array");
+        assert!(app.world().resource::<TouchState>().contacts.is_empty());
+        assert!(!app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().busy());
+        for id in 4200..4235 {touch(&mut app,window,id,TouchPhase::Ended,point.x,point.y);}
+        app.update();
+        assert_eq!(app.world().resource::<Seen>().envelopes,0);
+        assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4234));
+        for _ in 0..6 {app.update();}
+        assert!(app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4234));
+        let point=painted_footer(&mut app);raw_tap(&mut app,window,4236,point);
+        assert_eq!(app.world().resource::<Seen>().envelopes,1,"ID flood cannot strand or re-arm the next genuine contact");
+    }
 }

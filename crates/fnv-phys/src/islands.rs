@@ -23,7 +23,7 @@
 //! refresh [`PhysWorld::repair_islands`] checks and repairs that bookkeeping.
 //!
 //! The current query refresh uses the supported zero-dt physics pipeline instead
-//! (`crate::ragdoll::refresh_without_time`) and then restores explicit sleep/struck
+//! (`crate::ragdoll::refresh_without_integration`) and then restores explicit sleep/struck
 //! intent in [`PhysWorld::update_queries`]. This repair remains a defensive check
 //! after that path; it does not advance time or write poses or queued targets
 //! [documented: `ragdoll.rs`, `world.rs`, and the implementation below].

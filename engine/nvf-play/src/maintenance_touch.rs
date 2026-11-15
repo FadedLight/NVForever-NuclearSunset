@@ -35,6 +35,7 @@ impl Context {
         self.focused && self.logical.is_finite() && self.logical.min_element() > 0.0
             && self.physical.min_element() > 0 && self.density.is_finite() && self.density > 0.0
             && self.ui_scale.is_finite() && self.ui_scale > 0.0
+            && (self.logical / self.ui_scale).is_finite() && (ROW / self.ui_scale).is_finite()
             && [self.safe.left, self.safe.top, self.safe.right, self.safe.bottom].iter().all(|v| v.is_finite() && *v >= 0.0)
             && self.logical.x - self.safe.left - self.safe.right >= 280.0
             && self.logical.y - self.safe.top - self.safe.bottom >= 240.0

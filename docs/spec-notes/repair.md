@@ -12,6 +12,9 @@ and the repair formulas in this note remain authoritative.
 [design] `touch-maintenance-v1` is a saved Menus switch, on by default on Android
 and off on desktop. Turning it off restores the ordinary maintenance presentation;
 changing it cancels pending sheet actions and retains owned contacts until neutral.
+Invalid presentation metadata is refused before drawing: logical dimensions and
+48-pixel targets must remain finite after UI-scale conversion. Supported normal
+scales are unchanged; fresh valid metadata can rebuild the sheet.
 
 [design] A touch selects a row without consuming anything. A separate confirmation
 shows the selected target, donor and resulting condition, or the vendor's quoted

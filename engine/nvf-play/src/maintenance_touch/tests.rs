@@ -239,6 +239,28 @@ fn actual_sheet_taffy_bounds_match_raw_targets_at_density_scale_and_safe_insets(
                 assert_eq!(sheet::Geometry::new(context).target(transform.transform_point2(Vec2::ZERO) / density, app.world().resource::<State>().source.as_deref().unwrap()), Some(Action::Cancel));
             }
         }
+        // Reject malformed publisher metadata before it can create nonfinite
+        // Node/font values. Keep Bevy's unrelated global UiScale valid.
+        for malformed_scale in [f32::MIN_POSITIVE / 32.0, f32::NAN, f32::INFINITY, 0.0] {
+            let malformed = Context { ui_scale: malformed_scale, ..context };
+            app.world_mut().run_system_once(move |mut b: Bridge| b.prepare(Some(malformed), true)).unwrap();
+            app.update(); app.update();
+            assert!(!app.world().resource::<State>().visible());
+            assert_eq!(app.world_mut().query_filtered::<Entity, With<sheet::Sheet>>().iter(app.world()).count(), 0,
+                "invalid metadata must retire actual display nodes before Taffy sees nonfinite dimensions");
+            let at = Vec2::new(320.0, 140.0);
+            let e = TouchInput { window: context.window, id: 72, phase: TouchPhase::Started, position: at, force: None };
+            assert!(!app.world_mut().run_system_once(move |mut b: Bridge| b.event(&e, true)).unwrap());
+            assert_eq!(count(&app, GEAR), 2, "invalid metadata cannot queue a donor action");
+        }
+        app.world_mut().run_system_once(move |mut b: Bridge| b.prepare(Some(context), true)).unwrap();
+        for _ in 0..3 { app.update(); }
+        assert!(app.world().resource::<State>().visible());
+        assert_eq!(app.world_mut().query_filtered::<Entity, With<sheet::Sheet>>().iter(app.world()).count(), 1);
+        let mut recovered = app.world_mut().query::<(&sheet::SheetRow, &ComputedNode)>();
+        assert_eq!(recovered.iter(app.world()).count(), 2);
+        assert!(recovered.iter(app.world()).all(|(_, node)| (node.size().y - ROW * density).abs() < 0.05),
+            "actual laid-out rows recover at the original supported density/scale");
         tap(&mut app, 70, Action::Select(1)); tap(&mut app, 71, Action::Confirm);
         assert_eq!(count(&app, GEAR), 1, "rendered/raw geometry must still reach the real consumer");
     }

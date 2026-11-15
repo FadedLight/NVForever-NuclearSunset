@@ -7499,6 +7499,24 @@ order = [[
 ]]
 
 [[scenario]]
+name = "archimedes-strike"
+source = "issue #2544: That Lucky Old Sun with ARCHIMEDES armed: the Reflector Control Panel's script (SCPT 0x000E07CE) has ARCHIMEDESMarkerREF2 (0x000E07DD, an Immobile ARCHIMEDESTurret) UseWeapon ARCHIMEDESI on TestTrooperREF1-5 one at a time and waits for each to die. A rooted actor's weapon use never got in place, so the turret drew and holstered for good. It now uses it from where it stands and turns to the target (crates/fnv-ai/src/carry.rs step_actor_inner, rooted_turn)"
+note = "the player on the observation deck beside the panel 0x000E07DF in god mode at noon (the panel wants 9-15 h and objective 70 shown). The strike starts about 36 s after the activation (fOffset 11.5 + 25 intervals), one target every 1-4 s, then the finale (a beam, KillActor on all, about 27 s)"
+areas = ["ai", "combat", "scripts", "quests"]
+paths = ["crates/fnv-ai/src/carry.rs", "engine/nvforever/src/use_weapon.rs", "crates/fnv-game/src/use_weapon.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "15:startquest VMS03;setobjectivedisplayed VMS03 70 1;set VMS03.bArchimedesArmed to 1;set VMS03.nPowerConfiguration to 4;16:close;125:TestTrooperREF1.getdead;TestTrooperREF5.getdead;126:close", NVF_PLAY_TEST_SCRIPT = "18:activate:0x000E07DF" }
+args = ["--play", "--world", "WastelandNV", "--pos=21050,-600,7900", "--heading", "0", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 128
+expect = [
+  { re = 'use weapon: \S* ?ARCHIMEDESMarkerREF2.* uses ARCHIMEDESI', min = 1, label = "the turret fires ARCHIMEDES" },
+  { re = 'combat: NCR Trooper 0x000E35D[1-5] killed by 0x000E07DD', count = 5, label = "the turret kills TestTrooperREF1-5 one by one" },
+  { re = 'reference 0x00122A69 drawn \(enabled at run time\)', label = "the finale's beam is drawn" },
+  { re = 'reputation: NCR .* -> ', min = 1, label = "the strike costs the player NCR reputation" },
+  { re = 'console: GetDead on \S+ >> 1\.00', count = 2, label = "the first and the last target are dead without a console kill" },
+  { re = 'use weapon: ARCHIMEDESMarkerREF2 0x000E07DD has fired its 1 shots at TestTrooperREF[1-5]', min = 5, label = "it fires one shot at each target" },
+]
+
+[[scenario]]
 name = "helios-dogs-troopers"
 source = "issue #2547: at HELIOS One the guard dogs (CrDogNCRAggressive: Very Aggressive, aggro radius 2,000, in no NCR faction, Neutral to the troopers) went into combat with the NCR troopers about 2,800 units west, and the troopers fought back. A Very Aggressive actor with an aggro radius now attacks a Neutral on sight only inside that radius (crates/fnv-game/src/awareness.rs neutral_out_of_reach)"
 note = "the dogs 0x000A695E/0x000A695F/0x000A6944 stand about (25700, 2050, 5230), TestTrooperREF4/5 about (22950, 1200, 5232); the player is put 3,000+ units south of both, in god mode, so that the dogs (GeneralHostileToPlayerFaction) leave him out"

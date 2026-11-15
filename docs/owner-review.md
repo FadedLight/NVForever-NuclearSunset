@@ -525,6 +525,17 @@ the spec it links to.
     (2026-11-11) predates #2239 [hypothesis: your build was older than it; the log names
     no version]. No other engine change was made; the smoke scenarios
     `freeside-fort-residents-door` and `freeside-north-residents-door` keep it fixed.
+78. **A turret that cannot move fires a script's weapon use from where it stands
+    (#2544).** ARCHIMEDES at HELIOS One (an Immobile turret) is told by the control
+    panel's script to shoot each NCR trooper in turn; ours never let a rooted actor's
+    weapon use start, so it drew and holstered forever and the strike never came. Ours
+    now: such a use starts at once where the turret is, and it turns to the target at
+    its combat turn rate (ARCHIMEDES turns 375 degrees a second) before firing; the
+    troopers' places do not matter to the script. The NCR troopers turning on the player
+    before the beam is the script's own SetEnemy (23 intervals after arming), not a
+    fault. Check the strike's pace looks right to you: one shot every 1-4 s, five
+    troopers, then the big beam. Observer check 164 asks the original's timing.
+    ([use-weapon §2](design/use-weapon.md))
 76. **A line's group condition on the speaker wins over its fixed speaker (#2548).**
     Cottonwood Cove's "Halt! What business have you in Cottonwood Cove, outsider?"
     (0x0013AC97) names the AAM explorer as its fixed speaker but tests the explorers'

@@ -103,6 +103,16 @@ engine tests, shaders, final APK packaging and phone acceptance still pending.
 The separately tested Java loading protocol is unchanged, and its scoped host
 results do not qualify the newly merged engine or establish a phone-crash cure.
 
+The bounded normal Main `df17cc6d` follow-up is **In progress**. Its six incoming
+commits retain resurrection and unlit/additive rendering changes, with Android's
+numeric/image checks and the earlier touch/loading repairs preserved. The sole
+scenario-list conflict keeps all 1,554 Main records unchanged and in order plus
+Android's startup record, for 1,555. Android's record returns to a middle anchor
+so ordinary Main appends no longer compete with it at the end. Settings remain
+177 fixed keys and 68 Android overrides; incoming observer prompts remain exact
+Main. This source composition is uncompiled/unrun and does not establish shader,
+gameplay, save/load, phone recovery or a new qualified APK.
+
 The loading-cover completion correction is **In progress**. The real shared Java
 protocol now checks the current lease's logical hide before committing completion
 and preserves failure recovery or a newer episode after callbacks. Paired SDK 35

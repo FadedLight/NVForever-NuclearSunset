@@ -2687,6 +2687,18 @@ already talking takes over at once, same topic or another; nothing is queued or 
     player stopped at the edge like a wall, or pushed back; is the line a corner message
     or a message box, and how often does it repeat? Does Edge Fall-off (RPLI) move the
     edge?
+197. **What does a resurrected actor carry?** (P2; `fnv_game::resurrect`,
+    `fnv_sim::World::restock_inventory`, issue #2683.) NVForever makes the items of a
+    dead actor's own item list up again when it is resurrected (rolled anew; only what
+    it has fewer of is added) and keeps everything else it carries [hypothesis; capture
+    rs1 only showed that a given Stimpak stays and looted given ones do not come back].
+    Kill a Legionary Assassin of the reputation hit squad (or any NPC whose weapon is in
+    a leveled list of its own record, console `kill`), take everything from the body and
+    pick up its dropped weapon, then `resurrect` (and again with `resurrect 1`), kill it
+    and look: does it carry its weapons, armour and loot again? Same once more without
+    looting: is anything doubled, and is the weapon that fell beside the first body
+    still on the ground? Then with an NPC whose items are all fixed entries (Ringo):
+    do his own looted items come back?
 
 ## Added 2026-11-15 (REPCONN test-site load-door lock, #2538)
 
@@ -2785,3 +2797,17 @@ already talking takes over at once, same topic or another; nothing is queued or 
      detectors at 690 units read fighter 64 / watcher 56; the fighter closing to 610
      read 69 (PASS). With both detection.rs files reverted to upstream main, fighter
      84-88 / watcher 91 in all five pairs (FAIL).
+
+## Added 2026-11-15 (Gomorrah Suites wall-sconce glow, #2435)
+
+201. **How strong and how wide is the glow on the wall above a lit Gomorrah Suites
+     sconce?** (P3; #2435, nif.md §6 "Fog on added light".) Ours: the card
+     `NeoclassicalSconce:9` (ONE / ONE, no texture, vertex colour 0.34 at the bowl to
+     black on its outline) adds its colour in display values, fog only dimming it; next
+     to the bowl it is about 100 grey levels over the wall, near the outline 10 to 25
+     [observed in NVForever; hypothesis for the game]. In Gomorrah03 by any hour, stand
+     at 5900, 2250, 6384 facing east (heading 90, level) towards the sconce 0x0011A90A,
+     take one frame, then one from heading 50; note the wall's grey level beside the
+     glow, the glow's level next to the bowl and halfway up, and whether an outline of
+     the card can be seen anywhere. Softer and dimmer than ours points at the
+     display-value sum ("Additive blend") on a ONE / ONE card; the same agrees with ours.

@@ -247,7 +247,7 @@ and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
 ## Current-main integration status
 
 [design] The next source integration retains the optional touch views alongside
-accepted Main `7e638d4e`, following the earlier `ed684e8` checkpoint and retaining
+accepted Main `df17cc6d`, following the earlier `7e638d4e` and `ed684e8` checkpoints and retaining
 its engine implementation of Stewie-related preferences. This is separate from
 verified execution of a particular original mod/plugin/version/profile.
 Controller keyboard/mouse contributions keep their
@@ -268,14 +268,14 @@ PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
 all map assertions. This additional source setup correction is unexecuted; it is
 not an observed explanation for the earlier runtime failures.
 
-[qualification] Source comparison retains all 1,552 Main scenario records plus
+[qualification] Source comparison retains all 1,554 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
 integrity, not scenario execution. Integrated engine/UI regressions, native
 packaging and phone acceptance remain unrun. Earlier ARM/R31
 results belong to their stated historical checkpoints; no new qualified download
 or resume/Doc Mitchell crash resolution is established here.
 
-[qualification] The normal `7e638d4e` merge also retains Main's terrain anti-tiling,
+[qualification] The earlier normal `7e638d4e` merge retains Main's terrain anti-tiling,
 changes to loading/doors and pipeline diagnostics, projectile lifecycle, actor
 and first-person providers. The settings union keeps the independent Android layout
 and Main's new terrain row; its fixed `KNOWN` fixture is not the total dynamic
@@ -284,6 +284,18 @@ The old merge driver ran the previous parser and rejected that new key, so the
 resolved scenario file still requires the actual current verifier after commit.
 Source composition does not establish current shader, rendering, save/load or
 phone behavior. The separate DXT1 source-alpha proposal remains excluded.
+
+[qualification] The bounded follow-up accepts Main `df17cc6d`: six more commits
+covering resurrection and unlit/additive material rendering. Android's material
+selection and numeric/image admission remain separate from those rendering
+policies. The sole scenario-list conflict is resolved with all Main records
+unchanged and in order, plus Android's unchanged startup record before its prior
+middle anchor rather than at the file's end. That placement avoids ordinary
+future Main appends competing with the Android record; the final list has 1,555
+entries. The fixed settings fixture remains 177 with 68 Android overrides.
+Incoming observer prompts, including 201, are retained without renumbering.
+Original-game parity hypotheses and NVForever observations retain their distinct
+scope; no current compiler, shader, verifier or device result is inferred.
 
 [qualification] The first published combined source stopped at Rust compilation,
 before executing engine touch tests or constructing a new APK. Its repaired

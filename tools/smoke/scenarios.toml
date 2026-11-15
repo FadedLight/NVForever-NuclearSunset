@@ -29169,6 +29169,20 @@ order = [[
 forbid = [{ text = "EDE1Ref: does not talk", label = "ED-E has a greeting to say" }]
 
 [[scenario]]
+name = "android-start-options"
+source = "NVForever design, issue #2436 (docs/design/android.md): the Android launch defaults reach the shared game's main menu with MSAA off. This desktop scenario checks the shared argument path only, not NativeActivity, touch input or Android GPU behavior."
+areas = ["main-menu", "android"]
+paths = ["engine/nvf-android/**", "engine/nvforever/src/android.rs", "engine/nvforever/src/bin/nvforever.rs", "engine/nvforever/src/main.rs", "android/**"]
+env = { NVFOREVER_HOME = "android-start-options-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_MAIN_MENU = "5:continue" }
+args = ["--play", "--menu", "--msaa", "1", "--window", "borderless"]
+run_seconds = 12
+expect = [
+  { re = 'main menu: open \(\d+ loading screens, 0 saves\)', label = "the Android default arguments open the shared main menu" },
+  { text = "main menu: Continue is greyed out", label = "the main menu accepts the existing navigation input" },
+]
+forbid = [{ text = "explore: the free-camera explorer", label = "the port defaults do not select the explorer" }]
+
+[[scenario]]
 name = "mccarran-boyd-one-body"
 source = "issue #2461 (owner): after the Silus interrogation Lt. Carrie Boyd (LieutenantBoydREF 0x000F0678, CampMCTermInt02) was drawn twice, one body in the room and one outside the door, and the one in the room talked as the other. The scene's records: Silus's GREETING (INFO 0x000F1873) MoveTo's her to BoydExitREF 0x000FA73E (325, 719); the assassin trick's line (INFO 0x000F2DDE) MoveTo's her to XMarker 0x000FB4E1 (467, 1386) by the room's door and its end script sets bBoydEnter, so VFreeformMcCarran2BoydPatrolReturn walks her to her linked ref 0x000FA73D (296, 1665) in the room; the trigger 0x000FA742 there starts the POW2Int exchange with Silus, whose last line sets bBoydExit, and VFreeformMcCarran2BoydPatrolExit walks her back to BoydExitREF. One body per reference throughout (engine/nvforever/src/residents.rs drawn_twice, nav.rs show_actor)"
 note = "the player stands in the interrogation room; Silus's greeting is said at 3 s and the trick's line at 8 s (as the dialogue would, conditions not required). The census is taken at exit; the warnings name a body spawned and lost before it was found"
@@ -30165,15 +30179,30 @@ expect = [
 ]
 
 [[scenario]]
-name = "android-start-options"
-source = "NVForever design, issue #2436 (docs/design/android.md): the Android launch defaults reach the shared game's main menu with MSAA off. This desktop scenario checks the shared argument path only, not NativeActivity, touch input or Android GPU behavior."
-areas = ["main-menu", "android"]
-paths = ["engine/nvf-android/**", "engine/nvforever/src/android.rs", "engine/nvforever/src/bin/nvforever.rs", "engine/nvforever/src/main.rs", "android/**"]
-env = { NVFOREVER_HOME = "android-start-options-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_MAIN_MENU = "5:continue" }
-args = ["--play", "--menu", "--msaa", "1", "--window", "borderless"]
+name = "legion-assassins-armed"
+source = "#2683 (crates/fnv-game/src/resurrect.rs; crates/fnv-sim/src/world.rs World::restock_inventory): the Legion hit squad is four placed references the shipped script resurrects for every visit (VFactionSquadListSCRIPT); a resurrected dead actor has the items of its own list made up again, so a squad whose bodies were looted comes armed the next time"
+note = "the squad's leader (VEFR02LegionThugLeaderCMRef 0x00163414, his weapons in leveled lists of his own item list) is set on the player at 6 s: he takes up a weapon. Killed at 9 s and stripped at 10 s (RemoveAllItems, as a player who loots the body bare), resurrected at 11 s as the squad script does: his own items are made up again, a weapon among them. Set on the player again at 13 s: he takes up a weapon again. (The squad's own quest keeps him disabled here; none of this needs him drawn)"
+areas = ["ai", "combat", "scripts"]
+paths = ["crates/fnv-game/src/resurrect.rs", "crates/fnv-sim/src/world.rs", "engine/nvforever/src/resurrect.rs", "crates/fnv-game/src/style_weapon.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "4.5:moveto:VEFR02LegionThugLeaderCMRef:player:0:400:0,6:call:VEFR02LegionThugLeaderCMRef:StartCombat:player,9:kill:VEFR02LegionThugLeaderCMRef,10:call:VEFR02LegionThugLeaderCMRef:RemoveAllItems,11:call:VEFR02LegionThugLeaderCMRef:Resurrect,13:call:VEFR02LegionThugLeaderCMRef:StartCombat:player" }
+args = ["--cell", "Goodsprings", "--pos=-68375,4800,8700", "--heading", "0", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 18
+order = [[
+  { re = 'style weapon: VEFR02LegionThugLeaderCMRef 0x00163414 takes up \w+ 0x[0-9A-F]{8}', label = "the fresh leader takes up a weapon" },
+  { re = 'resurrect: 0x00163414 has its own items made up again: .*\d+ Weap\w+.*; it carries', label = "resurrected after being stripped, his own items are made up again, a weapon among them" },
+  { re = 'style weapon: VEFR02LegionThugLeaderCMRef 0x00163414 takes up \w+ 0x[0-9A-F]{8}', label = "the resurrected leader takes up a weapon again" },
+]]
+
+[[scenario]]
+name = "gomorrah-suite-sconce-glow"
+source = "issue #2435: the Gomorrah Suites (Gomorrah03) wall sconces (NeoclassicalSconce, clutter/neoclassical/neoclassicalsconce.nif) drew their glow card NeoclassicalSconce:9 (unlit, ONE / ONE, no texture, vertex colour 0.34 at the bowl to black on its outline) as a flat pale board with a hard outline: the shader added the room's fog colour over the whole card, and the unlit vertex colours, made linear at the vertices, stayed bright almost to the black edge (docs/spec-notes/nif.md section 6 'Fog on added light', 'Unlit vertex colours as display values'); frames in target/smoke facing the sconce 0011A90A (gomorrah_sconce_near.png) and from the side (gomorrah_sconce_side.png)"
+areas = ["materials", "interiors"]
+paths = ["engine/nvf-assets/src/nif_material.wesl", "engine/nvf-assets/src/nif_material.rs", "engine/nvf-assets/src/nif_spawn.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_GOTO = "6:5900:2250:6384", NVF_PLAY_TEST_LOOK = "6.5:90:8,9:50:8", NVF_PLAY_TEST_SHOTS = "8:gomorrah_sconce_near.png,10.5:gomorrah_sconce_side.png" }
+args = ["--play", "--cell", "Gomorrah03", "--pos=6015,1700,6384", "--heading", "0", "--no-voice", "--no-messages"]
 run_seconds = 12
+manual = "gomorrah_sconce_near.png: the wash of light above the bowl is brightest at the bowl and fades out towards its outline, without a pale flat board of even brightness; the room stays dark but readable"
 expect = [
-  { re = 'main menu: open \(\d+ loading screens, 0 saves\)', label = "the Android default arguments open the shared main menu" },
-  { text = "main menu: Continue is greyed out", label = "the main menu accepts the existing navigation input" },
+  { re = 'test aid: screenshot .*gomorrah_sconce_near\.png', label = "the frame facing the sconce is saved" },
+  { re = 'test aid: screenshot .*gomorrah_sconce_side\.png', label = "the frame from the side is saved" },
 ]
-forbid = [{ text = "explore: the free-camera explorer", label = "the port defaults do not select the explorer" }]

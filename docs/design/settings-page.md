@@ -22,8 +22,8 @@ is shown) and `engine/nvf-play/src/settings_view.rs` (what the page lists, as da
 **A row's command-line switches** [design: #2377]: `Setting::switches` names the switches
 whose state the row replaces, as `--a, --b` (`Setting::with_switches` for a slider row;
 empty: none). Until #2377 they were written at the end of the note, which the page showed;
-now the note says only what the row does (Â§10) and the switches are their own field, not
-shown (the search finds them, Â§6; docs/settings-reference.md lists them). `note_switches`
+now the note says only what the row does (§10) and the switches are their own field, not
+shown (the search finds them, §6; docs/settings-reference.md lists them). `note_switches`
 reads the field with the parse the notes had (each `--name` once, a value after it
 ignored, one the text is "a part of" left out), so every row names the same switches as
 before: in a test run a switch given keeps its rows at the command line's state over the
@@ -41,12 +41,11 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
 | Gameplay | Dialogue | `menu-pause`, `dialogue-goodbye-hint`, `dialogue-look`, `dialogue-recentre`, `dialogue-zoom`, `lip-sync` |
 | Gameplay | Camera | `detached-camera`, `true-iron-sights`, `first-person-body`, `weapon-sway`, `head-bob`, `weapon-lower`, `field-of-view`, `viewmodel-field-of-view` |
-| Gameplay | World | `grass-fire` (#2662) |
 | Display | Screen | `resolution`, `borderless`, `monitor`, `display-sync`, `frame-cap`, `physics-rate`, `ui-scale`, `menu-scale` |
 | Display | Interface | `hud-colour`, `hud-red`, `hud-green`, `hud-blue`, `pipboy-colour`, `pipboy-red`, `pipboy-green`, `pipboy-blue`, `language`, `dynamic-crosshair`, `crosshair-style`, `sneak-gauges` |
 | Display | Performance | `fps-counter`, `fps-counter-fps`, `fps-counter-low`, `fps-counter-graph`, `fps-counter-split`, `fps-counter-cpu`, `fps-counter-gpu`, `fps-counter-vram`, `fps-counter-ram`, `fps-counter-loaded`, `fps-counter-upscaling` |
 | Audio | (none) | `volume-master`, `volume-music`, `volume-footstep`, `volume-voice`, `volume-effects`, `volume-radio`, `music`, `voice`, `reverb`, `voice-reverb` |
-| Controls | (none) | the Controls tab's own rows (Â§4), then `button-style`, `aim-assist`, `aim-slowdown`, `aim-lock` |
+| Controls | (none) | the Controls tab's own rows (§4), then `button-style`, `aim-assist`, `aim-slowdown`, `aim-lock` |
 | Graphics | Quality | `quality` (#1966; only when the install has its preset files: docs/spec-notes/quality-presets.md) |
 | Graphics | Picture | `enhanced` (#1966), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `light-shafts`, `water-reflections`, `water-mirror` |
 | Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance` |
@@ -66,7 +65,7 @@ original puts the HUD and Pip-Boy colours and the crosshair in its Display categ
 **How the table is applied** (`resolve_layout`) [design: #1953]:
 
 1. Each section takes the rows of its keys that are registered; a missing optional row
-   (lip sync without lip data, the draw distances without `DrawDistances`, â€¦) is left
+   (lip sync without lip data, the draw distances without `DrawDistances`, …) is left
    out, a section left with none is dropped.
 2. All seven tabs are there, an empty one too (Tweaks today).
 3. **A row the table does not name** keeps the group it registered with as its tab, with
@@ -80,7 +79,7 @@ So #1892's tweaks, registered under `Tweaks`, show under Tweaks in registry orde
 #1892 naming them here.
 
 **The Tweaks list** (#1953 point 4, a later change): `Placement` has a `subgroup`, `None`
-throughout today. The later change gives Tweaks rows a placement `Tweaks â€º <group> â€º
+throughout today. The later change gives Tweaks rows a placement `Tweaks › <group> ›
 <heading>` in `SECTIONS` and draws the groups in place of the rail; neither the
 registrations nor `resolve_layout`'s interface change for it.
 
@@ -123,14 +122,14 @@ pending and are recorded separately from source review.
   Controls tab's own rows by what it is (`ControlRow`: `Device`, `Binding(control,
   device)`, `Invert`, `Sensitivity(device)`, `Rumble`), never by where it stands.
 - **A line** (`ViewEntry`) is a heading or a row. A heading takes one of the window's lines
-  (Â§4) and counts in the scroll bar, but it is never chosen: no box, no pointer, no value
+  (§4) and counts in the scroll bar, but it is never chosen: no box, no pointer, no value
   [design: #1953]. It is drawn dim in the page's font (font 7, `Shade::Dim`).
 - **What is listed** (`SettingsScope`): a tab, or the search's results or the Changed
-  list (Â§6, Â§7). These two list rows of every tab, each under a heading saying where it
+  list (§6, §7). These two list rows of every tab, each under a heading saying where it
   lives (`listing`: `Gameplay > Dialogue`, `Controls`); an empty one says "No results."
   or "No changed settings.", an empty tab "No settings here.".
 - **What is shown** (`Visibility`, worked out each frame from the game's state): a
-  colour's red, green and blue only while the colour is Custom (Â§5); the four
+  colour's red, green and blue only while the colour is Custom (§5); the four
   controller rows of the Controls tab only with Controller as the input device. A hidden
   row keeps its tab and heading. The choice on a hidden row moves to the row that stands
   for it (`parent_of`: the colour's list; the Input Device row), on a control of the other
@@ -149,7 +148,7 @@ pending and are recorded separately from source review.
 | Row before/after (round the ends, headings passed) | Up/Down, W/S | D-pad Up/Down | moving onto a row |
 | First row under the heading before/after (round) | Page Up/Page Down | LB/RB | "Previous heading", "Next heading" over the rows |
 | Tab before/after (round) | Shift+Tab or F1 / Tab | LT/RT | a click on a tab |
-| Keys onto the rail and back | F6 | Y | â€” |
+| Keys onto the rail and back | F6 | Y | — |
 | On the rail: line before/after; take it | Up/Down; Enter | D-pad; A | a click |
 | Act on the row | Enter, Space, Left/Right (A/D on sliders and lists), Delete | A, D-pad Left/Right, X | a click, the arrows, the meter |
 | Back | Esc, Backspace | B | Back |
@@ -159,7 +158,7 @@ pending and are recorded separately from source review.
 Page Down). A tab without headings is one section: Page Up/Down go to its first row. The
 rail's lines are Search, Changed, the tabs, then Defaults and Back (those two keep their
 place at the bottom right); with a controller in use the rail's keys pass over Search.
-Ctrl+F opens the search (Â§6).
+Ctrl+F opens the search (§6).
 
 **The window's lines** [design: #2377]: the original's options list shows nine items
 [documented: `options_container` `_number_of_visible_items` 9], and so did this page until
@@ -172,7 +171,7 @@ depend on the view; the `settings_view` functions (`follow`, `window_first`,
 `drawn_slots`, `clamp_into_window`) take it as an argument and work with any count of at
 least one (with one line the chosen row is shown rather than its heading). A new count is
 logged (`pause menu: settings window of 12 lines`). The note under the window is drawn to
-three lines at most: two for a row's own note, one for what it stands for (Â§6) or a
+three lines at most: two for a row's own note, one for what it stands for (§6) or a
 choice's reason.
 
 The window shows its lines from `PauseView::scroll`: the keys keep the chosen row in it,
@@ -248,7 +247,7 @@ still loads, so a request survives a run in which it cannot be met.
 
 **A choice that is an action** [design: #2250]: a list's `names` may hold a choice that does
 something instead of being kept, as Reports' "Delete them now" does (`reports/delete.rs`).
-The Upscaler row lists `Download DLSS...` (shown as "Download DLSSâ€¦", or "Downloading DLSSâ€¦
+The Upscaler row lists `Download DLSS...` (shown as "Download DLSS…", or "Downloading DLSS…
 n%" while its download runs) while DLSS is out of reach only because its files are missing
 (`upscaler::Unavailable::FilesMissing`, Windows with Vulkan) and no download installed them
 this session. Its `pick` asks for nvforever's `dlss_download` dialog (over the page as the
@@ -322,7 +321,7 @@ results and every other key does nothing. W/S, A/D and Space are no keys of the 
 
 **Matching** (`settings_view::search`) [design: #1953]: a row's words are its label and
 note in the language shown and in English, its INI key (a tweak's note names its
-Stewie's Tweaks key) and its command-line switches (Â§1; `--msaa` finds Anti-aliasing,
+Stewie's Tweaks key) and its command-line switches (§1; `--msaa` finds Anti-aliasing,
 #2377); the Controls tab's own rows have their label, note and INI name
 (`pause::control_words`), both devices' controls, so a controller's button is found from
 the keyboard. The query is split at whitespace and lowercased (Unicode); a row is found
@@ -394,7 +393,7 @@ in the player's own home reads and writes none (`settings::SettingsFile`). The C
 list and the search are not kept across runs.
 
 **The rail under the pointer** [design: #1953; as the screen menu's page names,
-docs/design/screen-menu.md Â§3.1, and the original's lists' mouse-over sound,
+docs/design/screen-menu.md §3.1, and the original's lists' mouse-over sound,
 list_box_template.xml `mouseoversound`]: a rail line (Search, Changed, a tab) under the
 pointer is drawn bright with the highlight box's line round it, unfilled, and the focus
 sound plays once as the pointer comes onto it (not again while it rests there). The line
@@ -460,7 +459,7 @@ Smoke scenarios: `settings-layout`, `settings-headings`, `settings-scroll-headin
 
 [design: #2377] A row's note says what the row does in one or two short sentences: at most
 200 characters (`settings::NOTE_BUDGET`, counted as characters) and no command-line switch
-(those are the row's `switches`, Â§1). That is about two lines at the page's width in a 16:9
+(those are the row's `switches`, §1). That is about two lines at the page's width in a 16:9
 view in the small face (font 3); the note's third line is left for what a search result
 stands for or a choice's reason. The explanations cut from the notes in #2377, and the
 switches, are in docs/settings-reference.md, one entry per key in the page's order, with

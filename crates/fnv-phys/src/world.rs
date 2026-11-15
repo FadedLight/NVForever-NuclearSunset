@@ -1060,10 +1060,6 @@ impl PhysWorld {
                 *a += t.time_ms();
             }
         }
-        // Bodies and colliders rapier took out for NaN or infinite state (`crate::quarantine`).
-        if !self.w.quarantine().is_empty() {
-            self.handle_quarantine();
-        }
         // Diagnostics: marks the step's own detection took, with no refresh between.
         if self.dirty {
             self.refresh_stats.step_absorbed += 1;
@@ -1072,6 +1068,11 @@ impl PhysWorld {
         self.dirty = false;
         self.new_bodies.clear();
         self.struck.clear();
+        // The positive step consumed the old changes. Keep any marks/new bodies
+        // produced by quarantine remedies for the next query registration.
+        if !self.w.quarantine().is_empty() {
+            self.handle_quarantine();
+        }
         self.steps += 1;
         self.stepped_secs += f64::from(self.params.dt);
     }
@@ -1115,13 +1116,9 @@ impl PhysWorld {
             // Standalone hit volumes written since the last refresh (`crate::actors`).
             self.flush_hit_volumes();
             {
-                // Apply user changes and update contacts without integrating time.
                 let _span = tracing::info_span!("phys::refresh_detect").entered();
-                self.detect();
+                self.register_query_changes();
             }
-            // The supported refresh already registered newly inserted bodies. Do not
-            // re-arm them with set_position: that would erase queued kinematic targets.
-            self.new_bodies.clear();
             // Preserve explicit asleep and struck-body intent after contact updates.
             let _repair = tracing::info_span!("phys::refresh_repair").entered();
             // A body added asleep wakes when its first contacts are found: rapier wakes
@@ -1152,8 +1149,30 @@ impl PhysWorld {
             // crashed rapier (`crate::islands`).
             let repaired = self.repair_islands();
             self.refresh_stats.repair_islands += repaired as u64;
-            self.dirty = false;
         }
+    }
+
+    /// Register current changes and immediately retain each pipeline's quarantine
+    /// report. The selected backend's remedies need at most one republish: they
+    /// restore sanitized finite bodies or rebuild an at-rest ragdoll. Any malformed
+    /// rebuilt geometry stays disabled on the second pass (see the topic note).
+    fn register_query_changes(&mut self) {
+        for _ in 0..2 {
+            self.detect();
+            // Only these changes were consumed by this pass. A remedy below may
+            // add bodies/marks; do not clear those before their own registration.
+            self.new_bodies.clear();
+            self.dirty = false;
+            self.dirty_by = 0;
+            if !self.w.quarantine().is_empty() {
+                self.handle_quarantine();
+            }
+            if !self.dirty { return; }
+        }
+        // No recursive or unbounded registration. This would violate the closed
+        // remedy invariant above: retain the pending marks for the next query,
+        // and do not advertise its partially published state as clean.
+        tracing::warn!("physics: quarantine remedies still dirty after two query registration passes; changes remain pending");
     }
 
     /// Scene queries on the current state (updates the broad phase first if needed).

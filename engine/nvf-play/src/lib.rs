@@ -23,6 +23,7 @@ pub mod bindings;
 pub mod blocking;
 pub mod chargen;
 pub mod clutter_pose;
+pub mod collision_view;
 pub mod creator;
 pub mod combat;
 pub mod compass;
@@ -104,6 +105,7 @@ pub mod pause;
 pub mod graphics_resume;
 pub mod phys;
 pub mod phys_load;
+pub mod phys_rate;
 pub mod pickpocket;
 pub mod pipboy;
 pub mod player;
@@ -412,6 +414,7 @@ impl Plugin for PlayPlugin {
             .add_plugins(console::ConsolePlugin)
             .add_plugins(editor::EditorPlugin)
             .add_plugins(location_markers::LocationMarkersPlugin)
+            .add_plugins(collision_view::CollisionViewPlugin)
             .add_plugins(free_cam::FreeCamPlugin)
             .add_plugins(script_camera::ScriptCameraPlugin)
             .add_plugins(aim_zoom::AimZoomPlugin)

@@ -25,6 +25,8 @@ const RATS: u32 = 0x902;
 const IDLERS: u32 = 0x903;
 const GANG_A: u32 = 0x904;
 const GANG_B: u32 = 0x905;
+/// The hound's own faction, naming nobody.
+const HOUNDS: u32 = 0x906;
 
 const LEADER: u32 = 0x830;
 const MEMBER: u32 = 0x831;
@@ -64,6 +66,10 @@ const LURKER: u32 = 0x871;
 /// from the wolf list (item 20).
 const NAMELESS: u32 = 0x872;
 /// What a wolf carries (a created leveled wolf carries it too).
+/// A Very Aggressive guard dog with an aggro radius of 2,000 (as HELIOS One's
+/// CrDogNCRAggressive, #2547), in a faction of its own.
+const HOUND: u32 = 0x873;
+const HOUND_REF: u32 = 0x331;
 const PELT: u32 = 0x880;
 
 const CELL: u32 = 0x200;
@@ -175,6 +181,7 @@ fn plugin_bytes() -> Vec<u8> {
         // Two gangs that name nobody but a third faction, each other not at all.
         record(b"FACT", 0, GANG_A, &[sub(b"EDID", z("GangA")), xnam(RATS, 0)]),
         record(b"FACT", 0, GANG_B, &[sub(b"EDID", z("GangB")), xnam(RATS, 0)]),
+        record(b"FACT", 0, HOUNDS, &[sub(b"EDID", z("Hounds"))]),
     ]
     .concat();
     let npcs = [
@@ -202,6 +209,7 @@ fn plugin_bytes() -> Vec<u8> {
         record(b"CREA", 0, SPAWN_HIGH, &[sub(b"EDID", z("SpawnHigh")), acbs(FACTIONS | AI_PACKAGES), snam(RATS, 3), pkid(PACK_OWN), tplt(LIST_HIGH)]),
         record(b"CREA", 0, COWARD, &[sub(b"EDID", z("Coward")), acbs(0), snam(RATS, 0), aidt_full(0, 0, 1, None)]),
         record(b"CREA", 0, LURKER, &[sub(b"EDID", z("Lurker")), acbs(0), snam(RATS, 0), aidt_full(0, 4, 1, Some(650))]),
+        record(b"CREA", 0, HOUND, &[sub(b"EDID", z("Hound")), acbs(0), snam(HOUNDS, 0), aidt_full(2, 4, 1, Some(2000))]),
         record(b"CREA", 0, NAMELESS, &[sub(b"EDID", z("Nameless")), acbs(BASE_DATA | INVENTORY | SCRIPT | TRAITS), tplt(LIST_WOLF), aidt(0)]),
     ]
     .concat();
@@ -230,6 +238,7 @@ fn plugin_bytes() -> Vec<u8> {
         placed(b"ACRE", COWARD_REF, COWARD),
         placed(b"ACRE", LURKER_REF, LURKER),
         placed(b"ACRE", NAMELESS_REF, NAMELESS),
+        placed(b"ACRE", HOUND_REF, HOUND),
     ]
     .concat();
     for r in MIXED_REFS {
@@ -1662,4 +1671,32 @@ fn attacking_an_evil_factions_member_alerts_its_members_in_the_area() {
         assert!(g.attacked_by(own, player));
         assert!(!g.would_attack(helper, player));
     }
+}
+
+#[test]
+fn a_very_aggressive_actor_leaves_a_neutral_outside_its_aggro_radius_alone() {
+    // #2547: HELIOS One's guard dogs (Very Aggressive, aggro radius 2,000) went for the
+    // NCR troopers 2,800 units off. A Very Aggressive actor attacks a Neutral on sight
+    // [documented: GetFactionCombatReaction] only inside its aggro radius when it has one
+    // [hypothesis]; once fighting it follows the target anywhere.
+    let f = fixture();
+    let mut g = game(&f);
+    let (hound, ganger) = (FormId(HOUND_REF), FormId(GANGER_B_REF));
+    assert!(g.would_attack(hound, ganger), "a Neutral to a Very Aggressive actor");
+    let seen = Detection { value: 5.0, band: Band::Detected, ..Default::default() };
+    g.observe_threat(hound, ganger, &seen, [2800.0, 0.0, 0.0]);
+    g.settle_awareness();
+    assert_eq!(g.awareness.state(hound), State::Normal, "outside the radius");
+    g.observe_threat(hound, ganger, &seen, [900.0, 0.0, 0.0]);
+    g.settle_awareness();
+    assert_eq!(g.awareness.state(hound), State::Combat, "inside the radius");
+    g.observe_threat(hound, ganger, &seen, [5000.0, 0.0, 0.0]);
+    g.settle_awareness();
+    assert_eq!(g.awareness.state(hound), State::Combat, "a fight goes on outside it");
+    // An Enemy is attacked on sight at any range.
+    let mut g = game(&f);
+    g.forms.faction_reactions.entry(FormId(HOUNDS)).or_default().insert(FormId(GANG_B), 1);
+    g.observe_threat(hound, ganger, &seen, [2800.0, 0.0, 0.0]);
+    g.settle_awareness();
+    assert_eq!(g.awareness.state(hound), State::Combat);
 }

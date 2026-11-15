@@ -1507,6 +1507,11 @@ fn split(path: &str) -> Vec<&str> {
     path.split(['/', '\\']).map(str::trim).filter(|s| !s.is_empty()).collect()
 }
 
+/// Invalid/overflowing extra-operator results do not enter renderer traits [hypothesis].
+fn finite_extra(value: f64) -> Value {
+    Value::Num(if value.is_finite() { value } else { 0.0 })
+}
+
 fn apply(kind: OpKind, acc: Value, a: Value, me: TileId, k: usize) -> Value {
     let (x, y) = (acc.num(), a.num());
     let num = Value::Num;
@@ -1529,6 +1534,12 @@ fn apply(kind: OpKind, acc: Value, a: Value, me: TileId, k: usize) -> Value {
         OpKind::Abs => num(x.abs()),
         // [documented: ui-neg-operator.md] Unlike abs/floor, neg uses the argument.
         OpKind::Neg => num(-y),
+        // UIO's unary arguments and accumulated exponentiation. Only the added
+        // operators use this finite-output policy; existing arithmetic is unchanged.
+        OpKind::Sin => finite_extra(y.to_radians().sin()),
+        OpKind::Cos => finite_extra(y.to_radians().cos()),
+        OpKind::Log => finite_extra(y.ln()),
+        OpKind::Pow => finite_extra(x.powf(y)),
         // A whole number from 0 below the argument, the same for this tile and operator
         // every time [design: when the original draws is not known].
         OpKind::Rand => {

@@ -5825,7 +5825,7 @@ mod tests {
                 material: None,
                 wind: false,
             };
-            RagdollBody { object, linear_damping: 0.1, angular_damping: 0.05, stored: Iso::IDENTITY, unit: 7.0 }
+            RagdollBody { object, linear_damping: 0.1, angular_damping: 0.05, stored: Iso::IDENTITY, unit: 7.0, inertia: None }
         };
         let ragdoll = std::sync::Arc::new(Ragdoll { bodies: vec![body(Shape::Box { half_extents: [30.0, 10.0, 8.0] }, 20.0), body(Shape::Sphere { radius: 8.0 }, 4.0)], joints: vec![], problems: vec![] });
         let at = |p: [f32; 3]| Iso { translation: p, rotation: Iso::IDENTITY.rotation };

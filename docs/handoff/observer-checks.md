@@ -2265,3 +2265,43 @@ already talking takes over at once, same topic or another; nothing is queued or 
     line heard and shown at a time, each to its end, or does the voice stutter and the
     subtitle flicker? The campaign `o30c_say` (tools/capture/observe) does the same by
     script with shots, if run with the window in front.
+
+## Added 2026-11-15 (Cottonwood Cove's explorers, #2548)
+
+162. **Does a fixed speaker give way to a faction condition?** (P2; #2548, dialogue.md,
+     the open case of check 29.) "Halt! What business have you in Cottonwood Cove,
+     outsider?" (0x0013AC97, VFreeformCottonwoodCove) names NVCCLegionaryGuardAAMExplorer
+     as its fixed speaker and has only `GetInFaction VCaesarsLegionCCoveExplorerFaction
+     == 1` [observed: the data]. At Cottonwood Cove with the Mark of Caesar, `prid
+     001364C3` then `disable` (the AAM explorer), and let NVCCExplorer2REF (0x00138A92)
+     walk up. Does he say the Halt line, voiced or silent, with the Mark of Caesar
+     choices, or "Move along."? Ours since #2548: the Halt line, in the AAM explorer's
+     voice [hypothesis].
+
+## Added 2026-11-15 (Very Aggressive actors, Neutrals and the aggro radius, #2547)
+
+163. **Does the aggro radius bound whom a Very Aggressive actor attacks on sight?** (P2;
+     #2547, factions.md §4; check 144 asks it of HELIOS One's dogs.) Ours since #2547: a
+     Very Aggressive actor with Aggro Radius Behavior on attacks a Neutral non-player
+     actor only inside its aggro radius [hypothesis]. A second pair that tells it apart
+     from the HELIOS fence: `player.placeatme CrDogNCRAggressive` (Very Aggressive,
+     radius 2,000) in the open at Goodsprings (`tdetect`), then `MoveTo` it 2,600 and
+     then 1,500 units from Sunny Smiles (SunnyREF, Neutral to the dog). At each distance
+     for 30 s: `IsInCombat`, `GetCombatTarget`, `GetDetected SunnyREF`. A fight at 1,500
+     and none at 2,600 (with detection at both) agrees with ours; a fight at both says
+     the bound is wrong. A spawned actor may start fights at once where a placed one
+     waits (aggro.rs, check 2); if the spawned dog fights at both, `MoveTo` one of
+     HELIOS's placed dogs instead (check 144).
+
+## Added 2026-11-15 (companions outside Hardcore, #2623)
+
+165. **Is an unflagged teammate knocked out, not killed, outside Hardcore?** (P2; #2623,
+     unconscious.md §2.2a.) Ours since #2623: outside Hardcore the player's teammate is
+     spared death as an essential actor, though no companion's ACBS has Essential; in
+     Hardcore it dies [hypothesis]. With Hardcore off: hire a companion who is not
+     flagged (Cass, or Easy Pete given `SetPlayerTeammate 1`), then `DamageAV Health
+     9999` and, on another try, `KillActor` on it. Each time read `GetDead`, `IsEssential`
+     and `GetKnockedState` for 15 s and whether it gets up and is still a teammate
+     (`GetPlayerTeammate`). Then the same with `SetHardcore 1`. Knocked out, up again and
+     still hired outside Hardcore, dead in it agrees with ours; IsEssential reading 1 for
+     the teammate says the engine counts teammates as essential by IsEssential too.

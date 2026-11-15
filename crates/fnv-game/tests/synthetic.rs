@@ -14,6 +14,9 @@ use fnv_script::FunctionTable;
 use fnv_sim::{FormId, FormStore, RefTable, SimConfig, World};
 use serde_json::{json, Value as Json};
 
+#[path = "common/inline_call_source_bridge.rs"]
+mod inline_call_source_bridge_tests;
+
 // ---- plugin builders ------------------------------------------------------------
 
 fn sub(sig: &[u8; 4], data: Vec<u8>) -> Subrecord {
@@ -3564,6 +3567,60 @@ fn each_queued_box_keeps_its_own_button_count() {
     assert_eq!(g.queued.len(), g.boxes.len());
     // The two boxes left, the one pushed out of step, then the box shown.
     assert_eq!(g.queued.iter().map(|q| q.buttons).collect::<Vec<_>>(), vec![None, None, None, Some(2)]);
+}
+
+#[test]
+fn answer_ok_boxes_answers_a_scripts_ok_box_without_opening_it() {
+    // `--no-messages` (GameConfig::answer_ok_boxes): the add-on packs' start-up boxes
+    // never open, so game time does not stop for them.
+    use fnv_game::game::menus;
+    let mut f = fixture();
+    f.data.messages.get_mut(&FormId(MESSAGE)).unwrap().buttons = vec!["Ok".into()];
+    let mut g = game(&f);
+    g.cfg.answer_ok_boxes = true;
+    g.new_game();
+    // The activator's ShowMessage (and SetStage Q 10, whose 1 s quest timer then runs).
+    g.activate(FormId::PLAYER_REF, FormId(ACT_REF), ActMode::Hand).unwrap();
+    assert_eq!((g.menu, g.boxes.len()), (None, 0), "the box never opened");
+    assert_eq!(g.message_box.as_ref().and_then(|m| m.pressed), Some(0), "answered with OK");
+    assert_eq!(g.take_answered_boxes(), vec![FormId(MESSAGE)]);
+    assert!(g.take_answered_boxes().is_empty(), "taken once");
+    let t0 = g.time;
+    g.frames(120);
+    assert!(g.time > t0, "game time runs on");
+    assert!(g.quest_state(q()).stages_done.contains(&20));
+    // Off (the default): the same box opens and holds the game.
+    let mut g = game(&f);
+    g.new_game();
+    g.activate(FormId::PLAYER_REF, FormId(ACT_REF), ActMode::Hand).unwrap();
+    assert_eq!((g.menu, g.boxes.clone()), (Some(menus::MESSAGE), vec![FormId(MESSAGE)]));
+    assert!(g.take_answered_boxes().is_empty());
+}
+
+#[test]
+fn answer_ok_boxes_leaves_a_box_with_a_choice_to_the_player() {
+    use fnv_game::game::menus;
+    use fnv_script::vm::XVal;
+    // The fixture's message asks Yes / No.
+    let f = fixture();
+    let mut g = game(&f);
+    g.cfg.answer_ok_boxes = true;
+    g.new_game();
+    g.activate(FormId::PLAYER_REF, FormId(ACT_REF), ActMode::Hand).unwrap();
+    assert_eq!((g.menu, g.boxes.clone()), (Some(menus::MESSAGE), vec![FormId(MESSAGE)]));
+    assert_eq!(g.message_box.as_ref().and_then(|m| m.pressed), None);
+    assert!(g.take_answered_boxes().is_empty());
+    // A form-less MessageBoxEx box: OK alone is answered (GetButtonPressed of the script
+    // that showed it reads 0), Yes / No waits.
+    let f = udf_fixture();
+    let mut g = game(&f);
+    g.cfg.answer_ok_boxes = true;
+    let ok = "Begin Function { }\nMessageBoxEx \"C|Ok\"\nSetFunctionValue (GetButtonPressed)\nEnd\n";
+    assert_eq!(g.run_query(ok, Default::default()), Ok(XVal::Num(0.0)));
+    assert_eq!((g.menu, g.boxes.len(), g.take_answered_boxes()), (None, 0, vec![FormId(0)]));
+    g.run_source("MessageBoxEx \"A|Yes|No\"", Default::default()).expect("compiles");
+    assert_eq!((g.menu, g.boxes.len()), (Some(menus::MESSAGE), 1));
+    assert!(g.take_answered_boxes().is_empty());
 }
 
 #[test]

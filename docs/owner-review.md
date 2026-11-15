@@ -525,6 +525,41 @@ the spec it links to.
     (2026-11-11) predates #2239 [hypothesis: your build was older than it; the log names
     no version]. No other engine change was made; the smoke scenarios
     `freeside-fort-residents-door` and `freeside-north-residents-door` keep it fixed.
+76. **A line's group condition on the speaker wins over its fixed speaker (#2548).**
+    Cottonwood Cove's "Halt! What business have you in Cottonwood Cove, outsider?"
+    (0x0013AC97) names the AAM explorer as its fixed speaker but tests the explorers'
+    faction, which all four explorers are in; the other three force-greeted the player
+    with the generic "Move along." and could never be shown the Mark of Caesar. Ours
+    now: a condition on the speaker naming a group (faction, class, race, voice type,
+    form list) decides who may say the line, as GetIsID already did. Nineteen lines
+    change: the explorers' greeting and its six answers, the Tops' random bartender (3)
+    and the Strip's Securitron messenger (9, still said by the messenger). The other
+    explorers speak the AAM explorer's recorded voice (the only file there is), so one
+    voice comes from four men; the other choice is silent subtitles. Say if you would
+    rather keep the fixed speaker. Observer check 162 asks the original.
+    ([dialogue §4](spec-notes/dialogue.md))
+77. **A Very Aggressive actor attacks a Neutral on sight only inside its aggro radius
+    (#2547).** HELIOS One's guard dogs are in no NCR faction (Neutral to the troopers)
+    and Very Aggressive, so by the wiki's rule they attack any Neutral they see; they
+    went for the troopers 2,800 units away again and again and pulled them off their
+    marks. Ours now: an actor with Aggro Radius Behavior on (the dogs' radius is 2,000)
+    starts such a fight only inside that radius; once fighting it chases anywhere, and a
+    hit or an Enemy still starts a fight at any range. This reaches 227 actor records of
+    FalloutNV.esm (226 creatures: night stalkers, geckos, Mister Gutsys, fire ant queens,
+    Legion mongrels …) that are Very Aggressive with a radius on; the 796 without one
+    still attack every Neutral they see. The player is not affected.
+    If you saw wild creatures and patrols ignore each other more than in the original,
+    say where. Observer checks 144 and 163 ask the original.
+    ([factions §4](spec-notes/factions.md))
+79. **Companions are knocked out, not killed, outside Hardcore (#2623).** No companion
+    carries the Essential flag in the data and no script sets it, so Cass, Veronica and
+    Boone died in the quest pilot's fights outside Hardcore (and Veronica's death left
+    the Hidden Valley bunker locked). Ours now: outside Hardcore every player teammate
+    falls unconscious at zero health and gets up after the fight, still hired; in
+    Hardcore it dies, as before. A mod's JIP ToggleTeammateKillable 1 makes one killable
+    again. IsEssential still reads only the flag (0 for Cass). If a companion should
+    still die in some case outside Hardcore, say which. Observer check 165 asks the
+    original. ([unconscious §2.2a](spec-notes/unconscious.md))
 
 ## Not a gameplay decision: what the extender work needs from you (2026-10-25)
 

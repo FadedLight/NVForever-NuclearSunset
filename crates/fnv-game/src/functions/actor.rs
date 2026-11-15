@@ -779,13 +779,37 @@ pub fn get_is_creature_type(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, 
     yes(g.stats_def(r).and_then(|d| d.creature_type) == Some(t))
 }
 
-/// Essential: the reference's own flag (SetActorRefEssential) or its base's (ACBS,
-/// changed by SetEssential). The reference flag cannot clear the base's [documented:
-/// catalogue notes of SetActorRefEssential].
+/// Whether `r` is spared death: knocked out at zero health instead of killed (combat,
+/// harmful effects, DamageActorValue, KillActor, KillAllActors, planted explosives).
+/// Outside Hardcore the player's teammate is, flag or not, unless JIP's
+/// ToggleTeammateKillable made it killable; in Hardcore a teammate is not, flag or not
+/// (docs/spec-notes/unconscious.md §2.2a). Everyone else: [`essential_flagged`].
 pub fn essential(g: &Game, r: FormId) -> bool {
-    // "Essential flagged teammates are not essential in Hardcore (New Vegas)"
-    // [documented: GECK wiki SetPlayerTeammate notes]: a companion killed in Hardcore
-    // dies, flag or not.
+    if g.is_teammate(r) {
+        // "Essential flagged teammates are not essential in Hardcore (New Vegas)"
+        // [documented: GECK wiki SetPlayerTeammate notes]: a companion killed in
+        // Hardcore dies, flag or not.
+        if g.hardcore() {
+            return false;
+        }
+        // No hired companion carries the Essential flag and no script sets it, yet
+        // their OnDeath blocks exist for Hardcore: outside it the engine keeps a
+        // teammate alive [hypothesis: unconscious.md §2.2a, observer-checks.md check
+        // 165]. ToggleTeammateKillable "Sets the specified teammate referance as
+        // killable" [documented: GECK wiki, JIP].
+        if !g.jip_flags.contains(&(r, "killable")) {
+            return true;
+        }
+    }
+    essential_flagged(g, r)
+}
+
+/// Essential by flag, what IsEssential reads ("Returns 1 if the calling actor is flagged
+/// as essential" [documented: GECK wiki IsEssential]): the reference's own flag
+/// (SetActorRefEssential) or its base's (ACBS, changed by SetEssential). The reference
+/// flag cannot clear the base's [documented: catalogue notes of SetActorRefEssential].
+/// A teammate in Hardcore reads 0 (the SetPlayerTeammate note, [`essential`]).
+pub fn essential_flagged(g: &Game, r: FormId) -> bool {
     if g.hardcore() && g.is_teammate(r) {
         return false;
     }
@@ -813,7 +837,7 @@ pub fn set_actor_ref_essential(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Valu
 
 pub fn is_essential(g: &mut Game, ctx: &Ctx, _a: &Args) -> Result<Value, String> {
     let r = ctx.subject()?;
-    yes(essential(g, r))
+    yes(essential_flagged(g, r))
 }
 
 /// `actor.SetActorFullName message`: the base's name becomes the message's title, for

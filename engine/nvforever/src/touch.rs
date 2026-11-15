@@ -3661,15 +3661,15 @@ mod tests {
             app.world_mut().write_message(hotbar::UtilityTrayRequest(true));
             if cause=="resize" {app.world_mut().get_mut::<Window>(w).unwrap().resolution.set_physical_resolution(672,384);}
             else {
-                let row=app.world().resource::<settings::Settings>().index("touch-hotbar").unwrap();
-                assert_eq!(settings::flip(app.world_mut(),row),Some(false));
+                let row=app.world().resource::<nvf_play::settings::Settings>().index("touch-hotbar").unwrap();
+                assert_eq!(nvf_play::settings::flip(app.world_mut(),row),Some(false));
             }
             app.update();
             assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request must not open");
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
             if cause=="disabled" {
-                let row=app.world().resource::<settings::Settings>().index("touch-hotbar").unwrap();
-                assert_eq!(settings::flip(app.world_mut(),row),Some(true));
+                let row=app.world().resource::<nvf_play::settings::Settings>().index("touch-hotbar").unwrap();
+                assert_eq!(nvf_play::settings::flip(app.world_mut(),row),Some(true));
             }
             app.update();
             assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request cannot replay after return");

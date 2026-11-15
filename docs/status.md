@@ -35,17 +35,22 @@ scales are implemented. Optional [touch practice](design/android-touch-practice.
 teaches movement and actions through isolated synthetic input. Rendered device
 acceptance remains pending. The practice correction follows the
 current movement side and distinguishes the analog dead-zone circle from the legacy
-box. Its ARM library/test-code check passed at code checkpoint `81dc1347`; App
-execution remains pending. That checkpoint's scenario-file verifier passed all
-1,517 entries and merge-parent integrity, without executing game scenarios. This
-documentation-only follow-up adds no whole-head runtime or APK result.
+box. Its ARM library/test-code check passed at code checkpoint `81dc1347`;
+that checkpoint's scenario-file verifier passed all 1,517 entries and merge-parent
+integrity without executing game scenarios. R31 later passed the dead-zone and
+Pad backup controls, but practice's full-layout assertion exposed an unsettled
+implicit-tray baseline in its fixture. The normal-provider baseline correction
+retains the original final equality and still awaits execution.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule
 consumers. Canonical launcher/adaptive icon resources and an explicit diagnostics
-build option are implemented. R30 hosted execution passed pointer ownership, but a
-native-map control still fails and wrapper execution remains unrun. Native build
-success does not qualify the new APK: final packaging and device acceptance remain
+build option are implemented. R31 hosted execution passed the former native-map
+failure and all eight root routing cases. The wrapper executed 1,308 passes and
+four failures (three map-parent fixtures plus practice); the map fixture now
+registers its actual DATA consumer's missing `MenuInput` provider. Its logs lack
+panic payloads, so that diagnosis is source-derived. Both fixture corrections
+await execution. Native build success does not qualify the new APK: final packaging and device acceptance remain
 open. The qualified R9 development APK remains the test baseline; these new features
 are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
 

@@ -129,11 +129,15 @@ tests. Rendered device validation remains separate.
 The practice correction aligns the practice sides with the current stick
 position, shows the analog dead zone as a circle and retains the legacy box. Its
 added App controls passed the scoped ARM library/test-code type/lint check at code
-checkpoint `81dc1347`, but remain unexecuted. That checkpoint also passed the
+checkpoint `81dc1347`. That checkpoint also passed the
 1,517-entry scenario-file verifier and merge-parent integrity check; it did not
 execute game scenarios. The R9 result does not qualify the changed presentation.
-This documentation-only attribution follow-up preserves the code and adds no
-whole-head runtime or APK result.
+The later R31 hosted run passed the dead-zone and Pad backup controls, but the
+mirrored practice control failed its full-layout equality: the implicit tray's
+normal migration changed its centre after the fixture took its snapshot. The
+fixture correction settles that provider before the snapshot and adds a second
+ordinary-frame stability check; all original practice gestures and final equality
+remain. Corrected execution is pending, and no new APK is qualified.
 
 ## Touch inventory menus
 
@@ -157,6 +161,19 @@ including pointer ownership; one native-map test failed. Of the selected 56 new
 menu controls, 43 passed, one failed and 12 were not run. Wrapper tests were not run.
 The native build succeeded but its APK remains unqualified; final packaging and
 phone acceptance are still required. R9 remains the qualified test baseline.
+
+[qualification] R31 tested merge `86e010a5` of source `79891b03` with main
+`6692d2da`, with a tree identical to that source. It passed 178 asset and 2,067 play
+tests (one existing ignored), including the formerly failing native-map control.
+The wrapper ran 1,308 passes, four failures and one existing ignored test. Three
+failures share a map-parent fixture whose actual DATA consumer requires the
+omitted `MenuInput` message stream; its narrow setup correction registers that
+real provider. Their logs omit panic payloads, so this cause is source-derived.
+The fourth failure is the practice snapshot above. Of the same 56 selected menu
+controls, 53 passed and three map-parent cases failed; none was unrun. All eight
+root routing cases passed. Strict engine lint and 3,142 core tests passed, with
+five existing core tests ignored. The aggregate failed: native-build success
+cannot qualify this APK. Both fixture corrections still require actual execution.
 
 ## Mobile performance
 

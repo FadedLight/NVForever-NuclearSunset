@@ -41,9 +41,13 @@ fn map_parent_scene(enabled:bool)->(App,Entity) {
         .insert_resource(nvf_play::player::Player{heading:0.,pitch:0.,eye_height:0.,feet:[0.,12288.,0.],body_eye:None,body_view:None,placed:None})
         .init_resource::<map_data::DataState>().init_resource::<map_pip::frame::Kit>()
         .init_resource::<nvf_play::pad::PadGlyphs>().init_resource::<MapParentSeen>()
+        // PlayPlugin normally gets this real DATA Input.menu stream from MenuPlugin.
+        .add_message::<nvf_play::menu::MenuInput>()
         .add_message::<FastTravelAsk>().add_message::<FastTravelGo>()
         .add_systems(Update,map_data::draw.after(map_pip::flat_screen))
         .add_systems(Update,observe_map_parent.after(map_data::draw));
+    assert!(app.world().contains_resource::<bevy::ecs::message::Messages<nvf_play::menu::MenuInput>>(),
+        "actual DATA draw requires MenuInput messages before its first system pass");
     app.world_mut().resource_mut::<map_pip::PipBoy>().tabs[map_pip::Page::Data.index()]=1;
     let camera=app.world().resource::<map_pip::PipBoyScreen>().camera;
     app.world_mut().spawn((Node::default(),UiTargetCamera(camera),map_pip::PageBody{page:map_pip::Page::Data,tab:1}));

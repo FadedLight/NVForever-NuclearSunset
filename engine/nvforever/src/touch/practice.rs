@@ -1482,7 +1482,7 @@ mod tests {
     fn actual_practice_mirrors_current_right_side_for_fixed_and_floating_owners() {
         for floating in [false, true] {
             let (mut app, w) = scene();
-            let saved = {
+            {
                 let mut layout = app.world_mut().resource_mut::<super::super::Layout>();
                 layout.config.apply_preset("left");
                 layout.config.floating = floating;
@@ -1496,8 +1496,16 @@ mod tests {
                     layout.config.southpaw = false;
                     layout.config.preset_name = "classic".into();
                 }
-                layout.config.clone()
-            };
+            }
+            // The real tray provider migrates an implicit layout on its next
+            // normal frame. Settle it before starting the isolated lesson, so
+            // the full unchanged-config oracle measures practice, not setup.
+            assert!(!app.world().resource::<Practice>().blocking());
+            app.update();
+            let saved = app.world().resource::<super::super::Layout>().config.clone();
+            app.update();
+            assert_eq!(app.world().resource::<super::super::Layout>().config, saved,
+                "the ordinary tray-migration baseline must be stable before practice opens");
             if !floating {
                 assert_eq!(saved.preset_name, "classic", "Custom movement side must not come from the left preset ID");
             }

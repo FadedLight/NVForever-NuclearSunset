@@ -161,6 +161,7 @@ pub const SECTIONS: &[Section] = &[
             "touch-pipboy-size-v1", "touch-pipboy-tab-swipes",
         ],
     ),
+    section("Gameplay", Some("World"), &["grass-fire"]),
     section(
         "Display",
         Some("Screen"),
@@ -585,8 +586,8 @@ mod tests {
     /// quality and enhanced rows, #2014's counter rows, the two VATS rows and #2198's Upscaler
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
-    /// registers with.
-    const KNOWN: [(&str, &str); 157] = [
+    /// registers with, plus main da13f4f8a's grass-fire row (#2567).
+    const KNOWN: [(&str, &str); 158] = [
         ("touch-practice-v1", "Controller"),
         ("touch-hotbar", "Controls"),
         ("touch-hotbar-slots", "Controls"),
@@ -600,6 +601,7 @@ mod tests {
         ("touch-world-activation-v1", "Controls"),
 
         ("detached-camera", "Gameplay"),
+        ("grass-fire", "Gameplay"),
         ("menu-pause", "Gameplay"),
         ("dialogue-goodbye-hint", "Gameplay"),
         ("reload-slows", "Gameplay"),
@@ -871,6 +873,7 @@ mod tests {
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
         for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side"] {assert_eq!(at(key), "Gameplay > Dialogue");}
         assert_eq!(at("head-bob"), "Gameplay > Camera");
+        assert_eq!(at("grass-fire"), "Gameplay > World");
         assert_eq!(at("hud-red"), "Display > Interface");
         for key in [
             "hud-health-size-v1",
@@ -1003,14 +1006,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_157_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_158_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 157);
+        assert_eq!(indices.len(), 158);
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();
@@ -1023,6 +1026,9 @@ mod tests {
             }
         }
         assert_eq!(mobile_keys.len(), 52);
+        let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
+        assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "Gameplay > World");
+        assert!(!mobile_keys.contains("grass-fire"), "upstream world setting is shared, not mobile-only");
         for (index, row) in list.iter().enumerate() {
             if !mobile_keys.contains(row.key) {
                 assert_eq!(mobile.placement_of(index), resolve_desktop_layout(&list).placement_of(index));

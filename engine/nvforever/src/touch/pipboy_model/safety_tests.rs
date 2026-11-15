@@ -19,10 +19,31 @@ mod safety_regressions {
         mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0,vec![[0.0_f32,0.],[1.,0.],[1.,1.],[0.,1.]]);
         mesh.insert_indices(Indices::U16(vec![0,1,2,0,2,3]));mesh
     }
+    fn knob_pose(rotation:f32)->GlobalTransform {
+        // The real fixture camera has a 45-degree, aspect-1 frustum: x=5 at
+        // z=-10 is wholly offscreen. Keep the authored knob visibly beside
+        // the screen and above the page buttons, including its animated pose.
+        GlobalTransform::from(Transform::from_xyz(3.5,-0.5,-10.).with_scale(Vec3::splat(0.35)).with_rotation(Quat::from_rotation_z(rotation)))
+    }
     fn knob(app:&mut App)->Entity {
         let entity=app.world_mut().spawn((PipBoyPart::ScrollKnob,PartMesh(Arc::new(square())),
-            GlobalTransform::from(Transform::from_xyz(5.,-3.,-10.).with_scale(Vec3::splat(0.35))),Visibility::Visible,InheritedVisibility::VISIBLE)).id();
-        settle(app);assert!(app.world().resource::<Geometry>().knob.is_some());entity
+            knob_pose(0.0),Visibility::Visible,InheritedVisibility::VISIBLE)).id();
+        settle(app);assert!(app.world().resource::<Geometry>().knob.is_some());
+        let camera_entity=camera(app);let world=app.world();
+        let camera=world.get::<Camera>(camera_entity).unwrap();let at=world.get::<GlobalTransform>(camera_entity).unwrap();
+        let geometry=world.resource::<Geometry>();let viewport=Rect::from_corners(Vec2::ZERO,geometry.size);
+        for rotation in [0.0,0.5] {
+            let pose=knob_pose(rotation);
+            for corner in [Vec3::new(-1.,-1.,0.),Vec3::new(1.,-1.,0.),Vec3::new(1.,1.,0.),Vec3::new(-1.,1.,0.)] {
+                let point=camera.world_to_viewport(at,pose.transform_point(corner)).unwrap();
+                assert!(viewport.contains(point),"the complete real knob mesh must remain in the actual camera viewport");
+            }
+        }
+        let point=camera.world_to_viewport(at,world.get::<GlobalTransform>(entity).unwrap().translation()).unwrap();
+        assert!(geometry.knob.unwrap().contains(point),"the actual projected mesh center owns the knob target");
+        assert!(!geometry.on_screen(point),"screen precedence must not steal the knob fixture contact");
+        assert!(geometry.target(point).is_none(),"a page button must not steal the knob fixture contact");
+        entity
     }
     fn page_messages(app:&App)->Vec<PipBoyInput> {
         let mut cursor=bevy::ecs::message::MessageCursor::<PipBoyInput>::default();
@@ -122,7 +143,7 @@ mod safety_regressions {
     fn unrelated_knob_pose_animation_preserves_the_real_button_contact_stamp() {
         let mut app=scene(1.0);let knob=knob(&mut app);let point=bounds(&app,Page::Data).center();let old_knob=app.world().resource::<Geometry>().knob;
         event(&mut app,240,TouchPhase::Started,point);
-        app.world_mut().entity_mut(knob).insert(GlobalTransform::from(Transform::from_xyz(5.,-3.,-10.).with_scale(Vec3::splat(0.35)).with_rotation(Quat::from_rotation_z(0.5))));app.update();
+        app.world_mut().entity_mut(knob).insert(knob_pose(0.5));app.update();
         assert_ne!(app.world().resource::<Geometry>().knob,old_knob,"fixture must really animate knob projected bounds");
         assert!(app.world().resource::<ModelTouch>().contact.is_some(),"unrelated knob animation is not button ownership replacement");
         event(&mut app,240,TouchPhase::Ended,point);
@@ -175,7 +196,7 @@ mod safety_regressions {
                 let camera=camera(&mut app);app.world_mut().get_mut::<Camera>(camera).unwrap().computed.target_info=Some(bevy::camera::RenderTargetInfo {physical_size:UVec2::new(2560,1920),scale_factor:2.0});settle(&mut app);
             }
             let point=app.world().resource::<Geometry>().knob.unwrap().center();event(&mut app,250,TouchPhase::Started,point);
-            app.world_mut().entity_mut(knob).insert(GlobalTransform::from(Transform::from_xyz(5.,-3.,-10.).with_scale(Vec3::splat(0.35)).with_rotation(Quat::from_rotation_z(0.5))));app.update();
+            app.world_mut().entity_mut(knob).insert(knob_pose(0.5));app.update();
             assert!(app.world().resource::<ModelTouch>().contact.is_some(),"animated knob bounds must not cancel its owner");
             event(&mut app,250,TouchPhase::Moved,point+Vec2::Y*39.0);assert_eq!(first(&app),Some(1));
             event(&mut app,250,TouchPhase::Moved,point+Vec2::Y*40.0);assert_eq!(first(&app),Some(2));

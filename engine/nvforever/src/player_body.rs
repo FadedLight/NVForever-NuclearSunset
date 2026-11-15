@@ -934,6 +934,7 @@ impl PlayerBody {
     }
     /// A tried-and-missing native raise clip cannot support direct manipulation.
     /// Unknown still uses the ordinary rig.clip load/female-to-male fallback.
+    #[cfg(any(target_os = "android", test))]
     pub fn pipboy_clip_missing(&self) -> bool {
         self.body.as_ref().and_then(|body| body.first.as_ref()
             .and_then(|rig|rig.clips.get(&ClipKey::PipBoy(body.female))))

@@ -51,6 +51,11 @@ pub(super) fn scene(mode: &str) -> (App, Entity, FormId, Vec2) {
             },
         );
     }
+    // World::place uses the signature index, as FormStore::build populates it.
+    // Keep both indices of these authored fixture forms in agreement.
+    for (&id, base) in &forms.bases {
+        forms.sigs.insert(id, base.sig);
+    }
     let forms = Box::leak(Box::new(forms));
     let refs = Box::leak(Box::new(RefTable::default()));
     let mut sim = nvf_play::sim::SimState {
@@ -92,10 +97,14 @@ pub(super) fn scene(mode: &str) -> (App, Entity, FormId, Vec2) {
     );
     let ray = camera.viewport_to_world(&transform, point).unwrap();
     let at = nvf_play::space::to_game(transform.translation() + ray.direction.as_vec3() * 90.);
+    assert_eq!(sim.forms.sig(FormId(0xF200)), Some(*b"DOOR"));
     let reference = sim
         .world
         .place(FormId(0xF200), None, at, [0.; 3], 1)
         .unwrap();
+    assert_eq!(sim.base_of(reference.0), Some(FormId(0xF200)));
+    assert!(sim.present(reference.0));
+    assert!(!sim.world.peek(reference).unwrap().open);
     app.world_mut().spawn((
         camera,
         transform,

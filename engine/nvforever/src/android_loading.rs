@@ -189,7 +189,11 @@ impl Channel {
     }
     fn back(&mut self) {
         #[cfg(test)]
-        if self.test_mode { self.back_calls += 1; return; }
+        if self.test_mode {
+            self.back_calls += 1;
+            #[cfg(target_os = "android")]
+            return;
+        }
         #[cfg(target_os = "android")]
         {
             let _ = crate::android::activity_string("loadingBack", None);

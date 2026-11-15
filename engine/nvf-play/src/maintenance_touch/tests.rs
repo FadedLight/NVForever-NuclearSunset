@@ -31,12 +31,15 @@ pub(crate) fn fixture(modding: bool, native_configuration: bool) -> App {
     let mut model = MenuModel::open_inventory(&mut sim.world).unwrap();
     model.apply(&mut sim.world, Command::SetCategory(Side::Player, if modding { Category::Weapons } else { Category::Apparel }));
     model.selected[Side::Player as usize] = model.list(Side::Player).rows.iter().position(|r| r.item == GEAR && r.condition == Some(0.4)).unwrap();
+    let mut pip = PipBoy::default();
+    pip.phase = Phase::Up;
+    pip.page = Page::Items;
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, MaintenanceTouchPlugin))
         .init_resource::<player_repair::PipRepair>().init_resource::<item_mod::PipItemMod>()
         .init_resource::<PromptKeys>().init_resource::<SafeInsets>().init_resource::<UiScale>()
         .insert_resource(sim).insert_resource(ActiveMenu(Some(model)))
-        .insert_resource(PipBoy { phase: Phase::Up, page: Page::Items, ..default() })
+        .insert_resource(pip)
         .insert_resource(crate::script::ScriptState::over_no_plugins())
         .insert_resource(crate::tiles::vanilla::TileMenus { repair_menu: native_configuration, item_mod: native_configuration, ..default() })
         .add_message::<player_repair::RepairInput>().add_message::<item_mod::ModInput>().add_message::<UiSound>()

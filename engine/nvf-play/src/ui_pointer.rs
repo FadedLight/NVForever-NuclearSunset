@@ -274,7 +274,7 @@ mod tests {
     fn touch_scene() -> (App, Entity, Entity) {
         use bevy::{app::{HierarchyPropagatePlugin, PropagateSet}, camera::{ComputedCameraValues,RenderTargetInfo,visibility::VisibilityPlugin}, ui::{ComputedUiRenderTargetInfo,UiScale,ui_surface::UiSurface,update::propagate_ui_target_cameras}};
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins,bevy::input::InputPlugin,bevy::asset::AssetPlugin::default(),bevy::transform::TransformPlugin));
+        app.add_plugins((MinimalPlugins,bevy::input::InputPlugin,bevy::asset::AssetPlugin::default(),bevy::transform::TransformPlugin,bevy::text::TextPlugin));
         app.init_resource::<Assets<Mesh>>().init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
             .add_plugins((VisibilityPlugin,HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(PostUpdate),HierarchyPropagatePlugin::<ComputedUiRenderTargetInfo>::new(PostUpdate),UiPointerPlugin))
             .init_resource::<UiScale>().init_resource::<UiSurface>().init_resource::<UiStack>();
@@ -285,6 +285,13 @@ mod tests {
         let window=app.world_mut().spawn((Window {resolution:bevy::window::WindowResolution::new(400,400),..default()},PrimaryWindow)).id();
         let button=app.world_mut().spawn((Button,Node {position_type:PositionType::Absolute,left:px(20.0),top:px(20.0),width:px(100.0),height:px(50.0),..default()},UiTargetCamera(camera))).id();
         for _ in 0..4 {app.update();}
+        // This is real Taffy layout, not authored ComputedNode data. Its system
+        // requires TextPlugin's FontCx and RemSize even for a text-free Button.
+        let node=app.world().get::<ComputedNode>(button).unwrap();
+        assert!(node.size().abs_diff_eq(Vec2::new(100.0,50.0),0.01),"actual laid-out button: {:?}",node.size());
+        assert!(app.world().get::<UiGlobalTransform>(button).unwrap().translation.abs_diff_eq(Vec2::new(70.0,45.0),0.01));
+        assert!(app.world().get::<InheritedVisibility>(button).unwrap().get());
+        assert_eq!(app.world().get::<ComputedUiTargetCamera>(button).unwrap().get(),Some(camera));
         let mut stack=app.world_mut().resource_mut::<UiStack>();
         stack.uinodes=vec![button];stack.partition.clear();stack.partition.push(0..1);
         (app,window,button)

@@ -14,6 +14,7 @@ mod map_touch_consumer_routes {
         }
         app.insert_resource(script).insert_resource(TileMenus{map:true,..default()})
             .init_resource::<MapTiles>().init_resource::<crate::tiles::draw::TileFonts>()
+            .init_resource::<crate::pause::PlayClock>()
             .add_systems(Update,data::prepare.after(crate::pipboy::flat_pointer).before(data::draw))
             .add_systems(Update,settle.after(data::prepare).before(data::draw));
         mobile::settle(&mut app);

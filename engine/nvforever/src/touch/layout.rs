@@ -480,11 +480,19 @@ pub fn editor_rect(index: usize, size: Vec2) -> Rect {
         Vec2::new(x + width / 3.0 - 2.0, y + h - 2.0),
     )
 }
+// Historical coordinates are retained only to prove the removed shortcuts stay absent.
+#[cfg(test)]
 pub fn utility_rect(help: bool, size: Vec2) -> Rect {
     let center = Vec2::new(if help { 0.40 } else { 0.50 }, 0.075) * size;
     Rect::from_center_size(Vec2::new(center.x, center.y.max(28.0)), Vec2::splat(48.0))
 }
 impl Layout {
+    pub(super) fn cancel_editor(&mut self) {
+        if let Some(editor) = self.editor.take() {
+            self.config = editor.original;
+            self.message = "Changes cancelled. Return to Settings.".into();
+        }
+    }
     pub fn open(&mut self, playing: bool) {
         self.editor = Some(Editor {
             original: self.config.clone(),
@@ -651,7 +659,7 @@ impl Layout {
                                 match result {
                                     Ok(()) => {
                                         self.message =
-                                            "Touch layout saved. Resume from the pause menu."
+                                            "Touch layout saved. Return to Settings."
                                                 .into();
                                         done = true;
                                     }
@@ -947,12 +955,6 @@ mod tests {
                     let d = c.diameter(target, size);
                     let rect = Rect::from_center_size(c.center(target, size), Vec2::splat(d));
                     assert!(rect.max.y <= size.y - 24.0, "{preset}/{i} {size:?}");
-                    for help in [false, true] {
-                        assert!(
-                            !overlaps(rect, utility_rect(help, size)),
-                            "utility {preset}/{i} {size:?}"
-                        );
-                    }
                     for (j, other) in &controls {
                         assert!(!overlaps(rect, *other), "buttons {preset}/{i}/{j} {size:?}");
                     }

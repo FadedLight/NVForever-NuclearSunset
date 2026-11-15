@@ -24,6 +24,7 @@ mod layout;
 mod modal;
 mod menu_sheets;
 mod practice;
+mod entrypoints;
 mod profiles;
 mod movement;
 
@@ -45,6 +46,7 @@ impl Plugin for TouchControlsPlugin {
         icons::install(app);
         action_presentation::install(app);
         practice::install(app);
+        entrypoints::install(app);
         gyro::install(app);
         safe_area::install(app);
         tray_editor::install(app);
@@ -496,9 +498,9 @@ struct WorldInputBridges<'w,'s> {
 }
 #[allow(clippy::too_many_arguments)]
 fn input(
-    (mut state, mut held_sneak, platform, mut movement): (
+    (mut state, mut held_sneak, platform, mut movement, mut editor_session): (
         ResMut<TouchState>, ResMut<nvf_play::control::HeldSneakInput>,
-        Option<Res<nvf_play::pad::PlatformInputGate>>, movement::Bridge,
+        Option<Res<nvf_play::pad::PlatformInputGate>>, movement::Bridge, ResMut<entrypoints::Session>,
     ),
     mut layout: ResMut<Layout>,
     (ads, gyro_options): (Option<Res<nvf_play::aim_zoom::AimZoom>>, Res<gyro::Options>),
@@ -575,6 +577,7 @@ fn input(
     let controller = bindings
         .as_deref()
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller);
+    if !interactive || resized { editor_session.interrupt(&mut layout); }
     let sheet_menu = sheets.prepare(window_id, window, interactive && !resized && layout.editor.is_none());
     arm.prepare(interactive&&!resized&&!controller&&layout.editor.is_none()&&!modal_captures&&!sheet_menu
         &&(playing||arm.inventory()),platform.as_deref());
@@ -639,6 +642,13 @@ fn input(
         touches.clear();
         return;
     }
+    if editor_session.blocking() && editor_session.discard_batch() {
+        sheets.cancel(); arm.cancel(); model.cancel(); bar.cancel(); drawer.drawer.cancel();
+        world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false;
+        sync_touch(&mut state, bindings.as_deref(), false);
+        for event in touches.read() { editor_session.record(event); }
+        touches.clear(); return;
+    }
     if practice.capture(&mut touches, window_id, size, interactive,
         effective_play == Some(nvf_play::PlayState::Menu)) {
         sheets.cancel();
@@ -699,6 +709,7 @@ fn input(
     let mut gesture_committed = false;
     let mut editor_closed=false;
     for t in touches.read() {
+        editor_session.record(t);
         if t.window != window_id || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
 
             continue;
@@ -708,7 +719,6 @@ fn input(
         if !t.position.is_finite() { world_touch.cancel(); map.cancel(); state.cancel_touch(); sync_touch(&mut state, bindings.as_deref(), false); continue; }
         let p = t.position / size;
         let map_unclaimed=layout.config.hit_filtered(t.position,size,playing,false,|i|i!=gyro::BUTTON||gyro_options.enabled).is_none()
-            && ![false,true].iter().any(|help|layout::utility_rect(*help,size).contains(t.position))
             && !bar.blocks(Rect::from_center_size(t.position,Vec2::splat(1.0)));
         if map.captures() {
             map.event(t,map_unclaimed);world_touch.cancel();state.cancel_touch();held_sneak.active=false;
@@ -724,20 +734,17 @@ fn input(
         if layout.editor.is_some() {
             bar.cancel();
             drawer.drawer.cancel();
-            let tray=layout.tray_editing();
             if interactive {layout.event(t,size);} else {layout.cancel_editor_drag();}
             model.cancel();world_touch.cancel(); map.cancel(); state.cancel_touch();
             sync_touch(&mut state, bindings.as_deref(), pause);
-            if tray && layout.editor.is_none() {editor_closed=true;break;}
+            if layout.editor.is_none() {editor_session.closed();editor_closed=true;break;}
             continue;
         }
         if drawer_allowed {
             let unclaimed = layout.config.hit_filtered(t.position,size,playing,false,
                 |i| i != gyro::BUTTON || gyro_options.enabled).is_none();
             let arm_unclaimed=unclaimed
-                && !bar.blocks(Rect::from_center_size(t.position,Vec2::splat(1.0)))
-                && !layout::utility_rect(false,size).contains(t.position)
-                && !layout::utility_rect(true,size).contains(t.position);
+                && !bar.blocks(Rect::from_center_size(t.position,Vec2::splat(1.0)));
             if arm.begin(t,size,arm_unclaimed,platform.as_deref()) {
                 bar.cancel();drawer.drawer.cancel();state.ui_capture=true;
                 world_touch.cancel(); map.cancel(); state.cancel_touch();held_sneak.active=false;
@@ -763,9 +770,7 @@ fn input(
             }
         }
         let unclaimed=layout.config.hit_filtered(t.position,size,playing,false,
-            |i| i != gyro::BUTTON || gyro_options.enabled).is_none()
-            && !layout::utility_rect(false,size).contains(t.position)
-            && !layout::utility_rect(true,size).contains(t.position);
+            |i| i != gyro::BUTTON || gyro_options.enabled).is_none();
         if model.event(t, unclaimed && !bar.items_pending()
             && !bar.blocks(Rect::from_center_size(t.position, Vec2::splat(1.0)))) {
             state.taps.clear();
@@ -792,20 +797,6 @@ fn input(
             sync_touch(&mut state,bindings.as_deref(),pause);
         }
         if consumed || state.ui_capture { world_touch.cancel(); map.cancel(); state.taps.clear(); continue; }
-        if t.phase == TouchPhase::Started && interactive {
-            if layout::utility_rect(false, size).contains(t.position) {
-                layout.open(playing);
-                world_touch.cancel(); map.cancel(); state.cancel_touch();
-                pause |= playing;
-                sync_touch(&mut state, bindings.as_deref(), pause);
-                continue;
-            }
-            if layout::utility_rect(true, size).contains(t.position) {
-                world_touch.cancel(); map.cancel();
-                layout.config.hints = !layout.config.hints;
-                continue;
-            }
-        }
         let run_lock_hit=playing&&options.run_lock&&movement::lock_available(&layout,&state,size)
             &&movement::lock_rect(&layout,&state,size).contains(t.position);
         let world_eligible=unclaimed&&playing&&interactive&&state.contacts.is_empty()&&!run_lock_hit
@@ -922,6 +913,7 @@ fn input(
     // Drop the unread tail too: breaking the iterator alone would replay it on the
     // next frame, before or after the ordinary menu consumer applies its request.
     if drawer_committed || gesture_committed || editor_closed {
+        if editor_closed { for event in touches.read() { editor_session.record(event); } }
         touches.clear();
     }
     if options.analog && state.interactive_actions && !state.ui_capture {
@@ -942,8 +934,6 @@ pub(super) enum TouchVisual {
     Glyph,
     Stick,
     Knob,
-    Gear,
-    Help,
     Instructions,
     EditorPanel,
     EditorAction(usize),
@@ -1018,21 +1008,7 @@ fn labels(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             Pickable::IGNORE,
         ));
     }
-    for (visual, index) in [(TouchVisual::Gear, 18), (TouchVisual::Help, 19)] {
-        commands.spawn((
-            ImageNode::default(),
-            icons::TouchIcon(index),
-            Node {
-                position_type: PositionType::Absolute,
-                border_radius: BorderRadius::MAX,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.02, 0.06, 0.07, 0.7)),
-            GlobalZIndex(2100),
-            visual,
-        ));
-    }
-    commands.spawn((Text::new("Left thumb: drag the stick to move. Right thumb: swipe empty space to look.\nHold an icon to act. ? toggles labels. The cog edits your controls."),
+    commands.spawn((Text::new("Left thumb: drag the stick to move. Right thumb: swipe empty space to look.\nPause > Settings > Mobile: Customize layout or Controls help / gesture practice."),
         TextFont {font_size:FontSize::Px(14.0),..default()},TextColor(Color::WHITE),
         Node {position_type:PositionType::Absolute,left:percent(25.0),top:percent(18.0),width:percent(50.0),padding:UiRect::all(px(8.0)),..default()},
         BackgroundColor(Color::srgba(0.01,0.02,0.03,0.8)),GlobalZIndex(2100),TouchVisual::Instructions));
@@ -1200,16 +1176,9 @@ fn show_labels(
                 ));
                 playing && !aiming_page
             }
-            TouchVisual::Gear | TouchVisual::Help => {
-                rect = Some(layout::utility_rect(
-                    matches!(visual, TouchVisual::Help),
-                    size,
-                ));
-                !editing
-            }
             TouchVisual::Instructions => {
                 if let Some(mut text) = text {
-                    text.0=format!("{} thumb: {}. {} thumb: swipe empty space to look.\n{}{}? toggles labels. The cog edits your controls.",
+                    text.0=format!("{} thumb: {}. {} thumb: swipe empty space to look.\n{}{}Pause > Settings > Mobile: Customize layout or Controls help / gesture practice.",
                         if layout.config.stick.center.x > 0.5 {"Right"} else {"Left"},
                         if state.movement_options.analog {"small pushes walk; larger pushes run with Always Run"} else {"drag beyond the dead zone for directional movement"},
                         if layout.config.stick.center.x > 0.5 {"Left"} else {"Right"},
@@ -1649,10 +1618,8 @@ mod tests {
             touch(&mut app, w, 9, TouchPhase::Started, gear.x, gear.y);
             touch(&mut app, w, 9, TouchPhase::Ended, gear.x, gear.y);
             app.update();
-            assert!(
-                app.world().resource::<Layout>().editor.is_some(),
-                "the subsequent cog tap opens editing"
-            );
+            assert!(app.world().resource::<Layout>().editor.is_none(),
+                "the removed shortcut cannot return after controller takeover");
         }
     }
     fn drawer_visibility(app: &mut App) -> Visibility {
@@ -1956,7 +1923,7 @@ mod tests {
                 3 => {
                     app.world_mut().write_message(AppLifecycle::Suspended);
                 }
-                4 => touch(&mut app, w, 2, TouchPhase::Started, 500.0, 75.0),
+                4 => app.world_mut().resource_mut::<Layout>().open(true),
                 _ => {
                     app.world_mut().write_message(KeyboardFocusLost);
                 }
@@ -2081,7 +2048,7 @@ mod tests {
     fn aiming_editor_settings_cancel_with_the_layout() {
         let (mut app, w) = scene();
         let original = app.world().resource::<Layout>().config.clone();
-        touch(&mut app, w, 1, TouchPhase::Started, 500.0, 75.0);
+        app.world_mut().resource_mut::<Layout>().open(true);
         app.update();
         for action in [11, 1, 7, 8, 6] {
             let size = Vec2::splat(1000.0);
@@ -2263,7 +2230,7 @@ mod tests {
         );
     }
     #[test]
-    fn editing_releases_attack_pauses_and_cancel_restores_dragged_layout() {
+    fn editing_releases_attack_and_cancel_restores_dragged_layout() {
         let (mut app, w) = scene();
         touch(&mut app, w, 1, TouchPhase::Started, 920.0, 900.0);
         app.update();
@@ -2271,17 +2238,15 @@ mod tests {
             .world()
             .resource::<ButtonInput<MouseButton>>()
             .pressed(MouseButton::Left));
-        touch(&mut app, w, 2, TouchPhase::Started, 500.0, 75.0);
+        app.world_mut().resource_mut::<Layout>().open(true);
         app.update();
         assert!(app.world().resource::<Layout>().editor.is_some());
         assert!(!app
             .world()
             .resource::<ButtonInput<MouseButton>>()
             .pressed(MouseButton::Left));
-        assert!(app
-            .world()
-            .resource::<ButtonInput<KeyCode>>()
-            .just_pressed(KeyCode::Escape));
+        assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape),
+            "the Settings entry already owns pause; editor entry must not toggle it");
         let original = app.world().resource::<Layout>().config.clone();
         touch(&mut app, w, 3, TouchPhase::Started, 180.0, 760.0);
         app.update();
@@ -2306,7 +2271,7 @@ mod tests {
     #[test]
     fn a_second_finger_changing_editor_mode_cancels_the_first_drag() {
         let (mut app, w) = scene();
-        touch(&mut app, w, 1, TouchPhase::Started, 500.0, 75.0);
+        app.world_mut().resource_mut::<Layout>().open(true);
         app.update();
         let size = Vec2::splat(1000.0);
         let fire = app
@@ -2747,7 +2712,7 @@ mod tests {
     }
 
     #[test]
-    fn local_gyro_action_uses_its_semantic_glyph_without_replacing_the_cog_or_help() {
+    fn local_gyro_action_uses_its_semantic_glyph_without_settings_or_help_hud_icons() {
         let (mut app,_)=scene();
         assert_eq!(BUTTONS[gyro::BUTTON].text,"Gyro");
         let world=app.world_mut();
@@ -2756,8 +2721,8 @@ mod tests {
             matches!(world.get::<TouchVisual>(parent.parent()),Some(TouchVisual::Button(gyro::BUTTON)))
                 && Some(icon.0)==icons::semantic_index("gyro")));
         let mut utilities=world.query::<(&TouchVisual,&icons::TouchIcon)>();
-        assert!(utilities.iter(world).any(|(v,i)|matches!(v,TouchVisual::Gear)&&Some(i.0)==icons::semantic_index("settings")));
-        assert!(utilities.iter(world).any(|(v,i)|matches!(v,TouchVisual::Help)&&Some(i.0)==icons::semantic_index("help")));
+        assert!(!utilities.iter(world).any(|(_,i)|Some(i.0)==icons::semantic_index("settings") || Some(i.0)==icons::semantic_index("help")),
+            "persistent settings/help nodes must not be spawned");
     }
 
     fn movement_scene() -> (App, Entity) {
@@ -3109,10 +3074,6 @@ mod tests {
                         }
                         let point=config.center(Target::Stick,size).clamp(rect.min+Vec2::splat(0.25),rect.max-Vec2::splat(0.25));
                         assert!(config.hit(point,size,true,false).is_none(),"{case}/{label}: visible bar intersects stick");
-                        for help in [false,true] {
-                            let overlap=rect.intersect(layout::utility_rect(help,size));
-                            assert!(overlap.width()<=0.5 || overlap.height()<=0.5,"{case}/{label}: bar covers cog/help");
-                        }
                         let lock=movement::lock_rect(app.world().resource::<Layout>(),app.world().resource::<TouchState>(),size);
                         if movement::lock_available(app.world().resource::<Layout>(),app.world().resource::<TouchState>(),size) {
                             let overlap=rect.intersect(lock);
@@ -3522,8 +3483,6 @@ mod tests {
             for x in [0.35, 0.45, 0.55, 0.65] {
                 let point = Vec2::new(x, y) * size;
                 if config.hit(point, size, false, false).is_none()
-                    && !layout::utility_rect(false, size).contains(point)
-                    && !layout::utility_rect(true, size).contains(point)
                     && tiles.iter().all(|(_, r)| !r.contains(point)) { return point; }
             }
         }
@@ -3760,6 +3719,7 @@ mod tests {
         }
     }
     include!("touch/menu_sheet_router_tests.rs");
+    include!("touch/entrypoint_tests.rs");
 }
 
 #[cfg(test)]

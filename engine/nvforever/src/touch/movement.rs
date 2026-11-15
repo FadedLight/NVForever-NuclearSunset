@@ -143,12 +143,7 @@ pub(super) fn lock_available(layout: &Layout, state: &TouchState, size: Vec2) ->
             center.distance(center.clamp(rect.min, rect.max))
                 < layout.config.diameter(Target::Button(i), size) * 0.5
         }
-    }) && rect
-        .intersect(super::layout::utility_rect(false, size))
-        .is_empty()
-        && rect
-            .intersect(super::layout::utility_rect(true, size))
-            .is_empty()
+    })
 }
 
 pub(super) fn install(app: &mut App) {

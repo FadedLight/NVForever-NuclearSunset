@@ -238,7 +238,7 @@ pub const SECTIONS: &[Section] = &[
         "Controls",
         Some("Touch"),
         &[
-            "touch-practice-v1",
+            "touch-layout-editor-v1", "touch-practice-v1",
             "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
             "touch-bottom-swipe-target-v1",
             "touch-pipboy-swipe-v1",
@@ -325,7 +325,7 @@ pub const SECTIONS: &[Section] = &[
 /// Native hardware bindings remain in Controls and use the existing device visibility.
 pub const MOBILE_SECTIONS: &[Section] = &[
     section(MOBILE_TAB, Some("Touch layout and guide"), &[
-        "touch-practice-v1", "touch-icon-family", "adaptive-touch-actions",
+        "touch-layout-editor-v1", "touch-practice-v1", "touch-icon-family", "adaptive-touch-actions",
     ]),
     section(MOBILE_TAB, Some("Movement and gestures"), &[
         "touch-analog-movement-v1", "touch-fire-drag-look-v1",
@@ -591,7 +591,8 @@ mod tests {
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with, plus main da13f4f8a's grass-fire row (#2567), the viewmodel
     /// field of view and menu scale rows, and main 6b29ee76b's Physics rate row.
-    const KNOWN: [(&str, &str); 161] = [
+    const KNOWN: [(&str, &str); 162] = [
+        ("touch-layout-editor-v1", "Controls"),
         ("touch-barter-v1", "Gameplay"),
         ("touch-maintenance-v1", "Gameplay"),
         ("touch-practice-v1", "Controller"),
@@ -838,7 +839,7 @@ mod tests {
                 .into_iter()
                 .chain([
                     "[Touch]",
-                    "touch-practice-v1",
+                    "touch-layout-editor-v1", "touch-practice-v1",
                     "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
                     "touch-bottom-swipe-target-v1",
                     "touch-pipboy-swipe-v1",
@@ -1014,14 +1015,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_161_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_registered_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 161);
+        assert_eq!(indices.len(), KNOWN.len());
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();
@@ -1033,7 +1034,7 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 54);
+        assert_eq!(mobile_keys.len(), 55);
         assert!(!mobile_keys.contains("physics-rate"), "upstream screen setting is shared, not mobile-only");
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "Gameplay > World");

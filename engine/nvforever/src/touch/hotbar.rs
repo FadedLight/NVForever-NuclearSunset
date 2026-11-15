@@ -552,12 +552,6 @@ impl Bridge<'_, '_> {
                     radius: 0.,
                 });
             }
-            for help in [false, true] {
-                occupied.push(packing::Occupied {
-                    rect: rect2(super::layout::utility_rect(help, size)),
-                    radius: 0.,
-                });
-            }
             occupied.extend(extra.iter().map(|(r, radius)| packing::Occupied {
                 rect: rect2(*r),
                 radius: *radius,

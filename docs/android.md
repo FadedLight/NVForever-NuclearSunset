@@ -70,15 +70,18 @@ binary packaging; Java-only checks do not need to package game files or load the
 
 The movement stick is visible: drag with one thumb to move, and swipe empty space
 with the other thumb to look. Action buttons use original geometric icons; held
-buttons light up. Tap **?** to show or hide the action names and movement guide.
+buttons light up. The layout editor's Hints action controls action names and the
+movement guide.
 
-The **cog** opens the touch editor and requests the ordinary pause menu. Drag a
+Open **Pause > Settings > Mobile > Customize layout** for the touch editor.
+**Controls help / gesture practice** opens the isolated teaching screen. Drag a
 control to reposition it, then use Smaller/Larger, Opacity and Show/Hide. Mirror
 swaps the layout between hands; Stick mode chooses fixed or floating movement.
-Game/Menu switches which group you edit. The cog and help controls stay available.
+Game/Menu switches which group you edit. Settings and help have no persistent HUD shortcuts.
 Reset restores that handedness layout; Cancel restores the layout before editing.
 Save writes `touch-controls.json` in the app's own engine home, then leaves the game
-paused so you can resume deliberately. It does not change keyboard bindings or saves.
+paused on the same Settings page so you can resume deliberately. Cancel and Escape
+return there with the original layout. It does not change keyboard bindings or saves.
 The icon/editor revision still needs rendered device validation.
 
 ### Touch aiming follow-up

@@ -15,6 +15,24 @@ install's preset files) is not on the page then.
 The Controls tab's own rows (Input Device, the controls, Invert Y, the sensitivities, Rumble)
 are at the end.
 
+## Mobile › Touch layout and guide
+
+Android groups these actions under Mobile; desktop keeps them in Controls › Touch.
+
+### `touch-layout-editor-v1`: Customize layout
+
+Opens the existing control editor over the paused Settings page. Move or resize
+controls and change opacity, aiming or profiles. Save uses `touch-controls.json`;
+Cancel or Escape restores the original draft. Both return to Settings. The action
+does not persist an open session and refuses another active form or a window
+smaller than 400 × 300 logical units.
+
+### `touch-practice-v1`: Controls help / gesture practice
+
+Opens isolated movement, aiming and gesture lessons without sending gameplay
+actions. Close or Escape returns to Settings. Its existing saved key is unchanged.
+These actions replace the removed persistent settings/help shortcuts on the HUD.
+
 ## Gameplay › Game
 
 ### `difficulty`: Difficulty

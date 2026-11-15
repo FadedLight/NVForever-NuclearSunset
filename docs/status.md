@@ -38,7 +38,12 @@ current movement side and distinguishes the analog dead-zone circle from the leg
 box. Its ARM library/test-code check passed at code checkpoint `81dc1347`; App
 execution remains pending. That checkpoint's scenario-file verifier passed all
 1,517 entries and merge-parent integrity, without executing game scenarios. This
-documentation-only follow-up adds no whole-head runtime or APK result.
+documentation qualification at `79891b03` added no whole-head runtime or APK result.
+The [Mobile entrypoint follow-up](design/android-mobile-entrypoints.md) removes
+persistent settings/help HUD shortcuts and opens the existing layout editor and
+practice through actionable Settings rows. Editor entry/return, Save/Cancel,
+Escape and touch ownership controls are authored; this follow-up is uncompiled
+and unexecuted, with phone acceptance pending.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule

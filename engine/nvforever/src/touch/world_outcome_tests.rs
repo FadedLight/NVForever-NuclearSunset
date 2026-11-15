@@ -234,8 +234,8 @@ fn raw_double_tap_drag_and_same_batch_ui_edge_keep_native_confirmation_separate(
     edge(&mut app, w, 94, TouchPhase::Started, p);
     app.update();
     edge(&mut app, w, 94, TouchPhase::Ended, p);
-    let help = layout::utility_rect(true, Vec2::splat(1000.)).center();
-    edge(&mut app, w, 95, TouchPhase::Started, help);
+    let pause = app.world().resource::<Layout>().config.center(Target::Button(0), Vec2::splat(1000.));
+    edge(&mut app, w, 95, TouchPhase::Started, pause);
     app.update();
     assert!(
         opened(&app, id),

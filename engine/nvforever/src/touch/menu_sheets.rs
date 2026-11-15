@@ -153,7 +153,7 @@ fn replay(
     mut batch: ResMut<Batch>, state: Res<TouchState>, sources: Sources, gates: Gates, cameras: Cameras,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>, touches: Res<Touches>,
     mut barter: barter_touch::Bridge, mut maintenance: maintenance_touch::Bridge,
-    mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>,
+    mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>, mut editor: ResMut<super::entrypoints::Session>,
     mut items: ResMut<nvf_play::pipboy::touch_items::TouchItems>,
     mut map: ResMut<nvf_play::pipboy::data::touch_map::TouchMap>,
 ) {
@@ -170,6 +170,8 @@ fn replay(
         && state.physical_keys.is_empty() && state.physical_mouse.is_empty()
         && batch.kind == current && context.is_some_and(|(s, w, _)| batch.stamp == Some(s) && w.focused);
     let neutral = touches.iter().next().is_none() && !touches.any_just_released() && !touches.any_just_canceled();
+    editor.observe_neutral(neutral);
+    editor.publish(&mut ownership);
     maintenance.observe_neutral(neutral);
     if let Some((stamp, window, camera)) = context {
         barter.prepare(barter_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
@@ -192,7 +194,7 @@ fn replay(
         if barter.captures_touch(touch.id()) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures() { ownership.block(touch.id()); }
     }
     if batch.overflow { ownership.quarantine_overflow(); }
-    ownership.suppress_pointer(barter.visible() || maintenance.captures_touch());
+    ownership.suppress_pointer(barter.visible() || maintenance.captures_touch() || editor.blocking());
     if current.is_some() { items.cancel(); }
 }
 

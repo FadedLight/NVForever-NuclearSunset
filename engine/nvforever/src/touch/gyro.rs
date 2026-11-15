@@ -918,9 +918,9 @@ mod tests {
     }
 
     #[test]
-    fn default_gyro_target_clears_utilities_and_gameplay_buttons_in_every_preset() {
+    fn default_gyro_target_clears_gameplay_buttons_in_every_preset() {
         use super::super::{
-            layout::{utility_rect, Config},
+            layout::Config,
             profiles,
         };
         for size in [
@@ -943,12 +943,6 @@ mod tests {
                 let target = Target::Button(BUTTON);
                 let center = c.center(target, size);
                 let rect = Rect::from_center_size(center, Vec2::splat(c.diameter(target, size)));
-                for help in [false, true] {
-                    assert!(
-                        rect.intersect(utility_rect(help, size)).is_empty(),
-                        "gyro must clear the entire utility hit rectangle at {size:?}"
-                    );
-                }
                 for i in 0..9 {
                     let other = Target::Button(i);
                     let bounds = Rect::from_center_size(
@@ -966,7 +960,7 @@ mod tests {
         }
     }
     #[test]
-    fn default_gyro_center_routes_hold_and_toggle_while_the_cog_still_opens_the_editor() {
+    fn default_gyro_center_routes_hold_and_toggle_without_recreating_the_removed_cog() {
         use super::super::{
             layout::{utility_rect, Config},
             profiles,
@@ -1019,8 +1013,8 @@ mod tests {
                     app.world()
                         .resource::<super::super::Layout>()
                         .editor
-                        .is_some(),
-                    "{preset}: cog must still route to actual editor"
+                        .is_none(),
+                    "{preset}: removed cog must not open an editor"
                 );
                 assert_eq!(delta(&app), Vec2::ZERO);
                 assert!(!app.world().resource::<State>().latched);

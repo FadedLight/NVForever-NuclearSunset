@@ -1,7 +1,10 @@
 # Touch practice (#2436)
 
 [design] Android Settings > Mobile > Touch layout and guide offers an optional
-practice screen (Controls > Touch on desktop). This is a first-use explanation,
+**Controls help / gesture practice** action beside **Customize layout**. The
+[editor entry and return path](android-mobile-entrypoints.md) has no persistent
+settings/help shortcut on the gameplay HUD (Controls > Touch on desktop).
+Practice provides a first-use explanation,
 not an automatic interruption: read movement-thumb and opposite-thumb look
 instructions on separate short pages before pressing Begin. Reset
 returns to that guide. Close and Escape return to Settings. No Seen bit or active

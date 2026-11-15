@@ -495,7 +495,7 @@ pub(super) fn install(app: &mut App) {
         .add_systems(Startup, spawn)
         .add_systems(Update, show);
     settings::add_choice_list(app, Setting {
-        key: KEY, group: "Controller", label: "Touch practice", note: "Practice movement and aiming safely; Close returns here. To move or resize controls, open the overlay cog; Style changes profiles and shapes. Save keeps the layout; Cancel restores it.",
+        key: KEY, group: "Controller", label: "Controls help / gesture practice", note: "Learn movement, aiming and gestures safely. Close returns here. Use Customize layout to move or resize controls and change styles or profiles.",
         switches: "",
         get: |_| false, set: |_, _| {}, slider: None,
     }, ChoiceList {

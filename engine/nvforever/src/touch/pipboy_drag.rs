@@ -360,7 +360,7 @@ fn dispatch_close(mut state:ResMut<State>, admission:CloseAdmission, optional:Re
         || admission.play.as_ref().is_some_and(|s|*s.get()!=nvf_play::PlayState::Menu)
         || admission.repair.as_ref().is_some_and(|r|r.is_open())
         || admission.modding.as_ref().is_some_and(|m|m.is_open())
-        || admission.data.as_ref().is_some_and(|d|d.popup().is_some())
+        || admission.data.as_ref().is_some_and(|d|d.has_popup())
         || admission.script.as_ref().is_some_and(|s|s.loading() || s.rt.as_ref().is_some_and(|rt|rt.game.loading || matches!(rt.game.side_menu(),Some(fnv_game::game::menus::LOADING|fnv_game::game::menus::VATS)) || rt.game.top_menu().is_some_and(|code|code!=fnv_game::game::menus::INVENTORY)))
         || !admission.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|m.mode==nvf_play::menu::model::Mode::Inventory && m.quantity.is_none())
         || admission.pip.as_deref().zip(admission.screen.as_deref()).is_none_or(|(p,s)|!context.matches(p,s))

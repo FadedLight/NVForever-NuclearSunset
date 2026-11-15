@@ -5,7 +5,7 @@ mod model_parent_ownership {
 use super::*;
 use bevy::{app::{HierarchyPropagatePlugin,PropagateSet},asset::{AssetApp,AssetPlugin},camera::{ComputedCameraValues,RenderTargetInfo,CameraProjection,visibility::VisibilityPlugin},ecs::system::RunSystemOnce,
     ui::{ComputedUiRenderTargetInfo,UiStack,ui_surface::UiSurface,update::propagate_ui_target_cameras}};
-use nvf_play::{pipboy::{Page,PipBoy,PipBoyScreen},ui_pointer::{Button,PointerState,UiPointerPlugin,TouchUiCapture}};
+use nvf_play::{pipboy::{Page,PipBoy},ui_pointer::{Button,PointerState,UiPointerPlugin,TouchUiCapture}};
 
 #[derive(Component)]struct Underlay;
 #[derive(Resource,Default)]struct Seen {presses:usize,releases:usize,down:bool}

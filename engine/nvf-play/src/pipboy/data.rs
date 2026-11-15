@@ -1237,6 +1237,9 @@ impl DataState {
         }
     }
 
+    /// Whether the DATA page currently owns a popup; external input must leave it in control.
+    pub fn has_popup(&self) -> bool { self.popup().is_some() }
+
     /// The question box over the map (fast travel's or Place Marker's), while it is up.
     pub(crate) fn popup(&self) -> Option<&Popup> {
         self.popup.as_ref()

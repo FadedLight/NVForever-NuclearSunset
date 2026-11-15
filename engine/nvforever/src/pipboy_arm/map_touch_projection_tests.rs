@@ -52,7 +52,7 @@ pub(crate) fn attach_map_pointer_fixture(app:&mut App) {
     camera.computed.target_info=Some(bevy::camera::RenderTargetInfo{physical_size:UVec2::splat(1000),scale_factor:1.});
     app.world_mut().spawn((camera,GlobalTransform::IDENTITY,PlayerCamera));
     app.init_resource::<Assets<SkinnedMeshInverseBindposes>>().init_resource::<crate::touch::pipboy_model::Geometry>()
-        .add_systems(Last,follow_pointer.after(nvf_play::pipboy::flat_pointer));
+        .add_systems(Update,follow_pointer.in_set(nvf_play::pipboy::PointerSet).before(nvf_play::pipboy::data::draw));
     {let mut pip=app.world_mut().resource_mut::<PipBoy>();pip.frame=Frame::Device;}
     app.world_mut().resource_mut::<PipBoyScreen>().on_model=true;
 }

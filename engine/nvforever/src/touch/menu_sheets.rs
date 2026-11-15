@@ -22,7 +22,7 @@ impl Batch {
             if let Some(slot) = self.ids.iter_mut().find(|slot| slot.is_none()) { *slot = Some(event.id); }
             else { self.overflow = true; }
         }
-        if self.events.len() < MAX_EDGES && !self.overflow { self.events.push(event.clone()); }
+        if self.events.len() < MAX_EDGES && !self.overflow { self.events.push(*event); }
         else { self.overflow = true; self.events.clear(); }
     }
 }
@@ -136,9 +136,11 @@ struct Cameras<'w, 's> {
     cameras: Query<'w, 's, (Entity, &'static Camera, &'static RenderTarget, Has<Camera2d>)>,
 }
 impl Cameras<'_, '_> {
-    fn select(&self, window: Entity, physical: UVec2) -> Option<Entity> {
+    fn select(&self, window: Entity, physical: UVec2, logical: Vec2) -> Option<Entity> {
         let valid = |camera: &Camera, target: &RenderTarget| camera.is_active
+            && camera.physical_target_size() == Some(physical)
             && camera.physical_viewport_rect() == Some(URect::from_corners(UVec2::ZERO, physical))
+            && camera.logical_viewport_rect() == Some(Rect::from_corners(Vec2::ZERO, logical))
             && matches!(target.normalize(Some(window)), Some(NormalizedRenderTarget::Window(w)) if w.entity() == window);
         self.default.get().filter(|&entity| self.cameras.get(entity).is_ok_and(|(_, c, t, _)| valid(c, t)))
             .or_else(|| self.cameras.iter().filter(|(_, c, t, two_d)| *two_d && valid(c, t))
@@ -159,7 +161,7 @@ fn replay(
     let current = sources.kind(maintenance.enabled());
     let context = windows.single().ok().and_then(|(entity, window)| {
         let stamp = sources.stamp(entity, window);
-        let camera = cameras.select(entity, stamp.physical)?;
+        let camera = cameras.select(entity, stamp.physical, window.resolution.size())?;
         Some((stamp, window, camera))
     });
     let consumed = gates.switching.as_ref().is_some_and(|s| !s.allows_actions());
@@ -168,6 +170,7 @@ fn replay(
         && state.physical_keys.is_empty() && state.physical_mouse.is_empty()
         && batch.kind == current && context.is_some_and(|(s, w, _)| batch.stamp == Some(s) && w.focused);
     let neutral = touches.iter().next().is_none() && !touches.any_just_released() && !touches.any_just_canceled();
+    maintenance.observe_neutral(neutral);
     if let Some((stamp, window, camera)) = context {
         barter.prepare(barter_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
             ui_scale: stamp.scale, density: stamp.density, admitted: allowed && current == Some(Kind::Barter), fresh, neutral });

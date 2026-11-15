@@ -98,9 +98,11 @@ fn sole_parent_raw_marker_tap_uses_real_record_and_existing_travel_request_once_
 }
 
 #[derive(Resource,Default)]
-struct LateMapRenderTarget(Option<bevy::camera::RenderTarget>);
+struct LateMapRenderTarget(Option<(bevy::camera::RenderTarget,Vec2)>);
 fn change_map_render_target_after_raw(world:&mut World) {
-    let Some(target)=world.resource_mut::<LateMapRenderTarget>().0.take() else {return;};
+    let Some((target,point))=world.resource_mut::<LateMapRenderTarget>().0.take() else {return;};
+    assert!(world.resource::<TouchMap>().captures(),"the sole raw reader already admitted this terminal batch");
+    assert!(world.resource::<TouchMap>().projected_point(point).is_some(),"the real PointerSet publisher accepted the primary target before this late mutation");
     let camera={let mut q=world.query_filtered::<Entity,With<nvf_play::PlayerCamera>>();q.single(world).unwrap()};
     world.entity_mut(camera).insert(target);
 }
@@ -110,7 +112,7 @@ fn actual_device_map_consumer_rejects_same_sized_target_switch_after_raw_end_but
     for target_case in ["image","other-window","same-window"] {
         let (mut app,w)=map_parent_scene(false);
         crate::pipboy_arm::tests::attach_map_pointer_fixture(&mut app);
-        app.init_resource::<LateMapRenderTarget>().add_systems(Update,change_map_render_target_after_raw.before(map_data::draw));
+        app.init_resource::<LateMapRenderTarget>().add_systems(Update,change_map_render_target_after_raw.after(map_pip::PointerSet).before(map_data::draw));
         for _ in 0..5 {app.update();}
         let p=crate::pipboy_arm::tests::map_pointer_fixture_raw(&mut app,Vec2::new(477.5,350.));
         assert!((app.world().resource::<TouchMap>().projected_point(p).unwrap()-Vec2::new(477.5,350.)).length()<0.01,
@@ -121,7 +123,7 @@ fn actual_device_map_consumer_rejects_same_sized_target_switch_after_raw_end_but
             "other-window"=>{let other=app.world_mut().spawn(Window{resolution:bevy::window::WindowResolution::new(1000,1000),..default()}).id();RenderTarget::Window(WindowRef::Entity(other))},
             _=>RenderTarget::Window(WindowRef::Entity(w)),
         };
-        app.world_mut().resource_mut::<LateMapRenderTarget>().0=Some(target);
+        app.world_mut().resource_mut::<LateMapRenderTarget>().0=Some((target,p));
         touch(&mut app,w,2300,TouchPhase::Ended,p.x,p.y);app.update();
         assert_eq!(app.world().resource::<MapParentSeen>().asks,
             if target_case=="same-window" {vec![0xF811]}else{vec![]},

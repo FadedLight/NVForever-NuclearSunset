@@ -29,7 +29,14 @@ class LauncherIcons {
         for (int i = 0; i < DENSITIES.length; i++) {
             Path directory = resources.resolve("mipmap-" + DENSITIES[i]);
             if (!check) Files.createDirectories(directory);
-            save(directory.resolve("ic_launcher.png"), render(brand, LEGACY[i], .82, true), check);
+            BufferedImage legacy = render(brand, LEGACY[i], .82, true);
+            for (int y = 0; y < legacy.getHeight(); y++) {
+                for (int x = 0; x < legacy.getWidth(); x++) {
+                    if ((legacy.getRGB(x, y) >>> 24) != 255)
+                        throw new IllegalStateException("Legacy background must remain opaque");
+                }
+            }
+            save(directory.resolve("ic_launcher.png"), legacy, check);
             BufferedImage foreground = render(brand, ADAPTIVE[i], 66.0 / 108, false);
             checkSafeZone(foreground);
             save(directory.resolve("ic_launcher_foreground.png"), foreground, check);
@@ -51,6 +58,7 @@ class LauncherIcons {
             if (background) {
                 graphics.setColor(BACKGROUND);
                 graphics.fillRect(0, 0, side, side);
+                graphics.setComposite(AlphaComposite.SrcOver);
             }
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);

@@ -230,6 +230,7 @@ fn actual_ended_batch_revalidates_its_id_after_late_platform_quarantine_for_tap_
 }
 
 pub(crate) fn handbuilt_window()->Rect {super::super::hand_built_window()}
+pub(crate) fn magnification(app:&App,tab:usize)->f32 {app.world().resource::<DataState>().magnify[tab]}
 
 #[test]
 fn actual_shared_view_transform_holds_both_map_bounds_rejects_invalid_inputs_and_anchors_off_centre() {
@@ -270,4 +271,57 @@ fn actual_terminal_edit_overflow_cannot_recreate_even_an_empty_map_selection_tap
     assert_eq!(shown(&app),before);assert_eq!(app.world().resource::<DataState>().travel_marker,Some(0xF811));quiet(&app);
     settle(&mut app);edge(&mut app,window,4002,TouchPhase::Started,marker);edge(&mut app,window,4002,TouchPhase::Ended,marker);app.update();
     assert_eq!(app.world().resource::<Seen>().asks,[0xF811],"neutral witness permits a genuinely fresh contact after overflow");
+}
+
+#[derive(Resource,Default)]struct LateMapModal(Option<&'static str>);
+fn open_late_map_modal(world:&mut World) {
+    use fnv_game::game::menus;
+    let Some(which)=world.resource_mut::<LateMapModal>().0.take() else {return;};
+    {
+        let mut script=world.resource_mut::<ScriptState>();let game=&mut script.rt.as_mut().unwrap().game;
+        match which {
+            "message"=>game.open_menu(menus::MESSAGE),
+            "under"=>{game.menu=None;game.menu_under=Some(menus::MESSAGE);},
+            "loading"=>game.loading=true,
+            "vats"=>game.vats.mode=fnv_game::vats::MODE_TARGET_SELECT,
+            "creator"=>game.open_menu(menus::RACE),
+            _=>unreachable!(),
+        }
+    }
+    if which=="creator" {
+        crate::creator::synchronize_for_map_control(world);
+        assert!(world.resource::<crate::creator::CreatorMenu>().is_open(),"real creator sync constructed the real model");
+        // The core renderer has not run sync again yet; its visible creator still
+        // owns this frame even if the script restores the underlying MAP code.
+        world.resource_mut::<ScriptState>().rt.as_mut().unwrap().game.menu=Some(menus::MAP);
+    }
+}
+#[test]
+fn actual_late_script_side_menu_and_creator_ownership_cancels_map_tap_then_own_map_accepts_fresh_contact() {
+    use fnv_game::game::menus;
+    for which in ["message","under","loading","vats","creator"] {
+        let (mut app,window)=scene(WORLD,1.0,1.0);
+        let mut script=ScriptState::over_no_plugins();script.rt.as_mut().unwrap().game.menu=Some(menus::MAP);
+        let data=fnv_actor::creator::Creator{player:Some(fnv_actor::Look {
+            race:fnv_sim::FormId(0x19),female:false,hair:None,hair_color:None,eyes:None,head_parts:vec![],facegen:default(),
+        }),..default()};
+        app.insert_resource(script).insert_resource(crate::creator::CreatorData(Arc::new(data)))
+            .init_resource::<crate::creator::CreatorMenu>().init_resource::<crate::control::PlayerControl>()
+            .init_resource::<LateMapModal>().add_systems(Update,open_late_map_modal.before(draw));
+        settle(&mut app);let before=shown(&app);let point=raw_point(&mut app,before.window.center());
+        step_edge(&mut app,window,4100,TouchPhase::Started,point);
+        assert!(app.world().resource::<TouchMap>().captures());
+        app.world_mut().resource_mut::<LateMapModal>().0=Some(which);
+        edge(&mut app,window,4100,TouchPhase::Ended,point);app.update();
+        quiet(&app);assert_eq!(shown(&app),before,"{which}: the late modal cannot admit a transform or marker request");
+        {
+            let mut script=app.world_mut().resource_mut::<ScriptState>();let game=&mut script.rt.as_mut().unwrap().game;
+            game.menu=Some(menus::MAP);game.menu_under=None;game.loading=false;game.vats.mode=0;
+        }
+        crate::creator::synchronize_for_map_control(app.world_mut());
+        assert!(!app.world().resource::<crate::creator::CreatorMenu>().is_open());
+        settle(&mut app);edge(&mut app,window,4101,TouchPhase::Started,point);edge(&mut app,window,4101,TouchPhase::Ended,point);app.update();
+        assert_eq!(app.world().resource::<Seen>().asks,[0xF811],"{which}: the ordinary PipBoy MAP route remains usable after closure");
+        assert!(app.world().resource::<Seen>().go.is_empty());
+    }
 }

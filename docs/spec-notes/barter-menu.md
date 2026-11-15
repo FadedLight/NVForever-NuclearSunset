@@ -670,3 +670,18 @@ Touch dispatch also checks the runtime's current top menu and active character
 creator. Barter and its own Quantity publication are admitted; an unrelated script
 modal opened after raw input retires the touch proposal. These checks apply only
 to this touch producer; ordinary keyboard/mouse/controller consumers are unchanged.
+
+[design]
+Accept and quantity controls use a one-shot internal command envelope. The existing
+MenuInput consumer resolves it immediately before its ordinary mutation, checking
+the exact current basket/quote or quantity row and confirmed amount. Earlier queued
+menu commands cannot change what a touch confirmation commits. One typed guard is
+retained; rejected, consumed or canceled tokens do not replay. Ordinary commands
+and their sounds, callbacks and effects retain the existing execution path.
+
+[design]
+The same consumer context check covers selection, staging, scrolling, category and
+Close, so a later modal cannot receive a touch intended for the underlying trade.
+Scroll resolves a fixed Focus/Scroll pair through the original effects body with no
+interleaving. An obsolete token cannot discard a newer live guard; only its matching
+token is consumed, including when an existing row guard drops that command.

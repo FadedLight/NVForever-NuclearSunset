@@ -671,6 +671,7 @@ type MapPublication<'w,'s> = (
     Query<'w,'s,(Entity,&'static PipBoyPart,Option<&'static Visibility>,Option<&'static InheritedVisibility>)>,
 );
 type PointerParts<'w, 's> = Query<'w, 's, (Entity, &'static PipBoyPart, &'static PartMesh, &'static GlobalTransform, Option<&'static SkinnedMesh>, Option<&'static Visibility>, Option<&'static InheritedVisibility>)>;
+type TouchPointerInput<'w> = (Option<Res<'w,nvf_play::pad::pointer::PadPointer>>, Option<ResMut<'w,nvf_play::pipboy::touch_items::TouchItems>>, Option<Res<'w,nvf_play::ui_pointer::TouchUiCapture>>);
 
 #[allow(clippy::too_many_arguments)]
 fn follow_pointer(
@@ -685,7 +686,7 @@ fn follow_pointer(
     mut aid: ResMut<PipBoyAid>,
     mut aid_over: Local<Option<Page>>,
     mut out: MessageWriter<PipBoyInput>,
-    (pad_pointer, mut touch, overlay): (Option<Res<nvf_play::pad::pointer::PadPointer>>, Option<ResMut<nvf_play::pipboy::touch_items::TouchItems>>, Option<Res<nvf_play::ui_pointer::TouchUiCapture>>),
+    (pad_pointer, mut touch, overlay): TouchPointerInput<'_>,
     #[cfg(any(target_os = "android", test))] mut geometry: Option<ResMut<crate::touch::pipboy_model::Geometry>>,
     #[cfg(any(target_os="android",test))] (mut map,map_safe,map_ui,map_size,map_windows,map_parts):MapPublication<'_,'_>,
 ) {

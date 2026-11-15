@@ -868,3 +868,10 @@ mod tests {
         }
     }
 }
+
+// The map regression opens the actual model through sync, not a forged is_open flag.
+#[cfg(test)]
+pub(crate) fn synchronize_for_map_control(world:&mut World) {
+    use bevy::ecs::system::RunSystemOnce;
+    world.run_system_once(sync).unwrap();
+}

@@ -23,7 +23,7 @@ repair the lifecycle of this supported step:
   persistent graph and active chunks coherent after query registration followed
   by an explicit sleep request. It does not suppress island assertions.
 
-[observed] The isolated candidate passed all 114 unchanged fnv-phys synthetic
+[implementation evidence] The isolated candidate passed all 114 unchanged fnv-phys synthetic
 fixtures and ten focused query lifecycle controls. The earlier no-time candidate
 failed 16 existing fixtures; adding the deferred join cleared thirteen, and the
 bootstrap correction cleared the remaining three. The matching NVForever change

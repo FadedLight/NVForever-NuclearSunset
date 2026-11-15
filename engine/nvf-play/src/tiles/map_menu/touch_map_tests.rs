@@ -39,7 +39,7 @@ mod map_touch_consumer_routes {
             mobile::step_edge(&mut app,window,302,TouchPhase::Moved,raw_centre-Vec2::X*80.);
             mobile::step_edge(&mut app,window,303,TouchPhase::Moved,raw_centre+Vec2::X*80.);
             let view=mobile::shown(&app);
-            assert!((app.world().resource::<DataState>().magnify[tab]-2.0).abs()<1e-4);
+            assert!((mobile::magnification(&app,tab)-2.0).abs()<1e-4);
             let tiles=app.world().resource::<MapTiles>();let native=tiles.written.shown.as_ref().unwrap().world.as_ref().unwrap();
             assert_eq!(native.view,view);assert!((native.mag-2.0).abs()<1e-4);
             let script=app.world().resource::<ScriptState>();let ui=&script.rt.as_ref().unwrap().game.ui_tree;

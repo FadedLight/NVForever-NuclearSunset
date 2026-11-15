@@ -817,6 +817,7 @@ fn apply_input(
     (mut taken, mut stolen): (MessageWriter<crate::crime::ItemsTaken>, MessageWriter<crate::pickpocket::Pickpocketed>),
     mut held: ResMut<PromptKeys>,
     combat: Option<Res<crate::combat::Combat>>,
+    mut mobile_barter: barter_touch::Commits,
 ) {
     let mut script = script.map(|s| s.into_inner());
     // The commands left of a guard that failed ([`Command::Expect`]).
@@ -832,96 +833,104 @@ fn apply_input(
         }
         if dropping > 0 {
             dropping -= 1;
+            if let Command::CommitBarter(token) = cmd { mobile_barter.discard(token); }
             continue;
         }
-        let before = crate::ui_sounds::MenuBefore::of(m);
-        let asking = m.quantity.is_some();
-        let a = m.apply(&mut sim.world, cmd);
-        held.0 |= m.quantity.is_some();
-        if let (false, Some(q)) = (asking, m.quantity) {
-            info!("menu: {cmd:?}: how many? ({} of {})", q.amount, q.max);
-        }
-        if asking && m.quantity.is_none() && matches!(cmd, Command::AmountCancel | Command::Close) {
-            info!("menu: {cmd:?}: prompt closed");
-        }
-        match cmd {
-            Command::Category(side, _) | Command::SetCategory(side, _) if m.mode != Mode::Inventory => {
-                info!("menu: {cmd:?}: the {side:?} list shows {:?}", m.category[side as usize]);
+        let commands = if let Command::CommitBarter(token) = cmd {
+            let Some(commands) = mobile_barter.resolve(token, m, &mut sim.world, script.as_deref()) else { continue };
+            commands
+        } else { [Some(cmd), None] };
+        for cmd in commands.into_iter().flatten() {
+            let Some(m) = active.0.as_mut() else { return };
+            let before = crate::ui_sounds::MenuBefore::of(m);
+            let asking = m.quantity.is_some();
+            let a = m.apply(&mut sim.world, cmd);
+            held.0 |= m.quantity.is_some();
+            if let (false, Some(q)) = (asking, m.quantity) {
+                info!("menu: {cmd:?}: how many? ({} of {})", q.amount, q.max);
             }
-            Command::Focus(_) => info!("menu: {cmd:?}: the {:?} list has the focus", m.focus),
-            _ => {}
-        }
-        // What the command did, for its sound (`crate::ui_sounds`).
-        if let Some(event) = crate::ui_sounds::menu_event(cmd, &before, m, &a) {
-            sounds.write(crate::ui_sounds::UiSound { menu: crate::ui_sounds::UiMenu::of(m.mode), event });
-        }
-        let moves_items = matches!(cmd, Command::One | Command::Stack | Command::TakeAll | Command::Drop | Command::DropStack | Command::Accept | Command::AmountOk);
-        if moves_items || a.changed {
-            if let Some(s) = m.status.as_deref().filter(|s| !s.is_empty()) {
-                info!("menu: {cmd:?}: {s}");
+            if asking && m.quantity.is_none() && matches!(cmd, Command::AmountCancel | Command::Close) {
+                info!("menu: {cmd:?}: prompt closed");
             }
-        }
-        if let Some(item) = a.used {
-            used.write(ItemUsed { item: item.0, limb: None });
-        }
-        // Power armour without the training: the game's message, once the Pip-Boy is
-        // closed (`fnv_game::functions::refuse_power_armor`).
-        if a.power_armor_refused {
-            if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
-                let m = fnv_game::functions::refuse_power_armor(&mut rt.game);
-                info!("menu: power armour refused: no Power Armor Training (message {})", m.map_or_else(|| "none".to_string(), |m| m.to_string()));
+            match cmd {
+                Command::Category(side, _) | Command::SetCategory(side, _) if m.mode != Mode::Inventory => {
+                    info!("menu: {cmd:?}: the {side:?} list shows {:?}", m.category[side as usize]);
+                }
+                Command::Focus(_) => info!("menu: {cmd:?}: the {:?} list has the focus", m.focus),
+                _ => {}
             }
-        }
-        if a.traded > 0 {
-            if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
-                rt.game.count_stat(fnv_game::misc_stats::BARTER_AMOUNT_TRADED, f64::from(a.traded));
+            // What the command did, for its sound (`crate::ui_sounds`).
+            if let Some(event) = crate::ui_sounds::menu_event(cmd, &before, m, &a) {
+                sounds.write(crate::ui_sounds::UiSound { menu: crate::ui_sounds::UiMenu::of(m.mode), event });
             }
-        }
-        // Picking a pocket: the pickpocket rules judge it (`crate::pickpocket`). A live
-        // explosive placed is armed now, and the pocket listed again, before the next
-        // command reads its rows (#1640).
-        if let Some(victim) = m.steal.as_ref().map(|s| s.victim) {
-            let mut placed = Vec::new();
-            if !a.given.is_empty() {
-                if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
-                    let c = combat.as_deref();
-                    placed = crate::pickpocket::arm_given(rt, &mut sim, Some(&mut *m), |item| c.and_then(|c| crate::pickpocket::explosive_of(c, item)), victim, &a.given);
+            let moves_items = matches!(cmd, Command::One | Command::Stack | Command::TakeAll | Command::Drop | Command::DropStack | Command::Accept | Command::AmountOk);
+            if moves_items || a.changed {
+                if let Some(s) = m.status.as_deref().filter(|s| !s.is_empty()) {
+                    info!("menu: {cmd:?}: {s}");
                 }
             }
-            if !a.taken.is_empty() || !a.given.is_empty() || a.caught.is_some() {
-                stolen.write(crate::pickpocket::Pickpocketed { victim, taken: a.taken.clone(), given: a.given.clone(), placed, caught: a.caught });
+            if let Some(item) = a.used {
+                used.write(ItemUsed { item: item.0, limb: None });
             }
-        } else if let (Mode::Container(c), false) = (m.mode, a.taken.is_empty()) {
-            // Taking owned items is theft (`crate::crime`).
-            taken.write(crate::crime::ItemsTaken { container: c, items: a.taken.clone() });
-        }
-        // A dropped item starts turned as its holder faces (GetAngle Z of the new reference
-        // equals the player's, X and Y 0 [observed: capture pc_drop_fall, physics.md
-        // §4.3]); `World::drop_item` leaves the rotation 0.
-        let heading = sim.world.peek(FormId::PLAYER_REF).map_or(0.0, |p| p.rot[2]);
-        for id in &a.created {
-            if let Ok(s) = sim.world.get(*id) {
-                s.rot = [0.0, 0.0, heading];
+            // Power armour without the training: the game's message, once the Pip-Boy is
+            // closed (`fnv_game::functions::refuse_power_armor`).
+            if a.power_armor_refused {
+                if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
+                    let m = fnv_game::functions::refuse_power_armor(&mut rt.game);
+                    info!("menu: power armour refused: no Power Armor Training (message {})", m.map_or_else(|| "none".to_string(), |m| m.to_string()));
+                }
             }
-            let (at, count) = sim.world.peek(*id).map(|s| (s.pos, s.count)).unwrap_or_default();
-            info!("menu: dropped reference {id} (count {count}) at ({:.1}, {:.1}, {:.1})", at[0], at[1], at[2]);
-            changed.write(RefChanged::new(id.0));
-        }
-        // A corpse's dropped weapon taken from its loot menu: picked up from the world,
-        // so its collision and drawing go (`model::Row::reference`).
-        for id in &a.picked {
-            info!("menu: picked up reference {id} lying beside the container");
-            changed.write(RefChanged::new(id.0));
-        }
-        if a.close {
-            info!("menu: close");
-            if *state.get() == PlayState::Menu {
-                next.set(PlayState::Playing);
-            } else if let Some(m) = active.0.take() {
-                // Over a conversation: it goes on (the drawing goes with the model).
-                crate::script::engine_menu_closed(script.as_deref_mut(), m.mode);
+            if a.traded > 0 {
+                if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
+                    rt.game.count_stat(fnv_game::misc_stats::BARTER_AMOUNT_TRADED, f64::from(a.traded));
+                }
             }
-            return;
+            // Picking a pocket: the pickpocket rules judge it (`crate::pickpocket`). A live
+            // explosive placed is armed now, and the pocket listed again, before the next
+            // command reads its rows (#1640).
+            if let Some(victim) = m.steal.as_ref().map(|s| s.victim) {
+                let mut placed = Vec::new();
+                if !a.given.is_empty() {
+                    if let Some(rt) = script.as_mut().and_then(|s| s.rt.as_mut()) {
+                        let c = combat.as_deref();
+                        placed = crate::pickpocket::arm_given(rt, &mut sim, Some(&mut *m), |item| c.and_then(|c| crate::pickpocket::explosive_of(c, item)), victim, &a.given);
+                    }
+                }
+                if !a.taken.is_empty() || !a.given.is_empty() || a.caught.is_some() {
+                    stolen.write(crate::pickpocket::Pickpocketed { victim, taken: a.taken.clone(), given: a.given.clone(), placed, caught: a.caught });
+                }
+            } else if let (Mode::Container(c), false) = (m.mode, a.taken.is_empty()) {
+                // Taking owned items is theft (`crate::crime`).
+                taken.write(crate::crime::ItemsTaken { container: c, items: a.taken.clone() });
+            }
+            // A dropped item starts turned as its holder faces (GetAngle Z of the new reference
+            // equals the player's, X and Y 0 [observed: capture pc_drop_fall, physics.md
+            // §4.3]); `World::drop_item` leaves the rotation 0.
+            let heading = sim.world.peek(FormId::PLAYER_REF).map_or(0.0, |p| p.rot[2]);
+            for id in &a.created {
+                if let Ok(s) = sim.world.get(*id) {
+                    s.rot = [0.0, 0.0, heading];
+                }
+                let (at, count) = sim.world.peek(*id).map(|s| (s.pos, s.count)).unwrap_or_default();
+                info!("menu: dropped reference {id} (count {count}) at ({:.1}, {:.1}, {:.1})", at[0], at[1], at[2]);
+                changed.write(RefChanged::new(id.0));
+            }
+            // A corpse's dropped weapon taken from its loot menu: picked up from the world,
+            // so its collision and drawing go (`model::Row::reference`).
+            for id in &a.picked {
+                info!("menu: picked up reference {id} lying beside the container");
+                changed.write(RefChanged::new(id.0));
+            }
+            if a.close {
+                info!("menu: close");
+                if *state.get() == PlayState::Menu {
+                    next.set(PlayState::Playing);
+                } else if let Some(m) = active.0.take() {
+                    // Over a conversation: it goes on (the drawing goes with the model).
+                    crate::script::engine_menu_closed(script.as_deref_mut(), m.mode);
+                }
+                return;
+            }
         }
     }
 }

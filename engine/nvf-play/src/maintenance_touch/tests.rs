@@ -290,3 +290,48 @@ fn actual_script_modal_or_other_maintenance_owner_opened_after_raw_confirm_canno
         }
     }
 }
+
+#[test]
+fn actual_refused_release_batch_stays_owned_until_real_neutral_then_recovers_beyond_retired_capacity() {
+    use bevy::input::{InputSystems, touch::Touches};
+    #[derive(Resource, Default)]
+    struct Refused(bool);
+    fn route(touches: Res<Touches>, mut events: MessageReader<TouchInput>, refused: Res<Refused>, mut bridge: Bridge) {
+        let neutral = touches.iter().next().is_none() && !touches.any_just_pressed()
+            && !touches.any_just_released() && !touches.any_just_canceled();
+        bridge.observe_neutral(neutral);
+        if refused.0 {
+            bridge.hardware_intent();
+            // Mirrors the parent rejecting this entire batch after selector/hardware
+            // admission. The real InputPlugin already observed its release edge.
+            events.clear(); return;
+        }
+        for event in events.read() { bridge.event(event, true); }
+    }
+    let mut app = fixture(false, false);
+    app.init_resource::<Refused>().add_systems(PreUpdate, route.after(InputSystems));
+    let window = app.world().resource::<State>().context.unwrap().window;
+    let at = center(&app, Action::Select(1));
+    let send = |app: &mut App, id, phase, position| { app.world_mut().write_message(TouchInput { window, id, phase, position, force: None }); };
+    for id in 150..168 {
+        app.world_mut().resource_mut::<Refused>().0 = false;
+        send(&mut app, id, TouchPhase::Started, at); app.update();
+        assert!(app.world_mut().run_system_once(move |b: Bridge| b.owns(id)).unwrap(), "fresh owner must remain admissible after previous skipped releases");
+        app.world_mut().resource_mut::<Refused>().0 = true;
+        send(&mut app, id, TouchPhase::Ended, at); app.update();
+        assert!(app.world().resource::<Touches>().any_just_released());
+        assert!(app.world_mut().run_system_once(move |b: Bridge| b.owns(id)).unwrap(), "refused release frame still belongs to the sheet");
+        assert_eq!(count(&app, GEAR), 2);
+        app.update();
+        assert!(app.world().resource::<Touches>().iter().next().is_none());
+        assert!(!app.world_mut().run_system_once(move |b: Bridge| b.owns(id)).unwrap(), "actual following neutral retires the old identity");
+        assert!(app.world().resource::<State>().retired.is_empty());
+    }
+    app.world_mut().resource_mut::<Refused>().0 = false;
+    for (id, action) in [(180, Action::Select(1)), (181, Action::Select(1)), (182, Action::Confirm)] {
+        let point = center(&app, action);
+        send(&mut app, id, TouchPhase::Started, point); send(&mut app, id, TouchPhase::Ended, point); app.update();
+        if id == 180 { assert_eq!(app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().selected, 0, "hardware return remains action-free"); }
+    }
+    assert_eq!(count(&app, GEAR), 1, "fresh deliberate action works after more than16 refused-release lifecycles");
+}

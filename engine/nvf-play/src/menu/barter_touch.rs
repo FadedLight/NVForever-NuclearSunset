@@ -5,6 +5,8 @@ use fnv_sim::FormId;
 use std::collections::BTreeMap;
 
 mod view;
+mod commit;
+pub(crate) use commit::Commits;
 #[cfg(test)]
 mod tests;
 
@@ -83,10 +85,10 @@ struct Identity { session: Session, window: Entity, camera: Entity, size: Vec2,
     safe: crate::touch_safe_area::SafeInsets, ui_scale: f32, density: f32, category: [Category; 2], prompt: Option<Prompt> }
 #[derive(Clone)]
 struct Contact { id: u64, origin: Vec2, previous: Vec2, target: Option<Target>, identity: Identity,
-    dragged: bool, scroll: bool, remainder: f32, quote: Option<Quote>, selection: Option<RowToken> }
+    dragged: bool, scroll: bool, remainder: f32, quote: Option<Quote>, selection: Option<RowToken>, amount: Option<i32> }
 #[derive(Clone)]
 enum Action { Select(RowToken), Scroll(Side, i32), Category(Side, i32), Stage(RowToken, bool),
-    Accept(Quote), Close, Amount(Prompt, Command) }
+    Accept(Quote), Close, Amount(Prompt, Command, Option<i32>) }
 struct Pending { id: u64, identity: Identity, action: Action }
 
 #[derive(Resource)]
@@ -169,7 +171,7 @@ impl TouchBarter {
             (Some(Pending { action: Action::Scroll(old_side, n), .. }), Action::Scroll(side, more)) if old_side == side => {
                 *n = n.saturating_add(*more).clamp(-12, 12);
             }
-            (Some(Pending { action: Action::Amount(old, command), .. }), Action::Amount(next, Command::Amount(n))) if old == next => {
+            (Some(Pending { action: Action::Amount(old, command, _), .. }), Action::Amount(next, Command::Amount(n), _)) if old == next => {
                 *command = Command::Amount(*n);
             }
             (None, _) => self.pending = Some(Pending { id, identity, action }),
@@ -206,7 +208,7 @@ impl TouchBarter {
             let target = panel.hits(m, self.first).into_iter().find(|h| h.rect.contains(event.position)).map(|h| h.target);
             self.contact = Some(Contact { id: event.id, origin: event.position, previous: event.position,
                 target, identity, dragged: false, scroll: false, remainder: 0.0,
-                quote: (target == Some(Target::Accept)).then(|| Quote::of(m)).flatten(), selection: selected(m) });
+                quote: (target == Some(Target::Accept)).then(|| Quote::of(m)).flatten(), selection: selected(m), amount: m.quantity.map(|q| q.amount) });
             self.revision = self.revision.wrapping_add(1);
             return true;
         }
@@ -229,13 +231,13 @@ impl TouchBarter {
         } else if c.target == Some(Target::Meter) {
             if let (Some(q), Some(rect)) = (prompt(m), panel.meter) {
                 let amount = model::amount_at((event.position.x - rect.min.x) / rect.width(), q.max);
-                self.queue(c.id, identity, Action::Amount(q, Command::Amount(amount)), false);
+                self.queue(c.id, identity, Action::Amount(q, Command::Amount(amount), None), false);
             }
         }
         c.previous = event.position;
         if event.phase == TouchPhase::Ended {
             if !c.dragged && c.target == panel.hits(m, self.first).into_iter().find(|h| h.rect.contains(event.position)).map(|h| h.target) {
-                if let Some(action) = c.target.and_then(|target| action(target, m, c.quote, c.selection)) {
+                if let Some(action) = c.target.and_then(|target| action(target, m, c.quote, c.selection, c.amount)) {
                     self.queue(c.id, identity, action, true);
                 }
             }
@@ -246,21 +248,21 @@ impl TouchBarter {
     }
 }
 fn selected(m: &MenuModel) -> Option<RowToken> { RowToken::at(m, m.focus, m.selected[m.focus as usize]) }
-fn action(target: Target, m: &MenuModel, quote: Option<Quote>, selection: Option<RowToken>) -> Option<Action> {
+fn action(target: Target, m: &MenuModel, quote: Option<Quote>, selection: Option<RowToken>, amount: Option<i32>) -> Option<Action> {
     Some(match target {
         Target::Row(t) => Action::Select(t), Target::Category(s, n) => Action::Category(s, n),
         Target::One => Action::Stage(selection?, false), Target::All => Action::Stage(selection?, true),
         Target::Accept => Action::Accept(quote?), Target::Close => Action::Close,
-        Target::Step(n) => Action::Amount(prompt(m)?, Command::AmountStep(n)),
-        Target::Min => Action::Amount(prompt(m)?, Command::Amount(1)),
-        Target::Max => Action::Amount(prompt(m)?, Command::Amount(i32::MAX)),
-        Target::ConfirmAmount => Action::Amount(prompt(m)?, Command::AmountOk),
-        Target::CancelAmount => Action::Amount(prompt(m)?, Command::AmountCancel), Target::Meter => return None,
+        Target::Step(n) => Action::Amount(prompt(m)?, Command::AmountStep(n), None),
+        Target::Min => Action::Amount(prompt(m)?, Command::Amount(1), None),
+        Target::Max => Action::Amount(prompt(m)?, Command::Amount(i32::MAX), None),
+        Target::ConfirmAmount => Action::Amount(prompt(m)?, Command::AmountOk, Some(amount?)),
+        Target::CancelAmount => Action::Amount(prompt(m)?, Command::AmountCancel, None), Target::Meter => return None,
     })
 }
 
 #[derive(SystemParam)]
-struct Admission<'w, 's> {
+struct LiveAdmission<'w, 's> {
     bindings: Option<Res<'w, crate::bindings::Bindings>>,
     switch: Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<'w, crate::pad::PlatformInputGate>>,
@@ -270,23 +272,11 @@ struct Admission<'w, 's> {
     fresh: Option<Res<'w, super::FreshMenu>>,
     capture: Option<Res<'w, crate::bindings::KeyboardCapture>>,
     free_cam: Option<Res<'w, crate::free_cam::FreeCam>>,
-    script: Option<Res<'w, crate::script::ScriptState>>,
     creator: Option<Res<'w, crate::creator::CreatorMenu>>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     cameras: Query<'w, 's, (&'static Camera, &'static RenderTarget)>,
 }
-impl Admission<'_, '_> {
-    fn menu_allows(&self, m: &MenuModel) -> bool {
-        if self.creator.as_ref().is_some_and(|c| c.is_open()) { return false; }
-        self.script.as_ref().and_then(|s| s.rt.as_ref()).is_none_or(|rt| {
-            use fnv_game::game::menus;
-            rt.game.top_menu().is_none_or(|code| code == menus::BARTER
-                || (code == menus::QUANTITY && m.quantity.is_some()))
-                // ui_prompt is the engine's own Quantity publication, not a top
-                // menu. Its clearing can trail apply_input by one frame.
-                && rt.game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)
-        })
-    }
+impl LiveAdmission<'_, '_> {
     fn allows(&self, frame: Frame, id: u64) -> bool {
         self.bindings.as_ref().is_none_or(|b| b.device == crate::bindings::InputDevice::KeyboardMouse)
             && self.switch.as_ref().is_none_or(|s| s.allows_actions())
@@ -304,8 +294,29 @@ impl Admission<'_, '_> {
                     bevy::camera::NormalizedRenderTarget::Window(w) if w.entity() == frame.window))
                 && camera.logical_viewport_size().is_some_and(|size| size.abs_diff_eq(frame.size, 0.01))
                 && self.windows.get(frame.window).is_ok_and(|w| camera.physical_viewport_rect()
-                    == Some(URect::from_corners(UVec2::ZERO, UVec2::new(w.physical_width(), w.physical_height())))))
+                    == Some(URect::from_corners(UVec2::ZERO, UVec2::new(w.physical_width(), w.physical_height())))
+                    && camera.physical_target_size() == Some(UVec2::new(w.physical_width(), w.physical_height()))))
     }
+}
+fn menu_allows(script: Option<&crate::script::ScriptState>, creator: Option<&crate::creator::CreatorMenu>, m: &MenuModel) -> bool {
+    if creator.is_some_and(crate::creator::CreatorMenu::is_open) { return false; }
+    script.and_then(|s| s.rt.as_ref()).is_none_or(|rt| {
+        use fnv_game::game::menus;
+        !rt.game.loading && !matches!(rt.game.side_menu(), Some(menus::LOADING | menus::VATS))
+            && rt.game.top_menu().is_none_or(|code| code == menus::BARTER
+                || (code == menus::QUANTITY && m.quantity.is_some()))
+            // ui_prompt is the engine's own Quantity publication, not a top
+            // menu. Its clearing can trail apply_input by one frame.
+            && rt.game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)
+    })
+}
+#[derive(SystemParam)]
+struct Admission<'w,'s> {
+    live: LiveAdmission<'w,'s>, script: Option<Res<'w,crate::script::ScriptState>>,
+}
+impl Admission<'_,'_> {
+    fn allows(&self, frame:Frame, id:u64)->bool { self.live.allows(frame,id) }
+    fn menu_allows(&self,m:&MenuModel)->bool {menu_allows(self.script.as_deref(),self.live.creator.as_deref(),m)}
 }
 
 /// Adapter for the parent's sole raw reader. No keyboard, mouse or touch reader
@@ -344,7 +355,7 @@ fn available(world: &mut fnv_sim::World<'_>, m: &MenuModel, token: RowToken, amo
     world.inventory_mut(holder).is_ok_and(|inventory| inventory.count_at(row.item, row.pick()) >= amount.saturating_add(reserved))
 }
 fn dispatch(mut state: ResMut<TouchBarter>, options: Res<Options>, mut active: ResMut<ActiveMenu>,
-    mut sim: ResMut<crate::sim::SimState>, admission: Admission, mut out: MessageWriter<MenuInput>) {
+    mut sim: ResMut<crate::sim::SimState>, admission: Admission, mut guards: ResMut<commit::Guards>, mut out: MessageWriter<MenuInput>) {
     let Some(pending) = state.pending.take() else { return };
     let Some(frame) = state.frame.filter(|_| options.enabled && state.visible()) else { return };
     let Some(m) = active.0.as_mut().filter(|m| session(m) == Some(pending.identity.session)) else { return };
@@ -359,21 +370,37 @@ fn dispatch(mut state: ResMut<TouchBarter>, options: Res<Options>, mut active: R
             if m.quantity.is_some() || m.refresh(&mut sim.world).is_err() || !t.same(m)
                 || (stage && !available(&mut sim.world, m, t, if all { t.count } else { 1 })) { changed(m); return; }
             out.write(MenuInput(Command::Expect(t.guard(m, stage))));
-            out.write(MenuInput(if stage { if all { Command::Stack } else { Command::One } } else { Command::Hover(t.side, t.index) }));
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision,
+                commit::Expected::Row { row: t, stage: stage.then_some(all) });
+            out.write(MenuInput(Command::CommitBarter(token)));
         }
         Action::Accept(quote) => {
-            if m.quantity.is_some() || m.refresh(&mut sim.world).is_err() || Quote::of(m) != Some(quote) { changed(m); return; }
-            out.write(MenuInput(Command::Accept));
+            if m.quantity.is_some() || m.refresh(&mut sim.world).is_err() || Quote::of(m).as_ref() != Some(&quote) { changed(m); return; }
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision, commit::Expected::Accept(quote));
+            out.write(MenuInput(Command::CommitBarter(token)));
         }
-        Action::Scroll(side, by) if m.quantity.is_none() => { out.write(MenuInput(Command::Focus(side))); out.write(MenuInput(Command::Scroll(by))); }
-        Action::Category(side, by) if m.quantity.is_none() => { out.write(MenuInput(Command::Category(side, by))); }
-        Action::Close => { out.write(MenuInput(Command::Close)); }
-        Action::Amount(expected, cmd) if prompt(m) == Some(expected) => {
+        Action::Scroll(side, by) if m.quantity.is_none() => {
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision, commit::Expected::Scroll(side, by));
+            out.write(MenuInput(Command::CommitBarter(token)));
+        }
+        Action::Category(side, by) if m.quantity.is_none() => {
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision, commit::Expected::Command(Command::Category(side, by)));
+            out.write(MenuInput(Command::CommitBarter(token)));
+        }
+        Action::Close => {
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision, commit::Expected::Command(Command::Close));
+            out.write(MenuInput(Command::CommitBarter(token)));
+        }
+        Action::Amount(expected, cmd, amount) if prompt(m) == Some(expected) => {
+            if amount.is_some_and(|amount| m.quantity.is_none_or(|q| q.amount != amount)) { changed(m); return; }
             if cmd == Command::AmountOk && !RowToken::at(m, expected.side, expected.row)
                 .is_some_and(|row| available(&mut sim.world, m, row, m.quantity.unwrap().amount)) {
                 m.quantity = None; let _ = m.refresh(&mut sim.world); changed(m); return;
             }
-            out.write(MenuInput(cmd));
+            let Some(row) = RowToken::at(m, expected.side, expected.row) else { return; };
+            let token = guards.arm(pending.id, frame, pending.identity, state.revision,
+                commit::Expected::Amount { prompt: expected, row, amount, command: cmd });
+            out.write(MenuInput(Command::CommitBarter(token)));
         }
         _ => {}
     }
@@ -382,7 +409,7 @@ fn dispatch(mut state: ResMut<TouchBarter>, options: Res<Options>, mut active: R
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Dispatch;
 pub fn install(app: &mut App) {
-    app.init_resource::<Options>().init_resource::<TouchBarter>()
+    app.init_resource::<Options>().init_resource::<TouchBarter>().init_resource::<commit::Guards>()
         .add_message::<MenuInput>()
         .add_systems(Update, dispatch.in_set(Dispatch).before(super::MenuSystems).run_if(resource_exists::<crate::sim::SimState>))
         .add_systems(Update, view::draw.after(super::MenuSystems));

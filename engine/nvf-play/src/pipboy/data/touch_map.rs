@@ -156,6 +156,14 @@ impl TouchMap {
         Some(Batch {context,base,mag,edits:std::mem::take(&mut self.edits),pointer:self.pointer,ids:std::mem::take(&mut self.ids)})
     }
 }
+/// The real game owns script/side-menu admission. Keep this read out of Gate:
+/// DATA already mutably borrows ScriptState through its existing Game parameter.
+/// Parent raw ingress only reads it in Bridge; DATA repeats it through that borrow.
+pub(super) fn source_allows(script:Option<&ScriptState>)->bool {
+    script.and_then(|s|s.rt.as_ref()).is_none_or(|rt|
+        !crate::tiles::stats_menu::modal_over(rt.game.top_menu())
+        && !crate::tiles::stats_menu::modal_over(rt.game.side_menu()))
+}
 /// Shared late admission; desktop fixtures need none of these optional resources.
 #[derive(SystemParam)]
 pub struct Gate<'w,'s> {
@@ -164,6 +172,7 @@ pub struct Gate<'w,'s> {
     windows:Query<'w,'s,(Entity,&'static Window),With<PrimaryWindow>>,
     safe:Option<Res<'w,crate::touch_safe_area::SafeInsets>>, ui:Option<Res<'w,UiScale>>,
     sizing:Option<Res<'w,super::super::touch_presentation::PipBoySize>>,
+    creator:Option<Res<'w,crate::creator::CreatorMenu>>,
     paused:Option<Res<'w,crate::pause::Paused>>, location:Option<Res<'w,crate::Location>>,
     touches:Option<Res<'w,bevy::input::touch::Touches>>,
     flat:Query<'w,'s,(Entity,&'static ComputedNode,&'static UiGlobalTransform),With<super::super::FlatScreen>>,
@@ -174,6 +183,7 @@ impl Gate<'_,'_> {
         let (window_id,window)=self.windows.single().ok()?;
         if !window.focused || pip.phase!=super::super::Phase::Up || pip.page!=Page::Data || pip.tab()>WORLD
             || self.paused.as_ref().is_some_and(|p|p.0) || !self.admission.allows()
+            || self.creator.as_ref().is_some_and(|c|c.is_open())
             || self.physical.as_ref().is_some_and(|p|p.active) {return None;}
         let presentation=Presentation {
             safe:self.safe.as_deref().copied().unwrap_or_default(), menu:crate::interface::unit_scale(),
@@ -194,7 +204,7 @@ impl Gate<'_,'_> {
 #[derive(SystemParam)]
 pub struct Bridge<'w,'s> {
     state:ResMut<'w,TouchMap>, pip:Option<Res<'w,PipBoy>>, screen:Option<Res<'w,PipBoyScreen>>,
-    data:Option<Res<'w,DataState>>, gate:Gate<'w,'s>,
+    data:Option<Res<'w,DataState>>, gate:Gate<'w,'s>, script:Option<Res<'w,ScriptState>>,
 }
 impl Bridge<'_,'_> {
     /// Called before the raw batch. `allowed` includes wrapper lifecycle, UI,
@@ -208,7 +218,7 @@ impl Bridge<'_,'_> {
         if self.state.overflow {self.state.context=None;return;}
         let next=(|| {
             let (pip,screen,data)=(self.pip.as_deref()?,self.screen.as_deref()?,self.data.as_deref()?);
-            if !allowed {return None;}
+            if !allowed || !source_allows(self.script.as_deref()) {return None;}
             let stamp=self.gate.stamp(pip,screen)?;
             if self.state.projection.as_ref()?.stamp!=stamp {return None;}
             let surface=surface(data,pip.tab())?;

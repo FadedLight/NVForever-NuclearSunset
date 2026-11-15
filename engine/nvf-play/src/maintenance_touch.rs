@@ -236,6 +236,11 @@ impl Bridge<'_> {
     pub fn available(&self) -> bool { self.state.enabled && self.state.allowed && self.state.context.is_some() && self.state.source.is_some() }
     /// Retired ownership survives source/modal/hardware cancellation until real neutral.
     pub fn owns(&self, id: u64) -> bool { self.state.retired.contains(&id) || self.state.contact.as_ref().is_some_and(|c| c.id == id) }
+    /// Parent's actual Touches witness: no held, pressed, release or cancel-edge
+    /// contact remains. A refused release frame must stay captured until this.
+    pub fn observe_neutral(&mut self, neutral: bool) {
+        if neutral { self.state.retired.clear(); }
+    }
     pub fn hardware_intent(&mut self) { self.state.retire(); self.state.hardware_hidden = true; }
     pub fn restore_touch(&mut self) { self.state.retire(); self.state.hardware_hidden = false; }
     pub fn cancel(&mut self) { self.state.retire(); self.state.allowed = false; }

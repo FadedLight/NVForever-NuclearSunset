@@ -929,8 +929,7 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
     // pointer is ignored so it cannot take the highlight box back from the stick.
     let mouse_pointer = screen.and_then(|s| s.pointer).filter(|_| !input.bindings.as_ref().is_some_and(|b| b.device == InputDevice::Controller));
     let e = early.unwrap_or_default();
-    let map_allowed = !e.hold && !game.script.as_ref().and_then(|s|s.rt.as_ref())
-        .is_some_and(|rt|crate::tiles::stats_menu::modal_over(rt.game.menu));
+    let map_allowed = !e.hold && touch_map::source_allows(game.script.as_deref());
     let direct_map = touch_map::take(st,tab,screen,input,map_allowed);
     let pointer = direct_map.map(|frame|frame.0).or(mouse_pointer);
     st.pointer_now = pointer.or_else(||screen.and_then(|s|s.pointer));

@@ -531,6 +531,9 @@ pub enum Command {
     /// The next commands hold only if the row is still there ([`MenuModel::row_is`]);
     /// `crate::menu::apply_input` drops them otherwise.
     Expect(RowGuard),
+    /// Internal one-shot touch envelope. Only menu::apply_input may resolve it
+    /// against its exact live barter guard; the plain model treats it as a no-op.
+    CommitBarter(u64),
     Up,
     Down,
     PageUp,
@@ -1240,7 +1243,7 @@ impl MenuModel {
                     }
                 }
             }
-            Command::Amount(_) | Command::AmountStep(_) | Command::AmountOk | Command::AmountCancel => {}
+            Command::CommitBarter(_) | Command::Amount(_) | Command::AmountStep(_) | Command::AmountOk | Command::AmountCancel => {}
             _ => {
                 if let Some(q) = self.asks_quantity(cmd) {
                     self.quantity = Some(q);

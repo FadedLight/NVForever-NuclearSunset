@@ -2,7 +2,7 @@
 //! The alternate presentation is exercised with a genuinely built native menu and
 //! with the ordinary hand-built fallback. Shared wrapper arbitration is separate.
 use super::*;
-use bevy::{camera::{ComputedCameraValues, RenderTargetInfo}, input::{InputPlugin, InputSystems},
+use bevy::{camera::{ComputedCameraValues, RenderTargetInfo, Viewport}, input::{InputPlugin, InputSystems},
     input::touch::Touches, state::app::StatesPlugin, window::WindowRef};
 use fnv_esm::{raw::{Subrecord, write_subrecords}, LoadOrder, Plugin, Schema};
 use fnv_sim::{FormStore, RefTable, SimConfig};
@@ -54,8 +54,41 @@ fn simulation() -> (crate::sim::SimState, FormId) {
 struct Fixture(Frame);
 #[derive(Resource, Default)]
 struct LateChange(Option<u8>);
+#[derive(Resource, Default)]
+struct LateConsumer(Option<u8>);
+#[derive(Resource, Default)]
+struct LastEnvelope(Option<u64>);
+#[derive(Resource, Default)]
+struct RepeatEnvelope { next: bool, queued: usize }
+#[derive(Resource, Default)]
+struct BeforeConsumerCount(usize);
 fn mutate_after_raw(world: &mut bevy::prelude::World) {
     let Some(change) = world.resource_mut::<LateChange>().0.take() else { return };
+    apply_late_change(world, change);
+}
+fn mutate_before_consumer(world: &mut bevy::prelude::World) {
+    let Some(change) = world.resource_mut::<LateConsumer>().0.take() else { return };
+    apply_late_change(world, change);
+}
+fn remember_envelope(mut input: MessageReader<MenuInput>, mut last: ResMut<LastEnvelope>,
+    mut repeat: ResMut<RepeatEnvelope>, mut commands: Commands) {
+    for event in input.read() {
+        if let Command::CommitBarter(token) = event.0 {
+            last.0 = Some(token);
+            if std::mem::take(&mut repeat.next) {
+                repeat.queued += 1;
+                commands.queue(move |world: &mut bevy::prelude::World| {
+                    world.write_message(MenuInput(Command::CommitBarter(token)));
+                });
+            }
+        }
+    }
+}
+fn count_before_consumer(input: Res<Messages<MenuInput>>, last: Res<LastEnvelope>, mut seen: ResMut<BeforeConsumerCount>) {
+    seen.0 = last.0.map_or(0, |token| input.iter_current_update_messages()
+        .filter(|event| event.0 == Command::CommitBarter(token)).count());
+}
+fn apply_late_change(world: &mut bevy::prelude::World, change: u8) {
     let f = world.resource::<Fixture>().0;
     match change {
         0 => world.resource_mut::<crate::touch_safe_area::SafeInsets>().left = 8.0,
@@ -73,6 +106,13 @@ fn mutate_after_raw(world: &mut bevy::prelude::World) {
         8 => world.resource_mut::<crate::pad::PlatformInputGate>().set_blocked(true),
         9 => world.resource_mut::<crate::bindings::Bindings>().device = crate::bindings::InputDevice::Controller,
         10 => world.resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.open_menu(fnv_game::game::menus::MESSAGE),
+        11 => {
+            let mut camera = world.get_mut::<Camera>(f.camera).unwrap();
+            camera.viewport = Some(Viewport { physical_size: UVec2::new(640,360), ..default() });
+            camera.computed.target_info.as_mut().unwrap().physical_size = UVec2::new(1280,720);
+        }
+        12 => world.resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.loading = true,
+        13 => world.resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.vats.mode = fnv_game::vats::MODE_TARGET_SELECT,
         _ => unreachable!(),
     }
 }
@@ -104,7 +144,9 @@ fn scene(native: bool, phase: crate::PlayState) -> (App, FormId) {
         .insert_resource(sim).insert_resource(script).insert_resource(ActiveMenu(Some(m)))
         .insert_resource(TileMenus { barter: native, ..default() }).insert_resource(tiles)
         .insert_resource(Options { enabled: true })
-        .init_resource::<LateChange>().init_resource::<UiScale>().init_resource::<crate::touch_safe_area::SafeInsets>()
+        .init_resource::<LateChange>().init_resource::<LateConsumer>().init_resource::<LastEnvelope>().init_resource::<RepeatEnvelope>()
+        .init_resource::<BeforeConsumerCount>()
+        .init_resource::<UiScale>().init_resource::<crate::touch_safe_area::SafeInsets>()
         .init_resource::<crate::bindings::KeyboardCapture>().init_resource::<crate::free_cam::FreeCam>().init_resource::<crate::pause::Paused>()
         .init_resource::<crate::pad::PlatformInputGate>().init_resource::<crate::bindings::Bindings>()
         .init_resource::<crate::menu::PromptKeys>().init_resource::<crate::menu::FreshMenu>().init_resource::<crate::menu::WheelHold>()
@@ -126,6 +168,8 @@ fn scene(native: bool, phase: crate::PlayState) -> (App, FormId) {
     install(&mut app);
     app.add_systems(PreUpdate, raw_owner.after(InputSystems))
         .add_systems(Update, mutate_after_raw.before(Dispatch))
+        .add_systems(Update, (mutate_before_consumer, remember_envelope, ApplyDeferred, count_before_consumer)
+            .chain().after(Dispatch).before(crate::menu::MenuSystems))
         .add_systems(Update, (input::feed, crate::menu::quantity_keys, crate::menu::menu_keys,
             crate::menu::menu_mouse, crate::menu::quantity_mouse, crate::menu::apply_input,
             crate::menu::draw).chain().in_set(crate::menu::MenuSystems));
@@ -456,6 +500,175 @@ fn actual_touch_barter_late_script_message_prevents_accept_then_fresh_review_can
         tap(&mut app, Target::Accept);
         assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (0, 16));
         assert_eq!((count(&mut app, PLAYER, CAPS), count(&mut app, stock, CAPS)), (1072, 928));
+    }
+}
+
+#[test]
+fn actual_touch_barter_final_consumer_rejects_queued_amount_change_and_consumes_token_once() {
+    for native in [false, true] {
+        let (mut app, stock) = scene(native, crate::PlayState::Menu);
+        let token = row(&app, Side::Container, GOODS);
+        tap(&mut app, Target::Row(token)); tap(&mut app, Target::One); tap(&mut app, Target::Min);
+        assert_eq!(model(&app).quantity.unwrap().amount, 1);
+        let point = at(&app, Target::ConfirmAmount);
+        edge(&mut app, 50, TouchPhase::Started, point); app.update();
+        // Genuine existing command already queued before the touch producer.
+        app.world_mut().write_message(MenuInput(Command::Amount(8)));
+        edge(&mut app, 50, TouchPhase::Ended, point); app.update();
+        assert_eq!(model(&app).quantity.unwrap().amount, 8, "ordinary input keeps its behavior");
+        assert_eq!(offered(&app), 0, "the touch confirmation saw one, never eight");
+        let envelope = app.world().resource::<LastEnvelope>().0.unwrap();
+        app.world_mut().write_message(MenuInput(Command::CommitBarter(envelope))); app.update();
+        assert_eq!(offered(&app), 0, "rejected envelope is consumed, not delayed");
+        tap(&mut app, Target::Min); tap(&mut app, Target::ConfirmAmount);
+        assert_eq!(offered(&app), 1, "fresh reviewed amount still stages one");
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+        tap(&mut app, Target::Accept);
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (9, 7));
+        assert_eq!((count(&mut app, PLAYER, CAPS), count(&mut app, stock, CAPS)), (989, 1011));
+    }
+}
+
+#[test]
+fn actual_touch_barter_final_consumer_rejects_queued_stack_before_accept_then_fresh_quote_succeeds() {
+    for native in [false, true] {
+        let (mut app, stock) = scene(native, crate::PlayState::Menu);
+        let token = row(&app, Side::Container, GOODS);
+        tap(&mut app, Target::Row(token)); tap(&mut app, Target::All);
+        assert_eq!(model(&app).trade.as_ref().unwrap().balance, -88);
+        let sell = {
+            let m = model(&app);
+            let index = m.list(Side::Player).rows.iter().position(|r| r.item == GOODS && !r.bartered).unwrap();
+            RowToken::at(m, Side::Player, index).unwrap()
+        };
+        let point = at(&app, Target::Accept);
+        edge(&mut app, 51, TouchPhase::Started, point); app.update();
+        for command in [Command::Focus(Side::Player), Command::Hover(Side::Player, sell.index), Command::Stack] {
+            app.world_mut().write_message(MenuInput(command));
+        }
+        edge(&mut app, 51, TouchPhase::Ended, point); app.update();
+        assert_eq!(offered(&app), 16, "the ordinary Stack still changes the basket");
+        assert_eq!(model(&app).trade.as_ref().unwrap().balance, -16);
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+        assert_eq!((count(&mut app, PLAYER, CAPS), count(&mut app, stock, CAPS)), (1000, 1000));
+        let envelope = app.world().resource::<LastEnvelope>().0.unwrap();
+        app.world_mut().write_message(MenuInput(Command::CommitBarter(envelope))); app.update();
+        assert_eq!(count(&mut app, PLAYER, CAPS), 1000);
+        tap(&mut app, Target::Accept);
+        assert_eq!(offered(&app), 0);
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+        assert_eq!((count(&mut app, PLAYER, CAPS), count(&mut app, stock, CAPS)), (984, 1016));
+    }
+}
+
+#[test]
+fn actual_touch_barter_final_consumer_rechecks_modal_loading_and_actual_target_size() {
+    for native in [false, true] {
+        for change in [10, 11, 12, 13] {
+            let (mut app, stock) = scene(native, crate::PlayState::Menu);
+            let token = row(&app, Side::Player, GOODS);
+            tap(&mut app, Target::Row(token)); tap(&mut app, Target::All);
+            let point = at(&app, Target::Accept);
+            edge(&mut app, 52, TouchPhase::Started, point); app.update();
+            edge(&mut app, 52, TouchPhase::Ended, point);
+            app.world_mut().resource_mut::<LateConsumer>().0 = Some(change);
+            app.update();
+            assert!(app.world().resource::<LastEnvelope>().0.is_some(), "producer emitted actual token before late change");
+            assert_eq!(offered(&app), 8, "late final gate {change}, native={native}");
+            assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+            assert_eq!(count(&mut app, PLAYER, CAPS), 1000);
+            for _ in 0..3 { app.update(); }
+            assert_eq!(count(&mut app, PLAYER, CAPS), 1000, "late refused token never retries");
+        }
+    }
+}
+
+#[test]
+fn actual_touch_barter_duplicate_envelope_in_same_consumer_batch_steps_quantity_once() {
+    for native in [false, true] {
+        let (mut app, _) = scene(native, crate::PlayState::Menu);
+        let token = row(&app, Side::Container, GOODS);
+        tap(&mut app, Target::Row(token)); tap(&mut app, Target::One); tap(&mut app, Target::Min);
+        assert_eq!(model(&app).quantity.unwrap().amount, 1);
+        let point = at(&app, Target::Step(1));
+        edge(&mut app, 53, TouchPhase::Started, point); app.update();
+        app.world_mut().resource_mut::<RepeatEnvelope>().next = true;
+        edge(&mut app, 53, TouchPhase::Ended, point); app.update();
+        assert_eq!(app.world().resource::<RepeatEnvelope>().queued, 1, "duplicate genuine token queued before consumer");
+        assert_eq!(app.world().resource::<BeforeConsumerCount>().0, 2, "both real copies exist at the actual consumer boundary");
+        assert_eq!(model(&app).quantity.unwrap().amount, 2, "one-shot token steps once even in the same frame");
+        assert_eq!(offered(&app), 0);
+        for _ in 0..3 { app.update(); }
+        assert_eq!(model(&app).quantity.unwrap().amount, 2);
+        tap(&mut app, Target::Step(1));
+        assert_eq!(model(&app).quantity.unwrap().amount, 3, "a new genuine contact is independent");
+    }
+}
+
+#[test]
+fn actual_touch_barter_obsolete_token_before_new_token_preserves_current_proposal() {
+    for native in [false, true] {
+        let (mut app, _) = scene(native, crate::PlayState::Menu);
+        let token = row(&app, Side::Container, GOODS);
+        tap(&mut app, Target::Row(token)); tap(&mut app, Target::One); tap(&mut app, Target::Min);
+        let obsolete = app.world().resource::<LastEnvelope>().0.unwrap();
+        let point = at(&app, Target::Step(1));
+        edge(&mut app, 54, TouchPhase::Started, point); app.update();
+        app.world_mut().write_message(MenuInput(Command::CommitBarter(obsolete)));
+        edge(&mut app, 54, TouchPhase::Ended, point); app.update();
+        assert_ne!(app.world().resource::<LastEnvelope>().0, Some(obsolete));
+        assert_eq!(model(&app).quantity.unwrap().amount, 2, "stale token must not consume a newer live guard");
+        assert_eq!(offered(&app), 0);
+        tap(&mut app, Target::Step(1));
+        assert_eq!(model(&app).quantity.unwrap().amount, 3);
+    }
+}
+
+#[test]
+fn actual_touch_barter_all_nonspend_actions_obey_final_modal_ownership_then_fresh_input_works() {
+    for native in [false, true] {
+        for case in 0..5 {
+            let (mut app, stock) = scene(native, crate::PlayState::Dialogue);
+            let target = match case {
+                0 => Target::Close, 1 => Target::One,
+                2 => Target::Row(row(&app, Side::Container, GOODS)),
+                3 => Target::Category(Side::Player, 1),
+                _ => Target::Row(row(&app, Side::Player, GOODS)),
+            };
+            let point = at(&app, target);
+            edge(&mut app, 55, TouchPhase::Started, point); app.update();
+            if case == 4 { edge(&mut app, 55, TouchPhase::Moved, point - Vec2::Y * 70.0); }
+            else { edge(&mut app, 55, TouchPhase::Ended, point); }
+            app.world_mut().resource_mut::<LateConsumer>().0 = Some(10);
+            app.update();
+            assert!(app.world().resource::<ActiveMenu>().0.is_some(), "late Close must not close underlying barter");
+            assert_eq!(model(&app).focus, Side::Player);
+            assert_eq!(model(&app).category[1], Category::All);
+            assert_eq!(model(&app).selected[1], 0);
+            assert!(model(&app).quantity.is_none());
+            assert_eq!(offered(&app), 0);
+            assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+            if case == 4 { edge(&mut app, 55, TouchPhase::Canceled, point); app.update(); }
+            app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap()
+                .game.open_menu(fnv_game::game::menus::BARTER);
+            app.update();
+            assert!(model(&app).quantity.is_none(), "no replay when modal closes");
+            if case == 4 {
+                edge(&mut app, 56, TouchPhase::Started, point); app.update();
+                edge(&mut app, 56, TouchPhase::Moved, point - Vec2::Y * 70.0); app.update();
+                edge(&mut app, 56, TouchPhase::Ended, point - Vec2::Y * 70.0); app.update();
+                assert!(model(&app).selected[1] > 0);
+            } else {
+                tap(&mut app, target);
+                match case {
+                    0 => assert!(app.world().resource::<ActiveMenu>().0.is_none()),
+                    1 => assert!(model(&app).quantity.is_some()),
+                    2 => assert_eq!(model(&app).focus, Side::Container),
+                    3 => assert_eq!(model(&app).category[1], Category::Weapons),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }
 

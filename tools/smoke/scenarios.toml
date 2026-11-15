@@ -28450,6 +28450,56 @@ expect = [
 manual = "Keep the primary game window focused; scroll up and down after loading. This manual scenario has no selection or scroll-offset expectation and provides no GPU/native visual comparison."
 
 [[scenario]]
+name = "heck-securitron-arrest"
+source = "issue #2574 (crates/fnv-game/src/combat.rs Game::harmless_hit; engine/nvf-play/src/combat.rs; fixed by #2492): Beyond the Beef's arrest scene. The Securitron's fire package VMS18SecuritronFire1 (0x001299B3, added by the begin script of line 0x00129992) is Do No Damage, and Heck Gunderson dies only in his OnHit block for the Securitron (SCPT 0x00125AF0: KillActor, then the Securitron says VMS18SecuritronHeckDeathReaction 0x00129986). Before #2492 a harmless shot ran no OnHit, so Heck lived and could still be talked to (the tester's 0.7.0 build)"
+note = "the player in ULCasino at 14:00 beside Heck; the Securitron (initially disabled) is enabled at 3 s and put beside Heck at 3.5 s, and line 0x00129992 is said by it at 5 s: Heck goes alert and the Securitron takes up its fire package"
+areas = ["ai", "combat", "scripts"]
+paths = ["engine/nvf-play/src/combat.rs", "engine/nvforever/src/use_weapon.rs", "crates/fnv-game/src/combat.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT = "2:start:VMS18,3:enable:VMS18SecuritronREF,3.5:moveto:VMS18SecuritronREF:VMS18HeckGundersonREF:250:0:0,5:info:0x00129992:VMS18SecuritronREF" }
+args = ["--play", "--cell", "ULCasino", "--pos=2483,2000,7568", "--hour", "14", "--no-voice", "--no-messages", "--npc-packages", "all,VMS18SecuritronREF,VMS18HeckGundersonREF"]
+run_seconds = 40
+order = [[
+  { re = 'use weapon: VMS18SecuritronREF 0x001299AB uses WeapNVSecuritronSubmachineGun on VMS18HeckGundersonREF \(its package VMS18SecuritronFire1\): 6 shots; always hit, no damage', label = "the Securitron opens fire on Heck with its Do No Damage package" },
+  { text = "combat: a harmless shot by 0x001299AB hits 0x0010D4EF: its hit blocks ran, no damage", label = "a harmless shot runs Heck's OnHit for the Securitron" },
+  { text = "script: OnDeath of FalloutNV.esm|SCPT 0x00125AF0 ran on Some(0x0010D4EF)", label = "its KillActor kills Heck: his OnDeath block runs" },
+  { text = "script: VMS18SecuritronREF says 0x00129988", label = "the Securitron says its death reaction (VMS18SecuritronHeckDeathReaction)" },
+]]
+expect = [
+  { text = "use weapon: VMS18SecuritronREF 0x001299AB stops: VMS18HeckGundersonREF is dead or gone", label = "the Securitron stops firing at the dead Heck (same frame as its line: not ordered)" },
+  { text = "script: VMS18 stage 255 set", label = "Heck's OnDeath sets VMS18 255 (objective 180 not done in this setup)" },
+]
+
+[[scenario]]
+name = "strip-gate-kill-zone-lines"
+source = "#2582: FalloutNV's Strip gate kill zone (VFSVegasAnnihilationVolumeREF, SCPT 0x00119786) SayTos VFSSecuritronKill every frame the player is inside (its target2 is never set); a script's Say/SayTo of the topic its speaker is already saying leaves that line playing (Game::say_by_script; observer batch o30, PR #2580). Before, the Securitron Gatekeeper restarted its line every frame: 2,231 lines in about 40 s"
+note = "The player starts inside the kill zone at the Freeside gate with no passport, in god mode; the zone's OnTriggerEnter sets the five gate Securitrons on the player and the Gatekeeper (VFSSecuritronGreeterREF) says its Kill lines one after another"
+areas = ["scripts", "dialogue", "combat"]
+paths = ["crates/fnv-game/src/game.rs", "crates/fnv-game/src/functions/misc.rs", "engine/nvf-play/src/script_trigger.rs"]
+env = { NVF_PLAY_TEST_GOD = "1" }
+args = ["--play", "--world", "FreesideWorld", "--pos=-6300,-9700,1040", "--heading", "40", "--hour", "13", "--no-voice", "--no-messages"]
+run_seconds = 40
+expect = [
+  { text = "script: player entered trigger VFSVegasAnnihilationVolumeREF", label = "the player is in the gate's kill zone" },
+  { text = "OnStartCombat of FalloutNV.esm|SCPT 0x0017934D ran on Some(0x00119793)", label = "the Gatekeeper starts its fight" },
+  { re = 'script: VFSSecuritronGreeterREF says 0x', min = 3, max = 60, label = "the Gatekeeper says its lines one after another, not one a frame (2,231 in 40 s before #2582)" },
+]
+
+[[scenario]]
+name = "turret-base-stays"
+source = "#2561 (owner's screenshots 2026-11-14, engine/nvforever/src/turret_aim.rs): a floor turret turned its whole model to the player, base and feet included; the skeleton hangs Bip01 Yaw from the base by a hinge, so the base stays as placed and the yaw bone carries the turn"
+note = "a Mark VI floor turret (SVFloorTurret, sentryturret skeleton) placed at the player (GOD) at 3 s and set on the player; the player is put 300 units east of it at 6 s, a quarter turn from the heading it was placed with. The log line measures both bones on the drawn skeleton: their world rotations against those they had before the turn"
+areas = ["combat", "creatures", "actors"]
+paths = ["engine/nvforever/src/turret_aim.rs", "crates/fnv-ai/src/carry.rs", "engine/nvforever/src/head_look.rs", "engine/nvforever/src/locomotion.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "3:call:player:PlaceAtMe:SVFloorTurret:1:300:0,4:call:0xFF000000:StartCombat:player", NVF_PLAY_TEST_GOTO = "6:-60700:4500:8500" }
+args = ["--cell", "Goodsprings", "--pos=-61000,4500,8500", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 14
+expect = [
+  { re = 'turret aim: meshes\\creatures\\sentryturret\\skeleton\.nif: the base stays as placed, Bip01 Yaw turns', label = "the floor turret's skeleton has the yaw bone" },
+  { re = 'turret aim: FF000000: turned (?P<n>\d+)° from where it was placed: its base [01]°, its Bip01 Yaw \d+°', range = [45, 180], label = "turned to the player, its base has not moved" },
+  { re = 'turret aim: FF000000: turned \d+° from where it was placed: its base \d+°, its Bip01 Yaw (?P<n>\d+)°', range = [45, 180], label = "the yaw bone carries the turn" },
+]
+
+[[scenario]]
 name = "quiet-missing-starfield"
 source = "#2408 (engine/nvforever/src/sky.rs cloud_layers, official_plugin): FalloutNV.esm's NVWastelandClearNight names sky/NVWastelandStarfieldSky.dds for its first cloud layer and no base archive has it; the player reports' missing_asset for it came from 25 of 43 installs. A texture the base game's own weather names and nobody has is no failure and logs no warning"
 note = "Goodsprings at 23:00: the climate rolls NVWastelandClearNight at the start"

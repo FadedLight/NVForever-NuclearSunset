@@ -1224,6 +1224,13 @@ impl Speech {
     pub fn goodbye_at_player(&self) -> bool {
         (self.greeting || self.farewell) && self.target == Some(FormId::PLAYER_REF)
     }
+
+    /// A line started by Say or SayTo (a script's, or a combat or package bark said the
+    /// same way): not a line of a conversation between actors, a greeting, a farewell or
+    /// a hello (`Game::say_by_script`, #2582).
+    pub fn said_by_script(&self) -> bool {
+        self.conversation.is_none() && !self.greeting && !self.farewell && !self.hello
+    }
 }
 
 /// One actor turning to another while a line is said ([`Game::facings`]).
@@ -4631,7 +4638,21 @@ impl<'a> Game<'a> {
     /// narrator saying Elijah's and Vera's slide lines among them; docs/spec-notes/
     /// dialogue.md §4, issue #965]. Combat barks, package and patrol topics keep
     /// [`Game::say`]: an actor with no Hit line does not say another's.
+    ///
+    /// A Say or SayTo of the topic its speaker is already saying by Say or SayTo (not a
+    /// line of a conversation, a greeting, a farewell or a hello) leaves that line playing
+    /// and returns it, as if said again [observed: observer batch o30, PR #2580: a repeat
+    /// renews the speaker's talking state from the call, a queue never builds, and a SayTo
+    /// every frame keeps it talking without a break; hypothesis: that the voice and the
+    /// subtitle do not restart with each call, observer check 144 open]. FalloutNV's Strip
+    /// gate kill zone (SCPT 0x00119786) SayTos its topic every frame the player is inside,
+    /// and the line restarted every frame before (#2582). Another topic cuts the line and
+    /// takes over, as o30 saw ([`Game::say_line`]). NVForever's talking state ends with
+    /// the line, not about 4.9 s after it as o30 measured in the original.
     pub fn say_by_script(&mut self, speaker: FormId, target: Option<FormId>, topic: FormId, say_to: bool) -> Option<FormId> {
+        if let Some(s) = self.speech.iter().find(|s| s.speaker == speaker && s.topic == topic && s.said_by_script()) {
+            return Some(s.info);
+        }
         self.say_with(speaker, target, topic, say_to, true)
     }
 

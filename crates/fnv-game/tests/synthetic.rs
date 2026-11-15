@@ -1889,7 +1889,43 @@ fn a_scripts_say_does_not_fall_back_when_the_speakers_own_line_is_spent() {
     let mut g = game(&f);
     g.new_game();
     assert_eq!(g.say_by_script(speaker, Some(FormId::PLAYER_REF), FormId(TOPIC), true), Some(FormId(INFO_B)));
+    // Once the line is over (a repeat while it plays leaves it playing, #2582).
+    g.frames(120);
+    assert!(!g.is_talking(speaker));
     assert_eq!(g.say_by_script(speaker, Some(FormId::PLAYER_REF), FormId(TOPIC), true), None);
+}
+
+#[test]
+fn a_scripts_say_of_the_topic_being_said_leaves_the_line_playing() {
+    // #2582: the Strip gate's kill zone SayTos its topic every frame; the original renews
+    // the talking state without a queue (observer batch o30), and here the line being
+    // said goes on instead of restarting every frame.
+    let f = fixture();
+    let speaker = FormId(NPC_REF);
+    let mut g = game(&f);
+    g.new_game();
+    let started = |g: &Game| g.events.iter().filter(|e| matches!(e.kind, EventKind::LineStarted { .. })).count();
+    assert_eq!(g.say_by_script(speaker, Some(FormId::PLAYER_REF), FormId(TOPIC), true), Some(FormId(INFO_A)));
+    // A SayTo or a Say of the same topic every frame while it plays: the same line.
+    for k in 0..60 {
+        g.frames(1);
+        assert_eq!(g.say_by_script(speaker, Some(FormId::PLAYER_REF), FormId(TOPIC), k % 2 == 0), Some(FormId(INFO_A)));
+    }
+    assert_eq!(started(&g), 1);
+    // Said to its end: its end script ran (GLOBAL 3, as in the SayTo test above), and
+    // the next call says the topic's next line.
+    g.frames(120);
+    assert!(!g.is_talking(speaker));
+    assert_eq!(g.world.global(FormId(GLOBAL)).unwrap(), 3.0);
+    assert_eq!(g.say_by_script(speaker, Some(FormId::PLAYER_REF), FormId(TOPIC), true), Some(FormId(INFO_B)));
+    assert_eq!(started(&g), 2);
+    // A line started otherwise (here a Say by the engine, `Game::say`) is no different:
+    // a script's repeat of its topic leaves it playing too, while `Game::say` still cuts.
+    let mut h = game(&f);
+    h.new_game();
+    assert_eq!(h.say(speaker, None, FormId(TOPIC), false), Some(FormId(INFO_A)));
+    assert_eq!(h.say_by_script(speaker, None, FormId(TOPIC), false), Some(FormId(INFO_A)));
+    assert_eq!(h.say(speaker, None, FormId(TOPIC), false), Some(FormId(INFO_B)));
 }
 
 #[test]

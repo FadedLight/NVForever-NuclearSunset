@@ -130,6 +130,12 @@ the spec it links to.
 
 ## Tier 2: movement and controls feel
 
+- **Darting movement clips (#2352).** [design, #2352] `ROOT_EXCURSION_RATIO = 1.5`
+  selects moves whose sampled root excursion exceeds 1.5 times net travel; their
+  drawn x/y stays at the track's start. A different ratio changes which moves lose
+  their in-cycle sway. Actor movement is unchanged; original dart behavior awaits
+  observer check 169. ([actors §8.2](spec-notes/actors.md#82-root-motion))
+
 13. **Grab.** Z held, or E held for 0.4 s, picks up an object or a corpse. It drops when
     lagging 90 units and is thrown at up to 600 units/s. Nothing over 100 kg can be
     picked up, and you can only walk while holding over 25 kg. All guessed.

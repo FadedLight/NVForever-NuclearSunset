@@ -1025,6 +1025,7 @@ mod tests {
             root: None,
             root_track: None,
             carried: None,
+            hold_xy: None,
             unbound: Default::default(),
         })
     }

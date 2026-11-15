@@ -2362,3 +2362,20 @@ already talking takes over at once, same topic or another; nothing is queued or 
      actors.md §1.2. Record which heads/items clip or shift, and the valid greeting's
      quest/stage conditions for a repeatable conversation smoke setup. No original
      capture or game run was made in the writer session.
+
+## Added 2026-11-14 (bloatfly side clips and combat wings, #2352)
+
+169. **Do bloatfly side darts move the actor, and do wings beat under combat clips?**
+     (P2; #2352, actors.md §§8.2–8.3.) [documented: supplied issue #2352 clip-root
+     survey] `mtleft.kf`/`mtright.kf` reach 225/243 units sideways before returning
+     to net travel 100. [hypothesis] NVForever provisionally removes the full drawn
+     root x/y excursion for moves past a 1.5 peak/net ratio; whether the original
+     moves the actor by that root is unknown. [design] Capture a bloatfly fighting
+     for about 20 seconds, including sideways movement, aim, firing and hover/special
+     idle. Record its actor x/y and body position frame by frame through a side dart:
+     does the actor follow the outward and return root motion, or does the body stay
+     at the actor while it strafes? Also compare wing beats during ordinary idle,
+     forward flight, aim, attack and hover, especially bones absent from the upper
+     clip. [hypothesis] NVForever keeps the set's idle on bones the active clips omit;
+     confirm whether those beats continue and whether their phase restarts on a
+     transition. Record clip names/times with the capture where available.

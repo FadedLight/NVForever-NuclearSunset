@@ -60,6 +60,7 @@
 //! plugin knows only [`draw`]).
 
 pub mod marker;
+pub mod touch_map;
 mod model;
 mod outline;
 pub(crate) mod read;
@@ -729,6 +730,8 @@ pub struct Input<'w, 's> {
     touch_wheel: Option<Res<'w,super::touch_scroll::WheelFrame>>,
     physical:Option<Res<'w,super::touch_scroll::PhysicalPriority>>,
     touch_pip: Option<Res<'w,super::PipBoy>>,
+    touch_map: Option<ResMut<'w,touch_map::TouchMap>>,
+    map_gate: touch_map::Gate<'w,'s>,
     menu: MessageReader<'w, 's, MenuInput>,
     pip_out: MessageWriter<'w, PipBoyInput>,
     time: Res<'w, Time<Real>>,
@@ -894,6 +897,7 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
         track(st, game);
     }
     let Some(tab) = open else {
+        if let Some(touch)=input.touch_map.as_deref_mut() {touch.cancel();}
         st.was_open = false;
         st.popup = None;
         st.note_shown = None;
@@ -921,10 +925,14 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
     }
     // With Controller chosen the controls answer the controller only (pad.rs): the mouse
     // pointer is ignored so it cannot take the highlight box back from the stick.
-    let pointer = screen.and_then(|s| s.pointer).filter(|_| !input.bindings.as_ref().is_some_and(|b| b.device == InputDevice::Controller));
-    st.pointer_now = screen.and_then(|s| s.pointer);
-    st.aiming = pointer.is_some();
+    let mouse_pointer = screen.and_then(|s| s.pointer).filter(|_| !input.bindings.as_ref().is_some_and(|b| b.device == InputDevice::Controller));
     let e = early.unwrap_or_default();
+    let map_allowed = !e.hold && !game.script.as_ref().and_then(|s|s.rt.as_ref())
+        .is_some_and(|rt|crate::tiles::stats_menu::modal_over(rt.game.menu));
+    let direct_map = touch_map::take(st,tab,screen,input,map_allowed);
+    let pointer = direct_map.map(|frame|frame.0).or(mouse_pointer);
+    st.pointer_now = pointer.or_else(||screen.and_then(|s|s.pointer));
+    st.aiming = pointer.is_some();
     if e.hold {
         hold_input(st, tab, &lists, input);
     } else {
@@ -943,6 +951,7 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
     // it was, and with it the Travel hint's marker (#1897).
     let on_map = pointer.filter(|_| !on_button(st, tab, pointer));
     let view = build(st, tab, &lists, game, on_map, pointer.is_some());
+    touch_map::finish(st,&view,direct_map.and_then(|frame|frame.1));
     // The hints are logged when they change from what was last shown: the hand-built drawing's
     // last view, or with the early preparation the last one prepared.
     let last = if early.is_some() { st.last_view.as_ref() } else { st.shown.as_ref() };

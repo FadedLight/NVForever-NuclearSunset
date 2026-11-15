@@ -655,6 +655,21 @@ fn pointer_pose(mesh: &Mesh, joints: Option<&[Mat4]>, world: Mat4) -> Option<Pos
     shape.points.iter().all(|p|p.is_finite()).then_some(shape)
 }
 
+fn touch_canvas(cam:&Camera,at:&GlobalTransform,posed:&[(PipBoyPart,Posed,bool)],position:Vec2)->Option<Vec2> {
+    let ray=cam.viewport_to_world(at,position).ok()?;
+    let hit=posed.iter().filter(|(_,_,visible)|*visible).filter_map(|(part,mesh,_)|
+        mesh.hit(ray.origin,Vec3::from(ray.direction)).map(|(distance,uv)|(distance,*part,uv)))
+        .min_by(|a,b|a.0.total_cmp(&b.0));
+    match hit {Some((_,PipBoyPart::Screen,uv))=>canvas_point(uv),_=>None}
+}
+#[cfg(any(target_os="android",test))]
+type MapPublication<'w,'s> = (
+    Option<ResMut<'w,nvf_play::pipboy::data::touch_map::TouchMap>>,
+    Option<Res<'w,nvf_play::touch_safe_area::SafeInsets>>,Option<Res<'w,UiScale>>,
+    Option<Res<'w,nvf_play::pipboy::touch_presentation::PipBoySize>>,
+    Query<'w,'s,Entity,With<PrimaryWindow>>,
+    Query<'w,'s,(Entity,&'static PipBoyPart,Option<&'static Visibility>,Option<&'static InheritedVisibility>)>,
+);
 type PointerParts<'w, 's> = Query<'w, 's, (Entity, &'static PipBoyPart, &'static PartMesh, &'static GlobalTransform, Option<&'static SkinnedMesh>, Option<&'static Visibility>, Option<&'static InheritedVisibility>)>;
 
 #[allow(clippy::too_many_arguments)]
@@ -672,9 +687,18 @@ fn follow_pointer(
     mut out: MessageWriter<PipBoyInput>,
     (pad_pointer, mut touch): (Option<Res<nvf_play::pad::pointer::PadPointer>>, Option<ResMut<nvf_play::pipboy::touch_items::TouchItems>>),
     #[cfg(any(target_os = "android", test))] mut geometry: Option<ResMut<crate::touch::pipboy_model::Geometry>>,
+    #[cfg(any(target_os="android",test))] (mut map,map_safe,map_ui,map_size,map_windows,map_parts):MapPublication<'_,'_>,
 ) {
     #[cfg(any(target_os = "android", test))]
     if let Some(geometry) = geometry.as_deref_mut() { *geometry = default(); }
+    #[cfg(any(target_os="android",test))]
+    let map_active=pip.phase==nvf_play::pipboy::Phase::Up && pip.page==Page::Data && pip.tab()<=1
+        && screen.as_ref().is_some_and(|s|s.on_model && pip.frame==Frame::Device);
+    #[cfg(any(target_os="android",test))]
+    if screen.is_none() || (screen.as_ref().is_some_and(|s|nvf_play::pipboy::pointer_source(pip.frame,s.on_model)==nvf_play::pipboy::PointerSource::Device) && !map_active) {
+        if let Some(map)=map.as_deref_mut(){map.publish(None);}
+    }
+
     let mouse = mouse.snapshot();
     let Some(mut screen) = screen else { return };
     let was_over = aid_over.take();
@@ -686,7 +710,11 @@ fn follow_pointer(
     if !pip.open() {
         return;
     }
-    let (Ok((camera_entity, cam, at)), Ok(window)) = (cams.single(), windows.single()) else { return };
+    let (Ok((camera_entity, cam, at)), Ok(window)) = (cams.single(), windows.single()) else {
+        #[cfg(any(target_os="android",test))]
+        if let Some(map)=map.as_deref_mut(){map.publish(None);}
+        return;
+    };
     #[cfg(any(target_os = "android", test))]
     let mut admitted = Vec::new();
     let posed: Vec<(PipBoyPart, Posed, bool)> = parts
@@ -757,15 +785,11 @@ fn follow_pointer(
         warn!("test aid: pipboy target {:?} is not in view", aid.target);
     }
     if let Some(touch) = touch.as_deref_mut() {
-        touch.project(|position| {
-            let ray=cam.viewport_to_world(at,position).ok()?;
-            let hit=posed.iter().filter(|(_,_,visible)|*visible).filter_map(|(part,mesh,_)|mesh.hit(ray.origin,Vec3::from(ray.direction)).map(|(distance,uv)|(distance,*part,uv))).min_by(|a,b|a.0.total_cmp(&b.0));
-            match hit {Some((_,PipBoyPart::Screen,uv))=>canvas_point(uv),_=>None}
-        });
+        touch.project(|position|touch_canvas(cam,at,&posed,position));
     }
     let sleeping = nvf_play::pad::pointer::asleep(pad_pointer.as_deref());
     let cursor = if aid.target.is_some() { target } else { window.cursor_position().filter(|_| !sleeping) };
-    let Some(ray) = cursor.and_then(|c| cam.viewport_to_world(at, c).ok()) else { return };
+    if let Some(ray) = cursor.and_then(|c| cam.viewport_to_world(at, c).ok()) {
     let (origin, dir) = (ray.origin, Vec3::from(ray.direction));
     let hit = posed.iter().filter_map(|(p, s, _)| s.hit(origin, dir).map(|(t, uv)| (t, *p, uv))).min_by(|a, b| a.0.total_cmp(&b.0));
     let clicked = mouse.just_pressed(MouseButton::Left) || (aid.click == 3 && matches!(aid.target, Some(AidTarget::Button(_))));
@@ -788,6 +812,29 @@ fn follow_pointer(
             }
         }
         _ => {}
+    }
+    }
+    #[cfg(any(target_os="android",test))]
+    if let Some(map)=map.as_deref_mut() {
+        use nvf_play::pipboy::data::touch_map::{Presentation,Projection,ProjectionStamp};
+        let projection=(|| {
+            if pip.phase!=nvf_play::pipboy::Phase::Up || pip.page!=Page::Data || pip.tab()>1
+                || !posed.iter().any(|(part,_,visible)|*part==PipBoyPart::Screen && *visible) {return None;}
+            let live=geometry.as_deref()?;
+            if live.screen.is_none() || map_parts.iter().any(|(entity,part,visible,inherited)|
+                matches!(part,PipBoyPart::Screen|PipBoyPart::Button(_)|PipBoyPart::ScrollKnob)
+                && visible.is_some_and(|v|*v!=Visibility::Hidden) && inherited.is_some_and(|v|v.get())
+                && !live.entities.contains(&entity)) {return None;}
+            let stamp=ProjectionStamp::new(map_windows.single().ok()?,window,&screen,true,Presentation {
+                safe:map_safe.as_deref().copied().unwrap_or_default(),menu:nvf_play::interface::unit_scale(),
+                ui:map_ui.as_deref().map_or(1.0,|s|s.0),size:map_size.as_deref().map_or(1.0,nvf_play::pipboy::touch_presentation::PipBoySize::ratio),
+            }).with_camera(camera_entity,cam)?;
+            let camera=cam.clone();let at=*at;
+            // Existing CPU pose ownership moves once; no vertex/triangle clone
+            // and no retained projection history. Physical pointer ran above.
+            Projection::new(stamp,move|point|touch_canvas(&camera,&at,&posed,point))
+        })();
+        map.publish(projection);
     }
 }
 

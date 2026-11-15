@@ -30,3 +30,28 @@ they have not yet been compiled or executed in this candidate.
 projection, device and flat inverse mappings at multiple sizes/densities, warm
 pose agreement, and cancellation without item use. Compilation, source tests and
 physical readability are separate; this note does not claim phone acceptance.
+
+
+## Direct map gestures
+
+[design: Android touch request, issue #2436] Local and world maps admit a single
+finger only within the actual painted map window, excluding hints and popups.
+Moving past the existing touch slop pans the map. A second map finger locks the
+whole contact to pinch/pan; moving their midpoint translates the map while their
+separation changes zoom. Release after any pan/pinch never becomes a marker tap.
+Zoom keeps the existing 1-to-4 bounds; world pan keeps normalized map bounds and
+touch-only local pan stays within the current projected outline frame.
+
+[documented: `pipboy/data.rs`, `pipboy/data/view.rs`, `tiles/map_menu.rs`]
+The existing shared MapView is authoritative for the hand-built and native tile
+renderers. Touch uses the actual flat crop or the same nearest visible posed
+screen ray as the existing pointer, including device content zoom. Raw hardware
+buttons and axes are not synthesized or changed. World marker taps request the
+existing FastTravelAsk route, preserving legal refusals and confirmation; local
+marker/door taps select their existing map highlight and do not invent travel.
+
+[design] A map gesture owns both contact IDs until release/cancel. Context,
+projection, focus, controller, platform or competing UI changes discard queued
+map edits and require a fresh contact. A third finger or projection failure
+cancels the gesture; stale tails cannot become tabs/items/world/fire actions.
+Source tests and device acceptance are separate validation boundaries.

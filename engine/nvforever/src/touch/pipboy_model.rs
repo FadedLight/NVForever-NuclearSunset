@@ -96,6 +96,18 @@ impl Bridge<'_, '_> {
             self.state.contact = None; self.state.pending = None; self.state.scroll = None;
         }
     }
+    /// Map raw admission uses the same live device-source guards; its publisher
+    /// additionally rejects incomplete current poses before typed edits apply.
+    pub(super) fn map_projection_ready(&self)->bool {
+        let (Some(pip),Some(screen))=(self.pip.as_deref(),self.screen.as_deref()) else {return false;};
+        if pip.frame==Frame::Screen || !screen.on_model {return true;}
+        self.state.admitted && self.geometry.screen.is_some()
+            && self.recognised.iter().all(|(entity,part,visible,inherited)| {
+                !matches!(part,crate::pipboy_arm::PipBoyPart::Screen|crate::pipboy_arm::PipBoyPart::Button(_)|crate::pipboy_arm::PipBoyPart::ScrollKnob)
+                    || !visible.is_some_and(|v|*v!=Visibility::Hidden) || !inherited.is_some_and(|v|v.get())
+                    || self.geometry.entities.contains(&entity)
+            })
+    }
     /// Missing/stale geometry never becomes an unclaimed closing-handle region.
     pub fn closing_unclaimed(&self, position: Vec2) -> bool {
         let (Some(pip),Some(screen),Ok(window))=(self.pip.as_deref(),self.screen.as_deref(),self.windows.single()) else {return false};

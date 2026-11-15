@@ -40,6 +40,7 @@ impl Plugin for TouchControlsPlugin {
         drawer::install(app);
         pipboy_drag::install(app);
         world_activate::install(app);
+        app.init_resource::<nvf_play::pipboy::data::touch_map::TouchMap>();
         icons::install(app);
         action_presentation::install(app);
         practice::install(app);
@@ -486,6 +487,11 @@ fn sync_touch(state: &mut TouchState, bindings: Option<&Bindings>, pause: bool) 
     state.mouse = wanted_mouse;
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorldInputBridges<'w,'s> {
+    world_touch:world_activate::Bridge<'w>,
+    map:nvf_play::pipboy::data::touch_map::Bridge<'w,'s>,
+}
 #[allow(clippy::too_many_arguments)]
 fn input(
     (mut state, mut held_sneak, platform, mut movement): (
@@ -503,13 +509,13 @@ fn input(
     next_play: Option<Res<NextState<nvf_play::PlayState>>>,
     bindings: Option<Res<Bindings>>,
     mut motion: MessageWriter<MouseMotion>,
-    (mut drawer,mut practice,mut modal,mut bar,mut model,mut arm,mut world_touch): (drawer::Bridge,practice::Bridge,modal::Bridge,hotbar::Bridge,pipboy_model::Bridge,pipboy_drag::Bridge,world_activate::Bridge),
+    (mut drawer,mut practice,mut modal,mut bar,mut model,mut arm,WorldInputBridges{mut world_touch,mut map}): (drawer::Bridge,practice::Bridge,modal::Bridge,hotbar::Bridge,pipboy_model::Bridge,pipboy_drag::Bridge,WorldInputBridges),
 ) {
     let modal_captures = modal.refresh();
     let previous_move = movement.clear_sample();
     state.pulses.clear(); state.interactive_actions = false; state.ui_capture = false;
     let options = movement.options();
-    if state.movement_options != options { world_touch.cancel(); state.cancel_touch(); state.movement_options = options; }
+    if state.movement_options != options { world_touch.cancel(); map.cancel(); state.cancel_touch(); state.movement_options = options; }
 
     let Ok((window_id, window)) = window.single() else {
         model.cancel();
@@ -518,7 +524,7 @@ fn input(
         practice.cancel();
         drawer.drawer.cancel();
         touches.clear();
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
         return;
@@ -574,7 +580,7 @@ fn input(
         drawer.drawer.cancel();
     }
     if playing != state.playing || !interactive || controller {
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
     }
     state.playing = playing;
     if lost_focus {
@@ -583,7 +589,7 @@ fn input(
     if state.toggle_aim != layout.config.aiming.toggle_aim
         || state.hold_sneak != layout.config.aiming.hold_sneak
     {
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
     }
     state.toggle_aim = layout.config.aiming.toggle_aim;
     state.hold_sneak = layout.config.aiming.hold_sneak;
@@ -609,12 +615,12 @@ fn input(
         && !bar.captures_actions() && state.physical_mouse.is_empty() && state.physical_keys.is_empty(), size);
     state.ui_capture = bar.captures_actions();
     if state.ui_capture {
-        world_touch.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
+        world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
     }
     let mut pause = just_suspended && playing;
     sync_touch(&mut state, bindings.as_deref(), pause);
     if resized {
-        practice.cancel(); world_touch.cancel(); state.cancel_touch(); drawer.drawer.cancel(); touches.clear(); held_sneak.active = false;
+        practice.cancel(); world_touch.cancel(); map.cancel(); state.cancel_touch(); drawer.drawer.cancel(); touches.clear(); held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), pause); return;
     }
     if platform.as_ref().is_some_and(|gate| !gate.allows_actions() && (gate.native_blocked() || !arm.captures())) {
@@ -622,7 +628,7 @@ fn input(
         bar.cancel();
         practice.cancel();
         drawer.drawer.cancel();
-        world_touch.cancel();
+        world_touch.cancel(); map.cancel();
         state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
@@ -634,7 +640,7 @@ fn input(
         arm.cancel();
         bar.cancel();
         drawer.drawer.cancel();
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
         return;
@@ -643,7 +649,7 @@ fn input(
         arm.cancel();
         bar.cancel();
         drawer.drawer.cancel();
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
         touches.clear();
@@ -655,7 +661,7 @@ fn input(
         arm.cancel();
         bar.cancel();
         drawer.drawer.cancel();
-        world_touch.cancel(); state.cancel_touch();
+        world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), pause);
         touches.clear();
@@ -663,17 +669,20 @@ fn input(
     }
     if arm.capture_batch(&mut touches,window_id,size) {
         bar.cancel(); drawer.drawer.cancel(); state.ui_capture=true;
-        world_touch.cancel(); state.cancel_touch(); held_sneak.active=false;
+        world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active=false;
         sync_touch(&mut state,bindings.as_deref(),false);
         return;
     }
     if bar.take_editor_request() {
         if interactive {match layout.open_tray() {Ok(())=>{pause|=playing;},Err(error)=>layout.message=error}}
-        arm.cancel();model.cancel();world_touch.cancel();bar.cancel();drawer.drawer.cancel();state.cancel_touch();held_sneak.active=false;
+        arm.cancel();model.cancel();world_touch.cancel(); map.cancel();bar.cancel();drawer.drawer.cancel();state.cancel_touch();held_sneak.active=false;
         sync_touch(&mut state,bindings.as_deref(),pause);touches.clear();return;
     }
     state.interactive_actions = playing && interactive && layout.editor.is_none() && !state.ui_capture;
     world_touch.prepare(state.interactive_actions,size);
+    map.prepare(interactive && !controller && !modal_captures && layout.editor.is_none()
+        && !bar.captures_actions() && !arm.captures() && model.map_projection_ready(),layout.config.profile_epoch);
+    state.ui_capture|=map.captures();
     let mut drawer_committed = false;
     let mut gesture_committed = false;
     let mut editor_closed=false;
@@ -683,12 +692,19 @@ fn input(
             continue;
         }
         if arm.captures(){arm.event(t,size);continue;}
-        if !t.position.is_finite() { world_touch.cancel(); state.cancel_touch(); sync_touch(&mut state, bindings.as_deref(), false); continue; }
+        if !t.position.is_finite() { world_touch.cancel(); map.cancel(); state.cancel_touch(); sync_touch(&mut state, bindings.as_deref(), false); continue; }
         let p = t.position / size;
+        let map_unclaimed=layout.config.hit_filtered(t.position,size,playing,false,|i|i!=gyro::BUTTON||gyro_options.enabled).is_none()
+            && ![false,true].iter().any(|help|layout::utility_rect(*help,size).contains(t.position))
+            && !bar.blocks(Rect::from_center_size(t.position,Vec2::splat(1.0)));
+        if map.captures() {
+            map.event(t,map_unclaimed);world_touch.cancel();state.cancel_touch();held_sneak.active=false;
+            sync_touch(&mut state,bindings.as_deref(),pause);continue;
+        }
         if state.ui_capture {
             // The UI owner still receives its close/drag events; background routes do not.
             bar.event(t,false);
-            world_touch.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
+            world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
             sync_touch(&mut state,bindings.as_deref(),pause);
             continue;
         }
@@ -697,7 +713,7 @@ fn input(
             drawer.drawer.cancel();
             let tray=layout.tray_editing();
             if interactive {layout.event(t,size);} else {layout.cancel_editor_drag();}
-            model.cancel();world_touch.cancel(); state.cancel_touch();
+            model.cancel();world_touch.cancel(); map.cancel(); state.cancel_touch();
             sync_touch(&mut state, bindings.as_deref(), pause);
             if tray && layout.editor.is_none() {editor_closed=true;break;}
             continue;
@@ -711,7 +727,7 @@ fn input(
                 && !layout::utility_rect(true,size).contains(t.position);
             if arm.begin(t,size,arm_unclaimed,platform.as_deref()) {
                 bar.cancel();drawer.drawer.cancel();state.ui_capture=true;
-                world_touch.cancel(); state.cancel_touch();held_sneak.active=false;
+                world_touch.cancel(); map.cancel(); state.cancel_touch();held_sneak.active=false;
                 sync_touch(&mut state,bindings.as_deref(),false);
                 continue;
             }
@@ -719,7 +735,7 @@ fn input(
             if consumed {
                 if opened {
                     drawer.drawer.cancel();
-                    world_touch.cancel(); state.cancel_touch();
+                    world_touch.cancel(); map.cancel(); state.cancel_touch();
                     held_sneak.active = false;
                 }
                 sync_touch(&mut state, bindings.as_deref(), pause);
@@ -745,30 +761,34 @@ fn input(
         if arm.inventory() && !bar.items_pending() && !bar.blocks(Rect::from_center_size(t.position,Vec2::splat(1.0)))
             && model.closing_unclaimed(t.position) && arm.begin(t,size,unclaimed,platform.as_deref()) {
             model.cancel();bar.cancel();drawer.drawer.cancel();state.ui_capture=true;
-            world_touch.cancel();state.cancel_touch();held_sneak.active=false;
+            world_touch.cancel(); map.cancel();state.cancel_touch();held_sneak.active=false;
             sync_touch(&mut state,bindings.as_deref(),false);continue;
         }
         let consumed = bar.event(t,unclaimed);
         if bar.captures_actions() {
             // Capture can begin on a long-press release midway through this batch.
             state.ui_capture = true;
-            world_touch.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
+            world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false; drawer.drawer.cancel();
             sync_touch(&mut state,bindings.as_deref(),pause);
         }
-        if consumed || state.ui_capture { world_touch.cancel(); state.taps.clear(); continue; }
+        if consumed || state.ui_capture { world_touch.cancel(); map.cancel(); state.taps.clear(); continue; }
         if t.phase == TouchPhase::Started && interactive {
             if layout::utility_rect(false, size).contains(t.position) {
                 layout.open(playing);
-                world_touch.cancel(); state.cancel_touch();
+                world_touch.cancel(); map.cancel(); state.cancel_touch();
                 pause |= playing;
                 sync_touch(&mut state, bindings.as_deref(), pause);
                 continue;
             }
             if layout::utility_rect(true, size).contains(t.position) {
-                world_touch.cancel();
+                world_touch.cancel(); map.cancel();
                 layout.config.hints = !layout.config.hints;
                 continue;
             }
+        }
+        if map.event(t,map_unclaimed) {
+            state.ui_capture=true;world_touch.cancel();state.cancel_touch();held_sneak.active=false;drawer.drawer.cancel();
+            sync_touch(&mut state,bindings.as_deref(),pause);continue;
         }
         let run_lock_hit=playing&&options.run_lock&&movement::lock_available(&layout,&state,size)
             &&movement::lock_rect(&layout,&state,size).contains(t.position);
@@ -867,7 +887,7 @@ fn input(
                     if playing && interactive && options.vats_taps && matches!(c.role, Role::Look) && !dragged
                         && state.contacts.is_empty() && movement.now() - c.started <= 0.25 {
                         if state.taps.tap(movement.now(), t.position) {
-                            world_touch.cancel(); state.cancel_touch(); state.pulses.push(Control::Vats);
+                            world_touch.cancel(); map.cancel(); state.cancel_touch(); state.pulses.push(Control::Vats);
                             gesture_committed = true; break;
                         }
                     } else if matches!(c.role, Role::Look) { state.taps.clear(); }

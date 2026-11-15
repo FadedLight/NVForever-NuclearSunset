@@ -1059,6 +1059,11 @@ fn flat_point(aid: &PipBoyAid, windows: &Query<&Window, With<PrimaryWindow>>, sl
 }
 
 type FlatPointerSizing<'w> = (Option<Res<'w, touch_presentation::PipBoySize>>, Option<Res<'w, crate::touch_safe_area::SafeInsets>>, Option<Res<'w, UiScale>>);
+type FlatPointerInput<'w,'s> = (
+    Option<Res<'w,crate::pad::pointer::PadPointer>>,Option<ResMut<'w,touch_items::TouchItems>>,
+    Option<ResMut<'w,data::touch_map::TouchMap>>,Query<'w,'s,Entity,With<PrimaryWindow>>,
+    Query<'w,'s,Entity,With<FlatScreen>>,
+);
 /// The flat image's pointer for this frame's tile input ([`PointerSet`]), from the cursor now
 /// and the image's place as last laid out. Nothing while the device has the pointer
 /// ([`pointer_source`]). Until the image stands up the last place stays: the hand-built page
@@ -1070,29 +1075,45 @@ pub fn flat_pointer(
     flat: FlatPresentation<'_, '_>,
     windows: Query<&Window, With<PrimaryWindow>>,
     aid: Res<PipBoyAid>,
-    (pad_pointer, mut touch): (Option<Res<crate::pad::pointer::PadPointer>>, Option<ResMut<touch_items::TouchItems>>),
+    (pad_pointer, mut touch, mut map, window_ids, flat_ids): FlatPointerInput<'_,'_>,
     (sizing, safe, ui_scale): FlatPointerSizing<'_>,
 ) {
-    let Some(mut screen) = screen else { return };
+    let Some(mut screen) = screen else {if let Some(map)=map.as_deref_mut(){map.publish(None);}return};
     if pointer_source(pip.frame, screen.on_model) != PointerSource::Flat {
         return;
     }
     let Some((computed, at, crop)) = flat.nodes.iter().next().filter(|_| pip.phase == Phase::Up) else {
         if let Some(touch) = touch.as_deref_mut() { touch.cancel(); }
+        if let Some(map)=map.as_deref_mut(){map.publish(None);}
         return;
     };
+    let window = windows.single().ok();
+    let zoom=sizing.as_deref().map_or(1.0,touch_presentation::PipBoySize::ratio);
+    let safe=safe.as_deref().copied().unwrap_or_default();
+    let ui=ui_scale.as_deref().map_or(1.0,|s|s.0);
+    let wanted=FlatCrop::desired(screen.scale,zoom,safe,window,ui);
+    let valid=wanted.valid() && crop==Some(&wanted) && computed.size().is_finite()
+        && computed.size().min_element()>0.0 && at.translation.is_finite();
     if let Some(touch) = touch.as_deref_mut() {
-        let window = windows.single().ok();
-        let wanted = FlatCrop::desired(screen.scale, sizing.as_deref().map_or(1.0, touch_presentation::PipBoySize::ratio),
-            safe.as_deref().copied().unwrap_or_default(), window, ui_scale.as_deref().map_or(1.0, |s| s.0));
-        if !wanted.valid() || crop != Some(&wanted) || !computed.size().is_finite()
-            || computed.size().min_element() <= 0.0 || !at.translation.is_finite()
-        { touch.cancel(); }
+        if !valid {touch.cancel();}
         else {
-            let scale = window.map_or(1.0, |w| w.scale_factor());
+            let scale=window.map_or(1.0,|w|w.scale_factor());
             touch.flat_geometry(computed.size(),at.translation);
-            touch.project(|position| crop_point(position * scale, at.translation, computed.size()));
+            touch.project(|position|crop_point(position*scale,at.translation,computed.size()));
         }
+    }
+    if let Some(map)=map.as_deref_mut() {
+        let projection=(|| {
+            use data::touch_map::{Presentation,Projection,ProjectionStamp};
+            if !valid || pip.phase!=Phase::Up || pip.page!=Page::Data || pip.tab()>data::WORLD {return None;}
+            let window=window?;
+            let stamp=ProjectionStamp::new(window_ids.single().ok()?,window,&screen,false,
+                Presentation{safe,menu:crate::interface::unit_scale(),ui,size:zoom})
+                .with_flat(flat_ids.single().ok()?,computed.size(),at.translation)?;
+            let (centre,size,scale)=(at.translation,computed.size(),window.scale_factor());
+            Projection::new(stamp,move|point|crop_point(point*scale,centre,size))
+        })();
+        map.publish(projection);
     }
     let now = flat_point(&aid, &windows, crate::pad::pointer::asleep(pad_pointer.as_deref()), computed, at);
     if screen.pointer != now {

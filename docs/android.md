@@ -126,10 +126,14 @@ The active session is never saved and practice does not change a gameplay save.
 The R9 CPU run passed all fifteen practice routing, lifecycle, settings and gesture
 tests. Rendered device validation remains separate.
 
-A pending source correction aligns the practice sides with the current stick
+The practice correction aligns the practice sides with the current stick
 position, shows the analog dead zone as a circle and retains the legacy box. Its
-added App controls are uncompiled and unrun; the R9 result does not qualify that
-changed presentation.
+added App controls passed the scoped ARM library/test-code type/lint check at code
+checkpoint `81dc1347`, but remain unexecuted. That checkpoint also passed the
+1,517-entry scenario-file verifier and merge-parent integrity check; it did not
+execute game scenarios. The R9 result does not qualify the changed presentation.
+This documentation-only attribution follow-up preserves the code and adds no
+whole-head runtime or APK result.
 
 ## Touch inventory menus
 

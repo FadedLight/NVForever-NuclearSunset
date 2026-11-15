@@ -69,5 +69,10 @@ only touch placement/size. Physical gamepad mappings and Auto/Xbox prompt names
 remain in Controls > Controller and are not selected by this touch preset.
 
 [qualification] The handedness/dead-zone/preset-wording correction adds authored
-App/provider/serialization controls. They are unexecuted in this source-only
-packet; the historical R9 result above does not qualify the changed presentation.
+App/provider/serialization controls. They passed ARM library/test-code type/lint
+checks at code checkpoint `81dc1347`, with the two disclosed local lint-category
+exclusions; their runtime execution remains pending. That checkpoint also passed
+the 1,517-entry scenario-file verifier and merge-parent integrity, not game
+scenarios. The historical R9 result above does not qualify the changed presentation.
+This subsequent documentation-only attribution update preserves those code inputs
+and adds no whole-head execution or APK qualification.

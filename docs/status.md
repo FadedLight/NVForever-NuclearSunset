@@ -33,9 +33,12 @@ Controller switching, independent look/ADS scales, dead zone and hold/toggle cho
 four original SVG icon families, adaptive Aim/Block/Scope captions and individual HUD
 scales are implemented. Optional [touch practice](design/android-touch-practice.md)
 teaches movement and actions through isolated synthetic input. Rendered device
-acceptance remains pending. A further source correction makes practice follow the
+acceptance remains pending. The practice correction follows the
 current movement side and distinguishes the analog dead-zone circle from the legacy
-box; its compilation and App execution remain pending.
+box. Its ARM library/test-code check passed at code checkpoint `81dc1347`; App
+execution remains pending. That checkpoint's scenario-file verifier passed all
+1,517 entries and merge-parent integrity, without executing game scenarios. This
+documentation-only follow-up adds no whole-head runtime or APK result.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule

@@ -418,6 +418,9 @@ pub(super) struct Bridge<'w, 's> {
 impl Bridge<'_, '_> {
     pub fn cancel(&mut self) {
         self.requests.clear();
+        self.cancel_owned_ui();
+    }
+    fn cancel_owned_ui(&mut self) {
         self.bar.cancel();
         self.edit.0=false;
         if self.preview.0 {self.bar.mode=3;self.bar.preview=true;}
@@ -571,13 +574,17 @@ impl Bridge<'_, '_> {
             safe_area:self.bar.safe_area,
             profile_epoch:config.profile_epoch,
         };
-        if mode != self.bar.mode
-            || menu_touch != self.bar.menu_touch
+        let context_changed = menu_touch != self.bar.menu_touch
             || self.bar.size != size
             || self.bar.safe_bottom != safe
-            || self.fresh.as_ref().is_some_and(|f| f.0)
-        {
-            self.cancel();
+            || self.fresh.as_ref().is_some_and(|f| f.0);
+        if mode != self.bar.mode || context_changed {
+            if self.bar.mode == 0 && mode == 1 && !context_changed {
+                // The preview publisher retires mode3 after explicit editor
+                // Cancel. A new gameplay request queued after that Cancel is
+                // fresh; reconcile owned UI without discarding that request.
+                self.cancel_owned_ui();
+            } else { self.cancel(); }
         }
         if self.bar.fitting_key.as_ref() != Some(&key) {
             self.bar.retire_binding_request();
@@ -1939,6 +1946,37 @@ mod binding_release_tests {
     fn late_quantity(mut flag:ResMut<LateQuantity>,mut active:ResMut<ActiveMenu>,mut sim:ResMut<nvf_play::sim::SimState>){
         if std::mem::take(&mut flag.0){quantity(&mut active,&mut sim);}
     }
+    #[derive(Resource,Default)]
+    struct PromptPointerReleases(usize);
+    fn record_prompt_pointer_releases(
+        mut events:MessageReader<bevy::picking::pointer::PointerInput>,
+        mut seen:ResMut<PromptPointerReleases>,
+    ) {
+        seen.0+=events.read().filter(|event|event.pointer_id==nvf_play::pipboy::touch_items::POINTER
+            &&matches!(event.action,bevy::picking::pointer::PointerAction::Release(_))).count();
+    }
+    fn install_flat_prompt_projection(app:&mut App) {
+        use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
+        use bevy::asset::{AssetApp, AssetPlugin};
+        use bevy::camera::{ComputedCameraValues, RenderTargetInfo, visibility::VisibilityPlugin};
+        use bevy::ui::{ComputedUiRenderTargetInfo, ui_layout_system, ui_surface::UiSurface, update::propagate_ui_target_cameras};
+        app.add_plugins((AssetPlugin::default(),bevy::text::TextPlugin,bevy::transform::TransformPlugin))
+            .init_asset::<Mesh>().init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>()
+            .add_plugins(VisibilityPlugin)
+            .add_plugins(HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(PostUpdate))
+            .add_plugins(HierarchyPropagatePlugin::<ComputedUiRenderTargetInfo>::new(PostUpdate))
+            .init_resource::<UiSurface>().init_resource::<UiScale>()
+            .add_systems(PostUpdate,(propagate_ui_target_cameras,ui_layout_system).chain())
+            .configure_sets(PostUpdate,PropagateSet::<ComputedUiTargetCamera>::default().after(propagate_ui_target_cameras).before(ui_layout_system))
+            .configure_sets(PostUpdate,PropagateSet::<ComputedUiRenderTargetInfo>::default().after(propagate_ui_target_cameras).before(ui_layout_system));
+        let camera=app.world().resource::<nvf_play::pipboy::PipBoyScreen>().camera;
+        app.world_mut().entity_mut(camera).insert((Camera2d,Camera {computed:ComputedCameraValues {
+            target_info:Some(RenderTargetInfo {physical_size:UVec2::new(1000,600),scale_factor:1.0}),..default()},..default()}));
+        app.init_resource::<PromptPointerReleases>()
+            .add_systems(PreUpdate,record_prompt_pointer_releases.after(nvf_play::pipboy::TouchPointerSet))
+            .add_systems(Update,nvf_play::pipboy::flat_screen).add_systems(Last,nvf_play::pipboy::flat_pointer);
+        idle(app,4);
+    }
     fn free_menu_point(app:&App)->Vec2 {
         let size=Vec2::new(1000.,600.);let config=&app.world().resource::<super::super::layout::Layout>().config;
         let bar=app.world().resource::<Bar>();let prefs=app.world().resource::<Preferences>();let g=geometry(size,prefs,bar).unwrap();
@@ -1947,18 +1985,31 @@ mod binding_release_tests {
                 &&!g.context.iter().any(|r|r.contains(*point))&&config.hit_filtered(*point,size,false,false,|_|true).is_none()
                 &&![false,true].iter().any(|help|super::super::layout::utility_rect(*help,size).contains(*point))).unwrap()
     }
+    fn free_prompt_point(app:&mut App)->Vec2 {
+        let bounds={
+            let world=app.world_mut();
+            let mut nodes=world.query_filtered::<(&ComputedNode,&UiGlobalTransform),With<nvf_play::pipboy::FlatScreen>>();
+            let (node,at)=nodes.single(world).unwrap();
+            assert!(node.size().is_finite() && node.size().min_element()>0.0);
+            Rect::from_center_size(at.translation,node.size())
+        };
+        let size=Vec2::new(1000.,600.);let config=&app.world().resource::<super::super::layout::Layout>().config;
+        let bar=app.world().resource::<Bar>();let prefs=app.world().resource::<Preferences>();let g=geometry(size,prefs,bar).unwrap();
+        (100..900).step_by(40).flat_map(|x|(100..500).step_by(40).map(move|y|Vec2::new(x as f32,y as f32)))
+            .find(|point|bounds.contains(*point)&&!g.slots.iter().any(|(_,r)|r.contains(*point))&&!g.tray.is_some_and(|r|r.contains(*point))
+                &&!g.context.iter().any(|r|r.contains(*point))&&config.hit_filtered(*point,size,false,false,|_|true).is_none()
+                &&![false,true].iter().any(|help|super::super::layout::utility_rect(*help,size).contains(*point))).unwrap()
+    }
     #[test]
     fn actual_quantity_interrupts_active_pending_and_late_binding_but_fresh_raw_prompt_pointer_survives(){
-        use bevy::picking::pointer::{PointerAction,PointerInput};
-        use bevy::ecs::message::Messages;
         for state in ["active","pending","late"] {
             let (mut app,w)=app();let p=test_slot_center(app.world(),0);
             // Use actual flat projection and the real PreUpdate pointer driver.
-            app.world_mut().spawn((nvf_play::pipboy::FlatScreen,ComputedNode{size:Vec2::new(1000.,600.),..default()},UiGlobalTransform::from_xy(500.,300.)));
-            app.add_systems(Last,nvf_play::pipboy::flat_pointer);
+            install_flat_prompt_projection(&mut app);
             app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:w,key_code:KeyCode::F12,
                 logical_key:bevy::input::keyboard::Key::F12,state:ButtonState::Pressed,text:None,repeat:false});
             app.update();
+            let release_baseline=app.world().resource::<PromptPointerReleases>().0;
             if state=="active" {fresh_tap(&mut app,w,650);open_quantity(&mut app);}
             else {
                 edge(&mut app,w,650,TouchPhase::Started,p);app.update();
@@ -1974,15 +2025,14 @@ mod binding_release_tests {
             assert!(!app.world().resource::<OverlayCapture>().0,"quantity must not become a permanent overlay capture");
             assert!(app.world().resource::<Bar>().menu_touch.is_some(),"ordinary prompt ingress stays admitted");
             edge(&mut app,w,650,TouchPhase::Ended,p);app.update();idle(&mut app,3);
-            let old_releases=app.world_mut().resource_mut::<Messages<PointerInput>>().drain()
-                .filter(|p|p.pointer_id==nvf_play::pipboy::touch_items::POINTER&&matches!(p.action,PointerAction::Release(_))).count();
+            let old_releases=app.world().resource::<PromptPointerReleases>().0-release_baseline;
             assert_eq!(old_releases,0,"interrupted binding cannot release into the prompt");
-            let point=free_menu_point(&app);
+            let fresh_baseline=app.world().resource::<PromptPointerReleases>().0;
+            let point=free_prompt_point(&mut app);
             edge(&mut app,w,651,TouchPhase::Started,point);app.update();
             assert!(app.world().resource::<TouchItems>().owns(651));
             app.update();edge(&mut app,w,651,TouchPhase::Ended,point);app.update();idle(&mut app,3);
-            let releases=app.world_mut().resource_mut::<Messages<PointerInput>>().drain()
-                .filter(|p|p.pointer_id==nvf_play::pipboy::touch_items::POINTER&&matches!(p.action,PointerAction::Release(_))).count();
+            let releases=app.world().resource::<PromptPointerReleases>().0-fresh_baseline;
             assert_eq!(releases,1,"fresh ordinary prompt contact reaches the actual projected pointer boundary");
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
             assert_eq!(app.world_mut().resource_mut::<nvf_play::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF,fnv_sim::FormId(0xF203)).unwrap(),10);
@@ -2044,6 +2094,29 @@ mod binding_release_tests {
             assert_eq!(app.world().resource::<Bar>().placement.pins,saved_pins);
             assert!(app.world().resource::<bevy::ecs::message::Messages<nvf_play::weapon_wheel::TouchHotkey>>().is_empty());
             assert_eq!(app.world_mut().resource_mut::<nvf_play::sim::SimState>().world.item_count(fnv_sim::FormId::PLAYER_REF,fnv_sim::FormId(0xF203)).unwrap(),10);
+        }
+    }
+
+    #[test]
+    fn queued_tray_requests_crossing_actual_menu_sessions_are_retired_then_fresh_requests_work() {
+        for cause in ["page","tab","frame"] {
+            let (mut app,_)=app();
+            app.world_mut().write_message(UtilityTrayRequest(true));
+            {
+                let mut pip=app.world_mut().resource_mut::<PipBoy>();
+                match cause {
+                    "page"=>pip.page=Page::Stats,
+                    "tab"=>pip.tabs[Page::Items.index()]=1,
+                    _=>pip.frame=nvf_play::pipboy::Frame::Screen,
+                }
+            }
+            app.update();
+            assert!(!app.world().resource::<Bar>().tray_open,"{cause}: old session request cannot cross the change");
+            assert_unarmed(&app);
+            app.world_mut().write_message(UtilityTrayRequest(true));
+            app.update();
+            assert!(app.world().resource::<Bar>().tray_open,"{cause}: fresh stable-session request still opens");
+            assert_unarmed(&app);
         }
     }
 

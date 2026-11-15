@@ -79,3 +79,10 @@ arm manipulation is subordinate to the existing optional Inventory bottom swipe;
 disabling it preserves that recognizer. World touch defaults to hold confirmation
 on the Android adapter; the standalone core resource defaults off and changes no
 desktop input. Existing bindings and script-disabled controls remain authoritative.
+
+[documented: touch/world_activate.rs and touch.rs]
+An unconfirmed short Hold with only a pending screen ray does not own the optional
+VATS tap gesture, including movement below the existing drag threshold. A sampled
+native target retains world-touch priority for the rest of that contact. Tap and
+double-tap confirmation retain their pending reservation. Actual dragging, the VATS
+duration bound and the parent's same-batch fire-tail quarantine remain unchanged.

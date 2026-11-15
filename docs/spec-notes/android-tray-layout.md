@@ -31,3 +31,11 @@
   actual device selector and rechecks its consumed-frame gate plus persistent
   controller/suspend state. Ordinary pause/disabled bar remain previewable; blocked
   lifecycle/platform/modal/device routes retire drag and never publish a live bar.
+
+- [documented: touch::hotbar::Bridge] Returning from an explicitly canceled editor
+  can reconcile the retired bar into gameplay without discarding a new tray request.
+  This exception is limited to mode0-to-mode1 with unchanged menu session, window
+  size, safe bottom and fresh-input gate. Owned contacts and binding state still
+  retire. All other existing full cancellation paths still discard queued requests;
+  fitting-only reconciliation keeps its existing policy. The boolean request has no
+  epoch and does not establish freshness across an inactive interval.

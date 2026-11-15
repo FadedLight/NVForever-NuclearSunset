@@ -2813,6 +2813,57 @@ mod tests {
         app.update();assert_eq!(app.world().resource::<VatsPresses>().0,1);assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger);
         button_touch(&mut app,w,4,TouchPhase::Started,Control::Use);app.update();assert!(app.world().resource::<nvf_play::control::PlayerControl>().trigger);
     }
+
+    #[test]
+    fn optional_vats_no_target_hold_jitter_keeps_same_batch_fire_tail_quarantined() {
+        let (mut app,w)=movement_scene();
+        app.init_resource::<VatsPresses>().add_systems(Update,count_vats);
+        app.world_mut().resource_mut::<movement::Options>().vats_taps=true;
+        app.world_mut().resource_mut::<Bindings>().rebind(Control::Vats,nvf_play::bindings::Input::Key(KeyCode::F9));
+        app.world_mut().resource_mut::<nvf_play::control::PlayerControl>().weapon_out=true;
+        app.update();
+        for id in [41,42] {
+            touch(&mut app,w,id,TouchPhase::Started,600.0,400.0);
+            touch(&mut app,w,id,TouchPhase::Moved,604.0,401.0);
+            touch(&mut app,w,id,TouchPhase::Ended,602.0,400.0);
+            if id==42 {button_touch(&mut app,w,43,TouchPhase::Started,Control::Use);}
+            app.update();
+            assert_eq!(app.world().resource::<VatsPresses>().0,usize::from(id==42));
+            assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger);
+        }
+        app.update();
+        assert_eq!(app.world().resource::<VatsPresses>().0,1);
+        assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger);
+    }
+
+    #[derive(Resource,Default)]
+    struct VatsNativeActivations(usize);
+    fn count_vats_native_activations(mut events:MessageReader<nvf_play::world_sounds::Activated>,mut seen:ResMut<VatsNativeActivations>) {
+        seen.0+=events.read().count();
+    }
+    #[test]
+    fn optional_vats_yields_to_actual_sampled_native_hold_target_and_confirms_that_hold_once() {
+        let (mut app,w,door,point)=super::world_outcome_tests::scene("Tap");
+        let setting=app.world().resource::<nvf_play::settings::Settings>().index("touch-world-activation-v1").unwrap();
+        assert!(nvf_play::settings::pick(app.world_mut(),setting,"Hold"));
+        app.init_resource::<VatsPresses>().init_resource::<VatsNativeActivations>()
+            .add_systems(Update,(count_vats,count_vats_native_activations));
+        app.world_mut().resource_mut::<movement::Options>().vats_taps=true;
+        for id in [51,52] {
+            touch(&mut app,w,id,TouchPhase::Started,point.x,point.y);app.update();
+            assert_eq!(app.world().resource::<nvf_play::activate::touch::TouchActivation>().target().map(|target|target.form_id),Some(door.0),"native probe must actually claim this target");
+            touch(&mut app,w,id,TouchPhase::Ended,point.x,point.y);app.update();
+            assert_eq!(app.world().resource::<VatsPresses>().0,0,"a sampled world target keeps priority over VATS");
+            assert!(!app.world().resource::<nvf_play::sim::SimState>().world.peek(door).unwrap().open,"short Hold release does not confirm native activation");
+        }
+        touch(&mut app,w,53,TouchPhase::Started,point.x,point.y);app.update();
+        for _ in 0..40 {app.update();}
+        assert!(app.world().resource::<nvf_play::sim::SimState>().world.peek(door).unwrap().open,"the same actual target still activates through a full Hold");
+        assert_eq!(app.world().resource::<VatsNativeActivations>().0,1);
+        touch(&mut app,w,53,TouchPhase::Ended,point.x,point.y);app.update();app.update();
+        assert_eq!(app.world().resource::<VatsNativeActivations>().0,1);
+        assert_eq!(app.world().resource::<VatsPresses>().0,0);
+    }
     #[test]
     fn vats_gesture_rejects_out_and_back_cancel_and_controller_return_touch() {
         let (mut app,w)=movement_scene();app.init_resource::<VatsPresses>().add_systems(Update,count_vats);
@@ -3600,6 +3651,26 @@ mod tests {
         touch(&mut app,w,875,TouchPhase::Started,slot.x,slot.y);
         touch(&mut app,w,875,TouchPhase::Ended,slot.x,slot.y);app.update();
         assert_eq!(reader.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).map(|m|m.0).collect::<Vec<_>>(),[0]);
+    }
+
+    #[test]
+    fn queued_tray_requests_crossing_resize_or_disabled_bar_do_not_replay_but_fresh_ones_open() {
+        for cause in ["resize","disabled"] {
+            let (mut app,w)=mixed_hotbar_phone_scene(Vec2::new(640.,360.),"classic",4);
+            raw_key(&mut app,w,KeyCode::F12,ButtonState::Pressed);app.update();
+            app.world_mut().write_message(hotbar::UtilityTrayRequest(true));
+            if cause=="resize" {app.world_mut().get_mut::<Window>(w).unwrap().resolution.set_physical_resolution(672,384);}
+            else {app.world_mut().resource_mut::<hotbar::Preferences>().enabled=false;}
+            app.update();
+            assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request must not open");
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+            if cause=="disabled" {app.world_mut().resource_mut::<hotbar::Preferences>().enabled=true;}
+            app.update();
+            assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request cannot replay after return");
+            app.world_mut().write_message(hotbar::UtilityTrayRequest(true));app.update();
+            assert!(hotbar::tray_open_collision_fixture(app.world()),"{cause}: a fresh stable request opens");
+            assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+        }
     }
 }
 

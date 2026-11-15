@@ -138,7 +138,12 @@ impl Bridge<'_> {
         contact.target_seen |= self.probe.target().is_some();
         contact.dragged |=
             !event.position.is_finite() || event.position.distance(contact.origin) > DRAG;
-        let suppress = contact.target_seen || self.probe.might_activate();
+        // Hold confirmation cannot act on a quick release. Until an actual
+        // target has been sampled, its pending ray must not claim the separate
+        // optional VATS tap gesture. Tap/double-tap still reserve their pending
+        // confirmation, and a sampled Hold target keeps priority.
+        let suppress = contact.target_seen
+            || (self.options.mode != Confirmation::Hold && self.probe.might_activate());
         if contact.dragged || event.phase == TouchPhase::Canceled {
             self.probe.cancel();
         }

@@ -72,7 +72,7 @@ fn newly_inserted_jointed_object_refresh_preserves_bind_pose_and_later_joint_con
         let rest=Iso {translation:[x,0.,55.],rotation:[1.,0.,0.,0.,1.,0.,0.,0.,1.]};
         RagdollBody {object:CollisionObject {node:Some(name.into()),node_block:0,node_transform:rest,body_transform:Iso::IDENTITY,
             motion,layer:1,mass:10.,friction:0.5,restitution:0.,shape:Shape::Box {half_extents:[5.;3]}.into(),shell:0.,material:None,wind:false},
-            linear_damping:0.1,angular_damping:0.05,stored:rest,unit:7.}
+            linear_damping:0.1,angular_damping:0.05,stored:rest,unit:7.,inertia:None}
     };
     let rag=Arc::new(Ragdoll {bodies:vec![body("owned anchor",0.,Motion::Static),body("owned arm",20.,Motion::Dynamic)],
         joints:vec![RagdollJoint {block:0,a:0,b:1,pivot_a:[20.,0.,0.],pivot_b:[0.;3],kind:JointKind::Ball,max_friction:0.,strength:None}],problems:vec![]});

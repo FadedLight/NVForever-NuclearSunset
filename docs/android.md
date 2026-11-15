@@ -243,3 +243,33 @@ result establishes phone comfort, visible resume recovery or Doc Mitchell exit
 stability. See the owning [dialogue](design/android-dialogue-accessibility.md),
 [lockpicking](design/android-lockpick-touch.md), [VATS](design/android-vats-touch.md)
 and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
+
+## Current-main integration status
+
+[design] The next source integration retains the optional touch views alongside
+accepted Main `ed684e8`, including its engine implementation of Stewie-related
+preferences. This is separate from verified execution of a particular original
+mod/plugin/version/profile. Controller keyboard/mouse contributions keep their
+physical hold ownership; controller toggles and touch gestures remain distinct.
+An explicit custom left/right stick deadzone preference takes precedence only
+while enabled; disabling it restores the separately saved controller calibration.
+
+Repair previews cannot consume an item, and repair-kit rows use the same gain and
+consumption provider as the ordinary menu. Open-only workbench/mod-skill conditions
+retain Main's policy for both physical and touch input; confirmation keeps the
+existing offer/skill/settings checks without a new touch-only restriction. Barter
+uses Main's full-total and caps-after display preferences while actual payment
+continues through the ordinary capped trade consumer.
+
+The incoming DATA consumer also requires its companion-summon message stream.
+The lean core and wrapper map fixtures register that real provider, as production
+PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
+all map assertions. This additional source setup correction is unexecuted; it is
+not an observed explanation for the earlier runtime failures.
+
+[qualification] Source comparison retains all 1,536 Main scenario records plus
+Android's startup-options record, with the Main order intact. This is file
+integrity, not scenario execution. The current integrated source, new consumer
+controls, native packaging and phone acceptance remain unrun. Earlier ARM/R31
+results belong to their stated historical checkpoints; no new qualified download
+or resume/Doc Mitchell crash resolution is established here.

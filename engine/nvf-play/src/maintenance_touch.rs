@@ -66,7 +66,7 @@ pub(crate) fn menu_allows(kind: Kind, game: Option<&fnv_game::Game<'_>>) -> bool
 impl Source {
     fn same_scroll_source(&self, next: &Self) -> bool {
         match (self, next) {
-            (Self::Repair(a), Self::Repair(b)) => a.offer == b.offer && a.skill == b.skill && a.settings == b.settings && a.selected == b.selected,
+            (Self::Repair(a), Self::Repair(b)) => a.offer == b.offer && a.skill == b.skill && a.settings == b.settings && a.selected == b.selected && a.preview == b.preview,
             (Self::Mod(a), Self::Mod(b)) => a.offer == b.offer && a.selected == b.selected,
             (Self::Vendor(id, a), Self::Vendor(other, b)) => {
                 let mut compare = b.clone();

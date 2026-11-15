@@ -541,3 +541,13 @@ contains 176 unique keys; 68 Android overrides comprise 60 Mobile and 8 shared c
 placements. These are potential rows, not a claim that every optional subsystem
 registers in every run. All new controls and the current merged source still
 require their own compilation/runtime and device acceptance.
+
+[design] The subsequent `ed684e8` Main import retains these 176 fixed `KNOWN`
+fixture entries and 68 Android overrides. Main's generated Tweaks rows and the
+Controls page's additional unbound tweak keys are separate from this fixed
+registry fixture. Saved per-device controller calibration is retained; an enabled
+custom per-stick tweak temporarily supplies its explicit values without rewriting
+the saved calibration. Disabling that tweak restores the saved values.
+[qualification] All 1,536 current Main scenario records and Android's startup record
+are retained as source. Compiler/test discovery, execution and device acceptance
+still require exact integrated-head qualification.

@@ -33,6 +33,7 @@ pub(crate) fn scene(tab:usize,density:f32,zoom:f32)->(App,Entity) {
         .init_resource::<crate::touch_safe_area::SafeInsets>()
         .add_message::<TouchInput>().add_message::<MenuInput>().add_message::<PipBoyInput>()
         .add_message::<FastTravelAsk>().add_message::<FastTravelGo>()
+        .add_message::<crate::pipboy::data::SummonCompanions>()
         .add_systems(PreUpdate,ingress.before(bevy::input::InputSystems))
         .add_systems(Update,(crate::pipboy::flat_screen,crate::pipboy::flat_pointer,draw,hear).chain())
         .add_systems(PostUpdate,(propagate_ui_target_cameras,ui_layout_system).chain())

@@ -370,6 +370,17 @@ epairmenuPlayer, Repair 17]:
 - Scripts do not see MenuMode 1035 (`fnv_game::repair::REPAIR_MENU`) while the list is
   open [not built].
 
+- **Weapon Repair Kit** [observed: FalloutNV.esm]: `NVRepairKit` is an ingestible with one
+  effect, `RepairKitEffect` ("Repairs Current Weapon"), whose script `RepairKitEffectSCRIPT`
+  reads the player's GetWeaponHealthPerc, adds 10 points below Repair 25, 15 below 50, 20
+  below 75, 25 below 100 and 30 at 100, and sets the weapon in hand to that with
+  SetWeaponHealthPerc (at most 99.83 % [documented: GECK wiki]). Used from the inventory it
+  runs as any aid item. Under the Tweaks tab's Repair Kits in the Repair List
+  (`bUseWeaponRepairKitsInRepairMenu`) the kits carried are parts in any weapon's repair
+  list, after the others, and one raises that weapon by the same rule
+  (`fnv_game::repair::kit_condition`) [design: the kit's script is not run, so a mod's kit
+  that changes the script but keeps the effect repairs by the master's rule].
+
 ### 5.1 The page drawn from its file
 
 Behind `[UI] TileMenus=RepairMenu`, on by default when the list is absent [design, #2215;
@@ -448,3 +459,17 @@ it; a long list, the brackets moving with the scroll; the choose text's period (
 **The seam with the ITEMS page**: the page's adapter (`tiles/inventory_menu.rs`, on its own branch)
 leaves ITEMS hand-built while a repair list is open, so that its body draws the list. With both
 switches on, this page takes that place; the two have to be checked together when both land.
+
+### Android presentation with Main's repair preferences
+
+[design] The optional maintenance sheet reads the same repair Session and Part
+records as the ordinary menu. Preview sessions display a disabled preview-only
+confirmation, and kit rows display the shared Session::after gain and kit action.
+A changed preview mode retires the old scroll/confirmation source. The existing
+consumer still owns eligibility, exact unit consumption and inventory refresh.
+Main's workbench/mod-skill requirements remain Open-only predicates for both
+physical and touch confirmation; this merge adds no stricter touch-only policy.
+Any future change to that policy must use a shared all-input effect boundary.
+[qualification] New actual-consumer controls cover preview reopen/stale
+confirmation, one-kit consumption and matching physical/touch Open-only behavior.
+They are source-authored and remain uncompiled/unrun until separately qualified.

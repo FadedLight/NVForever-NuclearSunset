@@ -40,7 +40,8 @@ impl Geometry {
 
 fn confirmation(source: &Source) -> (&'static str, bool) {
     match source {
-        Source::Repair(s) => ("Repair: consume donor", s.selected > 0 && s.offer.parts.get(s.selected - 1).is_some() && s.offer.usable()),
+        Source::Repair(s) if s.preview => ("Preview only", false),
+        Source::Repair(s) => (if s.selected.checked_sub(1).and_then(|i|s.offer.parts.get(i)).is_some_and(|p|p.kit) { "Repair: use kit" } else { "Repair: consume donor" }, s.selected > 0 && s.offer.parts.get(s.selected - 1).is_some() && s.offer.usable()),
         Source::Mod(s) => match s.selected.checked_sub(1).and_then(|i| s.offer.choices.get(i)) {
             Some(c) => (if c.attached { "Remove mod" } else { "Install mod" }, c.attached || c.count > 0),
             None => ("Select a mod", false),
@@ -51,9 +52,9 @@ fn confirmation(source: &Source) -> (&'static str, bool) {
 fn heading(source: &Source) -> (String, String) {
     match source {
         Source::Repair(s) => {
-            let after = s.selected.checked_sub(1).and_then(|i| s.offer.parts.get(i)).map(|p| fnv_game::repair::merged_condition(&s.settings, s.offer.condition, p.condition, s.skill));
+            let after = s.selected.checked_sub(1).and_then(|i| s.offer.parts.get(i)).map(|p| s.after(p));
             let change = after.map_or(String::new(), |to| format!(" → {:.0}%", to * 100.0));
-            let requirement = if s.offer.parts.is_empty() { "No compatible donors available." } else { "Select a donor, then confirm. The donor is consumed." };
+            let requirement = if s.preview { "Preview only. No items will be consumed." } else if s.offer.parts.is_empty() { "No compatible donors available." } else if s.offer.parts.iter().any(|p|p.kit) { "Select a donor or kit, then confirm. The selected part is consumed." } else { "Select a donor, then confirm. The donor is consumed." };
             (format!("Repair: {}", s.offer.name), format!("Condition {:.0}%{change} · Repair {:.0}\n{requirement}", s.offer.condition * 100.0, s.skill))
         }
         Source::Mod(s) => {
@@ -72,7 +73,7 @@ fn heading(source: &Source) -> (String, String) {
 fn row(source: &Source, index: usize) -> (String, bool) {
     match source {
         Source::Repair(s) => if index == 0 { (format!("{} · {:.0}% (item)", s.offer.name, s.offer.condition * 100.0), s.selected == 0) }
-            else { let p = &s.offer.parts[index - 1]; (format!("{} · {:.0}% donor", p.name, p.condition * 100.0), s.selected == index) },
+            else { let p = &s.offer.parts[index - 1]; (if p.kit { format!("{} · Repair kit", p.name) } else { format!("{} · {:.0}% donor", p.name, p.condition * 100.0) }, s.selected == index) },
         Source::Mod(s) => if index == 0 { (format!("{} (weapon)", s.offer.name), s.selected == 0) }
             else { let c = &s.offer.choices[index - 1]; (format!("{} · {}", c.name, if c.attached { "Installed".to_owned() } else { format!("{} carried", c.count) }), s.selected == index) },
         Source::Vendor(_, v) => { let r = &v.rows[index]; (format!("{} · {:.0}% · {}", r.label, r.condition * 100.0, r.quote.cost().map_or("Skill required".to_owned(), |n| format!("{n} caps"))), v.selected == index) },

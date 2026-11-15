@@ -95,3 +95,12 @@ choices. Source-authored controls must prove hints-off real input still reaches
 the existing pin/torque rules, actual colour updates reach UI components, and INI
 store/reload remains independent from the enhanced-control scheme. Qualification
 of this follow-on is pending; it does not change the served APK.
+
+[design] Main's optional keyboard-movement pin controls use actual keyboard/mouse
+provenance. They join a selected controller only under the explicit keyboard-with-
+controller preference; the controller's angle stick never becomes a second
+keyboard angle or torque owner. Arrow-key fallback and the independently owned
+pad/touch angle/torque paths remain. Authoritative control palette painting follows
+generic interface recolouring, including collinear custom RGB changes.
+[qualification] The focused raw-axis/key-to-Picking.pin and palette controls are
+authored, not executed evidence of the current integrated source or phone usability.

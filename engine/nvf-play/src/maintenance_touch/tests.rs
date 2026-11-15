@@ -5,12 +5,16 @@ use fnv_sim::{FormId, forms::{BaseData, ItemKind}, inventory::Extra};
 
 pub(crate) const GEAR: FormId = FormId(0xFA100);
 const MOD: FormId = FormId(0xFA101);
+const KIT: FormId = FormId(0xFA105);
 
 pub(crate) fn fixture(modding: bool, native_configuration: bool) -> App {
+    fixture_variant(modding, native_configuration, false)
+}
+fn fixture_variant(modding: bool, native_configuration: bool, repair_kit: bool) -> App {
     let mut gear = test_world::item_base(GEAR.0);
     gear.name = Some("Authored fixture gear".into());
     if let BaseData::Item(item) = &mut gear.data {
-        item.kind = if modding { ItemKind::Weapon } else { ItemKind::Armor };
+        item.kind = if modding || repair_kit { ItemKind::Weapon } else { ItemKind::Armor };
         item.health = Some(100); item.value = Some(100); item.armor_dt = Some(5.0);
     }
     let mut modification = test_world::item_base(MOD.0);
@@ -22,18 +26,42 @@ pub(crate) fn fixture(modding: bool, native_configuration: bool) -> App {
     vendor.sig = *b"NPC_";
     vendor.data = BaseData::Actor(fnv_sim::forms::ActorBase { entries: Vec::new(), attributes: None });
     let mut placed = test_world::placed(0xFA104, 0xFA103); placed.sig = *b"ACHR";
-    let mut sim = test_world::sim(vec![gear, modification, caps, vendor], vec![placed]);
+    let mut bases = vec![gear, modification, caps, vendor];
+    if repair_kit {
+        let mut kit = test_world::item_base(KIT.0);
+        kit.name = Some("Authored fixture repair kit".into()); kit.sig = *b"ALCH";
+        if let BaseData::Item(item) = &mut kit.data { item.kind = ItemKind::Aid; }
+        bases.push(kit);
+    }
+    let mut sim = test_world::sim(bases, vec![placed]);
     sim.world.add_item(FormId::PLAYER_REF, GEAR, if modding { 1 } else { 2 }).unwrap();
     let inv = sim.world.inventory_mut(FormId::PLAYER_REF).unwrap();
     assert!(inv.set_condition_one(GEAR, Extra::default(), 0.4));
     if !modding { assert!(inv.set_condition_one(GEAR, Extra::default(), 0.2)); }
     sim.world.add_item(FormId::PLAYER_REF, MOD, 2).unwrap();
+    if repair_kit { sim.world.add_item(FormId::PLAYER_REF, KIT, 2).unwrap(); }
     let mut model = MenuModel::open_inventory(&mut sim.world).unwrap();
-    model.apply(&mut sim.world, Command::SetCategory(Side::Player, if modding { Category::Weapons } else { Category::Apparel }));
+    model.apply(&mut sim.world, Command::SetCategory(Side::Player, if modding || repair_kit { Category::Weapons } else { Category::Apparel }));
     model.selected[Side::Player as usize] = model.list(Side::Player).rows.iter().position(|r| r.item == GEAR && r.condition == Some(0.4)).unwrap();
     let mut pip = PipBoy::default();
     pip.phase = Phase::Up;
     pip.page = Page::Items;
+    let mut script = crate::script::ScriptState::over_no_plugins();
+    if repair_kit {
+        // Synthetic static records feed the actual is_weapon_repair_kit producer;
+        // no Session/Part/repair result is injected into the consumer.
+        let schemas = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+        let functions = schemas.join("script/functions.json");
+        let json = serde_json::from_str(&std::fs::read_to_string(&functions).unwrap()).unwrap();
+        let mut data = fnv_game::data::GameData::build(&fnv_esm::LoadOrder::new(&[]).unwrap(),
+            &fnv_esm::Schema::load_dir(schemas.join("fnv")).unwrap(), fnv_script::FunctionTable::load(&functions).unwrap(), &json, sim.refs);
+        data.ingestibles.insert(KIT, fnv_game::data::IngestibleDef::default());
+        data.effect_items.insert(KIT, vec![fnv_game::data::EffectItem { effect: fnv_game::repair::REPAIR_KIT_EFFECT,
+            magnitude: 0, area: 0, duration: 0, actor_value: None, conditions: Vec::new() }]);
+        let game = &mut script.rt.as_mut().unwrap().game;
+        game.data = Box::leak(Box::new(data)); game.tweaks.repair_kits_in_list = true;
+        assert!(game.is_weapon_repair_kit(KIT));
+    }
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, MaintenanceTouchPlugin))
         .init_resource::<player_repair::PipRepair>().init_resource::<item_mod::PipItemMod>()
@@ -42,7 +70,7 @@ pub(crate) fn fixture(modding: bool, native_configuration: bool) -> App {
         .init_resource::<PromptKeys>().init_resource::<SafeInsets>().init_resource::<UiScale>()
         .insert_resource(sim).insert_resource(ActiveMenu(Some(model)))
         .insert_resource(pip)
-        .insert_resource(crate::script::ScriptState::over_no_plugins())
+        .insert_resource(script)
         .insert_resource(crate::tiles::vanilla::TileMenus { repair_menu: native_configuration, item_mod: native_configuration, ..default() })
         .add_message::<player_repair::RepairInput>().add_message::<item_mod::ModInput>().add_message::<UiSound>()
         .insert_resource(crate::PlayWorld(crate::PlayData {
@@ -363,4 +391,86 @@ fn actual_refused_release_batch_stays_owned_until_real_neutral_then_recovers_bey
         if id == 180 { assert_eq!(app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().selected, 0, "hardware return remains action-free"); }
     }
     assert_eq!(count(&app, GEAR), 1, "fresh deliberate action works after more than16 refused-release lifecycles");
+}
+
+#[test]
+fn actual_preview_reopen_retires_old_touch_confirmation_disables_sheet_use_and_normal_reopen_repairs() {
+    for native_configuration in [false, true] {
+        let mut app = fixture(false, native_configuration);
+        tap(&mut app, 400, Action::Select(1)); raw_tap(&mut app, 401, Action::Confirm);
+        app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.tweaks.repair_preview = true;
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::AltLeft);
+        app.world_mut().write_message(player_repair::RepairInput::Cancel);
+        app.world_mut().write_message(player_repair::RepairInput::Open);
+        app.update();
+        assert!(app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().preview);
+        assert_eq!(count(&app, GEAR), 2, "the old painted normal confirmation cannot consume after actual preview reopen");
+        tap(&mut app, 402, Action::Select(1));
+        let at = center(&app, Action::Confirm);
+        let state = app.world().resource::<State>();
+        assert_eq!(sheet::Geometry::new(state.context.unwrap()).target(at, state.source.as_deref().unwrap()), None);
+        let mut labels = app.world_mut().query::<&Text>();
+        assert!(labels.iter(app.world()).any(|t| t.0 == "Preview only"));
+        assert!(labels.iter(app.world()).any(|t| t.0.contains("No items will be consumed.")));
+        tap(&mut app, 403, Action::Confirm);
+        app.world_mut().write_message(player_repair::RepairInput::Use); app.update();
+        assert_eq!(count(&app, GEAR), 2, "both sheet touch and the original consumer refuse preview repair");
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::AltLeft);
+        app.world_mut().write_message(player_repair::RepairInput::Cancel);
+        app.world_mut().write_message(player_repair::RepairInput::Open); app.update();
+        assert!(!app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().preview);
+        tap(&mut app, 404, Action::Select(1)); tap(&mut app, 405, Action::Confirm);
+        assert_eq!(count(&app, GEAR), 1, "ordinary donor repair retains its original actual consumer");
+    }
+}
+
+#[test]
+fn actual_kit_sheet_uses_session_gain_and_consumes_one_real_kit_without_consuming_a_donor() {
+    for native_configuration in [false, true] {
+        let mut app = fixture_variant(false, native_configuration, true);
+        let s = app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap();
+        let index = s.offer.parts.iter().position(|part| part.kit && part.item == KIT).unwrap() + 1;
+        tap(&mut app, 410, Action::Select(index));
+        let s = app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap();
+        let expected = fnv_game::repair::kit_condition(s.offer.condition, s.skill);
+        assert_eq!(s.after(&s.offer.parts[index - 1]), expected);
+        let shown_gain = format!("→ {:.0}%", expected * 100.0);
+        let mut labels = app.world_mut().query::<&Text>();
+        assert!(labels.iter(app.world()).any(|t| t.0.contains(&shown_gain)), "actual painted gain comes from the kit rule");
+        assert!(labels.iter(app.world()).any(|t| t.0 == "Repair: use kit"));
+        assert!(labels.iter(app.world()).any(|t| t.0.contains("Repair kit")));
+        raw_tap(&mut app, 411, Action::Confirm); raw_tap(&mut app, 412, Action::Confirm); app.update();
+        assert_eq!(count(&app, KIT), 1, "duplicate painted confirmations consume exactly one kit");
+        assert_eq!(count(&app, GEAR), 2, "the kit never substitutes a donor consumption");
+        let inventory = app.world().resource::<SimState>().world.peek(FormId::PLAYER_REF).unwrap().inventory.as_ref().unwrap();
+        assert!(inventory.groups().any(|(id, unit, n)| id == GEAR && n == 1 && (unit.condition_or_whole() - expected).abs() < 1e-6));
+        assert!(inventory.groups().any(|(id, unit, n)| id == GEAR && n == 1 && unit.condition == Some(0.2)), "the real spare donor remains untouched");
+        assert!(!app.world().resource::<crate::pipboy::KeysTaken>().taken());
+        assert!(app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().offer.parts.iter().any(|p|p.kit && p.item == KIT), "the actual list refresh retains the remaining kit");
+    }
+}
+
+#[test]
+fn workbench_tweak_remains_an_open_predicate_for_both_real_keyboard_and_touch_confirmation() {
+    for native_configuration in [false, true] {
+        for physical in [false, true] {
+            let mut app = fixture(false, native_configuration);
+            tap(&mut app, 420, Action::Select(1));
+            app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.tweaks.repair_at_workbench = true;
+            if physical {
+                let window = app.world().resource::<State>().context.unwrap().window;
+                app.world_mut().write_message(bevy::input::keyboard::KeyboardInput {
+                    window, key_code: KeyCode::Enter, logical_key: bevy::input::keyboard::Key::Enter,
+                    state: bevy::input::ButtonState::Pressed, text: None, repeat: false,
+                });
+            } else { raw_tap(&mut app, 421, Action::Confirm); }
+            app.update();
+            assert_eq!(count(&app, GEAR), 1, "an already open session keeps Main's confirmation policy for physical={physical}");
+            assert_eq!(app.world().resource::<crate::pipboy::KeysTaken>().taken(), physical);
+            app.world_mut().write_message(player_repair::RepairInput::Cancel);
+            app.world_mut().write_message(player_repair::RepairInput::Open); app.update();
+            assert!(!app.world().resource::<player_repair::PipRepair>().is_open(), "a fresh Open still enforces the actual workbench predicate");
+            assert_eq!(count(&app, GEAR), 1);
+        }
+    }
 }

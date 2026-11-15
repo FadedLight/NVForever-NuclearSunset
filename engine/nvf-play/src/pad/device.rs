@@ -247,14 +247,17 @@ impl SwitchingInput {
 pub trait ActionButton: Copy + Eq + Hash + Send + Sync + 'static {
     fn blocked(filter: &SwitchingInput) -> &[Self];
     fn platform_held(gate: &PlatformInputGate) -> &HashSet<Self>;
+    fn physical(filter: &SwitchingInput) -> &ButtonInput<Self>;
 }
 impl ActionButton for KeyCode {
     fn blocked(filter: &SwitchingInput) -> &[Self] { &filter.keys }
     fn platform_held(gate: &PlatformInputGate) -> &HashSet<Self> { &gate.keys }
+    fn physical(filter: &SwitchingInput) -> &ButtonInput<Self> { &filter.physical_keys }
 }
 impl ActionButton for MouseButton {
     fn blocked(filter: &SwitchingInput) -> &[Self] { &filter.mouse }
     fn platform_held(gate: &PlatformInputGate) -> &HashSet<Self> { &gate.mouse }
+    fn physical(filter: &SwitchingInput) -> &ButtonInput<Self> { &filter.physical_mouse }
 }
 
 /// Action readers use this parameter instead of raw ButtonInput. Tests/tools without
@@ -274,6 +277,17 @@ impl<T: ActionButton> ActionButtons<'_, T> {
             for &button in T::platform_held(gate) { view.reset(button); }
             Cow::Owned(view)
         } else { filtered }
+    }
+    /// Raw provenance captured by the existing selector, still through action gates.
+    /// Standalone consumers without the selector retain the historical input view.
+    pub(crate) fn physical_pressed(&self, b:T)->bool {
+        !self.blocked(b) && self.filter.as_ref().map_or_else(||self.raw.pressed(b),|f|T::physical(f).pressed(b))
+    }
+    pub(crate) fn physical_just_pressed(&self, b:T)->bool {
+        !self.blocked(b) && self.filter.as_ref().map_or_else(||self.raw.just_pressed(b),|f|T::physical(f).just_pressed(b))
+    }
+    pub(crate) fn physical_just_released(&self, b:T)->bool {
+        !self.platform_blocked(b) && self.filter.as_ref().map_or_else(||self.raw.just_released(b),|f|T::physical(f).just_released(b))
     }
     pub fn pressed(&self, b: T) -> bool { self.raw.pressed(b) && !self.blocked(b) }
     pub fn just_pressed(&self, b: T) -> bool { self.raw.just_pressed(b) && !self.blocked(b) }
@@ -296,7 +310,12 @@ pub struct ActionPads<'w, 's> {
     platform: Option<Res<'w, PlatformInputGate>>,
 }
 impl ActionPads<'_, '_> {
-    pub(crate) fn dead_zone(&self) -> f32 {self.aim.as_deref().map_or(super::STICK_DEAD, |o|o.dead_zone)}
+    /// Explicit per-stick Tweaks override the saved generic preference only while on.
+    /// Disabling restores that preference without rewriting either setting.
+    pub(crate) fn dead_zone(&self, left: bool) -> f32 {
+        super::custom_dead_zone(left)
+            .unwrap_or_else(||self.aim.as_deref().map_or(super::STICK_DEAD, |o|o.dead_zone))
+    }
     /// Filter current stick activity while retaining physical previous edges
     /// [design, #2200; super::update_stick_buttons].
     pub fn filter_sticks(&self, raw: &super::StickButtons) -> super::StickButtons {
@@ -309,7 +328,7 @@ impl ActionPads<'_, '_> {
 
     /// Physical history uses the same normalization as actions [design, #2200; super::stick].
     pub(crate) fn physical_stick(&self, left: bool) -> Vec2 {
-        super::stick_vector(self.raw.iter().map(|(_, g)| if left { g.left_stick() } else { g.right_stick() }))
+        super::stick_vector_at(self.raw.iter().map(|(_, g)| if left { g.left_stick() } else { g.right_stick() }), self.dead_zone(left))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = ActionPad<'_>> {
@@ -414,7 +433,17 @@ pub(crate) fn automatic(world: &mut World) {
         activity.trigger |= (2..4).any(|i| now[i] && !before[i]);
         previous.insert(e, now);
     }
-    let switch = switch_on_use(current, (enabled || touch_fallback) && !listening, activity);
+    // Stewie's explicit A/left-click choice uses this same selector and consumes
+    // its edge. Touch/controller aggregate mouse synthesis is never physical intent.
+    let tweak = world.get_resource::<crate::tweaks::TweakSettings>().is_some_and(|t|t.toggle_device);
+    let gate = world.get_resource::<PlatformInputGate>();
+    let tweak_switch = tweak && !held.platform_blocked && gate.is_none_or(|g|!g.active) && match current {
+        InputDevice::KeyboardMouse => pads.iter(world).any(|(e,g)|g.just_pressed(GamepadButton::South)
+            && gate.is_none_or(|p|!p.pads.get(&e).is_some_and(|h|h.buttons.contains(&GamepadButton::South)))),
+        InputDevice::Controller => held.physical_mouse.just_pressed(MouseButton::Left)
+            && !held.platform_mouse.contains(&MouseButton::Left),
+    };
+    let switch = switch_on_use(current, (enabled || touch_fallback || tweak_switch) && !listening, activity);
     if let Some((device, cause)) = switch {
         crate::bindings::set_device(world, device);
         info!("controller: input device switched to {} ({cause})", device.name());

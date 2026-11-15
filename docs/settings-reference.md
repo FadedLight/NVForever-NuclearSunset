@@ -59,6 +59,20 @@ Appearance updates existing UI; it does not change choice words/order, semantic
 actions or input bindings. New controls are authored but uncompiled/unrun until
 separately qualified; their registration is not device acceptance.
 
+## Input preferences alongside Tweaks
+
+[design] The explicit custom left/right stick-deadzone preference supplies its
+per-stick values only while enabled. Otherwise the separately saved generic
+controller calibration applies. Neither option rewrites the other preference.
+Keyboard/mouse with a selected controller remains opt-in: actual physical holds
+stay independent of controller aim/sneak toggles and of virtual touch input.
+Movement and look device transforms are applied before the independently
+configured gyroscope contribution. Device/cover/focus cancellation also clears
+deferred reload input and stale held Jump state.
+
+These are the integrated source contracts and authored control boundaries;
+current-head compiler/runtime and real Bluetooth-controller acceptance are pending.
+
 ## Gameplay › Game
 
 ### `difficulty`: Difficulty

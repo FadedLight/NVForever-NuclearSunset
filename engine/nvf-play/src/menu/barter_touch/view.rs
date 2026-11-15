@@ -126,12 +126,19 @@ pub(super) fn draw(mut commands: Commands, state: Res<TouchBarter>, active: Opti
             overflow: Overflow::clip(), ..default() }, BackgroundColor(Color::srgb(0.015, 0.03, 0.025))))
         .with_children(|parent| {
             let balance = if t.balance < 0 { format!("Pay {}", t.balance.saturating_neg()) }
-                else { format!("Receive {}", t.paid()) };
+                else { format!("Receive {}", if m.full_barter_total { t.balance } else { t.paid() }) };
+            // Reuse the ordinary menu's current/after-caps presentation. This
+            // changes only the figure shown; actual acceptance still uses paid().
+            let caps = if m.barter_caps_change {
+                format!("Your {} · Merchant {}",
+                    super::super::look::half_figure(m, Side::Player).unwrap_or_default(),
+                    super::super::look::half_figure(m, Side::Container).unwrap_or_default())
+            } else { format!("Your caps {} · Merchant caps {}", t.purse[Side::Player as usize], t.purse[Side::Container as usize]) };
             let warning = if t.balance < 0 && !t.affordable() { " — insufficient caps" }
                 else if t.paid() != t.balance { " — merchant caps limit" } else { "" };
             paint(parent, rect(p.area.min.x, p.area.min.y, p.area.width(), HEADER), f.ui_scale,
-                format!("Your caps {} · Merchant caps {} · {balance}{warning} · Basket buy {} / sell {}",
-                    t.purse[1], t.purse[0], t.offered[0].values().map(|n| i64::from(*n)).sum::<i64>(),
+                format!("{caps} · {balance}{warning} · Basket buy {} / sell {}",
+                    t.offered[0].values().map(|n| i64::from(*n)).sum::<i64>(),
                     t.offered[1].values().map(|n| i64::from(*n)).sum::<i64>()), false);
             if let Some(q) = m.quantity {
                 let name = &m.list(q.side).rows[q.row].name;

@@ -996,6 +996,7 @@ mod tests {
         .init_resource::<TouchState>()
         .init_resource::<MenuRows>()
         .init_resource::<TerminalStats>()
+        .init_resource::<super::super::ReadEntries>()
         .init_resource::<crate::pause::PlayClock>()
         .init_resource::<crate::bindings::Bindings>()
         .insert_resource(Settings {

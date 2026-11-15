@@ -719,3 +719,5 @@ fn actual_barter_sheet_nodes_use_the_same_current_scaled_rectangles_as_raw_hits(
         }
     }
 }
+
+include!("main_preferences_tests.rs");

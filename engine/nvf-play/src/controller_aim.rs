@@ -245,7 +245,7 @@ fn route(
             && aim_allowed
             && !gestures.wait_aim
             && !gestures.raw_aim
-            && input.just_pressed(Control::Block)
+            && input.pad_just_pressed(Control::Block)
         {
             gestures.latched = !gestures.latched;
         }
@@ -254,7 +254,7 @@ fn route(
             && if options.toggle_aim {
                 gestures.latched
             } else {
-                input.pressed(Control::Block)
+                input.pad_pressed(Control::Block)
             };
         if !sneak_allowed {
             gestures.wait_sneak = true;
@@ -262,7 +262,7 @@ fn route(
         held.controller_active = options.hold_sneak
             && sneak_allowed
             && !gestures.wait_sneak
-            && input.pressed(Control::CrouchSneak);
+            && input.pad_pressed(Control::CrouchSneak);
     }
     gestures.raw_aim = raw_aim;
 }
@@ -282,6 +282,7 @@ mod tests {
         },
         window::{CursorGrabMode, CursorOptions},
     };
+    include!("controller_aim/input_union_tests.rs");
     #[derive(Resource, Default)]
     struct Sticks(Vec2, Vec2);
     fn observe(pads: crate::pad::ActionPads, mut seen: ResMut<Sticks>) {

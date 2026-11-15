@@ -44,6 +44,7 @@ fn map_parent_scene(enabled:bool)->(App,Entity) {
         // PlayPlugin normally gets this real DATA Input.menu stream from MenuPlugin.
         .add_message::<nvf_play::menu::MenuInput>()
         .add_message::<FastTravelAsk>().add_message::<FastTravelGo>()
+        .add_message::<map_data::SummonCompanions>()
         .add_systems(Update,map_data::draw.after(map_pip::flat_screen))
         .add_systems(Update,observe_map_parent.after(map_data::draw));
     assert!(app.world().contains_resource::<bevy::ecs::message::Messages<nvf_play::menu::MenuInput>>(),

@@ -161,13 +161,16 @@ public final class GameActivity extends NativeActivity {
         return "";
     }
     private void revealIfReady() {
-        final String ticket = loading.ticket();
-        if (loadingCover == null) return;
-        loadingCover.nextFrame(() -> {
-            if (destroyed || restartQueued.get() || !loading.reveal(ticket)) return;
-            loadingCover.hide(); loadingHandler.removeCallbacks(watchdog);
-            sendLoading(RestartActivity.SUBMITTED);
-            LanDiagnostics.record(this, "NATIVE_CONTENT_SUBMITTED", -1);
+        LoadingReveal.schedule(new LoadingReveal.Host() {
+            public LoadingState state() { return loading; }
+            public LoadingUi.CoverLease cover() { return loadingCover; }
+            public boolean active() { return !destroyed && !restartQueued.get(); }
+            public void completed() {
+                loadingHandler.removeCallbacks(watchdog);
+                sendLoading(RestartActivity.SUBMITTED);
+                LanDiagnostics.record(GameActivity.this, "NATIVE_CONTENT_SUBMITTED", -1);
+            }
+            public void failed() { coverUnavailable(); }
         });
     }
     public String loadRefused(String reason) {

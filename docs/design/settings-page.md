@@ -53,8 +53,8 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Tweaks | (none) | none named yet |
 | Debug | (none) | `overlay`, `hit-markers`, `god-mode`, `navmesh`, `scope-3d` |
 
-The table names every row the registry can hold [documented: `settings_layout.rs::SECTIONS`],
-113 with #1966's `quality` and `enhanced`,
+The table names the 162 potential built-in rows in the combined `KNOWN` fixture
+[documented: `settings_layout.rs::SECTIONS`], including #1966's `quality` and `enhanced`,
 #2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling`, #2317's
 `frame-generation-frames` and #2550's `terrain-height-blend` (`KNOWN` in
 `settings_layout.rs`); a test keeps
@@ -87,7 +87,7 @@ registrations nor `resolve_layout`'s interface change for it.
 
 [design] Android uses the same dynamic settings page, adding **Mobile** after Controls.
 Desktop keeps its seven tabs and existing placements. This changes presentation only:
-all 148 known settings retain their registration order, keys, callbacks, saved values
+all 162 known settings retain their registration order, keys, callbacks, saved values
 and defaults. Missing optional rows and empty headings stay omitted. Search, Changed,
 keyboard/controller navigation and row identity use the existing page implementation.
 
@@ -111,9 +111,10 @@ this route; there is no second editor, extra action row or new persistence schem
 
 `settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
 original sections claim their remaining rows. One row is resolved once, with its original
-registry index. Tests exercise all 148 rows, optional sections, actual page projection,
+registry index. Authored controls cover all 162 potential rows, optional sections, actual page projection,
 search/Changed/device handoff, and a real Settings callback through its original index.
-Rust execution and Android device acceptance are recorded separately from source review.
+Fresh Rust execution of the current merge and Android device acceptance remain
+pending and are recorded separately from source review.
 
 ## 3. What the page lists (`settings_view.rs`)
 

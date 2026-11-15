@@ -87,6 +87,13 @@ pub struct CharacterParams {
 /// jumped as high; a crouched height is not captured).
 pub const HEIGHT: f32 = 128.9;
 
+/// Steepest slope walked by actors [design, #2511]: 56 degrees leaves about 1.7
+/// degrees below the default cone face (atan(1.58), physics.md §6.4.1/§6.9), so a thin
+/// wall's edge cannot be climbed along that face beyond `step_height`. It still admits
+/// the 46–49-degree paths cited in docs/design/navmesh.md §5. Shared with the engine's
+/// `npc_params` and the synthetic controller tests; not a measured original-game limit.
+pub const ACTOR_MAX_SLOPE_DEG: f32 = 56.0;
+
 /// A dynamic body heavier than this (its Havok mass, as the model stores it) is not
 /// pushed by a character walking into it: the character stops at it as at a wall
 /// [design: the cars (MSTT `Car01`–`Car03`, Havok mass 600–1000) and the motorcycles
@@ -1136,15 +1143,28 @@ fn step_up_move(
     }
     let ahead = Pose::from_translation(lifted.translation + across);
     let opts = ShapeCastOptions { max_time_of_impact: (lift + TERRAIN_SHELL) * k, target_distance: 0.0, stop_at_penetration: false, compute_impact_geometry_on_penetration: true };
-    let (_, down) = q.cast_shape(&ahead, -Vector::Z, c.shape.as_ref(), opts)?;
+    // [design, #2511] If the bare cast misses or only reaches level ground without a
+    // rise, try the horizontal sweep's gap: a small cone can still be just outside the
+    // edge. This fallback must meet a crest off the flat tip, never just flat ground.
+    let (down, offset) = match q.cast_shape(&ahead, -Vector::Z, c.shape.as_ref(), opts) {
+        Some((_, down)) if down.normal1.z < LEVEL || lift * k - down.time_of_impact + c.gap * k >= MIN_STEP_RISE * k => (down, 0.0),
+        _ => {
+            let offset = c.gap.min(WALL_GAP).max(c.params.skin);
+            let (_, down) = q.cast_shape(&ahead, -Vector::Z, c.shape.as_ref(), ShapeCastOptions { target_distance: offset * k, ..opts })?;
+            (down, offset)
+        }
+    };
     let drop = down.time_of_impact;
-    // Higher than flat ground would put it: a step, not flat ground or a descent. The
-    // shape comes down onto the bare surface, the feet rest the support's gap above it.
-    let rise = lift * k - drop + c.gap * k;
+    // [design, #2511] Subtract the cast clearance from the rise above flat ground:
+    // clearance alone must not turn a level support into a step.
+    let rise = lift * k - drop + (c.gap - offset) * k;
     // Or an edge met by the cone's face, off its flat tip, which the shape crossing a gap
     // comes down onto a little lower than it was held before: a plank ramp's upper end
     // beyond a threshold's lip (issue #2494). It must then be a crest (`on_crest`).
     let off_axis = (down.witness1.x - ahead.translation.x).hypot(down.witness1.y - ahead.translation.y) / k;
+    if offset > 0.0 && off_axis <= c.params.bottom_flat + CREST_OFF_TIP {
+        return None;
+    }
     let low = rise < MIN_STEP_RISE * k;
     let sunk_onto_edge = off_axis > c.params.bottom_flat + CREST_OFF_TIP && rise > -CREST_SINK * k;
     if low && !sunk_onto_edge {
@@ -1158,7 +1178,7 @@ fn step_up_move(
     };
     let feet_z = feet.z / k;
     let on_top = [feet, feet + dir * (STEP_PROBE * k)].into_iter().any(|p| top(p).is_some_and(|z| z > feet_z - STEP_TOP_BELOW && z < feet_z + STEP_TOP_ABOVE));
-    if (low || !on_top) && !on_crest(q, c, &down, dir, base, k) {
+    if (low || !on_top || offset > 0.0) && !on_crest(q, c, &down, dir, base, k) {
         return None;
     }
     let lowered = Vector::new(across.x, across.y, lift * k - drop);

@@ -370,3 +370,12 @@ name = "Deutsch"
 # [design, #2242] The upscaling row (perf_overlay/readings.rs, settings.rs).
 "model {model}" = "Modell {model}"
 "The upscaler drawing now: its name and mode, and the sizes the world is drawn at and rebuilt to. Off and the window's size while nothing upscales." = "Die aktive Hochskalierung: Name, Modus und die Größen, in denen die Welt gezeichnet und wieder aufgebaut wird. Aus und die Fenstergröße, solange nichts hochskaliert."
+
+# [design, #2502] Our ammo effect labels when AMEF FULL is empty (pipboy/items.rs).
+"Damage" = "Schaden"
+"Damage resist" = "Schadensresistenz"
+"Damage threshold" = "Schadensschwelle"
+"Spread" = "Streuung"
+"Weapon wear" = "Waffenverschleiß"
+"Fatigue" = "Erschöpfung"
+"Ammo effect" = "Munitionseffekt"

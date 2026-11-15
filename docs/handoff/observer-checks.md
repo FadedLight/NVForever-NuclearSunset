@@ -2317,3 +2317,17 @@ already talking takes over at once, same topic or another; nothing is queued or 
      (`GetPlayerTeammate`). Then the same with `SetHardcore 1`. Knocked out, up again and
      still hired outside Hardcore, dead in it agrees with ours; IsEssential reading 1 for
      the teammate says the engine counts teammates as essential by IsEssential too.
+
+## Added 2026-11-14 (actors at thin walls, #2511)
+
+166. **Which thin walls can a person-sized actor and a small creature cross?** (P2;
+     #2511, physics.md §6.9.2.) [design] NVForever uses a 56° actor slope limit, below
+     the cone face's roughly 57.7°, to cross a 24-unit zero-thickness wall and block
+     25/26/28, with the same 24-unit step height for people and small creatures.
+     Original actors blocking the higher walls is [hypothesis]. To check: in a
+     controlled test cell with a level floor, lead a person-sized actor and a small
+     creature straight into thin walls of 24, 25, 26 and 28 units at walk and run
+     pace, without jumping. Record whether each crosses, the feet heights through
+     the crossing or stop, and whether it first detours; keep a clear run-up and
+     prevent routes around the ends. Also check a 46–49° ramp so the actor's slope
+     behavior can be separated from its stepping over an edge.

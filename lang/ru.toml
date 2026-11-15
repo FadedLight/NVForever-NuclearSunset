@@ -370,3 +370,12 @@ name = "Русский"
 # [design, #2242] The upscaling row (perf_overlay/readings.rs, settings.rs).
 "model {model}" = "модель {model}"
 "The upscaler drawing now: its name and mode, and the sizes the world is drawn at and rebuilt to. Off and the window's size while nothing upscales." = "Масштабирование, которое рисует сейчас: его название и режим, размеры, в которых мир рисуется и восстанавливается. Выкл. и размер окна, пока ничего не масштабируется."
+
+# [design, #2502] Our ammo effect labels when AMEF FULL is empty (pipboy/items.rs).
+"Damage" = "Урон"
+"Damage resist" = "Сопротивление урону"
+"Damage threshold" = "Порог урона"
+"Spread" = "Разброс"
+"Weapon wear" = "Износ оружия"
+"Fatigue" = "Усталость"
+"Ammo effect" = "Эффект патронов"

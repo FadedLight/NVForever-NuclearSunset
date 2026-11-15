@@ -483,13 +483,13 @@ fn caravan_door(lip: f32, ramp: bool) -> PhysWorld {
     w
 }
 
-/// The character parameter sets that walk through doors: the player's, an actor's
-/// (`nvf-play` `npc_params`: the player's with a 60-degree slope limit) and two small
-/// creatures' (`npc_params` for actors drawn 30 and 60 tall: as tall as drawn, radius
+/// [design/code refs: `nvf-play::phys::npc_params`] The character parameter sets that
+/// walk through doors: the player's, an actor's (with the shared actor slope limit)
+/// and two small creatures' (`npc_params` for actors drawn 30 and 60 tall: as tall as drawn, radius
 /// 0.17 of the height but at least 10, `step_width` at most the radius).
 fn door_walkers() -> Vec<(&'static str, CharacterParams)> {
     let player = CharacterParams::default();
-    let npc = CharacterParams { max_slope_deg: 60.0, ..player };
+    let npc = CharacterParams { max_slope_deg: fnv_phys::character::ACTOR_MAX_SLOPE_DEG, ..player };
     let small = |height: f32| {
         let radius = (0.17 * height).clamp(10.0, npc.radius);
         CharacterParams { radius, height, step_width: npc.step_width.min(radius), ..npc }
@@ -529,37 +529,33 @@ fn character_walks_out_over_a_threshold_lip() {
 
 #[test]
 fn thin_walls_are_stepped_over_up_to_the_step_height() {
-    // The crest rule of the step-up (issue #2494) climbs an edge with no top up to
+    // [design, #2494, #2511] The crest rule climbs an edge with no top up to
     // `step_height` (24) above the walkable surface the character stood on: a
     // zero-thickness wall 24 high is stepped over; 25, 26 and 28 stay walls, also when a
     // slow approach first perches the cone low on the wall's edge (the ground beyond then
     // counts as a walkable top 19 ahead) and later steps start from those raised feet.
     for (who, p) in door_walkers() {
-        for height in [24.0f32, 25.0, 26.0, 28.0] {
-            for speed in [30.0f32, 115.5, 344.0] {
-                let mut w = ground();
-                let vertices = vec![[100.0, -200.0, 0.0], [100.0, 200.0, 0.0], [100.0, 200.0, height], [100.0, -200.0, height]];
-                w.add_ref(&at(1, [0.0, 0.0, 0.0]), &[object(Shape::TriMesh { vertices, triangles: vec![[0, 1, 2], [0, 2, 3]], materials: vec![0; 2] }, Motion::Static)]);
-                let mut c = w.add_character(1, p, [40.0, 0.0, 1.0]);
-                settle(&mut w, &mut c, 30);
-                let steps = walk(&mut w, &mut c, [speed, 0.0], 360);
-                let peak = steps.iter().map(|s| s.feet[2]).fold(f32::MIN, f32::max);
-                let case = format!("{who}, wall {height}, speed {speed}");
-                // Actors with a slope limit above the cone face's 57.7 degrees (60) walk up
-                // a thin edge as far as the cone reaches by rapier's own slope climb, as on
-                // main before the crest rule: 25 and 26 for all of them, 28 for the person
-                // (the cone of radius 22 rises 29.7; a radius-10 one 10.7, then the side is
-                // a wall). That is not the step-up's, so only what it decides is checked.
-                let blocks = match who {
-                    "player" => height > p.step_height,
-                    "npc" => false,
-                    _ => height >= 28.0,
-                };
-                if height <= p.step_height {
-                    assert!(c.feet[0] > 130.0, "{case}: stepped over, {:?}, peak {peak}", c.feet);
-                } else if blocks {
-                    // The cone may rest low on the wall's edge, never climb it.
-                    assert!(c.feet[0] < 100.0 && peak < TERRAIN_SHELL + 8.0, "{case}: {:?}, peak {peak}", c.feet);
+        // [design, #2511] Terrain and a static floor exercise both support clearances.
+        for floor in [0.0f32, 50.0] {
+            for height in [24.0f32, 25.0, 26.0, 28.0] {
+                for speed in [30.0f32, 115.5, 344.0] {
+                    let mut w = ground();
+                    if floor > 0.0 {
+                        w.add_ref(&at(2, [0.0, 0.0, floor / 2.0]), &[object(boxed([400.0, 400.0, floor / 2.0]), Motion::Static)]);
+                    }
+                    let vertices = vec![[100.0, -200.0, floor], [100.0, 200.0, floor], [100.0, 200.0, floor + height], [100.0, -200.0, floor + height]];
+                    w.add_ref(&at(1, [0.0, 0.0, 0.0]), &[object(Shape::TriMesh { vertices, triangles: vec![[0, 1, 2], [0, 2, 3]], materials: vec![0; 2] }, Motion::Static)]);
+                    let mut c = w.add_character(1, p, [40.0, 0.0, floor + 1.0]);
+                    settle(&mut w, &mut c, 30);
+                    let steps = walk(&mut w, &mut c, [speed, 0.0], 360);
+                    let peak = steps.iter().map(|s| s.feet[2] - floor).fold(f32::MIN, f32::max);
+                    let case = format!("{who}, floor {floor}, wall {height}, speed {speed}");
+                    if height <= p.step_height {
+                        assert!(c.feet[0] > 130.0, "{case}: stepped over, {:?}, peak {peak}", c.feet);
+                    } else {
+                        // [design, #2511] A low perch is allowed; climbing the wall is not.
+                        assert!(c.feet[0] < 100.0 && peak < TERRAIN_SHELL + 8.0, "{case}: {:?}, peak {peak}", c.feet);
+                    }
                 }
             }
         }
@@ -685,6 +681,27 @@ fn character_respects_slope_limit() {
             assert!(up > 50.0, "{deg}°: {:?}", c.feet);
         } else {
             assert!(up < c.params.step_height + 2.0, "{deg}°: {:?}", c.feet);
+        }
+    }
+}
+
+#[test]
+fn actors_walk_navmesh_grade_slopes_below_the_cone_face_angle() {
+    // [design, #2511] Synthetic ramps cover the 46–49-degree range cited in
+    // docs/design/navmesh.md §5, with the same parameters as the thin-wall tests.
+    for (who, p) in door_walkers().into_iter().filter(|(who, _)| *who != "player") {
+        let margin = p.bottom_slope.atan().to_degrees() - p.max_slope_deg;
+        assert!(margin > 1.0 && margin < 3.0, "{who}: cone-face margin {margin}");
+        for deg in [46.0f32, 47.0, 48.0, 49.0] {
+            for speed in [115.5f32, 344.0] {
+                let mut w = ground();
+                ramp(&mut w, deg);
+                let mut c = w.add_character(1, p, [0.0, 0.0, 1.0]);
+                settle(&mut w, &mut c, 30);
+                walk(&mut w, &mut c, [speed, 0.0], 120);
+                assert!(c.feet[0] > 150.0 && c.feet[2] > 50.0,
+                    "{who}, {deg} degrees, speed {speed}: {:?}", c.feet);
+            }
         }
     }
 }

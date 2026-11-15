@@ -1316,6 +1316,8 @@ pub struct Game<'a> {
     /// Record fields xNVSE's setters changed this session (`crate::nvse`), by form and
     /// "SUB/path", and the names SetName gave.
     pub(crate) field_overrides: std::collections::HashMap<(FormId, String), fnv_script::vm::XVal>,
+    /// Owner witness for bounded diagnostic restoration; never part of a save.
+    pub(crate) projectile_launch_restore_owner: std::sync::Arc<()>,
     pub(crate) name_overrides: std::collections::HashMap<FormId, String>,
     /// xNVSE's mod local data: lower-cased key -> (key as given, value); the session's.
     pub(crate) mod_data: BTreeMap<String, (String, fnv_script::vm::XVal)>,
@@ -2394,6 +2396,7 @@ impl<'a> Game<'a> {
             delayed: Vec::new(),
             ref_walk: Vec::new(),
             field_overrides: std::collections::HashMap::new(),
+            projectile_launch_restore_owner: std::sync::Arc::new(()),
             name_overrides: std::collections::HashMap::new(),
             mod_data: BTreeMap::new(),
             note_edits: BTreeMap::new(),

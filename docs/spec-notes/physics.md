@@ -678,6 +678,18 @@ playtest list 5 item 59]. The tumbleweeds roll with the weather's wind: [wind](w
   moves, since `move_character` updates queries first) never moved [observed: test
   `bodies_added_then_queried_still_simulate`, rapier 0.36.0]. `update_queries` flags such
   bodies changed again so the next step registers them. Re-check when upgrading rapier.
+  This rearm must also keep a kinematic body's queued next pose. `set_position`
+  replaces both its current and next pose; `character::apply_move` has already queued
+  the next translation before the fixed step [documented: rapier3d 0.36.0,
+  `dynamics/rigid_body.rs`, `set_position` and `set_next_kinematic_position`;
+  `crates/fnv-phys/src/character.rs`, `apply_move`]. Copy the next pose before rearming
+  and restore it afterward for kinematic bodies [hypothesis: engineering policy]. This leaves registration
+  deferred until the real step. The library's `world::query_motion_tests` compare the
+  queried world with a direct step of the same snapshot: position- and velocity-driven
+  motion, an unrelated body's queued force and torque, and a real `move_character`
+  followed by an unrelated insertion and query. The query must not advance time or
+  erase the movement that the next step consumes. These are authored implementation
+  controls, not measurements of the original game.
   The same query loses the wake-up of a sleeping kinematic body that is teleported
   (`place_character` on a character that was not moved for a few seconds): the body
   stayed where it was put while the character walked on, so rays and other characters
@@ -2767,12 +2779,30 @@ threshold or sits in its gap until a jump.
   as do the step height (24) and the other rules of §6.9. All of this applies to actors
   and creatures as well: they walk with the same controller (`plan_move`) and
   `npc_params` keeps the step height of 24 (§6.8, §6.8.1).
-- **Actors' slope limit** [observed: the test above on main and on this branch]: with
-  `npc_params`' slope limit of 60°, above the cone face's 57.7°, rapier's controller itself
-  walks an actor up a thin edge as far as its cone reaches, before and without the
-  step-up: a person-sized actor (radius 22, cone 29.7 high) walks over thin walls of 24 to
-  28, a small creature (radius 10, cone 10.7 high) over 24 to 26 but not 28. Not changed
-  here; it is not the step-up's (an open question for actors' thin walls).
+- **Actors' slope limit (#2511)** [design]: `fnv_phys::character::ACTOR_MAX_SLOPE_DEG`
+  is 56°, shared by `nvf_play::phys::npc_params` and the synthetic tests. The cone's
+  `bottom_slope = 1.58` gives a face about 57.7° from level (§6.4.1/§6.9); the roughly
+  1.7° margin prevents the controller treating an edge against that face as a walkable
+  slope, while admitting the 46–49° paths cited in design/navmesh.md §5. The old 60°
+  limit was an engine choice, not the maintainer's or an original-game measurement.
+  [observed: headless runs reported in issue #2511] At 60°, a person-sized actor crossed
+  24–28-unit thin walls, and a radius-10 creature crossed 24–26 but stopped at 28,
+  before and without the step-up. [design: synthetic.rs]
+  `thin_walls_are_stepped_over_up_to_the_step_height` now requires the player, person
+  and small creatures to cross 24 and block 25/26/28 at 30/115.5/344 units/s,
+  on both terrain and a static floor;
+  `actors_walk_navmesh_grade_slopes_below_the_cone_face_angle` covers 46/47/48/49°
+  ramps at walk/run speeds. Original actors blocking these walls remains [hypothesis];
+  observer check 166 asks for that measurement.
+- **Step-up clearance (#2511)** [design: `step_up_move`]: when the bare downward cast
+  misses or only finds level ground without a rise, retry with the horizontal sweep's
+  wall gap (at least the numerical skin). This fallback must meet a crest off the flat
+  tip, and its rise check subtracts that clearance so flat ground alone is not a step. A slow small
+  creature can approach an edge while still outside its bare shape; a zero-clearance
+  cast refused its 24-unit wall after lowering the slope limit [observed: synthetic
+  controller run for #2511, radius 10, height 30, speed 30, stopped at x = 87.324
+  before the wall at x = 100]. The crest's height limit remains `step_height` above
+  `crest_base`; the clearance does not raise that limit.
 - **Checked** [observed: `fnvtool phys walk`, `CharacterParams::default()`, 5 offsets
   across the door (−15 to +15) × 3 headings (−10°, 0, +10°), 6 s at walk (115.5) and run
   (344) from the floor]:
@@ -2786,8 +2816,9 @@ threshold or sits in its gap until a jump.
   | 0x00137E77 with the ramp, run | 2/15 out | 15/15 | 15.3-17.7 (straight 17.5) |
 
   The peaks lie within the original's 9-16 at 0x001070C1 and up to 1.7 above it at the
-  ramp. With `npc_params` for a person (slope limit 60°) all 66 walks got out before and
-  after, the same peaks; for a creature drawn 30 tall (radius 10, `step_width` 10) 56 of
+  ramp. At the time of #2494, with `npc_params` for a person (slope limit 60°), all 66
+  walks got out before and after, the same peaks; for a creature drawn 30 tall
+  (radius 10, `step_width` 10) 56 of
   66 before and 65 after (the one left ran along the inside wall past the door at 10°). Unchanged: the parity lab's ten `L4.phys.walk.*` scripts and the `diag_fence_edge`
   / `diag_fence_low` drops give byte-identical traces before and after; the camper's door
   steps (§6.9) from x −53760 end at the same place, and from 5 starts further east the

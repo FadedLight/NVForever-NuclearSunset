@@ -768,6 +768,11 @@ fn small_actors_get_characters_of_their_size() {
     let dog = super::npc_params(Some(80.0));
     assert!((dog.radius - 13.6).abs() < 1e-3 && dog.height == 80.0, "{dog:?}");
     assert_eq!(super::npc_params(Some(3.0)).height, super::NPC_MIN_HEIGHT);
+    for params in [person, super::npc_params(None), nymph, dog] {
+        assert_eq!(params.max_slope_deg, fnv_phys::character::ACTOR_MAX_SLOPE_DEG);
+        assert!(params.max_slope_deg < params.bottom_slope.atan().to_degrees());
+        assert_eq!(params.step_height, 24.0);
+    }
 }
 
 /// The gate of [`gate_cell`]: placed at x 1000 in square (0, 0); its "Forward" (played

@@ -345,10 +345,9 @@ pub enum NpcSpotRefused {
 /// the border is not known until that square is in].
 const NPC_SPOT_MARGIN: f32 = 256.0;
 
-/// The steepest slope an actor's character walks: navmeshes cross slopes a little above
-/// the player's limit [observed: 46 to 49 degrees on paths of the walk tests,
-/// docs/design/navmesh.md §5; the value is an engine choice].
-pub const NPC_MAX_SLOPE_DEG: f32 = 60.0;
+/// Shared actor slope limit [design, #2511; physics.md §6.4.1/§6.9]: below the cone
+/// face's angle so thin walls higher than the step height block actors too.
+pub use fnv_phys::character::ACTOR_MAX_SLOPE_DEG as NPC_MAX_SLOPE_DEG;
 
 /// The shortest character an actor gets, game units [design: a capsule at least twice
 /// [`crate::blocking::MIN_RADIUS`] tall].

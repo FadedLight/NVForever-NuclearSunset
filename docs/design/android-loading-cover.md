@@ -1,6 +1,6 @@
 # Android native-window loading cover
 
-[observed] The R6 phone report is a visible main menu with neither touch nor virtual
+[qualification] The R6 phone report describes a visible main menu with neither touch nor virtual
 buttons responding. Automated native input tests passed, but did not exercise the
 Android window that supplies the loading-cover acknowledgement.
 
@@ -12,11 +12,12 @@ used by the cover protocol. See the Android 15 implementations of
 and [ViewRootImpl](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android15-release/core/java/android/view/ViewRootImpl.java),
 and the hardware-only [frame-commit contract](https://developer.android.com/reference/android/view/ViewTreeObserver#registerFrameCommitCallback(java.lang.Runnable)).
 
-[observed] The R6 source requires both that cover commit and a matching native
+[documented: `GameActivity.java`, `LoadingState.java`] The historical R6 source requires both that cover commit and a matching native
 content-submission witness before revealing content. An absent cover commit keeps
 LoadingState blocking and the shared PlatformInputGate closed, including native
 menu pointers, menu action buttons and wrapper controls. This source defect
-matches the reported failure; physical confirmation of its repair remains required.
+provides a source-level explanation to check against the reported failure;
+physical confirmation remains required.
 
 The recovery uses a separate ordinary application dialog window for the cover.
 Configure hardware acceleration before its content view. Keep it nonfocusable and
@@ -33,7 +34,42 @@ through WindowManager. Relevant contracts are
 [Dialog](https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android15-release/core/java/android/app/Dialog.java)
 and [WindowManager flags](https://developer.android.com/reference/android/view/WindowManager.LayoutParams).
 
-The labeled Java recovery APK retains the exact qualified R6 native library pair.
-Its SOURCE identifies the Java/package revision; NATIVE-SOURCE identifies the
-unchanged native CI revision. Local window-policy tests and SDK compilation do
+The historical labeled Java recovery APK retained the qualified R6 native library
+pair. Its SOURCE identified the Java/package revision; NATIVE-SOURCE identified
+the unchanged native CI revision. New packaging still requires current source-bound
+native/final APK qualification. Local window-policy tests and SDK compilation do
 not substitute for a fresh phone main-menu, interruption and loading test.
+
+## Completing only after logical cover hiding
+
+[design] `GameActivity.revealIfReady` delegates its queued callback to the shared
+`LoadingReveal` protocol. Both current Java-cover and native-content witnesses
+remain necessary. The protocol checks the current state, request/epoch, cover and
+lease generation, asks that lease to hide, and inspects the backend postcondition
+before committing completion or sending the existing success callback. A failed
+or unavailable hide postcondition keeps loading blocked and uses the existing
+failure/recovery callback without removing its watchdog. Reentrant callbacks that
+retire the episode, activity or cover cannot complete or fail the newer owner.
+There is no timer-based success, repeated hide retry or hardware-input reset.
+
+[documented] Android's `Dialog.hide` changes decor visibility, while `isShowing`
+reads that visibility. The cover backend uses these existing APIs. See the
+[Android 10](https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-10.0.0_r1/core/java/android/app/Dialog.java)
+and [Android 15](https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-15.0.0_r1/core/java/android/app/Dialog.java)
+implementations. This postcondition is logical window visibility; it does not
+prove compositor output, physical pixels or native input responsiveness.
+
+[qualification] Paired Java 17/SDK 35 checks compiled the complete production Java
+caller and test sources with diagnostics disabled. The production-equivalent
+baseline passed five named boundary cases and failed six actual assertions; the
+correction passed the same eleven named cases. The unchanged handoff and window
+mains passed 41 and 49 checks respectively in both variants. The candidate's
+actual no-argument workflow entry also executed all eleven cases, totaling 169
+checks. Original failure oracles and old test bytes were retained.
+
+These are Windows JVM checks using the real shared protocol, `CoverLease` and
+`LoadingState` with an authored backend. They do not instantiate Android's dialog
+at runtime or establish visible resume/input recovery on a phone. The historical
+`NATIVE_CONTENT_SUBMITTED` event remains evidence of admission and a hide attempt;
+its old meaning is not strengthened by this later correction. The reported resume
+hang and Doc Mitchell exit still require current APK/device acceptance.

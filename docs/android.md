@@ -269,7 +269,22 @@ not an observed explanation for the earlier runtime failures.
 
 [qualification] Source comparison retains all 1,536 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
-integrity, not scenario execution. The current integrated source, new consumer
-controls, native packaging and phone acceptance remain unrun. Earlier ARM/R31
+integrity, not scenario execution. Integrated engine/UI regressions, native
+packaging and phone acceptance remain unrun. Earlier ARM/R31
 results belong to their stated historical checkpoints; no new qualified download
 or resume/Doc Mitchell crash resolution is established here.
+
+## Loading recovery qualification
+
+[design] Loading completes only after checking that the current loading cover was
+logically hidden. If hiding fails, the existing recovery offers a return to the
+launcher and keeps saves intact. Old callbacks cannot complete a newer loading
+episode. The smaller text and appearance settings apply to the enhanced touch
+conversation view; disabling that view retains the ordinary native/fallback
+typography and preserves saved touch values for later use.
+
+[qualification] The separate Java protocol correction passed its unchanged paired
+host checks and SDK signature compilation; see the
+[loading-cover note](design/android-loading-cover.md). Actual Android presentation,
+touch recovery after backgrounding and leaving Doc Mitchell's still require a
+current qualified APK and device testing. This correction is absent from R9.

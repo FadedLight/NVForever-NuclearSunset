@@ -59,11 +59,13 @@ await execution. Native build success does not qualify the new APK: final packag
 open. The qualified R9 development APK remains the test baseline; these new features
 are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
 
-The normal main `af16a793` integration retains Android numeric admission and image
+The earlier normal Main `af16a793` integration retains Android numeric admission and image
 allocation guards alongside incoming BC5 normal roles/source alpha and the new
-terrain graphics row. All 68 combined Android overrides remain, including the optional UI rows; the
-registry has 176 unique rows. Static source comparison retains all 1,524 Main smoke records
-plus Android's startup-options record and both parents' order. Integrated
+terrain graphics row. The current combined UI has 68 Android overrides and a fixed
+`KNOWN` fixture with 176 unique literal keys; additional Main Tweaks and unbound
+control rows are separate, rather than a total live-registry count. The historical
+import retained all 1,524 incoming Main smoke records plus Android's startup-options
+record and both parents' order. Integrated
 compiler/runtime, native/final packaging and physical acceptance remain pending;
 prior R31 results do not qualify this new main import.
 
@@ -87,6 +89,15 @@ establish original Stewie plugin execution or universal mod compatibility.
 The lean map fixtures also need Main's new companion-summon message provider;
 that source setup correction retains their existing map oracles and remains
 unexecuted, separate from the earlier R31 failure diagnosis.
+
+The loading-cover completion correction is **In progress**. The real shared Java
+protocol now checks the current lease's logical hide before committing completion
+and preserves failure recovery or a newer episode after callbacks. Paired SDK 35
+Java compilation succeeded; five positive cases and six assertion failures in the
+baseline became eleven passing cases in the correction, with all old handoff/window
+tests unchanged and passing. These are host protocol checks, not native rendering,
+physical Android dialog, installed-APK or phone-resume/crash acceptance. The
+[loading-cover note](design/android-loading-cover.md) records the exact scope.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

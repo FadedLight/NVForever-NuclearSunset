@@ -15,3 +15,11 @@
 [design] `RestartActivity` is explicitly launched into the main task (NEW_TASK); the fresh game clears only its separate game task. An ordinary caller-task restart activity would be destroyed by that clear. Loading refusal is surfaced through a private bounded dialog, preserving saves and allowing the actual main menu to present before reveal.
 
 [qualification] CPU tests inject native submission evidence explicitly; they verify admission/epochs but do not execute GPU work. New Game film-end-to-world still uses the existing engine loading transition; device continuity and film texture upload timing remain private runtime qualification, not inferred from host tests.
+
+[design] The successor's completion callback also requires a successful logical
+hide of its current cover lease. The shared `LoadingReveal` protocol checks the
+state/ticket/cover generation again after hide callbacks. A refused hide retains
+the loading gate and existing failure recovery; an obsolete callback cannot
+acknowledge or fail a newer episode. See the owning
+[loading-cover note](android-loading-cover.md) for the actual paired Java
+regression results and the separate physical-window/input qualification limits.

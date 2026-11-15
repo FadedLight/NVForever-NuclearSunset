@@ -68,6 +68,19 @@ final class LoadingUi {
             final long expected = generation;
             if (current(expected)) window.nextFrame(() -> { if (current(expected)) action.run(); });
         }
+        enum HideResult { HIDDEN, STALE, FAILED }
+        /** Logical visibility only: this is not compositor, pixels or input evidence. */
+        HideResult hideForReveal(long expected) {
+            if (closed || !visible || generation != expected) return HideResult.STALE;
+            try { window.hide(); } catch (RuntimeException possiblyHidden) { /* Inspect actual postcondition below. */ }
+            if (closed || !visible || generation != expected) return HideResult.STALE;
+            final boolean stillShowing;
+            try { stillShowing = window.showing(); }
+            catch (RuntimeException unavailable) { return HideResult.FAILED; }
+            if (stillShowing) return HideResult.FAILED;
+            visible = false; generation++;
+            return HideResult.HIDDEN;
+        }
         void hide() {
             if (!closed) {
                 visible = false; generation++;

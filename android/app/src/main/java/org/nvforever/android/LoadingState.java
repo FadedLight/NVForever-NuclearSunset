@@ -28,8 +28,11 @@ final class LoadingState {
         if (!eligible() || !ticket().equals(ticket) || !blocking()) return false;
         submitted = epoch; return true;
     }
+    synchronized boolean readyToReveal(String ticket) {
+        return blocking() && eligible() && ticket().equals(ticket) && committed == epoch && submitted == epoch;
+    }
     synchronized boolean reveal(String ticket) {
-        if (!blocking() || !eligible() || !ticket().equals(ticket) || committed != epoch || submitted != epoch) return false;
+        if (!readyToReveal(ticket)) return false;
         completed = epoch; return true;
     }
     synchronized void tick(long now) { advance(now); if (blocking() && eligible() && elapsed > 180000) failed = true; }

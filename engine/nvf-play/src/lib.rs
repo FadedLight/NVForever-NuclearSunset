@@ -112,6 +112,7 @@ pub mod radiation;
 pub mod radio;
 pub mod reverb;
 pub mod repair;
+pub mod maintenance_touch;
 pub mod repeat;
 pub mod reputation;
 pub mod reticle;

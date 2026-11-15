@@ -2,12 +2,12 @@
 //! Positions and sensitivity are NVForever design choices, not original-game facts.
 use bevy::input::{
     keyboard::{KeyboardFocusLost, KeyboardInput},
-    mouse::{MouseButtonInput, MouseMotion},
+    mouse::{MouseButtonInput, MouseMotion, MouseWheel},
     touch::{TouchInput, TouchPhase},
     ButtonState, InputSystems,
 };
 use bevy::prelude::*;
-use bevy::window::{AppLifecycle, PrimaryWindow, WindowFocused};
+use bevy::window::{AppLifecycle, CursorMoved, PrimaryWindow, WindowFocused};
 use nvf_play::bindings::{Bindings, Control};
 use std::collections::{HashMap, HashSet};
 
@@ -52,6 +52,7 @@ impl Plugin for TouchControlsPlugin {
         pipboy_model::install(app);
 
         app.init_resource::<TouchState>()
+            .add_message::<CursorMoved>()
             .init_resource::<Layout>()
             .init_resource::<modal::Capture>()
             .init_resource::<nvf_play::pad::TouchDeviceSwitch>()
@@ -89,6 +90,9 @@ enum Role {
 }
 #[derive(Resource, Default)]
 struct TouchState {
+    // Raw hardware intent, sampled before aggregate touch/controller synthesis.
+    // CursorMoved is physical window activity; touch-look MouseMotion is not.
+    hardware_intent: bool,
     contacts: HashMap<u64, Contact>,
     keys: HashSet<KeyCode>,
     mouse: HashSet<MouseButton>,
@@ -293,15 +297,27 @@ fn capture_physical(
     mut keys: MessageReader<KeyboardInput>,
     mut mouse: MessageReader<MouseButtonInput>,
     mut focus_lost: MessageReader<KeyboardFocusLost>,
+    (mut cursor, mut wheel, windows): (MessageReader<CursorMoved>, MessageReader<MouseWheel>, Query<Entity, With<PrimaryWindow>>),
     previous_keys: Res<ButtonInput<KeyCode>>,
     previous_mouse: Res<ButtonInput<MouseButton>>,
 ) {
+    let window = windows.single().ok();
+    state.hardware_intent = cursor.read().any(|event| {
+        Some(event.window) == window && event.delta.is_some_and(|delta| delta.is_finite() && delta.length_squared() > 0.0)
+    });
+    state.hardware_intent |= wheel.read().any(|event| {
+        Some(event.window) == window && event.x.is_finite() && event.y.is_finite() && (event.x != 0.0 || event.y != 0.0)
+    });
+    // Drain the full streams even when an early event established intent.
+    cursor.clear();
+    wheel.clear();
     state.combined_keys = (*previous_keys).clone();
     state.combined_mouse = (*previous_mouse).clone();
     state.combined_keys.clear();
     state.combined_mouse.clear();
     for event in keys.read() {
         if event.state == ButtonState::Pressed {
+            state.hardware_intent |= Some(event.window) == window;
             state.physical_keys.insert(event.key_code);
         } else {
             state.physical_keys.remove(&event.key_code);
@@ -316,6 +332,7 @@ fn capture_physical(
     }
     for event in mouse.read() {
         if event.state == ButtonState::Pressed {
+            state.hardware_intent |= Some(event.window) == window;
             state.physical_mouse.insert(event.button);
         } else {
             state.physical_mouse.remove(&event.button);
@@ -1406,6 +1423,33 @@ mod tests {
             .add_systems(Update, nvf_play::control::read_controls);
         app.update();
         (app, window)
+    }
+    #[test]
+    fn menu_hardware_intent_uses_raw_window_activity_and_not_virtual_touch_look() {
+        let (mut app, window) = scene();
+        app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(nvf_play::PlayState::Playing);
+        app.update();
+        touch(&mut app, window, 90, TouchPhase::Started, 600.0, 410.0);
+        app.update();
+        touch(&mut app, window, 90, TouchPhase::Moved, 630.0, 420.0);
+        app.update();
+        assert_ne!(app.world().resource::<AccumulatedMouseMotion>().delta, Vec2::ZERO);
+        assert!(!app.world().resource::<TouchState>().hardware_intent);
+        app.update();
+        assert!(!app.world().resource::<TouchState>().hardware_intent, "previous touch MouseMotion is not hardware next frame");
+        let foreign = app.world_mut().spawn_empty().id();
+        app.world_mut().write_message(CursorMoved {window:foreign,position:Vec2::ONE,delta:Some(Vec2::ONE)});
+        app.update();
+        assert!(!app.world().resource::<TouchState>().hardware_intent);
+        app.world_mut().write_message(CursorMoved {window,position:Vec2::splat(20.0),delta:Some(Vec2::new(20.0,0.0))});
+        app.update();
+        assert!(app.world().resource::<TouchState>().hardware_intent);
+        app.update();
+        assert!(!app.world().resource::<TouchState>().hardware_intent);
+        raw_key(&mut app, window, KeyCode::ArrowDown, ButtonState::Pressed);
+        app.update();
+        assert!(app.world().resource::<TouchState>().hardware_intent);
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::ArrowDown), "the observer does not consume hardware");
     }
     fn button_touch(app: &mut App, window: Entity, id: u64, phase: TouchPhase, control: Control) {
         let index = BUTTONS

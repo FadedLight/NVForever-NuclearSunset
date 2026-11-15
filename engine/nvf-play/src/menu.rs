@@ -61,6 +61,7 @@
 //!   the inventory menu at those times (see [`test_aid`]).
 
 pub mod barter;
+pub mod barter_touch;
 pub(crate) mod look;
 pub mod model;
 mod test_aid;
@@ -181,6 +182,7 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
+        barter_touch::install(app);
         app.configure_sets(Update, WheelHoldSet.before(MenuSystems)).add_systems(Update, wheel_hold.in_set(WheelHoldSet));
         app.init_resource::<ActiveMenu>()
             .insert_resource(DevKeys::from_env())

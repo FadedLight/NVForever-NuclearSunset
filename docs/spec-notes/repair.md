@@ -1,5 +1,37 @@
 # Spec note: repair
 
+## Android touch presentation (source increment)
+
+[design] Android uses a compact maintenance sheet for player donor repair and
+vendor repair. It is an alternate mobile presentation of the existing sessions,
+not a claim that touch operates the original menu-file widgets. The same sheet
+works when the existing native-file presentation is selected and when its
+hand-built fallback is selected. Existing keyboard, mouse and controller routes
+and the repair formulas in this note remain authoritative.
+
+[design] A touch selects a row without consuming anything. A separate confirmation
+shows the selected target, donor and resulting condition, or the vendor's quoted
+condition/caps/skill requirements. Cancel changes neither equipment nor caps.
+Scrolling changes the visible list without choosing a different donor or item.
+Confirmation carries the painted item/unit/quote identity and is checked again
+inside the existing action consumer before any inventory mutation. A changed
+selection, missing item, changed quote, modal, source or input owner rejects that
+old confirmation. Repeated delivery must not consume a second donor or charge
+twice.
+
+[design] The parent Android input coordinator supplies the current full-window UI
+camera, logical viewport and safe insets and remains the sole raw touch reader.
+The sheet never writes hardware button state. Real hardware intent hides/cancels
+the touch sheet; returning touch restores it with an action-free contact. An
+already-consumed controller return restores it without costing an additional tap.
+The touch surface owns its entire panel and closing drain, so its contacts cannot
+also act on the underlying native, hand-built or dialogue surface.
+
+[design] This source increment requires actual App controls for donor consumption,
+vendor charging, refusal, cancellation, late refresh and hardware handoff in both
+presentation configurations. Authored or merely compiled controls do not establish
+runtime or Android device coverage.
+
 Tags as in `nif.md`: `[documented]` cites a page or file, `[observed]` says what was
 looked at, `[hypothesis]` is a reading that nothing has confirmed yet. `[design]` marks
 what is NVForever's own, `[owner]` a rule the owner set.

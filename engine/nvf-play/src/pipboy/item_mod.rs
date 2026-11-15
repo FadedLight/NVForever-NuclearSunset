@@ -310,12 +310,14 @@ pub fn keys(
     combat: Option<Res<crate::combat::Combat>>,
     mut sounds: MessageWriter<UiSound>,
     prompt: Res<crate::menu::PromptKeys>,
+    mut touch: crate::maintenance_touch::Requests,
 ) {
     let keys = keys.snapshot();
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
     let _canvas = crate::interface::original_units();
     use KeyCode::*;
-    let mut steps: Vec<ModInput> = aid.read().copied().collect();
+    let mut steps: Vec<(ModInput, Option<crate::maintenance_touch::Request>)> = aid.read().copied().map(|s| (s, None)).collect();
+    let mobile = touch.take(crate::maintenance_touch::Kind::Mod);
     let items = pip.open() && pip.page == Page::Items && active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory);
     if !items {
         if menu.0.take().is_some() {
@@ -328,16 +330,35 @@ pub fn keys(
     }
     let shift = keys.any_pressed([ShiftLeft, ShiftRight]);
     if keys.just_pressed(KeyX) && !shift && !menu.is_open() {
-        steps.push(ModInput::Open);
+        steps.push((ModInput::Open, None));
     }
     if menu.is_open() {
         for (k, s) in [(&[ArrowUp, KeyW][..], ModInput::Up), (&[ArrowDown, KeyS], ModInput::Down), (&[Enter, NumpadEnter, Space], ModInput::Use), (&[KeyE, Escape], ModInput::Cancel)] {
             if keys.any_just_pressed(k.iter().copied()) {
-                steps.push(s);
+                steps.push((s, None));
             }
         }
     }
-    for step in steps {
+    for request in mobile {
+        use crate::maintenance_touch::Action;
+        let step = match request.action { Action::Select(i) => ModInput::Hover(i), Action::Confirm => ModInput::Use, Action::Cancel => ModInput::Cancel, Action::Scroll(_) => ModInput::Hover(usize::MAX) };
+        steps.push((step, Some(request)));
+    }
+    for (step, request) in steps {
+        if let Some(request) = &request {
+            if !request.modding(menu.0.as_ref()) { continue; }
+            let live = current(&active, &sim, combat.as_deref());
+            if menu.0.as_ref().is_none_or(|s| Some(&s.offer) != live.as_ref()) {
+                if let Some(s) = menu.0.as_mut() {
+                    if let Some(offer) = live { s.offer = offer; s.selected = 0; s.first = 0; } else { menu.0 = None; }
+                }
+                continue;
+            }
+            if let crate::maintenance_touch::Action::Scroll(by) = request.action {
+                if let Some(s) = menu.0.as_mut() { s.first = crate::maintenance_touch::scroll(s.first, by, s.offer.choices.len() + 1); }
+                continue;
+            }
+        }
         if let ModInput::Click(i) = step {
             info!("pipboy mod: clicked row {i}");
         }

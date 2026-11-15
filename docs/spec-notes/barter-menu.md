@@ -611,3 +611,49 @@ or the engine's
 preserve the feedback without inventing a tile in the file. Blur uses the existing
 tile-menu blur path at radius 3
 [hypothesis for barter: the same shared presentation as the container].
+
+
+## Android alternate touch presentation
+
+[design: issue #2436, Android batch after qualified R9]
+An optional compact touch sheet presents the existing barter model, independently
+of whether its ordinary drawing selected native tiles or the hand-built fallback.
+This is an alternate mobile presentation, not native-file widget touch support.
+Both inventories have separate category/scroll controls and rows at least48 logical
+pixels high. A row tap only selects. Explicit One/All controls stage or take back
+units, the existing quantity prompt asks for large stacks, and only explicit Accept
+commits the existing trade. Cancel keeps the ordinary menu's Close semantics.
+
+[documented: menu/model.rs, menu.rs::apply_input, menu/barter.rs]
+The touch producer emits existing guarded MenuInput commands. Existing prices,
+merchant services, quest/live filtering, condition/mod identity, caps limit,
+quantity rules, script callbacks, sounds and item-transfer effects remain the
+authoritative consumers. No direct transfer, Use, invented discount or relaxed
+eligibility is introduced. Before an accepted touch action, the real inventory is
+checked again; changed rows or trade totals require a fresh selection/review.
+
+[design]
+The same logical rectangles paint and hit the sheet, clipped to the parent's
+current safe window and explicit full-window UI camera. A scrolling contact cannot
+stage an item or accept a trade. Sticky travel, one contact, guarded release and a
+same-batch commit barrier prevent row/category/quantity/Accept click-through.
+Quantity changes alone move no items. Small/invalid windows fail closed and retain
+the ordinary presentation rather than creating invisible targets.
+
+[design]
+KeyboardMouse remains the existing shared device identity for both finger and mouse.
+The parent observes actual physical mouse/navigation intent once: it hides/retires
+the sheet without altering hardware buttons, and the ordinary mouse/keyboard/pad
+consumers keep their behavior. A fresh touch restores the sheet while consuming
+that contact; the existing consumed controller-return touch restores presentation
+without an extra action or an extra restoration tap. The parent alone reads raw
+TouchInput, applies selector/platform/focus/modal admission and prioritizes barter
+over the underlying conversation. Original hand-built touch picking is filtered
+only for this sheet's owned/retired contacts, never for unrelated menus.
+
+[hypothesis: qualification plan]
+Authored App tests must run the actual MenuInput/apply_input consumer in both
+native-selected and fallback configurations, including both inventories, quantity,
+category, insufficient caps, changed row/trade, cancellation, source handoff and
+no duplicate actions. Source review, compilation, CPU execution and phone/readability
+acceptance are separate evidence; none is implied by this design note.

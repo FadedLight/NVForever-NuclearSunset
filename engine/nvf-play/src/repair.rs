@@ -158,6 +158,9 @@ pub struct Open {
 }
 
 impl Open {
+    pub(crate) fn touch_view(&self) -> Option<(FormId, &View)> {
+        self.drawn.as_ref().map(|view| (self.vendor, view))
+    }
     /// What the menu showed last, for the tiles' writer: the view, and [`Open::pointer_pick`]
     /// and [`Open::navigated`].
     pub(crate) fn shown(&self) -> Option<(&View, bool, u32)> {
@@ -374,6 +377,7 @@ fn keys(
     mut moved: MessageReader<bevy::window::CursorMoved>,
     mut commands: Commands,
     mut on_tiles: MessageReader<RepairServicesInput>,
+    mut touch: crate::maintenance_touch::Requests,
 ) {
     let keys = keys.snapshot();
     // Only a pointer that moves takes the selection: the rows drawn when the menu opens
@@ -381,6 +385,7 @@ fn keys(
     let pointer_moved = moved.read().count() > 0;
     // What the tiles asked: read whatever else happens, so none of it waits for a later frame.
     let asked: Vec<RepairServicesInput> = on_tiles.read().copied().collect();
+    let mobile = touch.take(crate::maintenance_touch::Kind::Vendor);
     let Some(open) = menu.0.as_mut() else { return };
     let Some(rt) = script.and_then(|s| s.into_inner().rt.as_mut()) else { return };
     // A world aid (`crate::pause::WorldAidClock`).
@@ -396,7 +401,7 @@ fn keys(
         info!("repair menu: screenshot repair_menu.png");
         commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk("repair_menu.png"));
     }
-    let v = open.drawn.clone().unwrap_or_else(|| view(rt, &mut sim, combat.as_deref(), open));
+    let mut v = open.drawn.clone().unwrap_or_else(|| view(rt, &mut sim, combat.as_deref(), open));
     let n = v.rows.len();
     let before = open.selected;
     let mut clicked = None;
@@ -422,10 +427,31 @@ fn keys(
     // After the keys: a click acts on the row it was on.
     open.chosen_on_tiles(&asked, n);
     let tile_asked = |a: RepairServicesInput| asked.contains(&a);
+    let mut touch_one = false;
+    let mut touch_done = false;
+    // Existing physical/native selection has already run. Validate each mobile action
+    // against the actual current quote/unit/caps and current selection, not the last
+    // rendered vendor list. Only one confirmation may act in a batch.
+    for request in mobile {
+        let live = view(rt, &mut sim, combat.as_deref(), open);
+        if !request.vendor(open.vendor, &live) { open.drawn = None; continue; }
+        use crate::maintenance_touch::Action;
+        match request.action {
+            Action::Select(i) if i < live.rows.len() => { open.selected = i; open.pointer_pick = true; open.drawn = None; }
+            Action::Scroll(by) => { open.first = crate::maintenance_touch::scroll(open.first, by, live.rows.len()); open.drawn = None; }
+            Action::Confirm if !touch_one => {
+                touch_one = live.rows.get(open.selected).is_some_and(|r| r.ready);
+                v = live;
+                if touch_one { break; }
+            }
+            Action::Cancel => { touch_done = true; break; }
+            _ => {}
+        }
+    }
     if open.selected != before {
         sounds.write(UiSound { menu: UiMenu::Repair, event: UiEvent::Focus });
     }
-    if keys.any_just_pressed([KeyCode::KeyE, KeyCode::Escape, KeyCode::Tab]) || clicked == Some(RepairButton::Done) || act("done") || tile_asked(RepairServicesInput::Done) {
+    if keys.any_just_pressed([KeyCode::KeyE, KeyCode::Escape, KeyCode::Tab]) || clicked == Some(RepairButton::Done) || act("done") || tile_asked(RepairServicesInput::Done) || touch_done {
         info!("repair menu: done");
         sounds.write(UiSound { menu: UiMenu::Repair, event: UiEvent::Back });
         next.set(after_close(&rt.game));
@@ -433,7 +459,7 @@ fn keys(
     }
     let forms = sim.forms;
     let vendor = open.vendor;
-    let one = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || matches!(clicked, Some(RepairButton::Row(_))) || act("repair") || tile_asked(RepairServicesInput::Repair);
+    let one = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || matches!(clicked, Some(RepairButton::Row(_))) || act("repair") || tile_asked(RepairServicesInput::Repair) || touch_one;
     let all = keys.just_pressed(KeyCode::KeyA) || clicked == Some(RepairButton::All) || act("all") || tile_asked(RepairServicesInput::All);
     if one {
         let Some(r) = v.rows.get(open.selected.min(n.saturating_sub(1))) else { return };
@@ -679,8 +705,17 @@ fn draw(
     formats: Option<Res<CompressedImageFormatSupport>>,
     glyphs: Res<crate::pad::PadGlyphs>,
     (switch, mut was_tiled): (Option<Res<crate::tiles::vanilla::TileMenus>>, Local<bool>),
+    touch: Option<Res<crate::maintenance_touch::State>>,
 ) {
     let Some(open) = menu.0.as_mut() else { return };
+    if touch.as_ref().is_some_and(|s| s.visible()) {
+        if let Some(rt) = script.and_then(|s| s.into_inner().rt.as_mut()) {
+            // The alternate list owns its actual first row. Legacy window() keeps the
+            // selected row visible and would otherwise undo an intentional touch scroll.
+            open.drawn = Some(view(rt, &mut sim, combat.as_deref(), open));
+        }
+        return;
+    }
     // The one decision with the tiles' writer, whose drawing replaces this one.
     let tiled = switch.is_some_and(|s| s.repair_services) && script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| crate::tiles::repair_services_menu::tiled(true, &rt.game, true));
     if tiled {

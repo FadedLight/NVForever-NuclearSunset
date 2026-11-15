@@ -52,6 +52,25 @@ pub struct Button;
 /// test aids that feed presses run before [`UiSystems::Focus`]).
 pub struct UiPointerPlugin;
 
+/// One frame's alternate-sheet touch ownership, published by the sole wrapper
+/// reader before UI focus. Hardware input is never filtered by this resource.
+/// Overflow suppresses touch until the publisher's next fresh frame; the sheet
+/// remains responsible for draining its contacts to actual neutral.
+#[derive(Resource, Default)]
+pub struct TouchUiCapture {
+    ids: [Option<u64>; 32],
+    overflow: bool,
+}
+impl TouchUiCapture {
+    pub fn begin_frame(&mut self) { self.ids.fill(None); self.overflow = false; }
+    pub fn block(&mut self, id: u64) {
+        if self.ids.contains(&Some(id)) { return; }
+        if let Some(slot) = self.ids.iter_mut().find(|slot| slot.is_none()) { *slot = Some(id); }
+        else { self.overflow = true; }
+    }
+    pub fn allows(&self, id: u64) -> bool { !self.overflow && !self.ids.contains(&Some(id)) }
+}
+
 impl Plugin for UiPointerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreUpdate, update_pointer_state.in_set(UiSystems::Focus).after(InputSystems));
@@ -158,6 +177,7 @@ fn update_pointer_state(
     nodes: Query<NodeData>,
     mut states: Query<(Entity, &mut PointerState)>,
     (pad_pointer, platform): (Option<Res<crate::pad::pointer::PadPointer>>, Option<Res<crate::pad::PlatformInputGate>>),
+    touch_owner: Option<Res<TouchUiCapture>>,
 ) {
     if platform.as_ref().is_some_and(|g| !g.allows_actions()) {
         to_reset.clear(); places.clear();
@@ -168,7 +188,8 @@ fn update_pointer_state(
     // A pointer asleep under the controller is on nothing (`crate::pad::pointer`, #2310).
     let sleeping = crate::pad::pointer::asleep(pad_pointer.as_deref());
     let primary_window = primary_window.iter().next();
-    let touch_allowed = |id| platform.as_ref().is_none_or(|g| g.allows_touch(id));
+    let touch_allowed = |id| platform.as_ref().is_none_or(|g| g.allows_touch(id))
+        && touch_owner.as_ref().is_none_or(|owner| owner.allows(id));
     let released = mouse.just_released(MouseButton::Left) || touches.iter_just_released().any(|t| touch_allowed(t.id()));
     let clicked = mouse.just_pressed(MouseButton::Left) || touches.iter_just_pressed().any(|t| touch_allowed(t.id()));
 
@@ -242,6 +263,41 @@ fn update_pointer_state(
 mod tests {
     use super::PointerState::{Hovered, None, Pressed};
     use super::*;
+
+    fn touch_scene() -> (App, Entity, Entity) {
+        use bevy::{app::{HierarchyPropagatePlugin, PropagateSet}, camera::{ComputedCameraValues,RenderTargetInfo,visibility::VisibilityPlugin}, ui::{ComputedUiRenderTargetInfo,UiScale,ui_surface::UiSurface,update::propagate_ui_target_cameras}};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins,bevy::input::InputPlugin,bevy::asset::AssetPlugin::default(),bevy::transform::TransformPlugin));
+        app.init_resource::<Assets<Mesh>>().init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .add_plugins((VisibilityPlugin,HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(PostUpdate),HierarchyPropagatePlugin::<ComputedUiRenderTargetInfo>::new(PostUpdate),UiPointerPlugin))
+            .init_resource::<UiScale>().init_resource::<UiSurface>().init_resource::<UiStack>();
+        app.add_systems(PostUpdate,(ApplyDeferred,propagate_ui_target_cameras,bevy::ui::ui_layout_system).chain());
+        app.configure_sets(PostUpdate,PropagateSet::<ComputedUiTargetCamera>::default().after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        app.configure_sets(PostUpdate,PropagateSet::<ComputedUiRenderTargetInfo>::default().after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        let camera=app.world_mut().spawn((Camera2d,Camera {computed:ComputedCameraValues {target_info:Some(RenderTargetInfo {physical_size:UVec2::splat(400),scale_factor:1.0}),..default()},..default()})).id();
+        let window=app.world_mut().spawn((Window {resolution:bevy::window::WindowResolution::new(400,400),..default()},PrimaryWindow)).id();
+        let button=app.world_mut().spawn((Button,Node {position_type:PositionType::Absolute,left:px(20.0),top:px(20.0),width:px(100.0),height:px(50.0),..default()},UiTargetCamera(camera))).id();
+        for _ in 0..4 {app.update();}
+        let mut stack=app.world_mut().resource_mut::<UiStack>();
+        stack.uinodes=vec![button];stack.partition=vec![0..1];
+        (app,window,button)
+    }
+
+    #[test]
+    fn alternate_sheet_owns_touch_at_real_ui_focus_without_consuming_mouse_or_raw_touches() {
+        let (mut app,window,button)=touch_scene();
+        app.init_resource::<TouchUiCapture>();
+        app.world_mut().resource_mut::<TouchUiCapture>().block(7);
+        app.world_mut().write_message(bevy::input::touch::TouchInput {window,id:7,phase:bevy::input::touch::TouchPhase::Started,position:Vec2::splat(40.0),force:std::option::Option::None});
+        app.update();
+        assert_eq!(*app.world().get::<PointerState>(button).unwrap(),PointerState::None);
+        assert!(app.world().resource::<Touches>().get_pressed(7).is_some());
+        app.world_mut().get_mut::<Window>(window).unwrap().set_cursor_position(Some(Vec2::splat(40.0)));
+        app.world_mut().write_message(bevy::input::mouse::MouseButtonInput {window,button:MouseButton::Left,state:bevy::input::ButtonState::Pressed});
+        app.update();
+        assert_eq!(*app.world().get::<PointerState>(button).unwrap(),PointerState::Pressed,"physical mouse still reaches the real UI focus consumer");
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+    }
 
     fn f(place: Place) -> Frame {
         Frame { place, clicked: false, released: false, reset: false }

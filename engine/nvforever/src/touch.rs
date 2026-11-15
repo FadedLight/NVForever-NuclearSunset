@@ -3660,11 +3660,17 @@ mod tests {
             raw_key(&mut app,w,KeyCode::F12,ButtonState::Pressed);app.update();
             app.world_mut().write_message(hotbar::UtilityTrayRequest(true));
             if cause=="resize" {app.world_mut().get_mut::<Window>(w).unwrap().resolution.set_physical_resolution(672,384);}
-            else {app.world_mut().resource_mut::<hotbar::Preferences>().enabled=false;}
+            else {
+                let row=app.world().resource::<settings::Settings>().index("touch-hotbar").unwrap();
+                assert_eq!(settings::flip(app.world_mut(),row),Some(false));
+            }
             app.update();
             assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request must not open");
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
-            if cause=="disabled" {app.world_mut().resource_mut::<hotbar::Preferences>().enabled=true;}
+            if cause=="disabled" {
+                let row=app.world().resource::<settings::Settings>().index("touch-hotbar").unwrap();
+                assert_eq!(settings::flip(app.world_mut(),row),Some(true));
+            }
             app.update();
             assert!(!hotbar::tray_open_collision_fixture(app.world()),"{cause}: old request cannot replay after return");
             app.world_mut().write_message(hotbar::UtilityTrayRequest(true));app.update();

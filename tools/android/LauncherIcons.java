@@ -31,6 +31,7 @@ class LauncherIcons {
             if (!check) Files.createDirectories(directory);
             save(directory.resolve("ic_launcher.png"), render(brand, LEGACY[i], .82, true), check);
             BufferedImage foreground = render(brand, ADAPTIVE[i], 66.0 / 108, false);
+            checkSafeZone(foreground);
             save(directory.resolve("ic_launcher_foreground.png"), foreground, check);
             // The canonical silhouette supplies themed artwork; retain its alpha.
             BufferedImage mono = new BufferedImage(foreground.getWidth(), foreground.getHeight(), BufferedImage.TYPE_INT_ARGB);
@@ -54,6 +55,19 @@ class LauncherIcons {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             double scale = side * fraction / Math.max(source.getWidth(), source.getHeight());
+            if (!background) {
+                // A square's corners exceed Android's circular 66 dp safe zone.
+                // Fit actual alpha, including the lock, rather than clipping the brand.
+                double radius = 0;
+                for (int y = 0; y < source.getHeight(); y++) {
+                    for (int x = 0; x < source.getWidth(); x++) {
+                        if ((source.getRGB(x, y) >>> 24) != 0)
+                            radius = Math.max(radius, Math.hypot(Math.abs(x + .5 - source.getWidth() / 2.0) + .5,
+                                Math.abs(y + .5 - source.getHeight() / 2.0) + .5));
+                    }
+                }
+                if (radius > 0) scale = Math.min(scale, (side * 33.0 / 108 - 2) / radius);
+            }
             int width = Math.max(1, (int)Math.round(source.getWidth() * scale));
             int height = Math.max(1, (int)Math.round(source.getHeight() * scale));
             graphics.drawImage(source, (side - width) / 2, (side - height) / 2, width, height, null);
@@ -78,5 +92,20 @@ class LauncherIcons {
         if (!ImageIO.write(image, "png", destination.toFile()))
             throw new IllegalStateException("PNG encoder unavailable");
         System.out.println(destination);
+    }
+
+    private static void checkSafeZone(BufferedImage image) {
+        double centre = image.getWidth() / 2.0;
+        double safe = image.getWidth() * 33.0 / 108;
+        int visible = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if ((image.getRGB(x, y) >>> 24) == 0) continue;
+                visible++;
+                if (Math.hypot(x + .5 - centre, y + .5 - centre) > safe)
+                    throw new IllegalStateException("Adaptive brand exceeds the circular safe zone");
+            }
+        }
+        if (visible == 0) throw new IllegalStateException("Empty launcher artwork");
     }
 }

@@ -9,7 +9,7 @@
   with important artwork inside the central 66 dp safe zone. Launchers may apply
   different masks. Android 13 supports a monochrome layer for themed icons.
   [Android adaptive icons](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive).
-- [hypothesis] Center the complete canonical artwork within a 66 dp square on
+- [hypothesis] Center the complete canonical artwork within the 66 dp safe circle on
   an opaque near-black adaptive background. Supply legacy density variants and
   an alpha-derived monochrome layer; do not redraw the brand or use game art.
   `tools/android/LauncherIcons.java` is the reproducible source adaptation.

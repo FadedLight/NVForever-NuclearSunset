@@ -10,10 +10,12 @@ successful drawing, pixels, or a cause of device loss or visual corruption.
 [documented: android/GameActivity.java, LanDiagnostics.available] This repository already
 uses `ApplicationInfo.FLAG_DEBUGGABLE` as the APK debug authority. The new JNI string
 method `renderDiagnosticsBuildType` returns only `debug` or `release` from that flag.
-Native code caches its exact result once per process through the existing bounded
-`android::activity_string` helper. An absent method, JNI error, unknown value or release
-APK disables the observer. This is independent of Rust `debug_assertions`: the debug
-APK's native library may be built with `--release` and still enables the observer.
+Native code additionally requires `renderDiagnosticsUi` to return `enabled`, from
+the explicit default-off Gradle `nvfDiagnostics` option. Both exact results are
+cached once per process through the existing bounded `android::activity_string`
+helper. An absent method, JNI error, unknown value, disabled option or release APK
+disables the observer. This is independent of Rust `debug_assertions`: an opted-in
+debug APK's native library may be optimized and still enables the observer.
 No token, preference, path or device identity crosses this gate. Non-Android builds do
 not install this plugin; host tests explicitly inject a synthetic gate.
 

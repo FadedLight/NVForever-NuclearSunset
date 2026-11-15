@@ -132,11 +132,15 @@ tests. Rendered device validation remains separate.
 The practice correction aligns the practice sides with the current stick
 position, shows the analog dead zone as a circle and retains the legacy box. Its
 added App controls passed the scoped ARM library/test-code type/lint check at code
-checkpoint `81dc1347`, but remain unexecuted. That checkpoint also passed the
+checkpoint `81dc1347`. That checkpoint also passed the
 1,517-entry scenario-file verifier and merge-parent integrity check; it did not
 execute game scenarios. The R9 result does not qualify the changed presentation.
-This documentation-only attribution follow-up preserves the code and adds no
-whole-head runtime or APK result.
+The later R31 hosted run passed the dead-zone and Pad backup controls, but the
+mirrored practice control failed its full-layout equality: the implicit tray's
+normal migration changed its centre after the fixture took its snapshot. The
+fixture correction settles that provider before the snapshot and adds a second
+ordinary-frame stability check; all original practice gestures and final equality
+remain. Corrected execution is pending, and no new APK is qualified.
 
 ## Touch inventory menus
 
@@ -167,6 +171,32 @@ controls, 53 passed and three map-parent cases failed; none was unrun. All eight
 root routing cases passed. Strict engine lint and 3,142 core tests passed, with
 five existing core tests ignored. The aggregate failed: native-build success
 cannot qualify this APK. Both fixture corrections still require actual execution.
+
+[qualification] R31 tested merge `86e010a5` of source `79891b03` with main
+`6692d2da`, with a tree identical to that source. It passed 178 asset and 2,067 play
+tests (one existing ignored), including the formerly failing native-map control.
+The wrapper ran 1,308 passes, four failures and one existing ignored test. Three
+failures share a map-parent fixture whose actual DATA consumer requires the
+omitted `MenuInput` message stream; its narrow setup correction registers that
+real provider. Their logs omit panic payloads, so this cause is source-derived.
+The fourth failure is the practice snapshot above. Of the same 56 selected menu
+controls, 53 passed and three map-parent cases failed; none was unrun. All eight
+root routing cases passed. Strict engine lint and 3,142 core tests passed, with
+five existing core tests ignored. The aggregate failed: native-build success
+cannot qualify this APK. Both fixture corrections still require actual execution.
+
+[qualification] The normal integration with main `af16a793` retains those two
+fixture corrections and imports the upstream BC5 texture roles, source-alpha
+handling, terrain-height-blend option, script/VFS/audio and soft-lock watcher
+changes. Android numeric admission remains after real material selection and
+before mesh bounds/handles; checked-image allocation guards remain in place.
+The settings union has 176 unique rows, combining the terrain graphics row and
+fourteen optional UI rows, with 68 Android overrides and one Grass fires World row. Static
+comparison retains all 1,524 Main scenario records plus `android-start-options`
+and both parents' relative order; it does not execute them. This integrated source
+requires fresh strict/runtime, native and final packaging checks. The terrain
+option remains off in both presets; DLSS download remains Windows-only. No
+Android pixels, performance, save/Doc exit or loading-cure result is inferred.
 
 ## Mobile performance
 

@@ -41,22 +41,23 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
 | Gameplay | Dialogue | `menu-pause`, `dialogue-goodbye-hint`, `dialogue-look`, `dialogue-recentre`, `dialogue-zoom`, `lip-sync` |
 | Gameplay | Camera | `detached-camera`, `true-iron-sights`, `first-person-body`, `weapon-sway`, `head-bob`, `weapon-lower`, `field-of-view`, `viewmodel-field-of-view` |
+| Gameplay | World | `grass-fire` (#2662) |
 | Display | Screen | `resolution`, `borderless`, `monitor`, `display-sync`, `frame-cap`, `physics-rate`, `ui-scale`, `menu-scale` |
 | Display | Interface | `hud-colour`, `hud-red`, `hud-green`, `hud-blue`, `pipboy-colour`, `pipboy-red`, `pipboy-green`, `pipboy-blue`, `language`, `dynamic-crosshair`, `crosshair-style`, `sneak-gauges` |
 | Display | Performance | `fps-counter`, `fps-counter-fps`, `fps-counter-low`, `fps-counter-graph`, `fps-counter-split`, `fps-counter-cpu`, `fps-counter-gpu`, `fps-counter-vram`, `fps-counter-ram`, `fps-counter-loaded`, `fps-counter-upscaling` |
 | Audio | (none) | `volume-master`, `volume-music`, `volume-footstep`, `volume-voice`, `volume-effects`, `volume-radio`, `music`, `voice`, `reverb`, `voice-reverb` |
 | Controls | (none) | the Controls tab's own rows (§4), then `button-style`, `aim-assist`, `aim-slowdown`, `aim-lock` |
 | Graphics | Quality | `quality` (#1966; only when the install has its preset files: docs/spec-notes/quality-presets.md) |
-| Graphics | Picture | `enhanced` (#1966), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `light-shafts`, `water-reflections`, `water-mirror` |
+| Graphics | Picture | `enhanced` (#1966), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `light-shafts`, `water-reflections`, `water-mirror` |
 | Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance` |
 | Graphics | World | `head-tracking`, `foot-ik`, `sky-clock` |
 | Tweaks | (none) | none named yet |
 | Debug | (none) | `overlay`, `hit-markers`, `god-mode`, `navmesh`, `scope-3d` |
 
-The table names every row the registry can hold [documented: `settings_layout.rs::SECTIONS`],
-109 with #1966's `quality` and `enhanced`,
-#2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling` and #2317's
-`frame-generation-frames` (`KNOWN` in
+The table names the 176 potential built-in rows in the combined `KNOWN` fixture
+[documented: `settings_layout.rs::SECTIONS`], including #1966's `quality` and `enhanced`,
+#2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling`, #2317's
+`frame-generation-frames`, #2550's `terrain-height-blend` and #2662's `grass-fire` (`KNOWN` in
 `settings_layout.rs`); a test keeps
 it so (`settings_layout.rs`, `the_table_names_each_key_once_in_one_of_the_tabs`). The
 original puts the HUD and Pip-Boy colours and the crosshair in its Display category
@@ -87,7 +88,7 @@ registrations nor `resolve_layout`'s interface change for it.
 
 [design] Android uses the same dynamic settings page, adding **Mobile** after Controls.
 Desktop keeps its seven tabs and existing placements. This changes presentation only:
-all 148 known settings retain their registration order, keys, callbacks, saved values
+all 176 known settings retain their registration order, keys, callbacks, saved values
 and defaults. Missing optional rows and empty headings stay omitted. Search, Changed,
 keyboard/controller navigation and row identity use the existing page implementation.
 
@@ -111,9 +112,10 @@ this route; there is no second editor, extra action row or new persistence schem
 
 `settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
 original sections claim their remaining rows. One row is resolved once, with its original
-registry index. Tests exercise all 148 rows, optional sections, actual page projection,
+registry index. Authored controls cover all 176 potential rows, optional sections, actual page projection,
 search/Changed/device handoff, and a real Settings callback through its original index.
-Rust execution and Android device acceptance are recorded separately from source review.
+Fresh Rust execution of the current merge and Android device acceptance remain
+pending and are recorded separately from source review.
 
 ## 3. What the page lists (`settings_view.rs`)
 
@@ -530,3 +532,12 @@ Smoke scenario `perf-overlay-usage-availability` accepts a numeric or explicit m
 part independently. The older `fps-counter` numeric expectation is preserved.
 Linux validation still needs Intel/nouveau game-only rates and labels, NVIDIA with
 and without NVML, amdgpu fallback, no telemetry, and hide/show or GPU-row off/on.
+
+[design] The optional mobile-control follow-up adds fourteen registered rows to
+that 162-row current-main/Android checkpoint: the layout action, independent
+terminal/companion views, five Pip-Boy preferences, lockpicking hints, VATS
+selection, and four dialogue appearance/hint rows. The combined `KNOWN` fixture
+contains 176 unique keys; 68 Android overrides comprise 60 Mobile and 8 shared controller
+placements. These are potential rows, not a claim that every optional subsystem
+registers in every run. All new controls and the current merged source still
+require their own compilation/runtime and device acceptance.

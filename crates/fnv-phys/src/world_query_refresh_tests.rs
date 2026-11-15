@@ -1,3 +1,8 @@
+mod quarantine_controls {
+    use super::*;
+    include!("world_query_quarantine_tests.rs");
+}
+
 use crate::*;
 use fnv_collide::{CollisionObject, Iso, Motion, Shape};
 use rapier3d::prelude::*;

@@ -3930,4 +3930,6 @@ mod tests {
         }
     }
 
+    include!("map_menu/touch_map_tests.rs");
+
 }

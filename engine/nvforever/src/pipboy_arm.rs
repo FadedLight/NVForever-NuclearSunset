@@ -676,7 +676,7 @@ type PointerParts<'w, 's> = Query<'w, 's, (Entity, &'static PipBoyPart, &'static
 fn follow_pointer(
     pip: Res<PipBoy>,
     screen: Option<ResMut<PipBoyScreen>>,
-    cams: Query<(Entity, &Camera, &GlobalTransform), With<PlayerCamera>>,
+    cams: Query<(Entity, &Camera, &GlobalTransform, &bevy::camera::RenderTarget), With<PlayerCamera>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     parts: PointerParts<'_, '_>,
     globals: Query<&GlobalTransform>,
@@ -685,7 +685,7 @@ fn follow_pointer(
     mut aid: ResMut<PipBoyAid>,
     mut aid_over: Local<Option<Page>>,
     mut out: MessageWriter<PipBoyInput>,
-    (pad_pointer, mut touch): (Option<Res<nvf_play::pad::pointer::PadPointer>>, Option<ResMut<nvf_play::pipboy::touch_items::TouchItems>>),
+    (pad_pointer, mut touch, overlay): (Option<Res<nvf_play::pad::pointer::PadPointer>>, Option<ResMut<nvf_play::pipboy::touch_items::TouchItems>>, Option<Res<nvf_play::ui_pointer::TouchUiCapture>>),
     #[cfg(any(target_os = "android", test))] mut geometry: Option<ResMut<crate::touch::pipboy_model::Geometry>>,
     #[cfg(any(target_os="android",test))] (mut map,map_safe,map_ui,map_size,map_windows,map_parts):MapPublication<'_,'_>,
 ) {
@@ -710,7 +710,7 @@ fn follow_pointer(
     if !pip.open() {
         return;
     }
-    let (Ok((camera_entity, cam, at)), Ok(window)) = (cams.single(), windows.single()) else {
+    let (Ok((camera_entity, cam, at, _map_target)), Ok(window)) = (cams.single(), windows.single()) else {
         #[cfg(any(target_os="android",test))]
         if let Some(map)=map.as_deref_mut(){map.publish(None);}
         return;
@@ -788,7 +788,8 @@ fn follow_pointer(
         touch.project(|position|touch_canvas(cam,at,&posed,position));
     }
     let sleeping = nvf_play::pad::pointer::asleep(pad_pointer.as_deref());
-    let cursor = if aid.target.is_some() { target } else { window.cursor_position().filter(|_| !sleeping) };
+    let cursor = if overlay.as_ref().is_some_and(|o| o.pointer_suppressed()) { None }
+        else if aid.target.is_some() { target } else { window.cursor_position().filter(|_| !sleeping) };
     if let Some(ray) = cursor.and_then(|c| cam.viewport_to_world(at, c).ok()) {
     let (origin, dir) = (ray.origin, Vec3::from(ray.direction));
     let hit = posed.iter().filter_map(|(p, s, _)| s.hit(origin, dir).map(|(t, uv)| (t, *p, uv))).min_by(|a, b| a.0.total_cmp(&b.0));
@@ -828,7 +829,7 @@ fn follow_pointer(
             let stamp=ProjectionStamp::new(map_windows.single().ok()?,window,&screen,true,Presentation {
                 safe:map_safe.as_deref().copied().unwrap_or_default(),menu:nvf_play::interface::unit_scale(),
                 ui:map_ui.as_deref().map_or(1.0,|s|s.0),size:map_size.as_deref().map_or(1.0,nvf_play::pipboy::touch_presentation::PipBoySize::ratio),
-            }).with_camera(camera_entity,cam)?;
+            }).with_camera(camera_entity,cam,_map_target)?;
             let camera=cam.clone();let at=*at;
             // Existing CPU pose ownership moves once; no vertex/triangle clone
             // and no retained projection history. Physical pointer ran above.
@@ -1311,5 +1312,6 @@ pub(crate) mod tests {
         assert_eq!(lit(&app, glows), [true, true, true], "down, all glow");
     }
     include!("pipboy_arm/pointer_pose_safety_tests.rs");
+    include!("pipboy_arm/map_touch_projection_tests.rs");
 
 }

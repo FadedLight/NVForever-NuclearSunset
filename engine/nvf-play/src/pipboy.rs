@@ -1063,6 +1063,7 @@ type FlatPointerInput<'w,'s> = (
     Option<Res<'w,crate::pad::pointer::PadPointer>>,Option<ResMut<'w,touch_items::TouchItems>>,
     Option<ResMut<'w,data::touch_map::TouchMap>>,Query<'w,'s,Entity,With<PrimaryWindow>>,
     Query<'w,'s,Entity,With<FlatScreen>>,
+    Option<Res<'w,crate::ui_pointer::TouchUiCapture>>,
 );
 /// The flat image's pointer for this frame's tile input ([`PointerSet`]), from the cursor now
 /// and the image's place as last laid out. Nothing while the device has the pointer
@@ -1075,7 +1076,7 @@ pub fn flat_pointer(
     flat: FlatPresentation<'_, '_>,
     windows: Query<&Window, With<PrimaryWindow>>,
     aid: Res<PipBoyAid>,
-    (pad_pointer, mut touch, mut map, window_ids, flat_ids): FlatPointerInput<'_,'_>,
+    (pad_pointer, mut touch, mut map, window_ids, flat_ids, overlay): FlatPointerInput<'_,'_>,
     (sizing, safe, ui_scale): FlatPointerSizing<'_>,
 ) {
     let Some(mut screen) = screen else {if let Some(map)=map.as_deref_mut(){map.publish(None);}return};
@@ -1115,7 +1116,8 @@ pub fn flat_pointer(
         })();
         map.publish(projection);
     }
-    let now = flat_point(&aid, &windows, crate::pad::pointer::asleep(pad_pointer.as_deref()), computed, at);
+    let now = if overlay.as_ref().is_some_and(|o| o.pointer_suppressed()) { None }
+        else { flat_point(&aid, &windows, crate::pad::pointer::asleep(pad_pointer.as_deref()), computed, at) };
     if screen.pointer != now {
         screen.pointer = now;
     }

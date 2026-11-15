@@ -60,15 +60,21 @@ pub struct UiPointerPlugin;
 pub struct TouchUiCapture {
     ids: [Option<u64>; 32],
     overflow: bool,
+    pointer_suppressed: bool,
 }
 impl TouchUiCapture {
-    pub fn begin_frame(&mut self) { self.ids.fill(None); self.overflow = false; }
+    pub fn begin_frame(&mut self) { self.ids.fill(None); self.overflow = false; self.pointer_suppressed = false; }
     pub fn block(&mut self, id: u64) {
         if self.ids.contains(&Some(id)) { return; }
         if let Some(slot) = self.ids.iter_mut().find(|slot| slot.is_none()) { *slot = Some(id); }
         else { self.overflow = true; }
     }
     pub fn allows(&self, id: u64) -> bool { !self.overflow && !self.ids.contains(&Some(id)) }
+    pub fn quarantine_overflow(&mut self) { self.overflow = true; }
+    /// Hide the stale pointer under a visible sheet. Actual hardware intent yields
+    /// the sheet first, so physical input resumes without changing Window state.
+    pub fn suppress_pointer(&mut self, suppressed: bool) { self.pointer_suppressed = suppressed; }
+    pub fn pointer_suppressed(&self) -> bool { self.pointer_suppressed }
 }
 
 impl Plugin for UiPointerPlugin {
@@ -186,7 +192,8 @@ fn update_pointer_state(
     }
     let mouse = mouse.snapshot();
     // A pointer asleep under the controller is on nothing (`crate::pad::pointer`, #2310).
-    let sleeping = crate::pad::pointer::asleep(pad_pointer.as_deref());
+    let sleeping = crate::pad::pointer::asleep(pad_pointer.as_deref())
+        || touch_owner.as_ref().is_some_and(|owner| owner.pointer_suppressed());
     let primary_window = primary_window.iter().next();
     let touch_allowed = |id| platform.as_ref().is_none_or(|g| g.allows_touch(id))
         && touch_owner.as_ref().is_none_or(|owner| owner.allows(id));

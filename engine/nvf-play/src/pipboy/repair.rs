@@ -294,6 +294,7 @@ pub fn keys(
     }
     for (step, request) in steps {
         if let Some(request) = &request {
+            if !crate::maintenance_touch::menu_allows(crate::maintenance_touch::Kind::Repair, script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game)) { continue; }
             if !request.repair(repair.0.as_ref()) { continue; }
             // Re-evaluate the actual selected unit and available donors at consumption.
             // A stale painted offer must never consume a donor for a missing target.

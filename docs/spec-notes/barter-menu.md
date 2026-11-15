@@ -664,3 +664,9 @@ density/size/focus, full-window camera, device/platform admission, keyboard capt
 free camera and fresh-menu state. A stale row, quantity session or quote is refused.
 Retired contact IDs are bounded at 32; exceeding that budget abandons proposals and
 captures until an actual neutral touch frame, without clearing hardware input.
+
+[design]
+Touch dispatch also checks the runtime's current top menu and active character
+creator. Barter and its own Quantity publication are admitted; an unrelated script
+modal opened after raw input retires the touch proposal. These checks apply only
+to this touch producer; ordinary keyboard/mouse/controller consumers are unchanged.

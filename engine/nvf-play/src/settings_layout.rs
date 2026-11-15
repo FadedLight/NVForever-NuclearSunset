@@ -125,6 +125,7 @@ pub const SECTIONS: &[Section] = &[
             "autosave-scripts",
         ],
     ),
+    section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1"]),
     section(
         "Gameplay",
         Some("Dialogue"),
@@ -336,6 +337,7 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     section(MOBILE_TAB, Some("Inventory and quick access"), &[
         "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
         "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1", "touch-pipboy-size-v1", "touch-pipboy-tab-swipes", "touch-direct-pipboy-v1",
+        "touch-barter-v1", "touch-maintenance-v1",
     ]),
     section(MOBILE_TAB, Some("Dialogue"), &[
         "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side",
@@ -587,7 +589,9 @@ mod tests {
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with, plus main da13f4f8a's grass-fire row (#2567).
-    const KNOWN: [(&str, &str); 158] = [
+    const KNOWN: [(&str, &str); 160] = [
+        ("touch-barter-v1", "Gameplay"),
+        ("touch-maintenance-v1", "Gameplay"),
         ("touch-practice-v1", "Controller"),
         ("touch-hotbar", "Controls"),
         ("touch-hotbar-slots", "Controls"),
@@ -1006,14 +1010,14 @@ mod tests {
     }
 
     #[test]
-    fn android_groups_the_same_158_rows_once_without_changing_the_registry() {
+    fn android_groups_the_same_160_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
         let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
-        assert_eq!(indices.len(), 158);
+        assert_eq!(indices.len(), 160);
         indices.sort_unstable();
         assert_eq!(indices, (0..list.len()).collect::<Vec<_>>());
         let mut mobile_keys = std::collections::HashSet::new();
@@ -1025,7 +1029,7 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 52);
+        assert_eq!(mobile_keys.len(), 54);
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "Gameplay > World");
         assert!(!mobile_keys.contains("grass-fire"), "upstream world setting is shared, not mobile-only");

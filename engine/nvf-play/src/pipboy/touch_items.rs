@@ -16,19 +16,19 @@ mod binding;
 
 pub struct OverlayCapture(pub bool);
 
-/// Rechecked after device switching, at the actual picking boundary.
+/// Shared device/platform admission without reading an overlay the raw owner may
+/// be mutating in the same system. Effect consumers also check their overlay.
 #[derive(bevy::ecs::system::SystemParam)]
-pub struct Admission<'w> {
+pub struct InputAdmission<'w> {
     bindings: Option<Res<'w, crate::bindings::Bindings>>,
     platform: Option<Res<'w, crate::pad::PlatformInputGate>>,
     switching: Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     capture: Option<Res<'w, crate::bindings::KeyboardCapture>>,
     camera: Option<Res<'w, crate::free_cam::FreeCam>>,
-    overlay: Option<Res<'w, OverlayCapture>>,
     fresh: Option<Res<'w, crate::menu::FreshMenu>>,
 
 }
-impl Admission<'_> {
+impl InputAdmission<'_> {
     pub fn allows_contact(&self, id: Option<u64>) -> bool {
         self.allows()
             && id.is_none_or(|id| self.platform.as_ref().is_none_or(|g| g.allows_touch(id)))
@@ -41,9 +41,21 @@ impl Admission<'_> {
             && self.switching.as_ref().is_none_or(|s| s.allows_actions())
             && self.capture.as_ref().is_none_or(|c| !c.0)
             && self.camera.as_ref().is_none_or(|c| !c.active)
-            && self.overlay.as_ref().is_none_or(|c| !c.0)
             && self.fresh.as_ref().is_none_or(|f| !f.0)
     }
+}
+
+/// Rechecked after device switching, at the actual picking boundary.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Admission<'w> {
+    input: InputAdmission<'w>,
+    overlay: Option<Res<'w, OverlayCapture>>,
+}
+impl Admission<'_> {
+    pub fn allows_contact(&self, id: Option<u64>) -> bool {
+        self.input.allows_contact(id) && self.overlay.as_ref().is_none_or(|c| !c.0)
+    }
+    pub fn allows(&self) -> bool { self.input.allows() && self.overlay.as_ref().is_none_or(|c| !c.0) }
 }
 
 pub const POINTER: bevy::picking::pointer::PointerId =

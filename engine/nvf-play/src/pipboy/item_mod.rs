@@ -311,6 +311,7 @@ pub fn keys(
     mut sounds: MessageWriter<UiSound>,
     prompt: Res<crate::menu::PromptKeys>,
     mut touch: crate::maintenance_touch::Requests,
+    script: Option<Res<crate::script::ScriptState>>,
 ) {
     let keys = keys.snapshot();
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
@@ -346,6 +347,7 @@ pub fn keys(
     }
     for (step, request) in steps {
         if let Some(request) = &request {
+            if !crate::maintenance_touch::menu_allows(crate::maintenance_touch::Kind::Mod, script.as_ref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game)) { continue; }
             if !request.modding(menu.0.as_ref()) { continue; }
             let live = current(&active, &sim, combat.as_deref());
             if menu.0.as_ref().is_none_or(|s| Some(&s.offer) != live.as_ref()) {

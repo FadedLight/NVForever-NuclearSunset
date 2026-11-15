@@ -22,6 +22,7 @@ mod tray_editor;
 mod icons;
 mod layout;
 mod modal;
+mod menu_sheets;
 mod practice;
 mod profiles;
 mod movement;
@@ -51,6 +52,7 @@ impl Plugin for TouchControlsPlugin {
 
         hotbar::install(app);
         pipboy_model::install(app);
+        menu_sheets::install(app);
 
         app.init_resource::<TouchState>()
             .add_message::<CursorMoved>()
@@ -509,8 +511,9 @@ fn input(
     next_play: Option<Res<NextState<nvf_play::PlayState>>>,
     bindings: Option<Res<Bindings>>,
     mut motion: MessageWriter<MouseMotion>,
-    (mut drawer,mut practice,mut modal,mut bar,mut model,mut arm,WorldInputBridges{mut world_touch,mut map}): (drawer::Bridge,practice::Bridge,modal::Bridge,hotbar::Bridge,pipboy_model::Bridge,pipboy_drag::Bridge,WorldInputBridges),
+    (mut drawer,mut practice,mut modal,mut bar,mut model,mut arm,WorldInputBridges{mut world_touch,mut map},mut sheets): (drawer::Bridge,practice::Bridge,modal::Bridge,hotbar::Bridge,pipboy_model::Bridge,pipboy_drag::Bridge,WorldInputBridges,menu_sheets::Ingress),
 ) {
+    sheets.reset();
     let modal_captures = modal.refresh();
     let previous_move = movement.clear_sample();
     state.pulses.clear(); state.interactive_actions = false; state.ui_capture = false;
@@ -572,7 +575,8 @@ fn input(
     let controller = bindings
         .as_deref()
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller);
-    arm.prepare(interactive&&!resized&&!controller&&layout.editor.is_none()&&!modal_captures
+    let sheet_menu = sheets.prepare(window_id, window, interactive && !resized && layout.editor.is_none());
+    arm.prepare(interactive&&!resized&&!controller&&layout.editor.is_none()&&!modal_captures&&!sheet_menu
         &&(playing||arm.inventory()),platform.as_deref());
     let drawer_allowed =
         playing && interactive && !controller && layout.editor.is_none() && drawer.allowed();
@@ -607,10 +611,10 @@ fn input(
             }
         }
     }
-    bar.prepare(size, interactive && !controller && (layout.editor.is_none() || layout.tray_editing()) && !modal_captures
+    bar.prepare(size, interactive && !controller && !sheet_menu && (layout.editor.is_none() || layout.tray_editing()) && !modal_captures
         && platform.as_ref().is_none_or(|gate|gate.allows_actions()), playing,
         &layout.config,gyro_options.enabled,&reserved);
-    model.prepare(interactive && !controller && layout.editor.is_none() && !modal_captures
+    model.prepare(interactive && !controller && !sheet_menu && layout.editor.is_none() && !modal_captures
         && platform.as_ref().is_none_or(|gate|gate.allows_actions())
         && !bar.captures_actions() && state.physical_mouse.is_empty() && state.physical_keys.is_empty(), size);
     state.ui_capture = bar.captures_actions();
@@ -637,11 +641,18 @@ fn input(
     }
     if practice.capture(&mut touches, window_id, size, interactive,
         effective_play == Some(nvf_play::PlayState::Menu)) {
+        sheets.cancel();
         arm.cancel();
         bar.cancel();
         drawer.drawer.cancel();
         world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
+        sync_touch(&mut state, bindings.as_deref(), false);
+        return;
+    }
+    if sheets.capture(&mut touches) {
+        arm.cancel(); model.cancel(); bar.cancel(); drawer.drawer.cancel(); map.cancel();
+        world_touch.cancel(); state.cancel_touch(); state.ui_capture = true; held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
         return;
     }
@@ -681,7 +692,8 @@ fn input(
     state.interactive_actions = playing && interactive && layout.editor.is_none() && !state.ui_capture;
     world_touch.prepare(state.interactive_actions,size);
     map.prepare(interactive && !controller && !modal_captures && layout.editor.is_none()
-        && !bar.captures_actions() && !arm.captures() && model.map_projection_ready(),layout.config.profile_epoch);
+        && !bar.captures_actions() && !bar.items_pending() && !arm.captures()
+        && model.map_projection_ready(),layout.config.profile_epoch);
     state.ui_capture|=map.captures();
     let mut drawer_committed = false;
     let mut gesture_committed = false;
@@ -691,6 +703,7 @@ fn input(
 
             continue;
         }
+        if sheets.tail(t) { continue; }
         if arm.captures(){arm.event(t,size);continue;}
         if !t.position.is_finite() { world_touch.cancel(); map.cancel(); state.cancel_touch(); sync_touch(&mut state, bindings.as_deref(), false); continue; }
         let p = t.position / size;
@@ -764,6 +777,13 @@ fn input(
             world_touch.cancel(); map.cancel();state.cancel_touch();held_sneak.active=false;
             sync_touch(&mut state,bindings.as_deref(),false);continue;
         }
+        // Hotbar's event also feeds ordinary TouchItems when its optional bar
+        // is disabled. Map canvas owns its gestures before that generic route;
+        // actual slot/tray/utility geometry and existing item contacts win.
+        if map.event(t,map_unclaimed) {
+            state.ui_capture=true;world_touch.cancel();state.cancel_touch();held_sneak.active=false;drawer.drawer.cancel();
+            sync_touch(&mut state,bindings.as_deref(),pause);continue;
+        }
         let consumed = bar.event(t,unclaimed);
         if bar.captures_actions() {
             // Capture can begin on a long-press release midway through this batch.
@@ -785,10 +805,6 @@ fn input(
                 layout.config.hints = !layout.config.hints;
                 continue;
             }
-        }
-        if map.event(t,map_unclaimed) {
-            state.ui_capture=true;world_touch.cancel();state.cancel_touch();held_sneak.active=false;drawer.drawer.cancel();
-            sync_touch(&mut state,bindings.as_deref(),pause);continue;
         }
         let run_lock_hit=playing&&options.run_lock&&movement::lock_available(&layout,&state,size)
             &&movement::lock_rect(&layout,&state,size).contains(t.position);
@@ -1402,6 +1418,7 @@ fn show_labels(
 #[cfg(test)]
 mod tests {
     include!("touch/tray_editor_tests.rs");
+    include!("touch/map_parent_tests.rs");
     use super::*;
     use bevy::input::{keyboard::Key, mouse::AccumulatedMouseMotion, InputPlugin};
     use bevy::state::app::StatesPlugin;

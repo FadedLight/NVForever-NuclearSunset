@@ -49,6 +49,19 @@ enum Source {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind { Repair, Mod, Vendor }
+/// Evaluated inside each existing consumer, using its actual ScriptState borrow.
+/// An absent runtime/menu preserves the existing no-script hand-built path.
+pub(crate) fn menu_allows(kind: Kind, game: Option<&fnv_game::Game<'_>>) -> bool {
+    use fnv_game::game::menus;
+    game.is_none_or(|g| {
+        !g.loading && !matches!(g.side_menu(), Some(menus::LOADING | menus::VATS))
+            && g.open_menu_code().is_none_or(|code| match kind {
+                Kind::Repair => matches!(code, menus::INVENTORY | menus::REPAIR),
+                Kind::Mod => matches!(code, menus::INVENTORY | menus::ITEM_MOD),
+                Kind::Vendor => code == fnv_game::repair::REPAIR_SERVICES_MENU,
+            })
+    })
+}
 impl Source {
     fn same_scroll_source(&self, next: &Self) -> bool {
         match (self, next) {
@@ -127,6 +140,8 @@ impl Default for State {
     }
 }
 impl State {
+    /// Saved presentation preference, independent of transient input admission.
+    pub fn enabled(&self) -> bool { self.enabled }
     fn for_platform(android: bool) -> Self {
         Self { enabled: android, source: None, context: None, allowed: false, hardware_hidden: false, contact: None, retired: Vec::new(), queue: VecDeque::new(), generation: 0, painted: None }
     }
@@ -208,6 +223,7 @@ fn publish(
 #[derive(SystemParam)]
 pub struct Bridge<'w> { state: ResMut<'w, State> }
 impl Bridge<'_> {
+    pub fn enabled(&self) -> bool { self.state.enabled() }
     pub fn prepare(&mut self, context: Option<Context>, allowed: bool) {
         let context = context.filter(|c| c.valid());
         let s = &mut self.state;
@@ -323,6 +339,7 @@ struct MaintenanceAdmission<'w> {
     free_camera: Option<Res<'w, crate::free_cam::FreeCam>>,
     fresh: Option<Res<'w, crate::menu::FreshMenu>>,
     paused: Option<Res<'w, crate::pause::Paused>>,
+    creator: Option<Res<'w, crate::creator::CreatorMenu>>,
 }
 impl MaintenanceAdmission<'_> {
     fn allows(&self, id: u64) -> bool {
@@ -333,6 +350,7 @@ impl MaintenanceAdmission<'_> {
             && self.free_camera.as_ref().is_none_or(|c| !c.active)
             && self.fresh.as_ref().is_none_or(|f| !f.0)
             && self.paused.as_ref().is_none_or(|p| !p.0)
+            && self.creator.as_ref().is_none_or(|c| !c.is_open())
     }
 }
 

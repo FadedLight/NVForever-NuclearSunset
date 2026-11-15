@@ -269,3 +269,24 @@ fn saved_opt_out_cancels_pending_and_held_confirmation_and_reloads_without_touch
     tap(&mut app, 83, Action::Confirm); assert_eq!(count(&app, GEAR), 1, "fresh stable input works after enabling");
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn actual_script_modal_or_other_maintenance_owner_opened_after_raw_confirm_cannot_consume() {
+    use fnv_game::game::menus;
+    for modding in [false, true] {
+        for blocker in [menus::MESSAGE, if modding { menus::REPAIR } else { menus::ITEM_MOD }] {
+            let mut app = fixture(modding, true);
+            tap(&mut app, 110, Action::Select(1)); raw_tap(&mut app, 111, Action::Confirm);
+            app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.open_menu(blocker);
+            app.update();
+            assert_eq!(count(&app, if modding { MOD } else { GEAR }), 2, "late actual top-menu {blocker} owns the action");
+            {
+                let mut script = app.world_mut().resource_mut::<crate::script::ScriptState>();
+                let game = &mut script.rt.as_mut().unwrap().game;
+                game.close_menu(); game.open_menu(if modding { menus::ITEM_MOD } else { menus::REPAIR });
+            }
+            tap(&mut app, 112, Action::Confirm);
+            assert_eq!(count(&app, if modding { MOD } else { GEAR }), 1, "fresh explicit confirmation works for its actual owner kind");
+        }
+    }
+}

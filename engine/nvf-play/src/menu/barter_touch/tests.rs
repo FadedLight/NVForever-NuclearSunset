@@ -72,6 +72,7 @@ fn mutate_after_raw(world: &mut bevy::prelude::World) {
         7 => world.get_mut::<Camera>(f.camera).unwrap().is_active = false,
         8 => world.resource_mut::<crate::pad::PlatformInputGate>().set_blocked(true),
         9 => world.resource_mut::<crate::bindings::Bindings>().device = crate::bindings::InputDevice::Controller,
+        10 => world.resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.open_menu(fnv_game::game::menus::MESSAGE),
         _ => unreachable!(),
     }
 }
@@ -85,6 +86,7 @@ fn scene(native: bool, phase: crate::PlayState) -> (App, FormId) {
     let (mut sim, stock) = simulation();
     let m = MenuModel::open_barter(&mut sim.world, stock, stock, CAPS, 100.0, 0).unwrap();
     let mut script = crate::script::ScriptState::over_no_plugins();
+    crate::script::engine_menu_opened(Some(&mut script), m.mode);
     let mut tiles = barter_menu::BarterTiles::default();
     if native {
         let mut ui = barter_menu::tests::fixture(|s| s);
@@ -177,6 +179,10 @@ fn actual_touch_barter_buys_and_sells_only_after_amount_then_accept_in_both_pres
         tap(&mut app, Target::One);
         assert_eq!(model(&app).quantity.unwrap().max, 8);
         assert_eq!(offered(&app), 0);
+        // This is the real engine Quantity publication (tiles::publish). It is
+        // not Game::menu, and may clear one frame after AmountOk applies.
+        app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.ui_prompt
+            = Some(fnv_game::game::menus::QUANTITY);
         tap(&mut app, Target::Min);
         assert_eq!(model(&app).quantity.unwrap().amount, 1);
         tap(&mut app, Target::Step(1));
@@ -425,6 +431,35 @@ fn actual_touch_barter_hardware_handoff_keeps_the_original_accept_key_consumer()
 }
 
 #[test]
+fn actual_touch_barter_late_script_message_prevents_accept_then_fresh_review_can_trade() {
+    for native in [false, true] {
+        let (mut app, stock) = scene(native, crate::PlayState::Menu);
+        let token = row(&app, Side::Player, GOODS);
+        tap(&mut app, Target::Row(token)); tap(&mut app, Target::All);
+        assert_eq!(offered(&app), 8);
+        let point = at(&app, Target::Accept);
+        edge(&mut app, 40, TouchPhase::Started, point); app.update();
+        edge(&mut app, 40, TouchPhase::Ended, point);
+        app.world_mut().resource_mut::<LateChange>().0 = Some(10);
+        app.update();
+        assert_eq!(app.world().resource::<crate::script::ScriptState>().rt.as_ref().unwrap().game.top_menu(),
+            Some(fnv_game::game::menus::MESSAGE), "actual script menu opened after raw input");
+        assert_eq!(offered(&app), 8);
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8));
+        assert_eq!(count(&mut app, PLAYER, CAPS), 1000);
+        for _ in 0..3 { app.update(); }
+        assert_eq!(offered(&app), 8);
+        app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap()
+            .game.open_menu(fnv_game::game::menus::BARTER);
+        app.update();
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (8, 8), "no stale replay on modal exit");
+        tap(&mut app, Target::Accept);
+        assert_eq!((count(&mut app, PLAYER, GOODS), count(&mut app, stock, GOODS)), (0, 16));
+        assert_eq!((count(&mut app, PLAYER, CAPS), count(&mut app, stock, CAPS)), (1072, 928));
+    }
+}
+
+#[test]
 fn barter_sheet_paint_and_hit_targets_share_safe_scaled_clipping_and_minimum_48_pixels() {
     let (app, _) = scene(false, crate::PlayState::Menu);
     let f = app.world().resource::<Fixture>().0;
@@ -464,7 +499,7 @@ fn actual_barter_sheet_nodes_use_the_same_current_scaled_rectangles_as_raw_hits(
         assert_eq!(app.world().get::<UiTargetCamera>(root).unwrap().0, f.camera);
         let children = app.world().get::<Children>(root).unwrap();
         for hit in hits {
-            assert!(children.iter().any(|entity| app.world().get::<Node>(*entity).is_some_and(|node|
+            assert!(children.iter().any(|entity| app.world().get::<Node>(entity).is_some_and(|node|
                 node.left == px(hit.rect.min.x / scale) && node.top == px(hit.rect.min.y / scale)
                 && node.width == px(hit.rect.width() / scale) && node.height == px(hit.rect.height() / scale))),
                 "the actual painted node and its raw hit rectangle differ");

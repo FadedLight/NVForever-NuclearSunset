@@ -9,6 +9,11 @@
   Raw keyboard presses, mouse-button presses, nonzero mouse wheel and actual
   window `CursorMoved` activity can yield the alternate touch sheet to hardware.
   Do not clear hardware state or treat synthesized look/menu actions as hardware.
+- [hypothesis] The pre-input reader queues at most 128 sheet edges and retains
+  at most 32 owned IDs. Replay occurs after the actual input selector and platform
+  hold sampler, before UI focus/picking. Overflow cancels proposals and waits for
+  actual neutral. No second production raw-touch reader is added. Camera/window,
+  DPI, safe insets and UI scale must still match the captured batch at replay.
 - [hypothesis] The selected alternate sheet receives admitted touch edges before
   dialogue, generic buttons, tabs, item picking and world input. A gesture belongs
   to one owner. Hardware use, lifecycle loss, presentation changes and fresh menu
@@ -17,6 +22,10 @@
   quarantined by an alternate sheet, including its closing frame. Ordinary mouse,
   keyboard and controller handling remains available. The filter is an optional
   resource; absent ownership preserves desktop behavior.
+- [hypothesis] A visible sheet suppresses the stale underlying cursor through
+  derived pointer views only. Actual hardware intent yields the sheet before
+  focus; raw Window and button state remain intact. Dialogue's separate existing
+  reader filters only owned contact IDs, including release/cancel edges.
 - [documented] `dialogue_split.rs` already owns a full-window UI camera while
   cropping only the world camera. UI hit tests use physical camera viewports;
   absolute sheet rectangles are logical full-window coordinates.

@@ -464,6 +464,13 @@ impl Plugin for InputSwitchPlugin {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// A race fixture can sample the real pre-existing held-touch state between
+    /// raw ingress and InputSystems, then reopen global admission before DATA.
+    pub(crate) fn sample_platform_holds_now(world:&mut World) {
+        use bevy::ecs::system::RunSystemOnce;
+        world.run_system_once(super::remember_platform_holds).unwrap();
+    }
+
     use super::*;
 
     fn app() -> (App, Entity) {

@@ -433,6 +433,7 @@ fn keys(
     // against the actual current quote/unit/caps and current selection, not the last
     // rendered vendor list. Only one confirmation may act in a batch.
     for request in mobile {
+        if !crate::maintenance_touch::menu_allows(crate::maintenance_touch::Kind::Vendor, Some(&rt.game)) { continue; }
         let live = view(rt, &mut sim, combat.as_deref(), open);
         if !request.vendor(open.vendor, &live) { open.drawn = None; continue; }
         use crate::maintenance_touch::Action;

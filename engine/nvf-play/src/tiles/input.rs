@@ -198,6 +198,7 @@ pub(crate) struct Devices<'w, 's> {
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     /// The window's pointer asleep under the controller is on nothing (#2310).
     pad_pointer: Option<Res<'w, crate::pad::pointer::PadPointer>>,
+    touch_owner: Option<Res<'w, crate::ui_pointer::TouchUiCapture>>,
 }
 
 /// T15a: the message box button the pointer or a script clicked on its tiles this frame,
@@ -943,7 +944,8 @@ pub(crate) fn feed(
     let anchor = super::draw::menu_anchor(dialog_menu.is_some() && taking.len() == 1);
     // The HUD alone under a script's cursor is hit where its tiles stand, in no frame.
     let hud_alone = hud_cursor && aid_at.is_none() && taking.len() == 1 && rt.game.ui_tree.menu(super::draw::HUD_MENU) == taking.first().copied();
-    let sleeping = crate::pad::pointer::asleep(devices.pad_pointer.as_deref());
+    let sleeping = crate::pad::pointer::asleep(devices.pad_pointer.as_deref())
+        || devices.touch_owner.as_ref().is_some_and(|owner| owner.pointer_suppressed());
     let cursor = || {
         aid_at.or_else(|| {
             devices.windows.single().ok().filter(|_| !sleeping).and_then(|w| {

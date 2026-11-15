@@ -265,13 +265,14 @@ type InputGates<'w> = (
     Option<Res<'w, crate::bindings::Bindings>>,
     Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     Option<Res<'w, crate::pad::PlatformInputGate>>,
+    Option<Res<'w, crate::ui_pointer::TouchUiCapture>>,
 );
 type Availability<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::creator::CreatorMenu>>);
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn read(
     settings: Res<TouchDialogue>,
     menu: Res<DialogueMenu>,
-    (bindings, touch_switch, platform): InputGates<'_>,
+    (bindings, touch_switch, platform, touch_owner): InputGates<'_>,
     (state, paused, script, creator): Availability<'_>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     targets: Query<(Entity, TargetData)>,
@@ -346,8 +347,14 @@ fn read(
     let events: Vec<_> = touches
         .read()
         .filter(|e| e.window == window_id)
+        .filter(|e| touch_owner.as_ref().is_none_or(|owner| owner.allows(e.id)))
         .cloned()
         .collect();
+    if gestures.gesture.as_ref().is_some_and(|g| touch_owner.as_ref().is_some_and(|owner| !owner.allows(g.id))) {
+        gestures.gesture = None;
+        gestures.armed = None;
+    }
+    gestures.contacts.retain(|id| touch_owner.as_ref().is_none_or(|owner| owner.allows(*id)));
     let input_blocked = touch_switch.as_deref().is_some_and(|s| !s.allows_actions())
         || platform.as_deref().is_some_and(|p| {
             !p.allows_actions() || events.iter().any(|event| !p.allows_touch(event.id))

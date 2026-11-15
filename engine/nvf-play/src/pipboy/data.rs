@@ -732,6 +732,8 @@ pub struct Input<'w, 's> {
     touch_pip: Option<Res<'w,super::PipBoy>>,
     touch_map: Option<ResMut<'w,touch_map::TouchMap>>,
     map_gate: touch_map::Gate<'w,'s>,
+    // Separate from the raw bridge's shared gate: its parent owns this overlay mutably.
+    map_overlay: Option<Res<'w, super::touch_items::OverlayCapture>>,
     menu: MessageReader<'w, 's, MenuInput>,
     pip_out: MessageWriter<'w, PipBoyInput>,
     time: Res<'w, Time<Real>>,

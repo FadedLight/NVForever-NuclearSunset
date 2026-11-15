@@ -68,3 +68,20 @@ fn actual_vendor_confirmation_requotes_after_caps_or_unit_changes() {
         assert_ne!(app.world().resource::<RepairServices>().0.as_ref().unwrap().drawn.as_ref(), Some(&painted), "real quote model refreshes instead of predicting a charge");
     }
 }
+
+#[test]
+fn actual_script_message_opened_after_vendor_raw_confirmation_keeps_caps_until_fresh_owner_confirmation() {
+    let mut app = vendor_app(true);
+    let quote = app.world().resource::<RepairServices>().0.as_ref().unwrap().drawn.as_ref().unwrap().rows[0].quote;
+    let cost = quote.cost().unwrap();
+    raw_tap(&mut app, 115, Action::Confirm);
+    app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.open_menu(fnv_game::game::menus::MESSAGE);
+    app.update(); assert_eq!(count(&app, CAPS), 1000);
+    {
+        let mut script = app.world_mut().resource_mut::<ScriptState>();
+        let game = &mut script.rt.as_mut().unwrap().game;
+        game.close_menu(); game.open_menu(REPAIR_SERVICES_MENU);
+    }
+    tap(&mut app, 116, Action::Confirm);
+    assert_eq!(count(&app, CAPS), 1000 - cost as i32);
+}

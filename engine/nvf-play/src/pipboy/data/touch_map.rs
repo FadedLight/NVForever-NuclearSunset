@@ -43,7 +43,9 @@ impl ProjectionStamp {
         if self.device || !size.is_finite() || size.min_element()<=0.0 || !centre.is_finite() {return None;}
         self.flat=Some((entity,size,centre));Some(self)
     }
-    pub fn with_camera(mut self,entity:Entity,camera:&Camera)->Option<Self> {
+    pub fn with_camera(mut self,entity:Entity,camera:&Camera,target:&bevy::camera::RenderTarget)->Option<Self> {
+        let expected=bevy::camera::RenderTarget::Window(bevy::window::WindowRef::Entity(self.window));
+        if target.normalize(Some(self.window))!=expected.normalize(Some(self.window)) {return None;}
         let viewport=camera.logical_viewport_rect()?;
         if !self.device || !camera.is_active || !camera.computed.clip_from_view.is_finite()
             || !viewport.min.is_finite() || !viewport.max.is_finite() || viewport.size().min_element()<=0.0 {return None;}
@@ -157,7 +159,7 @@ impl TouchMap {
 /// Shared late admission; desktop fixtures need none of these optional resources.
 #[derive(SystemParam)]
 pub struct Gate<'w,'s> {
-    admission:super::super::touch_items::Admission<'w>,
+    admission:super::super::touch_items::InputAdmission<'w>,
     physical:Option<Res<'w,super::super::touch_scroll::PhysicalPriority>>,
     windows:Query<'w,'s,(Entity,&'static Window),With<PrimaryWindow>>,
     safe:Option<Res<'w,crate::touch_safe_area::SafeInsets>>, ui:Option<Res<'w,UiScale>>,
@@ -165,7 +167,7 @@ pub struct Gate<'w,'s> {
     paused:Option<Res<'w,crate::pause::Paused>>, location:Option<Res<'w,crate::Location>>,
     touches:Option<Res<'w,bevy::input::touch::Touches>>,
     flat:Query<'w,'s,(Entity,&'static ComputedNode,&'static UiGlobalTransform),With<super::super::FlatScreen>>,
-    cameras:Query<'w,'s,(Entity,&'static Camera),With<crate::PlayerCamera>>,
+    cameras:Query<'w,'s,(Entity,&'static Camera,&'static bevy::camera::RenderTarget),With<crate::PlayerCamera>>,
 }
 impl Gate<'_,'_> {
     fn stamp(&self,pip:&PipBoy,screen:&PipBoyScreen)->Option<ProjectionStamp> {
@@ -181,7 +183,7 @@ impl Gate<'_,'_> {
         let device=pip.frame==super::super::Frame::Device && screen.on_model;
         let stamp=ProjectionStamp::new(window_id,window,screen,device,presentation);
         let stamp=if device {
-            let (entity,camera)=self.cameras.single().ok()?;stamp.with_camera(entity,camera)?
+            let (entity,camera,target)=self.cameras.single().ok()?;stamp.with_camera(entity,camera,target)?
         } else {
             let (entity,node,at)=self.flat.single().ok()?;stamp.with_flat(entity,node.size(),at.translation)?
         };
@@ -273,18 +275,18 @@ impl Bridge<'_,'_> {
             let old_span=before.distance(other_at);let new_span=after.distance(other_at);
             if finger.at.distance(other.at)<MIN_SPAN || event.position.distance(other.at)<MIN_SPAN
                 || old_span<=0.0 || !new_span.is_finite() {self.state.cancel();self.state.drain=true;return true;}
-            self.state.push(Edit::Transform {from:(before+other_at)*0.5,to:(after+other_at)*0.5,ratio:new_span/old_span},surface.view,surface.mag);
+            if !self.state.push(Edit::Transform {from:(before+other_at)*0.5,to:(after+other_at)*0.5,ratio:new_span/old_span},surface.view,surface.mag) {return true;}
             self.state.pointer=Some((after+other_at)*0.5);
         } else if self.state.moved || event.position.distance(finger.origin)>SLOP {
             self.state.moved=true;
-            self.state.push(Edit::Transform{from:before,to:after,ratio:1.0},surface.view,surface.mag);
+            if !self.state.push(Edit::Transform{from:before,to:after,ratio:1.0},surface.view,surface.mag) {return true;}
             self.state.pointer=Some(after);
         } else {self.state.pointer=Some(after);}
         if let Some(f)=self.state.fingers[index].as_mut() {f.at=event.position;}
         if event.phase==TouchPhase::Ended {
             if !self.state.moved && !self.state.multiple {
                 let marker=self.state.marker;
-                if marker==surface.marker(after) {self.state.push(Edit::Tap{point:after,marker},surface.view,surface.mag);}
+                if marker==surface.marker(after) && !self.state.push(Edit::Tap{point:after,marker},surface.view,surface.mag) {return true;}
             }
             self.state.fingers[index]=None;
             if self.state.fingers.iter().all(Option::is_none) {self.state.drain=true;}
@@ -302,7 +304,7 @@ pub(super) fn take(st:&mut DataState,tab:usize,screen:Option<&PipBoyScreen>,inpu
         || input.keys.any_just_pressed([KeyCode::Enter,KeyCode::NumpadEnter,KeyCode::Space,KeyCode::KeyX,KeyCode::KeyE]);
     let stamp=input.touch_pip.as_deref().zip(screen).and_then(|(pip,screen)|input.map_gate.stamp(pip,screen));
     let state=input.touch_map.as_deref_mut()?;
-    if !allowed || hardware || !input.map_gate.admission.allows()
+    if state.overflow || !allowed || hardware || input.map_overlay.as_ref().is_some_and(|overlay| overlay.0) || !input.map_gate.admission.allows()
         || state.fingers.iter().flatten().any(|f|!input.map_gate.admission.allows_contact(Some(f.id))) {
         state.cancel();return None;
     }
@@ -353,3 +355,6 @@ pub(super) fn finish(st:&mut DataState,view:&View,tap:Option<Option<u32>>) {
 }
 
 
+
+#[cfg(test)]
+pub(crate) mod tests;

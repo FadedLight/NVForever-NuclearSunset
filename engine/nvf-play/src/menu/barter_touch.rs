@@ -270,10 +270,23 @@ struct Admission<'w, 's> {
     fresh: Option<Res<'w, super::FreshMenu>>,
     capture: Option<Res<'w, crate::bindings::KeyboardCapture>>,
     free_cam: Option<Res<'w, crate::free_cam::FreeCam>>,
+    script: Option<Res<'w, crate::script::ScriptState>>,
+    creator: Option<Res<'w, crate::creator::CreatorMenu>>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     cameras: Query<'w, 's, (&'static Camera, &'static RenderTarget)>,
 }
 impl Admission<'_, '_> {
+    fn menu_allows(&self, m: &MenuModel) -> bool {
+        if self.creator.as_ref().is_some_and(|c| c.is_open()) { return false; }
+        self.script.as_ref().and_then(|s| s.rt.as_ref()).is_none_or(|rt| {
+            use fnv_game::game::menus;
+            rt.game.top_menu().is_none_or(|code| code == menus::BARTER
+                || (code == menus::QUANTITY && m.quantity.is_some()))
+                // ui_prompt is the engine's own Quantity publication, not a top
+                // menu. Its clearing can trail apply_input by one frame.
+                && rt.game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)
+        })
+    }
     fn allows(&self, frame: Frame, id: u64) -> bool {
         self.bindings.as_ref().is_none_or(|b| b.device == crate::bindings::InputDevice::KeyboardMouse)
             && self.switch.as_ref().is_none_or(|s| s.allows_actions())
@@ -312,6 +325,7 @@ impl Bridge<'_, '_> {
             if !self.admission.allows(frame, event.id) { self.state.cancel(); return owned; }
         }
         let Some(m) = self.active.as_ref().and_then(|a| a.0.as_ref()) else { return owned };
+        if !self.admission.menu_allows(m) { self.state.cancel(); return owned; }
         self.state.event(event, m)
     }
     pub fn captures_touch(&self, id: u64) -> bool { self.state.captures_touch(id) }
@@ -335,7 +349,8 @@ fn dispatch(mut state: ResMut<TouchBarter>, options: Res<Options>, mut active: R
     let Some(frame) = state.frame.filter(|_| options.enabled && state.visible()) else { return };
     let Some(m) = active.0.as_mut().filter(|m| session(m) == Some(pending.identity.session)) else { return };
     if state.identity != Some(pending.identity) || m.category != pending.identity.category
-        || prompt(m) != pending.identity.prompt || !admission.allows(frame, pending.id) { state.cancel(); return; }
+        || prompt(m) != pending.identity.prompt || !admission.allows(frame, pending.id)
+        || !admission.menu_allows(m) { state.cancel(); return; }
     let changed = |m: &mut MenuModel| { m.status = Some("Trade changed. Review the item and amount again.".into()); };
     let all = matches!(&pending.action, Action::Stage(_, true));
     let stage = matches!(&pending.action, Action::Stage(..));

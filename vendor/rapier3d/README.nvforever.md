@@ -42,8 +42,14 @@ proof sets. Query refresh must not overwrite a queued kinematic target, advance
 simulation or interpolation time, lose quarantine reports, or publish an
 unfinished collision tree.
 
-[design] This source upgrade has not been compiled or executed by its author.
-It does not qualify Android gameplay, GPU behavior, a canonical workspace run,
-phone crashes, or any mod/profile. Those checks remain separate. The vendor's
+[implementation evidence] The combined source at `d66eec9a7780cef13ad1f56e4ca7adbe3fe3c93e`
+passes 225 host physics tests across all seven package test binaries, with one
+existing diagnostic probe ignored and unexecuted. Rust optimization level 2 keeps
+debug assertions and overflow checks enabled. The default island stress retains
+all eight seeds and 1,200 steps per seed. The earlier unoptimized stress attempt
+hit its time bound and is not counted as a pass.
+
+[design] These checks do not qualify Android gameplay, GPU behavior, the full engine
+workspace, phone crashes, or any mod/profile. Those checks remain separate. The vendor's
 internal Cargo.lock is the exact published package file; it does not stand in
 for normal regeneration of the two workspace locks.

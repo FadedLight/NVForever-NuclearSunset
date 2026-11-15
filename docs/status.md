@@ -25,7 +25,7 @@ Experimental Android platform work (#2436): [ARM64 app, read-only game import,
 startup, process restart and icon touch controls with layout editing](design/android.md).
 The first test APK was installed and reached the opening interior. An exterior-arrival
 physics assertion exposed a [query-refresh registration defect](spec-notes/query-refresh-island-lifecycle.md);
-the bounded repair passes all 114 physics fixtures and the animated-collision regression,
+the physics regression checks pass with the integrated Rapier 0.36.1 backend,
 with device confirmation pending. Full
 gameplay, lifecycle and performance acceptance remain open. This is not a qualified
 Android release. [Build and touch-control instructions](android.md).
@@ -36,10 +36,10 @@ teaches movement and actions through isolated synthetic input. These library/tes
 targets pass ARM64 compilation; rendered device acceptance remains pending.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
-repair and weapon-mod touch sheets are being integrated over the existing game-rule
+repair and weapon-mod touch sheets are integrated over the existing game-rule
 consumers. Canonical launcher/adaptive icon resources and an explicit diagnostics
-build option are authored; packaging/consumer checks and device acceptance remain
-pending. The existing qualified development APK remains the test baseline; these
+build option are implemented; new menu App execution, final packaging checks and
+device acceptance remain pending. The existing qualified development APK remains the test baseline; these
 new features are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP

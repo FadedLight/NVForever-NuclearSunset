@@ -120,6 +120,22 @@ Reset returns to the guide; Close or Escape returns to the paused Settings page.
 The active session is never saved and practice does not change a gameplay save.
 This source increment still needs Rust execution and rendered device validation.
 
+## Touch inventory menus
+
+The current development source adds direct dragging and two-finger pinch on the
+Pip-Boy's world and local maps. Fast travel keeps its usual eligibility checks and
+confirmation.
+
+Gameplay and Mobile > Inventory menus offer **Touch barter menu** and **Touch repair
+and weapon mods**. In barter, tap a row to select it, choose a quantity for the
+basket, review the prices and caps, then Accept. Cancel preserves carried items and
+caps. Repair and weapon-mod lists also separate selection from confirmation;
+the existing eligibility rules decide which actions can be confirmed.
+
+Hardware input restores the ordinary menu presentation. A first return touch can
+restore the touch sheet without activating an item. These presentations still need
+phone acceptance for readability, reach and native-menu coexistence.
+
 ## Mobile performance
 
 Display > Performance offers Battery (30 FPS, 50% world resolution), Balanced

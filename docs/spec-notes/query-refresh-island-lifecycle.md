@@ -49,9 +49,16 @@
   queues before applying quarantine remedies, retaining their new dirty marks and
   rebuilt bodies for the next query. Reports remain one-time owner reports, and
   drawing forgets quarantined poses through the existing handler.
-- [implementation status] The combined query/quarantine controls are authored against
-  the actual wrapper, native pipeline and scene queries. Body/ragdoll same-query
-  recovery, invalid collider/pose refusal, later true-step bookkeeping and normal
-  queued motion must be executed alongside all earlier lifecycle and incoming-main
-  interpolation/ragdoll/debug/rate tests. No new pass, Android crash attribution or
-  device/game qualification is claimed by these source changes.
+- [implementation evidence] The actual host wrapper/pipeline/query baseline passes
+  its normal queued-motion control and fails five same-query remedy/report and
+  positive-step bookkeeping assertions. The unchanged six controls then pass with
+  the bounded correction. A separate post-fix finite kinematic `Enabled` control
+  passes; no pre-fix result is claimed for that additional case. The combined source
+  at `d66eec9a7780cef13ad1f56e4ca7adbe3fe3c93e` passes 225 physics tests across seven
+  binaries, including the three unchanged queued-motion contracts, main's drawing,
+  ragdoll and default island stress checks. One existing diagnostic probe remains
+  ignored/unexecuted. Optimization level 2 retains debug assertions and overflow
+  checks; no seed, step count or assertion was reduced.
+- [implementation status] Full engine/wrapper execution, strict hosted checks,
+  source-identical native packaging and device/game acceptance remain separate.
+  These CPU results do not establish an Android crash cause or cure.

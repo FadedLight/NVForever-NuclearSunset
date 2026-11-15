@@ -995,16 +995,31 @@ pub(crate) fn forget_relations(g: &Game) {
 /// [`faction_relation`] does (0 neutral, 1 enemy, 2 ally, 3 friend). A media location
 /// controller's conditional faction asks this of the player (docs/spec-notes/audio.md §13).
 pub fn factions_relation(g: &Game, mine: &[FormId], o: FormId) -> i64 {
-    if o == FormId::PLAYER_REF && mine.iter().any(|f| g.player.enemy_of.contains(f)) {
-        return 1;
-    }
     factions_between(g, mine, o, &factions_of(g, o))
+}
+
+/// Whether the player is an enemy of an actor in the factions `mine` by a faction enemy
+/// flag (SetPCEnemyOfFaction, a witnessed crime): one of `mine` is flagged, and none of
+/// the others is the player's ally or friend (`theirs`: the player's factions). A
+/// faction disguise makes such a faction the player's friend: the NCR armour's OnEquip
+/// makes PlayerFaction and ArmorNCRFactionNV friends, every NCR soldier is in
+/// ArmorNCRFactionNV too, and the disguise pulse takes sniffers near the player out of
+/// it, by its notes so that they may turn hostile to a player they think little of
+/// [observed: FalloutNV.esm's disguise scripts; hypothesis: the friendship outranks the
+/// flag, docs/spec-notes/disguises.md §3]. The flagged faction's own friendship does
+/// not count: a crime among the player's friends stays a crime.
+pub fn player_enemy_of_factions(g: &Game, mine: &[FormId], theirs: &[FormId]) -> bool {
+    let enemy_of = &g.player.enemy_of;
+    if enemy_of.is_empty() || !mine.iter().any(|f| enemy_of.contains(f)) {
+        return false;
+    }
+    !mine.iter().filter(|f| !enemy_of.contains(f)).any(|&x| theirs.iter().any(|&y| matches!(reaction(g, x, y), 2 | 3)))
 }
 
 /// [`factions_relation`] with `o`'s factions given (`theirs`): reads no kept factions, so
 /// it takes no lock (a detection round's pairs on several threads, #1799).
 pub fn factions_between(g: &Game, mine: &[FormId], o: FormId, theirs: &[FormId]) -> i64 {
-    if o == FormId::PLAYER_REF && mine.iter().any(|f| g.player.enemy_of.contains(f)) {
+    if o == FormId::PLAYER_REF && player_enemy_of_factions(g, mine, theirs) {
         return 1;
     }
     let all: Vec<i64> = mine.iter().flat_map(|&x| theirs.iter().map(move |&y| (x, y))).map(|(x, y)| reaction(g, x, y)).collect();

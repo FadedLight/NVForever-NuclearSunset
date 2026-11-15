@@ -2379,3 +2379,81 @@ already talking takes over at once, same topic or another; nothing is queued or 
      clip. [hypothesis] NVForever keeps the set's idle on bones the active clips omit;
      confirm whether those beats continue and whether their phase restarts on a
      transition. Record clip names/times with the capture where available.
+
+## Added 2026-11-14 (actor stealth fields, #2557)
+
+170. **How do cloaked Nightkin and nightstalkers look and change state?** (P2; #2557,
+     refraction.md section 5.) [observed: owner's 2026-11-14 REPCONN playtest, issue #2557
+     comment] Nightkin there were drawn plain even as their uncloak sound/effect played.
+     [design, #2557] NVForever now refracts loaded living actors at Chameleon >= 1,
+     restoring the body, outfit and weapon when the value drops or the actor dies.
+     [hypothesis] The player's existing 0.03 screen shift and 2 s shimmer provisionally
+     apply to other actors. To check in the original: at REPCONN and in the caves near
+     Jacobstown, record the outline, weapon and outfit while cloaked, during an attack,
+     after combat and on death; compare the bend/shimmer to a player's Stealth Boy.
+     Check that Jacobstown's residents stay plain. Also record whether nightstalkers
+     cloak, which encountered variant does so, and under what conditions; the owner's
+     comment leaves that uncertain, and no nightstalker record facts were supplied.
+
+## Added 2026-11-14 (helipad ladder pair, #2528)
+
+171. **Which helipad ladder faces are usable, and can the upper endpoint be targeted
+     from the deck?** (P2; #2528, cells-refs.md §5.) [documented: supplied writer
+     brief #2528 round w4, fnvtool ESM decode of FalloutNV.esm] The nearly coincident
+     lower pair is teleporting `00164C64` (`VHDExteriorLadder`) at
+     (67942.66,19400.51,4663.61), z rotation 3.442, and plain `00164C65` (DOOR
+     `00060730`, `UtlHallBgEndSewerExLad01`, FULL Ladder) at
+     (67941.33,19400.33,4664.01), z rotation 0.300, with no XTEL/XATO/XESP or
+     reference flags. [observed: supplied main-session run 2026-11-14 23:14,
+     `ov15/smoke-2528b/*.log`] Ours at spot 3, feet near (67950,19440,4802),
+     selected plain `00164C65` at yaw 236, pitches 0/-30/-60, drawing Open / Ladder.
+     [hypothesis, #2528] Ours retains ordinary non-teleport Open/Close toggling for
+     that member; whether the original offers it at all is unknown. To check:
+     approach this face from that landing and the opposite face from the south
+     (the separate lower smoke approach is near (67942.7,19320.5,4806)). Record
+     actual feet/view, targeted reference (distinguish the two IDs), prompt or its
+     absence, and the result of pressing E twice: travel, visible movement, sound,
+     state-only toggle or nothing. Does the plain back-to-back ladder have a prompt
+     and activation, and does the opposite face select the teleporting member?
+
+     [observed: same supplied run] Only original sweep looks 11/23 on the deck
+     targeted upper `00164C63`: from (67900,19440,5101) yaw 121, pitch -60, and
+     (67915,19385,5101) yaw 54, pitch -60. Other sampled deck looks hit deck STAT
+     `0012CE4B` or nothing. To check in the original: try these views and small
+     yaw/pitch changes, and look straight down from the deck near the upper
+     endpoint (67939.5,19439.3,5028). Record target ID, exact prompt/absence and E
+     result, with actual feet and view. Is the top usable from the deck, only from
+     a narrow angle, or not there at all? Compare with activating the lower
+     teleporting member as a control. [design, #2528] Do not infer original
+     behavior from NVForever's successful teleport smoke scenarios.
+
+## Added 2026-11-15 (a script's Disable of the player, #2617)
+
+172. **Can a script disable the player, and can a disabled player use a scripted load
+     door?** (P2; #2617, doors.md §6.) VHDIntakeTowerLegionaryDespawnScript (SCPT
+     0x0013CA2C) disables whoever enters its trigger (VHDIntakeTowerLegionaryDespawnTriggerREF,
+     0x0013CA72) once VHDLegionBattle.IntakeTowerStrategy is 2 [observed: the data].
+     In any interior: `player.disable`, then `player.getdisabled` (1 or 0?), walk, and use a
+     load door, an unscripted one and one whose OnActivate ends in a bare Activate (the
+     Power Plant 01 elevator, VHDODeckElevREF 0x0013151C, in HooverDamIntODeck). Then, on a
+     save there, `set VHDLegionBattle.IntakeTowerStrategy to 2`, `player.moveto 0013CA72`
+     and `player.getdisabled`. Ours since #2617: Disable of the player does nothing
+     [hypothesis]; GetDisabled 1 or a door that stays shut in the original says otherwise.
+
+## Added 2026-11-15 (faction disguises, #2611)
+
+173. **Does the NCR armour fool the NCR when the player is an enemy of NCRFactionNV?**
+     (P2; #2611, disguises.md §3.) Ours since #2611: a faction enemy flag yields to the
+     disguise's friendship (ArmorNCRFactionNV, which every NCR soldier is in); only
+     sniffers (VNCRSnifferFaction) within the pulse's 25 ft (about 533 units) see
+     through [hypothesis]. At Hoover Dam by day, stand on the road at
+     VHDAssassinationSetupREF (0x0012FCF0), `player.additem 00129254 1`, equip it, then
+     `SetPCEnemyOfFaction 000A46E7 1`. For 30 s note whether the troopers and engineers
+     near (VHDPreBattleNCRTrooper4REF 0x0014633D, VHDPreBattleNCREngineer02REF
+     0x0014695E) attack, and read `VHDPreBattleNCRTrooper4REF.GetFactionRelation player`
+     and `GetCombatTarget` on the rangers by the vertibird pad (VHDPreBattleRanger04REF
+     0x0014694C, a sniffer about 2,000 units off). Then walk up to that ranger (under
+     500 units, in sight) and note whether it attacks and the others follow. Nobody
+     attacking until the ranger is near agrees with ours; everyone attacking at once
+     says the flag beats the disguise (then the disguise works only through the
+     reputation reset, reputation.md §4).

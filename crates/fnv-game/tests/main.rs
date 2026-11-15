@@ -63,6 +63,7 @@ mod jip7;
 mod jip8;
 mod jip9;
 mod knockdowns;
+mod lighting_session;
 mod lutana;
 mod nellis_hangar_doors;
 mod nif_player_models;

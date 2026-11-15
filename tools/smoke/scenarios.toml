@@ -46,6 +46,7 @@ untimed = [
   "NVF_PLAY_TEST_SANDBOX_INTERRUPT",
   "NVF_PLAY_TEST_MELEE_KNOCKBACK",
   "NVF_PLAY_TEST_RAGDOLL_FAIL",
+  "NVF_PLAY_TEST_DEATH_RECOVERY",
 ]
 
 # Test aids whose value is a list of timed items (`<seconds>:<what>`), joined with sep.
@@ -194,6 +195,35 @@ paths = [".github/workflows/", "tools/release/"]
 cmd = ["python", "-m", "unittest", "discover", "-s", "tools/release/tests"]
 
 # ------------------------------------------------------------------ renderer, sky, image space
+
+[[scenario]]
+name = "death-recovery-handoff"
+source = "original death reload observed in campaign o29_dmg (2026-11-08, #1858), docs/handoff/observer-checks.md item 89; bounded recovery policy in docs/spec-notes/player-death-recovery.md"
+note = "UNRUN: an isolated NVForever home saves a living player before KillActor; the existing load handoff must take over once, without overwriting that save. This is separate from the unchanged camera-only fade timing scenario."
+areas = ["save", "combat"]
+paths = ["engine/nvf-play/src/save.rs", "engine/nvf-play/src/save/death_recovery.rs", "engine/nvf-play/src/loading.rs", "engine/nvforever/src/handoff.rs"]
+env = { NVFOREVER_HOME = "death-recovery-home", NVF_PLAY_TEST_DEATH_RECOVERY = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "20:save death-recovery-living;21:close;24:player.killactor;25:close", NVF_PLAY_TEST_HANDOFF_EXIT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
+run_seconds = 90
+ends = "test aid NVF_PLAY_TEST_HANDOFF_EXIT: the new run took over and its world is in"
+expect = [
+  { re = 'save: wrote .*death-recovery-living\.nvfsave', count = 1, label = "one living save is written" },
+  { re = 'death recovery: loading .*death-recovery-living\.nvfsave after', count = 1, label = "death selects the living save once" },
+  { re = 'load: handing over to a new run with --load .*death-recovery-living\.nvfsave', count = 1, label = "one existing load handoff starts" },
+  { re = 'load: restored .*death-recovery-living\.nvfsave: \d+ changed references', count = 1, label = "the new run restores the living save" },
+  { re = 'handoff: window shown after [\d.]+ s$', label = "the new window is shown" },
+  { text = "the new run took over and its world is in; ending it", label = "the restored world comes in" },
+  { re = 'load: the new run is up after [\d.]+ s; ending this one', label = "the old run ends after takeover" },
+  { text = "No living save could be loaded", count = 0, label = "the usable living save is not rejected" },
+  { re = 'before the world was in|before it was ready|the previous run did not end normally', count = 0, label = "no handoff timeout or crash" },
+]
+order = [[
+  { re = 'save: wrote .*death-recovery-living\.nvfsave', label = "save first" },
+  { re = 'death recovery: loading .*death-recovery-living\.nvfsave after', label = "then recover" },
+  { re = 'handoff: window shown after [\d.]+ s$', label = "new window shows" },
+  { re = 'load: restored .*death-recovery-living\.nvfsave', label = "restore after handoff" },
+  { text = "the new run took over and its world is in; ending it", label = "restored world ready" },
+]]
 
 [[scenario]]
 name = "memory-budget-capped"
@@ -1469,9 +1499,11 @@ expect = [
   { json = "verdicts.stays where it is", schema = "fnv.ai.reach/1", equals = 1571, known_failing = "main 2026-10-11: 1,602" },
   { json = "verdicts.never chosen: needs a linked reference the actor lacks", schema = "fnv.ai.reach/1", equals = 2810, known_failing = "main 2026-10-11: 3,185" },
   { json = "verdicts.nowhere to go: the location is the player, who is nowhere yet", schema = "fnv.ai.reach/1", equals = 177, known_failing = "main 2026-10-11: 182" },
-  { json = "verdicts.talks: goes up to its target from where it is", schema = "fnv.ai.reach/1", equals = 126 },
+  # 127 since fe707658d (2026-11-14, #2451): a Dialogue package talking to another actor or a talking activator is carried out; the 3 pairs "not carried out yet: a conversation between two actors" became 1 talks + 2 reachable (checked by putting that one goal.rs rule back: 126, 3, and reachable 10,590; issue #2571)
+  { json = "verdicts.talks: goes up to its target from where it is", schema = "fnv.ai.reach/1", equals = 127 },
   # issue #909 item 9 (2026-10-30): pairs unreachable from the editor placement but reached from a place a script MoveTo's the actor to (Yes Man's penthouse marker 0x00166304)
-  { json = "verdicts.reachable from where a script moves it (MoveTo)", schema = "fnv.ai.reach/1", equals = 120, label = "reached from a script's MoveTo target: 120 pairs" },
+  # 122 since 3ceeb49ff (2026-11-14, #2566): a disabled load door is no way through; 4 pairs reachable only through one became 2 reached from a MoveTo target + 2 with no way there (checked by letting disabled doors through again: 120, 183 no way, 10,596 reachable; issue #2571)
+  { json = "verdicts.reachable from where a script moves it (MoveTo)", schema = "fnv.ai.reach/1", equals = 122, label = "reached from a script's MoveTo target: 122 pairs" },
   # main on 2026-10-11, so any change shows here and gets explained
   { json = "actor_package_pairs", schema = "fnv.ai.reach/1", equals = 16935, label = "pairs as on main 2026-10-11: 16,935" },
   { json = "verdicts.reachable", schema = "fnv.ai.reach/1", equals = 10258, label = "reachable as on main 2026-10-11: 10,258", known_failing = "main 2026-10-17 (6a53e8e7): 10,403; with every package type carried out (Escort, Find, Use Item At, Ambush, Flee, actor-behaviour.md §5.10): 10,620" },
@@ -4956,6 +4988,36 @@ expect = [
 order = [["terminal 0x0014B0A7 plays Open before its screen", "terminal: open 0x0014B0A7", "terminal 0x0014B0A7 closes"]]
 
 [[scenario]]
+name = "dam-elevator-disabled-player"
+source = "#2617: on the Legion route, once VHDLegionBattle.IntakeTowerStrategy is 2, VHDIntakeTowerLegionaryDespawnScript (SCPT 0013CA2C) disables whoever enters its trigger, the player too; a disabled actor's Activate does nothing, so the Power Plant 01 elevator VHDODeckElevREF (0013151C, SCPT 0014659A, OnActivate ending in a bare Activate) played its sound and never took the player through. Disable now leaves the player enabled (functions::refs::disable_ref, doors.md section 6)"
+note = "Strategy 2 by the console at 3 s (the result script of INFO 0013CA26 sets it in play); the script aid moves the player into VHDIntakeTowerLegionaryDespawnTriggerREF (0013CA72) at 5 s, back to the elevator at 11 s and activates it at 15 s as the player's own E would [observed: fnvtool script decompile, esm decode]"
+areas = ["scripts", "quests"]
+paths = ["crates/fnv-game/src/functions/refs.rs", "crates/fnv-game/src/game.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "3:set VHDLegionBattle.IntakeTowerStrategy to 2;3.3:close", NVF_PLAY_TEST_SCRIPT = "5:moveto:player:VHDIntakeTowerLegionaryDespawnTriggerREF,11:moveto:player:VHDODeckElevREF,15:activate:VHDODeckElevREF" }
+args = ["--cell", "HooverDamIntODeck", "--play", "--no-voice"]
+run_seconds = 24
+order = [[
+  { text = "script: OnTriggerEnter of FalloutNV.esm|SCPT 0x0013CA2C ran", label = "the intake tower trigger's block runs for the player" },
+  { text = "script: activating 0x0013151C runs its OnActivate block instead of the default action", label = "then the elevator's OnActivate block runs" },
+  { re = 'script: travel to Some\(1181400\) / None at', label = "and its bare Activate takes the player through the load door to HooverDamIntPowerPlant01 (001206D8)" },
+]]
+expect = [{ text = "script: Disable of the player ignored", label = "the trigger's Disable leaves the player enabled" }]
+
+[[scenario]]
+name = "door-scripted-activate-battle"
+source = "#2617: the same elevator during the battle (vHDBattleController.iBattleState 2, the state of the owner's report): the block's battle branch enables six references and sets VHDLegionBattle's respawners once, then its bare Activate still takes the player through"
+note = "iBattleState set by the console at 4 s, the door activated by the script aid at 8 s; VHDLegionPowerPlant01EnableMarker (001465C5) is the first reference the branch enables [observed: fnvtool script decompile SCPT 0014659A, esm decode]"
+areas = ["scripts", "quests"]
+paths = ["engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs", "engine/nvf-play/src/activate.rs", "crates/fnv-game/src/functions/refs.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "4:set vHDBattleController.iBattleState to 2;4.3:close", NVF_PLAY_TEST_SCRIPT = "8:activate:VHDODeckElevREF" }
+args = ["--cell", "HooverDamIntODeck", "--play", "--no-voice"]
+run_seconds = 18
+expect = [
+  { text = "script: OnActivate of FalloutNV.esm|SCPT 0x0014659A ran on Some(0x0013151C)", label = "the elevator's OnActivate block runs" },
+  { re = 'script: travel to Some\(1181400\) / None at', label = "its bare Activate sends the player through the load door to HooverDamIntPowerPlant01 (001206D8)" },
+]
+
+[[scenario]]
 name = "terminal-from-message-box"
 source = "#2459: EastPumpStationTerminal's script (SCPT 0x000E8FA3) shows EastPumpStationTermMsg on activation and its GameMode block answers the button \"Activate the terminal.\" (2) with a bare Activate. An answered box closes after that frame's scripts (ScriptState::answer, Runtime::finish_answer), the player is back in the world in the next frame (hold_player), and only there does the GameMode block read the button: the terminal's screen opens. A box closed before the frame's scripts instead lets the block run while the box still holds PlayState::Menu, and the request is dropped (the quest pilot's own answer did that, #2365)"
 note = "East Pump Station (interior 1EEastPumpStation 000E8F6F), the terminal REFR 000FAA48 (base EastPumpStationTerminal 000E8FA2, not locked) [observed: FalloutNV.esm, fnvtool world refs / script decompile]. Activated at 6 s by the script aid, as the player's own activation; at 8 s the real key 2 picks the second button drawn (script_hud.rs menu_keys, the path of a click too): the record's button 2, since \"Repair the network connection.\" is hidden below Science 50; the terminal left at 12 s. Used by the quest Hard Luck Blues (VES34Vault)"
@@ -8315,6 +8377,7 @@ source = "issue #1572: every way of saving is refused from the player's death on
 areas = ["save"]
 paths = ["engine/nvf-play/src/save.rs"]
 note = "player.kill at 14 s; the QuickSave key at 15.5 s and 17 s (the second while the screen is going black) and a console save at 19 s are all refused, and nothing is written. NVFOREVER_HOME keeps the run off the real quicksave."
+forbid = [{ text = "death recovery:", label = "assisted death remains in this run without opening recovery or loading another save" }]
 env = { NVFOREVER_HOME = "save-dead-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_CONSOLE = "14:player.kill;14.3:close;19:save dead-save;19.5:close", NVF_PLAY_TEST_KEYS = "15.5:f5,17:f5" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 22
@@ -11440,7 +11503,7 @@ name = "death-cam-first"
 source = "owner 2026-10-16: when the player dies the body drops as a ragdoll with the first-person view fixed to its head, in slow motion and blurred (engine/nvforever/src/death_cam.rs)"
 areas = ["combat", "camera"]
 paths = ["engine/nvforever/src/death_cam.rs", "engine/nvforever/src/ragdoll.rs", "engine/nvforever/src/player_body.rs", "engine/nvforever/src/imagespace.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/audio_out.rs"]
-env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:player.killactor;11:close" }
+env = { NVFOREVER_HOME = "death-cam-first-recovery-delay-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "9:setgs fPlayerDeathReloadTime 120;9.5:close;10:player.killactor;11:close" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 run_seconds = 22
 order = [[
@@ -11448,11 +11511,13 @@ order = [[
   { re = 'sound speed: 0\.\d\d -> 1\.00', label = "and come back to speed when it ends" },
 ]]
 expect = [
+  { re = 'console: fPlayerDeathReloadTime: \S+ -> 120', count = 1, label = "explicit loaded-GMST camera-only fixture delay is applied" },
   "death camera: the player died in first person: the body drops as a ragdoll, the view stays on its head",
   "player controls: all held, the player is dead",
   { re = 'death camera: the body is on the ground [\d.]+ s after the death', label = "the ragdoll comes to rest" },
   "death camera: 1 death(s) shown, the player dead at exit",
 ]
+forbid = [{ text = "death recovery:", label = "camera-only fixture does not dispatch recovery during its unchanged observation window" }]
 
 [[scenario]]
 name = "death-fade"
@@ -11460,27 +11525,31 @@ source = "owner todo 6 item 3 (2026-10-17): 2 s after the player dies the screen
 note = "killed at 10 s as death-cam-first; the fade starts 2 s of real time after the death and is black 4 s later; the slow motion runs meanwhile, so these are not game seconds"
 areas = ["combat", "camera"]
 paths = ["engine/nvforever/src/death_cam.rs", "engine/nvforever/src/imagespace.rs"]
-env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:player.killactor;11:close" }
+env = { NVFOREVER_HOME = "death-fade-recovery-delay-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "9:setgs fPlayerDeathReloadTime 120;9.5:close;10:player.killactor;11:close" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 run_seconds = 22
 expect = [
+  { re = 'console: fPlayerDeathReloadTime: \S+ -> 120', count = 1, label = "explicit loaded-GMST camera-only fixture delay is applied" },
   "death camera: the player died in first person: the body drops as a ragdoll, the view stays on its head",
   { re = 'death camera: the screen starts fading to black (?P<n>[\d.]+) s after the death', range = [2.0, 2.3], label = "the fade starts about 2 s after the death" },
   { re = 'death camera: the screen is black (?P<n>[\d.]+) s after the death', range = [6.0, 6.3], label = "the screen is black about 6 s after the death" },
 ]
+forbid = [{ text = "death recovery:", label = "camera-only fixture does not dispatch recovery during its unchanged observation window" }]
 
 [[scenario]]
 name = "death-cam-third"
 source = "owner 2026-10-16: in third person the camera stays on the player's body as it drops, in slow motion and blurred; owner 2026-10-25: the camera keeps its place and only turns to the body (engine/nvforever/src/death_cam.rs)"
 areas = ["combat", "camera"]
 paths = ["engine/nvforever/src/death_cam.rs", "engine/nvforever/src/ragdoll.rs", "engine/nvforever/src/player_body.rs"]
-env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONTROL = "8:view", NVF_PLAY_TEST_CONSOLE = "10:player.killactor;11:close" }
+env = { NVFOREVER_HOME = "death-cam-third-recovery-delay-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONTROL = "8:view", NVF_PLAY_TEST_CONSOLE = "9:setgs fPlayerDeathReloadTime 120;9.5:close;10:player.killactor;11:close" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 run_seconds = 22
 expect = [
+  { re = 'console: fPlayerDeathReloadTime: \S+ -> 120', count = 1, label = "explicit loaded-GMST camera-only fixture delay is applied" },
   "death camera: the player died in third person: the body drops as a ragdoll, the camera stays put and looks at it",
   { re = 'death camera: the body is on the ground [\d.]+ s after the death', label = "the ragdoll comes to rest" },
 ]
+forbid = [{ text = "death recovery:", label = "camera-only fixture does not dispatch recovery during its unchanged observation window" }]
 
 [[scenario]]
 name = "g5-self-kill-1"
@@ -11496,6 +11565,7 @@ expect = [
   { re = 'combat: the player died, killed by Player', label = "the player dies of it", known_failing = "#1581: the blast misses the player on some runs" },
 ]
 forbid = [
+  { text = "death recovery:", label = "assisted death remains in this run without opening recovery or loading another save" },
   { re = 'xp: \S+ XP from a kill', label = "no kill XP" },
   { re = 'challenge: (Lord Death|Kaboom|The Rifleman) ', label = "no kill challenge" },
 ]
@@ -11513,6 +11583,7 @@ order = [[
   { re = 'test aid: the player hits 0x00000014 for \d+ with ' },
 ]]
 forbid = [
+  { text = "death recovery:", label = "assisted death remains in this run without opening recovery or loading another save" },
   { re = 'XP from a kill', label = "no XP for their own death" },
   { re = 'challenge: (Lord Death|The Rifleman|Kaboom) ', label = "no challenge for their own death" },
 ]
@@ -11523,14 +11594,15 @@ source = "owner 2026-10-25: anything ragdolled floats to the surface in water (d
 note = "the player swims out from the Boulder Beach shore as wade-in-swim (on to x about 59300), is killed under the lake's surface (2600) at 19 s, and its body rises and comes to rest floating there"
 areas = ["ragdoll", "physics"]
 paths = ["crates/fnv-phys/src/buoyancy.rs", "crates/fnv-phys/src/ragdoll.rs", "crates/fnv-phys/src/water.rs", "engine/nvforever/src/ragdoll.rs", "engine/nvforever/src/death_cam.rs"]
-env = { NVF_PLAY_TEST_MOVE = "10:1:0,17:0:0", NVF_PLAY_TEST_CONSOLE = "19:player.killactor;20:close" }
+env = { NVFOREVER_HOME = "ragdoll-floats-recovery-delay-home", NVF_PLAY_TEST_MOVE = "10:1:0,17:0:0", NVF_PLAY_TEST_CONSOLE = "18:setgs fPlayerDeathReloadTime 120;18.5:close;19:player.killactor;20:close" }
 args = ["--play", "--pos=56992,37536,2745", "--heading", "90", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 50
 expect = [
+  { re = 'console: fPlayerDeathReloadTime: \S+ -> 120', count = 1, label = "explicit loaded-GMST camera-only fixture delay is applied" },
   "death camera: the player died in first person: the body drops as a ragdoll, the view stays on its head",
   { re = 'ragdoll: actor 00000014 floats at \(5\d{4}, 37\d{3}, [\d.]+\), its trunk (?P<n>-?\d+) units under the surface at 2600', range = [-25, 25], label = "the body comes to rest floating, its trunk at the lake's surface (6 under, 13 s after the death, 2026-10-25)" },
 ]
-forbid = [{ re = 'ragdoll: actor 00000014 held at rest still moving', label = "the body is never frozen part way up" }]
+forbid = [{ text = "death recovery:", label = "camera-only fixture does not dispatch recovery during its unchanged observation window" }, { re = 'ragdoll: actor 00000014 held at rest still moving', label = "the body is never frozen part way up" }]
 
 [[scenario]]
 name = "loose-items-float"
@@ -14159,6 +14231,38 @@ expect = [
 ]
 
 [[scenario]]
+name = "session-lighting-reentry"
+source = "docs/spec-notes/session-cell-lighting.md; Part of #2272: actual console session template/trait/inheritance writes reach the existing camera Projection when the cell is entered again. Application and zero-clip fallback are engine policy, not native timing observations."
+note = "Requires a non-null LoadOrder-backed template on 2ETopsPresidentialSuite and an initial GSDocMitchellHouse camera clip unequal to the authored 32123. These are checked admission conditions, not a silently substituted template. A real COC exit/return tests positive clip; then same-cell COC reapplies zero while the camera still has the positive clip, making the fallback transition observable without a new diagnostic. No immediate live-refresh, pixel or installed-mod assertion."
+areas = ["scripts", "sky", "world"]
+paths = ["crates/fnv-world/src/lighting.rs", "crates/fnv-game/src/nvse_jg1.rs", "engine/nvforever/src/world.rs", "engine/nvforever/src/main.rs", "engine/nvforever/src/sky.rs"]
+requires = ["NVF_PLAY_TEST_LIGHTING_HOME"]
+env = { NVFOREVER_HOME = "{env:NVF_PLAY_TEST_LIGHTING_HOME}", NVF_REPORTS = "0", RUST_LOG = "info,nvf_play::script=debug", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_CONSOLE = '8:PrintC "lighting-smoke template %i" (GetCellLightingTemplate 2ETopsPresidentialSuite);9:SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite);10:SetCellFlag GSDocMitchellHouse 15 1;11:SetLightingTemplateTraitNumeric (GetCellLightingTemplate GSDocMitchellHouse) 15 32123;12:PrintC "lighting-smoke positive clip %g" (GetLightingTemplateTraitNumeric (GetCellLightingTemplate GSDocMitchellHouse) 15);13:PrintC "lighting-smoke inherit %g" (GetCellFlag GSDocMitchellHouse 15);14:close;20:coc Goodsprings;20.5:close;30:coc GSDocMitchellHouse;30.5:close;39:SetLightingTemplateTraitNumeric (GetCellLightingTemplate GSDocMitchellHouse) 15 0;40:PrintC "lighting-smoke zero clip %g" (GetLightingTemplateTraitNumeric (GetCellLightingTemplate GSDocMitchellHouse) 15);41:close;46:coc GSDocMitchellHouse;46.5:close' }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 58
+timeout = 180
+order = [[
+  { re = '''sky: the camera's far plane at (?!32123\b)(?P<n>\d+) units \(the cell's fog clip distance\)''', range = [500, 100000], label = "ordinary cold camera clipping is present and differs from the authored target" },
+  { re = 'console: lighting-smoke template (?!00000000\b)[0-9A-Fa-f]{8}$', label = "the donor cell resolves a non-null LoadOrder template" },
+  { text = 'console: SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite) >> ran', label = "the real console compiles the template assignment" },
+  { re = 'console: lighting-smoke positive clip 32123(?:\.0+)?$', label = "the selected template trait getter sees the authored positive clip" },
+  { re = 'console: lighting-smoke inherit 1(?:\.0+)?$', label = "clip inheritance is enabled" },
+  { text = "console: Travelling to Goodsprings", label = "leave through the real console travel path" },
+  { text = "sky: the camera's far plane at 400000 units", label = "outdoor camera fallback remains intact" },
+  { text = "console: Travelling to GSDocMitchellHouse", label = "re-enter the edited cell" },
+  { text = "sky: the camera's far plane at 32123 units (the cell's fog clip distance)", label = "the actual camera consumer applies the session clip after re-entry" },
+  { re = 'console: lighting-smoke zero clip 0(?:\.0+)?$', label = "the template getter sees zero before the second cycle" },
+  { text = "console: Travelling to GSDocMitchellHouse", label = "same-cell COC reapplies zero while the camera still has the positive clip" },
+  { text = "sky: the camera's far plane at 400000 units", label = "the interior's zero clip keeps the existing engine fallback" },
+]]
+forbid = [
+  { re = 'script: .* failed in .*console', label = "no console CallFailed event is hidden by a zero result" },
+  { re = 'script error in .*console', label = "no compiled console script error" },
+  { re = 'script: unhandled .* in .*console|script: .* in .*console.*could not read parameter', label = "no unsupported call or argument-default fallback" },
+  { re = 'console: .*not built|console: No cell named|console: .*has no marker or door to arrive at', label = "no unsupported function or invalid travel admission" },
+]
+
+[[scenario]]
 name = "region-sounds"
 source = "ESM audit group 8 (docs/spec-notes/default-objects.md §2): in Doc Mitchell's house the sounds of the region its acoustic space names (AudioIntMitchellHouse, REGN RDSD) are tried every 10 s at their chance and some play"
 areas = ["audio"]
@@ -14174,13 +14278,14 @@ name = "death-music-dobj"
 source = "ESM audit group 8 (docs/spec-notes/default-objects.md §1): the default objects' Death Music (DefaultDeath, special\\death.mp3) is not shipped, so when the player dies the SOUN MUSDeath plays as before"
 areas = ["audio", "music"]
 paths = ["engine/nvf-play/src/music.rs", "crates/fnv-world/src/audio.rs"]
-env = { NVF_PLAY_TEST_CONSOLE = "8:player.kill;8.3:close" }
+env = { NVFOREVER_HOME = "death-music-dobj-recovery-delay-home", NVF_PLAY_TEST_CONSOLE = "7:setgs fPlayerDeathReloadTime 120;7.5:close;8:player.kill;8.3:close" }
 args = ["--cell", "Goodsprings", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 16
 expect = [
+  { re = 'console: fPlayerDeathReloadTime: \S+ -> 120', count = 1, label = "explicit loaded-GMST camera-only fixture delay is applied" },
   { re = 'music: the player died: the music stops, MUSDeath \(0x[0-9A-F]{8}\) plays', label = "the SOUN fallback plays: the DOBJ's death music names no shipped file" },
 ]
-forbid = [{ text = "the default objects' death music", label = "no default objects' death music file in the shipped data" }]
+forbid = [{ text = "death recovery:", label = "camera-only fixture does not dispatch recovery during its unchanged observation window" }, { text = "the default objects' death music", label = "no default objects' death music file in the shipped data" }]
 
 [[scenario]]
 name = "anim-state-throw"
@@ -29024,6 +29129,21 @@ order = [[
 ]]
 
 [[scenario]]
+name = "nightkin-stealth-field"
+source = "[documented: issue #2557, supplied FalloutNV.esm records] CrSuperMutantNightkin (0x0007EA29) carries CrNightkinSCRIPT (0x0007EA22), which adds StealthBoyInvisibilitySpell (0x0007E474) on load: StealthBoyInvis (0x00043E95), Chameleon 95; [design, #2557] loaded living actors with Chameleon >= 1 get refracting material copies"
+note = "[design, #2557] Place the scripted Nightkin beside an unseen player, then restrain it to keep this cloak-on check out of an attack transition. The log must identify its base and dynamic reference; no game data fixture is shipped. Player regression scenarios retain their expectations unchanged."
+areas = ["aid", "actors"]
+paths = ["engine/nvforever/src/stealth_field.rs", "engine/nvforever/src/actor_materials.rs", "engine/nvforever/src/actors.rs", "crates/fnv-game/src/functions/magic.rs", "crates/fnv-game/src/aid.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_UNSEEN = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "3:call:player:PlaceAtMe:CrSuperMutantNightkin:1,3.2:call:0xFF000000:SetRestrained:1" }
+args = ["--cell", "Goodsprings", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 20
+expect = [
+  { re = 'ai \[[^\]]*\] CrSuperMutantNightkin 0xFF000000: created by a script \(PlaceAtMe\)', label = "the scripted Nightkin is the first created reference" },
+  { re = 'stealth field: CrSuperMutantNightkin 0xFF000000 on \(Chameleon 95\)', label = "the Nightkin gets the actor stealth field" },
+]
+manual = "[design, #2557] Inspect the refracting body and weapon. Unrestrain the actor and provoke an attack: plain during attack, cloaked after combat; a killed actor restores. Compare the player's Stealth Boy and Pip-Boy using aid-stealth-boy, stealth-boy-refraction and stealth-boy-pipboy. Original-game comparisons remain observer check 170."
+
+[[scenario]]
 name = "grass-fire"
 source = "owner request 2026-11-14 (#2567, docs/design/grass-fire.md): fire from a burning weapon spreads across grass, sets the actors in it alight and goes out within a hard limit; the grass blackens and sinks away and grows back when its cell reloads"
 note = "the player (god mode) fires the Flamer (0000432D, fuel 00029371) north at the grass by the Prospector Saloon (nearest tufts about 230 units north) for a second from 26 s (message boxes off: one open stops the trigger), then looks at the fire; Easy Pete is held in place and put 250 units in front, in the fire's path, at 27 s; the fire runs to its end. Frames for the eye: the front spreading, the black grass sinking, the scorched ground left behind"
@@ -29209,4 +29329,133 @@ expect = [
   { re = 'rigid head check summary: .*max_error=(?P<n>[\d.]+)', range = [0, 0.02], label = "every sampled centre follows the full head transform" },
   { re = 'rigid head check summary: .*max_frame_error=(?P<n>[\d.]+)', range = [0, 0.001], label = "every sampled cap frame follows head rotation and scale" },
   { re = 'rigid head check summary: .*turn_deg=(?P<n>[\d.]+)', range = [0.5, 180], label = "the head actually turned during the check" },
+]
+
+[[scenario]]
+name = "helipad-ladder-top-crosshair"
+source = "[documented: writer brief #2528 round w3] Hoover Dam helipad ladder endpoints 00164C63/00164C64 and top-to-bottom arrival near (68084,19354,4806); [design: docs/spec-notes/cells-refs.md section 5] isolate crosshair picking from direct hand activation"
+note = "[design, #2528; fnv-world transform.rs::ref_rotation] Eight OBND corners transformed by position + 0.15 * Rx(1.601) Ry(-0.287) Rz(-1.562) * local give world min (67903.61,19374.57,5009.27), max (67927.56,19444.40,5183.48): 82.48 above deck z5101. OBND does not establish actual render/collision geometry or a deck opening. [documented: supplied w3 brief] OBND (-1037,-109,0)..(112,-84,445), rotation (-1.601,0.287,1.562), position (67939.5,19439.3,5028). [observed: supplied main-session run 2026-11-14 22:50] Old top look hit STAT 0012CE4B/base 0012CE4A. [observed: supplied main-session run 2026-11-14 23:14, ov15/smoke-2528b/*.log] All four helipad scenarios passed. Original looks 11/23 (pitch -60, yaw 121/54) targeted 00164C63 from the deck; original looks 25-27 at spot 3 (settled feet z4802) targeted plain ladder 00164C65 with Open / Ladder. [design, #2528; test_aid/activation_sweep.rs] Retain heading +/-30 at pitch -60 at all three spots (9 looks), including both successful deck views (now 3/6) and the plain ladder view (now 7). Each look logs actual feet/view, GetCrosshairRef/base/type, target/base/type, drawn prompt and hit DOOR refs within 400 of the ladder. Finish every look, replay first successful view and press E on its current target; no explicit-ref activation. Misses and unrelated doors remain diagnostics."
+areas = ["activation", "hud"]
+paths = ["engine/nvf-play/src/test_aid.rs", "engine/nvf-play/src/test_aid/activation_sweep.rs", "engine/nvf-play/src/activate.rs", "engine/nvf-play/src/activate/pick.rs", "engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs", "engine/nvf-play/src/activate/outcome.rs", "engine/nvforever/src/world.rs", "engine/nvf-assets/src/model.rs", "crates/fnv-sim/src/refs.rs", "crates/fnv-sim/src/world.rs", "docs/spec-notes/cells-refs.md"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_ACTIVATION_SWEEP = "00164C63|67900:19440:5101:91,67915:19385:5101:24,67950:19440:5101:266" }
+args = ["--play", "--pos=67900,19440,5101", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 38
+expect = [
+  { re = 'activation sweep: look=\d+ spot=\d+ feet=\([^)]+\) yaw=[\d.]+ pitch=-?[\d.]+ GetCrosshairRef=0x[0-9A-F]{8} base=0x[0-9A-F]{8} type=\S+ target=0x[0-9A-F]{8} target_base=0x[0-9A-F]{8} target_type=\S+ prompt=.* nearby_DOOR_collision=\S+ nearby_DOOR_target=\S+ nearby_DOOR_far=\S+$', count = 9, label = "top crosshair: every look records collision query, selected target, drawn prompt and nearby hit doors" },
+  { text = "activation sweep: complete looks=9 replay=first-success press=E", label = "top crosshair: sweep completes before replaying a successful view" },
+  { re = 'activation sweep: look=.* target=0x00164C63 ', label = "top crosshair: the ladder itself is the activation target" },
+  { re = '(?:activate 0x00164C63 .*Teleported \{ to_door: 0x00164C64|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C64")', label = "top crosshair: activation teleports to the reciprocal ladder rather than toggling a door" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "top crosshair: exterior travel is requested" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()(?P<n>-?\d+(?:\.\d+)?)', range = [68079, 68089], label = "top crosshair: arrival x is near the supplied lower landing" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()-?\d+(?:\.\d+)?, (?P<n>-?\d+(?:\.\d+)?)', range = [19349, 19359], label = "top crosshair: arrival y is near the supplied lower landing" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()-?\d+(?:\.\d+)?, -?\d+(?:\.\d+)?, (?P<n>-?\d+(?:\.\d+)?)', range = [4801, 4811], label = "top crosshair: arrival z is near the supplied lower landing" },
+]
+order = [[
+  { re = 'activation sweep: complete looks=9 replay=first-success press=E', label = "top crosshair: diagnostics before activation" },
+  { re = '(?:activate 0x00164C63 .*Teleported \{ to_door: 0x00164C64|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C64")', label = "top crosshair: reciprocal teleport after diagnostics" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "top crosshair: exterior travel after teleport" },
+]]
+forbid = [
+  { re = 'activate 0x00164C63 .*DoorToggled', label = "top crosshair: the ladder must never toggle open or closed" },
+]
+
+[[scenario]]
+name = "helipad-ladder-top-direct"
+source = "[documented: writer brief #2528 round w2] Hoover Dam helipad ladder endpoints 00164C63/00164C64 and top-to-bottom arrival near (68084,19354,4806); [design: docs/spec-notes/cells-refs.md section 5] isolate crosshair picking from direct hand activation"
+note = "[hypothesis, #2528] Top standing point/pitch need a game run; GOTO settles on the floor and LOOK faces the supplied endpoint. SCRIPT activate directly uses 0x00164C63 through the hand-activation path, independently of the crosshair. [design: activate.rs::find_target] Target/reticle logs show the chosen ref and displayed prompt; PrintC additionally logs the collision-query ref, base and XATO, which may differ from a bounds-picked target. Separate launches keep travel from one path from masking the other."
+areas = ["activation", "hud"]
+paths = ["engine/nvf-play/src/activate.rs", "engine/nvf-play/src/activate/pick.rs", "engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs", "engine/nvf-play/src/activate/outcome.rs", "engine/nvforever/src/world.rs", "engine/nvf-assets/src/model.rs", "crates/fnv-sim/src/refs.rs", "crates/fnv-sim/src/world.rs", "docs/spec-notes/cells-refs.md"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_GOTO = "1:67900:19440:5101", NVF_PLAY_TEST_LOOK = "4:91:-60", NVF_PLAY_TEST_CONSOLE = "6:PrintC \"helipad crosshair ref %i\", (GetCrosshairRef);PrintC \"helipad crosshair base %i xato [%z]\", ((GetCrosshairRef).GetBaseObject), ((GetCrosshairRef).GetRefActivationPromptOverride);6.5:close", NVF_PLAY_TEST_SCRIPT = "8:activate:0x00164C63" }
+args = ["--play", "--pos=67900,19440,5101", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 22
+expect = [
+  { re = 'console: helipad crosshair ref [0-9A-F]{8}$', label = "top direct: collision-query reference logged before activation, including zero when nothing collides" },
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "top direct: collision-query base and reference prompt logged" },
+  { text = "test aid: script Activate(\"0x00164C63\")", label = "top direct: the explicit reference is activated by hand independently of picking" },
+  { re = '(?:activate 0x00164C63 .*Teleported \{ to_door: 0x00164C64|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C64")', label = "top direct: activation teleports to the reciprocal ladder rather than toggling a door" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "top direct: exterior travel is requested" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()(?P<n>-?\d+(?:\.\d+)?)', range = [68079, 68089], label = "top direct: arrival x is near the supplied lower landing" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()-?\d+(?:\.\d+)?, (?P<n>-?\d+(?:\.\d+)?)', range = [19349, 19359], label = "top direct: arrival y is near the supplied lower landing" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()-?\d+(?:\.\d+)?, -?\d+(?:\.\d+)?, (?P<n>-?\d+(?:\.\d+)?)', range = [4801, 4811], label = "top direct: arrival z is near the supplied lower landing" },
+]
+order = [[
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "top direct: diagnostics before activation" },
+  { re = '(?:activate 0x00164C63 .*Teleported \{ to_door: 0x00164C64|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C64")', label = "top direct: reciprocal teleport after diagnostics" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "top direct: exterior travel after teleport" },
+]]
+forbid = [
+  { re = 'activate 0x00164C63 .*DoorToggled', label = "top direct: the ladder must never toggle open or closed" },
+]
+
+[[scenario]]
+name = "helipad-ladder-bottom-crosshair"
+source = "[documented: writer brief #2528 round w2] Hoover Dam helipad ladder endpoints 00164C63/00164C64 and top-to-bottom arrival near (68084,19354,4806); [design: docs/spec-notes/cells-refs.md section 5] isolate crosshair picking from direct hand activation"
+note = "[hypothesis, #2528] Bottom standing point/pitch need a game run; GOTO settles on the floor and LOOK faces the supplied endpoint. E activates whatever the actual activation target is. [design: activate.rs::find_target] Target/reticle logs show the chosen ref and displayed prompt; PrintC additionally logs the collision-query ref, base and XATO, which may differ from a bounds-picked target. Separate launches keep travel from one path from masking the other."
+areas = ["activation", "hud"]
+paths = ["engine/nvf-play/src/activate.rs", "engine/nvf-play/src/activate/pick.rs", "engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs", "engine/nvf-play/src/activate/outcome.rs", "engine/nvforever/src/world.rs", "engine/nvf-assets/src/model.rs", "crates/fnv-sim/src/refs.rs", "crates/fnv-sim/src/world.rs", "docs/spec-notes/cells-refs.md"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_GOTO = "1:67942.7:19320.5:4806", NVF_PLAY_TEST_LOOK = "4:0:-40", NVF_PLAY_TEST_CONSOLE = "6:PrintC \"helipad crosshair ref %i\", (GetCrosshairRef);PrintC \"helipad crosshair base %i xato [%z]\", ((GetCrosshairRef).GetBaseObject), ((GetCrosshairRef).GetRefActivationPromptOverride);6.5:close", NVF_PLAY_TEST_ACTIVATE = "8" }
+args = ["--play", "--pos=67942.7,19320.5,4806", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 22
+expect = [
+  { re = 'console: helipad crosshair ref [0-9A-F]{8}$', label = "bottom crosshair: collision-query reference logged before activation, including zero when nothing collides" },
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "bottom crosshair: collision-query base and reference prompt logged" },
+  { re = 'target 0x00164C64 .*by (?:Collision|Bounds)', label = "bottom crosshair: the ladder itself is the activation target" },
+  { text = "reticle: prompt \"Climb Ladder\"", label = "bottom crosshair: the ladder reference supplies its displayed action" },
+  { re = '(?:activate 0x00164C64 .*Teleported \{ to_door: 0x00164C63|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C63")', label = "bottom crosshair: activation teleports to the reciprocal ladder rather than toggling a door" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "bottom crosshair: exterior travel is requested" },
+]
+order = [[
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "bottom crosshair: diagnostics before activation" },
+  { re = '(?:activate 0x00164C64 .*Teleported \{ to_door: 0x00164C63|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C63")', label = "bottom crosshair: reciprocal teleport after diagnostics" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "bottom crosshair: exterior travel after teleport" },
+]]
+forbid = [
+  { re = 'activate 0x00164C64 .*DoorToggled', label = "bottom crosshair: the ladder must never toggle open or closed" },
+]
+
+[[scenario]]
+name = "helipad-ladder-bottom-direct"
+source = "[documented: writer brief #2528 round w2] Hoover Dam helipad ladder endpoints 00164C63/00164C64 and top-to-bottom arrival near (68084,19354,4806); [design: docs/spec-notes/cells-refs.md section 5] isolate crosshair picking from direct hand activation"
+note = "[hypothesis, #2528] Bottom standing point/pitch need a game run; GOTO settles on the floor and LOOK faces the supplied endpoint. SCRIPT activate directly uses 0x00164C64 through the hand-activation path, independently of the crosshair. [design: activate.rs::find_target] Target/reticle logs show the chosen ref and displayed prompt; PrintC additionally logs the collision-query ref, base and XATO, which may differ from a bounds-picked target. Separate launches keep travel from one path from masking the other."
+areas = ["activation", "hud"]
+paths = ["engine/nvf-play/src/activate.rs", "engine/nvf-play/src/activate/pick.rs", "engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_events.rs", "engine/nvf-play/src/activate/outcome.rs", "engine/nvforever/src/world.rs", "engine/nvf-assets/src/model.rs", "crates/fnv-sim/src/refs.rs", "crates/fnv-sim/src/world.rs", "docs/spec-notes/cells-refs.md"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_GOTO = "1:67942.7:19320.5:4806", NVF_PLAY_TEST_LOOK = "4:0:-40", NVF_PLAY_TEST_CONSOLE = "6:PrintC \"helipad crosshair ref %i\", (GetCrosshairRef);PrintC \"helipad crosshair base %i xato [%z]\", ((GetCrosshairRef).GetBaseObject), ((GetCrosshairRef).GetRefActivationPromptOverride);6.5:close", NVF_PLAY_TEST_SCRIPT = "8:activate:0x00164C64" }
+args = ["--play", "--pos=67942.7,19320.5,4806", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 22
+expect = [
+  { re = 'console: helipad crosshair ref [0-9A-F]{8}$', label = "bottom direct: collision-query reference logged before activation, including zero when nothing collides" },
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "bottom direct: collision-query base and reference prompt logged" },
+  { text = "test aid: script Activate(\"0x00164C64\")", label = "bottom direct: the explicit reference is activated by hand independently of picking" },
+  { re = '(?:activate 0x00164C64 .*Teleported \{ to_door: 0x00164C63|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C63")', label = "bottom direct: activation teleports to the reciprocal ladder rather than toggling a door" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "bottom direct: exterior travel is requested" },
+]
+order = [[
+  { re = 'console: helipad crosshair base [0-9A-F]{8} xato \[.*\]$', label = "bottom direct: diagnostics before activation" },
+  { re = '(?:activate 0x00164C64 .*Teleported \{ to_door: 0x00164C63|script: \S+ activated by \S+: .*"result":"teleported".*"to_door":"0x00164C63")', label = "bottom direct: reciprocal teleport after diagnostics" },
+  { re = '(?:script: travel to None / Some\(\d+\) at \[|travel to worldspace [0-9A-F]{8} .*: feet \()', label = "bottom direct: exterior travel after teleport" },
+]]
+forbid = [
+  { re = 'activate 0x00164C64 .*DoorToggled', label = "bottom direct: the ladder must never toggle open or closed" },
+]
+
+[[scenario]]
+name = "ncr-disguise-dam"
+source = "#2611 (Arizona Killer): in NCR ranger combat armour the player passes the NCR at Hoover Dam though the NCR take the player for an enemy (SetPCEnemyOfFaction NCRFactionNV 1, a stand-in for the Legion route's bad standing): the armour's script makes ArmorNCRFactionNV, which every NCR soldier of the dam is in, the player's friend, and only the sniffers (VNCRSnifferFaction) the disguise pulse reaches (25 ft, about 533 units, in sight) leave it (docs/spec-notes/disguises.md §3)"
+note = "the player stands at VHDAssassinationSetupREF on the dam road below the podium, among the pre-battle engineers (no sniffers, 600-1,800 units off); the nearest sniffers, rangers 04 and 05, about 2,000 units off by the vertibird pad. Console at 4 s: the armour and helmet given and worn (its OnEquip makes the disguise and starts the pulse quest); at 7 s the NCR enemy flag. Before the fix the flag outranked the disguise: every soldier near attacked at once (53 hits in 40 s) and the alarm brought troopers 8,000 units off"
+areas = ["ai", "combat", "factions"]
+paths = ["crates/fnv-game/src/functions/actor.rs", "crates/fnv-game/src/crime.rs", "crates/fnv-game/src/combat_group.rs", "crates/fnv-game/src/area_effects.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_CONSOLE = "4:player.additem 00129254 1;player.equipitem 00129254;player.additem 00145EC5 1;player.equipitem 00145EC5;4.5:close;7:setpcenemyoffaction 000A46E7 1;7.3:close;40:VHDPreBattleNCRTrooper4REF.getfactionrelation player;VHDPreBattleRanger04REF.getfactionrelation player;40.5:close" }
+args = ["--play", "--world", "WastelandNV", "--pos=67805,22301,4530", "--hour", "10", "--no-voice", "--no-messages"]
+run_seconds = 45
+expect = [
+  { text = 'script: message NCRFactionOutfitWarning', label = "the armour's OnEquip runs the disguise" },
+  { text = 'area effect: DisguiseFactionPulseActorEffect around the player', label = "the disguise pulse runs" },
+  { text = 'console: SetPCEnemyOfFaction >> 0.00', label = "the NCR enemy flag is set" },
+  { re = 'console: GetFactionRelation on VHDPreBattleNCRTrooper4REF >> 3\.00', label = "a trooper takes the disguised player for a friend" },
+  { re = 'console: GetFactionRelation on VHDPreBattleRanger04REF >> 3\.00', label = "so does a sniffer out of the pulse's reach" },
+]
+forbid = [
+  { re = 'combat: .* hits the player', label = "the NCR shoot the disguised player" },
+  { re = 'alert: .* → Combat: detects the player', label = "an NCR soldier starts fighting the disguised player" },
+  { re = 'combat group: .* about the player', label = "an alarm about the player goes round" },
 ]

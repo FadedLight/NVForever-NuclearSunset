@@ -100,7 +100,7 @@
 //! - **The player's death**: at 0 health the player dies (`Game::hit`); every control
 //!   is held from then on (`ScriptState::locks`) and the screen says so; the death
 //!   camera (`nvforever` `death_cam.rs`) drops the body, slows the clock and blurs the
-//!   picture [design: reloading the last save is not built]. God mode ([`god_mode`]:
+//!   picture; `save::death_recovery` asks the existing loader for the newest eligible save. God mode ([`god_mode`]:
 //!   `--god`, the settings page's Developer switch, test aid `NVF_PLAY_TEST_GOD=1`): the
 //!   player takes no damage, so a long unattended run is not ended by a fight.
 //! - **Feedback** [design]: no hit marker at the crosshair (owner 2026-10-27), the last

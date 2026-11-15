@@ -2274,11 +2274,14 @@ pub(crate) fn run_scripts(
         // since the last frame before it, again every frame, so a countdown kept in an
         // OnTrigger block ran down while the game stood still (Hidden Valley's virus
         // purge, issue #2455) [hypothesis: OnTrigger is a game-mode block, as GameMode's
-        // are held under menus, scripts.md §7.7].
+        // are held under menus, scripts.md §7.7]. This frame's loading state is set first:
+        // on the first frame after a loading screen the triggers are looked at before the
+        // GameMode blocks run (a trigger waiting for its model holds its script,
+        // `script_trigger::update`, #2571).
+        rt.game.loading = loading;
         if !rt.game.paused() {
             crate::script_trigger::update(rt, &play, &phys, player_capsule);
         }
-        rt.game.loading = loading;
         rt.game.cfg.frame_seconds = dt;
         // Scripts' GetFallTimeElapsed (`fnv_game::nvse_gaps`).
         rt.game.gaps.air_times = phys

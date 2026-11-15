@@ -1803,6 +1803,14 @@ pub struct Game<'a> {
     /// next one [observed: OnLoad after Enable had not run on the line after Enable and
     /// had run by the next frame, layer5-captures.md §8.3 d].
     pub pending_onload: Vec<FormId>,
+    /// References whose GameMode and MenuMode blocks wait: the engine has not placed
+    /// them yet. A trigger whose model is not read has no volumes, so an actor standing
+    /// in it at the start gets no OnTriggerEnter before the script's first GameMode run;
+    /// Davison's trigger (SCPT 0x000CE554) keeps the antler's place in OnTriggerEnter and
+    /// starts combat from GameMode when it differs, from 0 before the first Enter (issue
+    /// #2571) [hypothesis: the original runs a reference's script once its 3D is in
+    /// place]. Set each frame by the engine (`nvf_play::script_trigger`); not saved.
+    pub scripts_held: BTreeSet<FormId>,
     /// Scripted doors' last answers to the NPCs walking through them, by (actor, door)
     /// (`crate::npc_doors`). Not part of the saved state.
     pub door_gates: std::collections::HashMap<(FormId, FormId), crate::npc_doors::Gate>,
@@ -2563,6 +2571,7 @@ impl<'a> Game<'a> {
             frame: 0,
             time: 0.0,
             pending_onload: Vec::new(),
+            scripts_held: BTreeSet::new(),
             door_gates: Default::default(),
             door_heard: Default::default(),
             npc_door_run: None,
@@ -4081,6 +4090,10 @@ impl<'a> Game<'a> {
         for r in active {
             if held(self) {
                 break;
+            }
+            // Not placed by the engine yet (`Game::scripts_held`).
+            if self.scripts_held.contains(&r) {
+                continue;
             }
             let Some(script) = self.ref_script(r) else { continue };
             if self.data.script(script).is_some_and(|u| u.has_block(ev)) {
@@ -6307,6 +6320,13 @@ impl<'a> Game<'a> {
         // at once, where the hold would have left it [design] (#1985).
         for r in &s.fading_out {
             let _ = g.world.set_enabled(*r, false);
+        }
+        // A save from before the player could not be disabled may hold the player
+        // disabled (VHDIntakeTowerLegionaryDespawnScript's trigger, #2617): enabled again,
+        // as Disable now leaves the player (`functions::refs::disable_ref`) [design].
+        if g.world.peek(FormId::PLAYER_REF).is_some_and(|p| !p.enabled()) {
+            tracing::info!("load: the save holds the player disabled; enabled again (doors.md §6)");
+            let _ = g.world.set_enabled(FormId::PLAYER_REF, true);
         }
         // Crime enmities an older save holds undated start their cooldown now (#2467).
         g.date_crimes();

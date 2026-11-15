@@ -1259,7 +1259,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         }
     }
     if let Some(id) = interior {
-        sky_state.interior = fnv_world::lighting::cell_lighting(world.lo, world.schema, id);
+        sky_state.interior = world::effective_cell_lighting(&world, None, id);
         sky_state.interior_grade = sky::SkyState::cell_grade(world.lo, world.schema, id);
     }
     if let Some(f) = args.fog.as_deref() {
@@ -1720,7 +1720,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         // The loading screen sends the travel in the Input set and reads in `Last` whether
         // the renderer is done: both this frame.
         app.add_plugins(nvf_play::PlayPlugin(data))
-            .add_systems(Update, (worldspace::switch, world::travel, world::cell_image_space).chain().after(nvf_play::PlaySet::Input).before(world::stream))
+            .add_systems(Update, (worldspace::switch, world::travel, world::cell_image_space, world::cell_lighting).chain().after(nvf_play::PlaySet::Input).before(world::stream))
             .add_plugins(pipeline_gate::PipelineGatePlugin)
             .add_systems(Update, world::loading_gate.after(world::stream))
             .configure_sets(Update, nvf_play::PlaySet::Physics.before(world::stream));

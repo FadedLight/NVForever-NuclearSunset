@@ -32,15 +32,19 @@ Android release. [Build and touch-control instructions](android.md).
 Controller switching, independent look/ADS scales, dead zone and hold/toggle choices,
 four original SVG icon families, adaptive Aim/Block/Scope captions and individual HUD
 scales are implemented. Optional [touch practice](design/android-touch-practice.md)
-teaches movement and actions through isolated synthetic input. These library/test
-targets pass ARM64 compilation; rendered device acceptance remains pending.
+teaches movement and actions through isolated synthetic input. Rendered device
+acceptance remains pending. A further source correction makes practice follow the
+current movement side and distinguishes the analog dead-zone circle from the legacy
+box; its compilation and App execution remain pending.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule
 consumers. Canonical launcher/adaptive icon resources and an explicit diagnostics
-build option are implemented; new menu App execution, final packaging checks and
-device acceptance remain pending. The existing qualified development APK remains the test baseline; these
-new features are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
+build option are implemented. R30 hosted execution passed pointer ownership, but a
+native-map control still fails and wrapper execution remains unrun. Native build
+success does not qualify the new APK: final packaging and device acceptance remain
+open. The qualified R9 development APK remains the test baseline; these new features
+are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

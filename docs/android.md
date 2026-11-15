@@ -105,7 +105,8 @@ pistol visibility/action checks. Physical-device rendering remains unqualified.
 
 ## Original touch icon families follow-up
 
-Controls > Touch offers Precise line, Bold filled, Rounded and Industrial action icons.
+Android's Mobile > Touch layout and guide offers Precise line, Bold filled, Rounded
+and Industrial action icons (Controls > Touch on desktop).
 The choice is saved for the next start. It changes artwork without changing positions,
 bindings, hit targets or tint. Companion and Aid artwork is available for future controls.
 This source follow-up still needs rendered Android validation; the
@@ -113,15 +114,22 @@ This source follow-up still needs rendered Android validation; the
 
 ### Optional touch practice
 
-[design] Settings > Controls > Touch > Touch practice offers a short movement,
-look and action guide before Begin practice. Touch the left panel to place a floating ring, or start at the fixed ring, matching
-your movement mode. Drag to see directions and its inner dead-zone box; drag the right area to move a pretend
-look marker. Fire, Aim and Jump only update this screen. If Swipe to Pip-Boy is
-enabled, Try drawer offers an isolated swipe exercise without opening inventory.
+[design] Android Settings > Mobile > Touch layout and guide > Touch practice offers
+a short movement, look and action guide before Begin practice (Controls > Touch on
+desktop). Touch the movement panel to place a floating ring, or start at the fixed
+ring, matching your movement mode. Drag to see directions and its inner dead zone;
+drag the opposite area to move a pretend look marker. Fire, Aim and Jump only update
+this screen. If Swipe to Pip-Boy is enabled, Try drawer offers an isolated swipe
+exercise without opening inventory.
 Reset returns to the guide; Close or Escape returns to the paused Settings page.
 The active session is never saved and practice does not change a gameplay save.
 The R9 CPU run passed all fifteen practice routing, lifecycle, settings and gesture
 tests. Rendered device validation remains separate.
+
+A pending source correction aligns the practice sides with the current stick
+position, shows the analog dead zone as a circle and retains the legacy box. Its
+added App controls are uncompiled and unrun; the R9 result does not qualify that
+changed presentation.
 
 ## Touch inventory menus
 
@@ -140,9 +148,16 @@ Hardware input restores the ordinary menu presentation. A first return touch can
 restore the touch sheet without activating an item. These presentations still need
 phone acceptance for readability, reach and native-menu coexistence.
 
+[qualification] R30 hosted execution passed 178 asset tests and 2,052 play tests,
+including pointer ownership; one native-map test failed. Of the selected 56 new
+menu controls, 43 passed, one failed and 12 were not run. Wrapper tests were not run.
+The native build succeeded but its APK remains unqualified; final packaging and
+phone acceptance are still required. R9 remains the qualified test baseline.
+
 ## Mobile performance
 
-Display > Performance offers Battery (30 FPS, 50% world resolution), Balanced
+Android's Mobile > Performance and battery (Display > Performance on desktop)
+offers Battery (30 FPS, 50% world resolution), Balanced
 (60 FPS, 67%) and Quality (60 FPS, native). The frame limit and world resolution
 can also be selected separately. Smaller world resolutions require FSR support;
 unsupported choices explain why they are unavailable. Menus stay at display resolution.

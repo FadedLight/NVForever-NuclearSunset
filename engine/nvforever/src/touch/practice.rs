@@ -63,6 +63,7 @@ pub(super) struct Practice {
     toggle_aim: bool,
     dead_zone: f32,
     floating: bool,
+    movement_right: bool,
     analog: bool,
     fire_drag: bool,
 }
@@ -98,7 +99,7 @@ impl Practice {
         self.contacts
             .values()
             .find(|c| c.target == Target::Move)
-            .map_or(stick(size).0, |c| c.origin)
+            .map_or(stick_on_side(size, self.movement_right).0, |c| c.origin)
     }
     fn speed_feedback(&self, radius: f32) -> String {
         if !self.analog { return "Legacy directional movement".into(); }
@@ -149,6 +150,7 @@ impl Practice {
                     size,
                     self.drawer_enabled,
                     self.floating,
+                    self.movement_right,
                     t.position,
                 ) {
                     if matches!(target, Target::Move | Target::Look | Target::Drawer)
@@ -157,7 +159,7 @@ impl Practice {
                         return false;
                     }
                     let origin = if target == Target::Move && !self.floating {
-                        stick(size).0
+                        stick_on_side(size, self.movement_right).0
                     } else {
                         t.position
                     };
@@ -229,6 +231,7 @@ impl Practice {
                             size,
                             self.drawer_enabled,
                             self.floating,
+                            self.movement_right,
                             t.position,
                         ) == Some(c.target)
                     {
@@ -281,8 +284,8 @@ fn area(size: Vec2, left: bool) -> Rect {
         ),
     )
 }
-fn look_centre(size: Vec2) -> Vec2 {
-    let a = area(size, false);
+fn look_centre(size: Vec2, movement_right: bool) -> Vec2 {
+    let a = area(size, movement_right);
     Vec2::new(
         a.center().x,
         a.center().y.max(a.min.y + 84.0).min(a.max.y - 12.0),
@@ -294,6 +297,13 @@ fn stick(size: Vec2) -> (Vec2, f32) {
         .clamp(28.0, 80.0)
         .min(a.width() * 0.42);
     (Vec2::new(a.center().x, a.min.y + 60.0 + radius), radius)
+}
+fn stick_on_side(size: Vec2, movement_right: bool) -> (Vec2, f32) {
+    let (mut centre, radius) = stick(size);
+    if movement_right {
+        centre.x = size.x - centre.x;
+    }
+    (centre, radius)
 }
 fn action(size: Vec2, i: usize, drawer: bool) -> Rect {
     let n = if drawer { 4.0 } else { 3.0 };
@@ -316,7 +326,7 @@ fn drawer_handle(size: Vec2) -> Rect {
         Vec2::new(200.0, 64.0),
     )
 }
-fn target(page: PageKind, size: Vec2, drawer: bool, floating: bool, p: Vec2) -> Option<Target> {
+fn target(page: PageKind, size: Vec2, drawer: bool, floating: bool, movement_right: bool, p: Vec2) -> Option<Target> {
     if header(size, true).contains(p) {
         return Some(Target::Close);
     }
@@ -340,12 +350,12 @@ fn target(page: PageKind, size: Vec2, drawer: bool, floating: bool, p: Vec2) -> 
                     return Some(t);
                 }
             }
-            let (centre, r) = stick(size);
-            if (floating && area(size, true).contains(p)) || (!floating && p.distance(centre) <= r)
+            let (centre, r) = stick_on_side(size, movement_right);
+            if (floating && area(size, !movement_right).contains(p)) || (!floating && p.distance(centre) <= r)
             {
                 Some(Target::Move)
             } else {
-                area(size, false).contains(p).then_some(Target::Look)
+                area(size, movement_right).contains(p).then_some(Target::Look)
             }
         }
     }
@@ -451,12 +461,13 @@ fn open(world: &mut World, name: &str) -> bool {
     {
         return false;
     }
-    let (dead_zone, floating, toggle_aim) = {
+    let (dead_zone, floating, toggle_aim, movement_right) = {
         let layout = world.resource::<super::Layout>();
         (
             layout.config.aiming.dead_zone,
             layout.config.floating,
             layout.config.aiming.toggle_aim,
+            layout.config.stick.center.x > 0.5,
         )
     };
     let movement = world.get_resource::<super::movement::Options>().copied().unwrap_or_default();
@@ -471,6 +482,7 @@ fn open(world: &mut World, name: &str) -> bool {
         toggle_aim,
         dead_zone,
         floating,
+        movement_right,
         analog: movement.analog, fire_drag: movement.fire_drag,
         ..default()
     };
@@ -620,24 +632,23 @@ fn show(
     let centre = state.stick_centre(size);
     for (v, mut node, mut text, mut font, mut visible, label) in &mut nodes {
         let control_page = state.page == PageKind::Controls;
-        if matches!(v, Visual::DeadZone) { node.border_radius = if state.analog { BorderRadius::MAX } else { BorderRadius::default() }; }
         let (shown, rect, words) = match v {
             Visual::Header => (true, Rect::from_corners(Vec2::new(16.0, 8.0), Vec2::new(size.x-232.0, 88.0)), "Touch guide\nGame paused.".into()),
             Visual::Close => (true, header(size,true), "Close".into()), Visual::Reset => (true,header(size,false),"Reset".into()),
             Visual::Guide => (!control_page && state.page != PageKind::Drawer, Rect::from_corners(Vec2::new(20.0,84.0),Vec2::new(size.x-20.0,size.y-100.0)), match state.page {
-                PageKind::Guide => format!("MOVEMENT THUMB\n{} = no movement.\n{}\n{}", if state.analog { "Inner circle" } else { "Inner box" },
+                PageKind::Guide => format!("MOVEMENT THUMB ({})\n{} = no movement.\n{}\n{}", if state.movement_right { "right" } else { "left" }, if state.analog { "Inner circle" } else { "Inner box" },
                     if state.analog { "Push gently to walk; farther to run with Always Run. Lift to stop." } else { "Drag out for directional movement; lift to stop." },
                     if state.floating { "Floating: starts at your thumb." } else { "Fixed: start on the ring." }),
-                PageKind::GuideLook => format!("LOOKING\nDrag empty look space to turn.\n{}\nUse both thumbs together.", if state.fire_drag { "Fire also looks while dragged; try it in practice." } else { "Lift to stop looking." }),
+                PageKind::GuideLook => format!("LOOKING ({} thumb)\nDrag empty look space to turn.\n{}\nUse both thumbs together.", if state.movement_right { "left" } else { "right" }, if state.fire_drag { "Fire also looks while dragged; try it in practice." } else { "Lift to stop looking." }),
                 _ => "SAFE PRACTICE\nTry Fire, Aim and Jump next.\nOnly this guide changes.\nNo ammo/AP used. Close exits.".into(),
             }),
             Visual::Begin => (!control_page && state.page != PageKind::Drawer,begin(size),match state.page { PageKind::Guide => "Next: looking", PageKind::GuideLook => "Next: actions", _ => "Begin practice" }.into()),
-            Visual::Left => (control_page,area(size,true),format!("{}\n{}\n{}",if state.floating {"Touch left"} else {"Drag ring"},state.direction(r),state.speed_feedback(r))),
-            Visual::Right => (control_page,area(size,false),format!("LOOK: drag\n{}",if state.looked {"Look practised"} else {"Drag the dot"})),
+            Visual::Left => (control_page,area(size,!state.movement_right),format!("{}\n{}\n{}",if state.floating {if state.movement_right {"Touch right"} else {"Touch left"}} else {"Drag ring"},state.direction(r),state.speed_feedback(r))),
+            Visual::Right => (control_page,area(size,state.movement_right),format!("LOOK: drag\n{}",if state.looked {"Look practised"} else {"Drag the dot"})),
             Visual::Ring => (control_page,Rect::from_center_size(centre,Vec2::splat(r*2.0)),String::new()),
             Visual::DeadZone => (control_page,Rect::from_center_size(centre,Vec2::splat((r*2.0*state.dead_zone).max(2.0))),String::new()),
             Visual::Knob => (control_page,Rect::from_center_size(centre+state.move_delta.clamp_length_max(r),Vec2::splat(28.0)),String::new()),
-            Visual::LookMarker => (control_page,Rect::from_center_size((look_centre(size)+state.look).clamp(area(size,false).min+Vec2::splat(12.0),area(size,false).max-Vec2::splat(12.0)),Vec2::splat(20.0)),String::new()),
+            Visual::LookMarker => (control_page,Rect::from_center_size((look_centre(size,state.movement_right)+state.look).clamp(area(size,state.movement_right).min+Vec2::splat(12.0),area(size,state.movement_right).max-Vec2::splat(12.0)),Vec2::splat(20.0)),String::new()),
             Visual::Fire => (control_page,action(size,0,state.drawer_enabled),if state.fire {"Fire: done"} else {"Fire"}.into()),
             Visual::Aim => (control_page,action(size,1,state.drawer_enabled),if state.aim && state.toggle_aim {"Aim: ON"} else if state.aim {"Aim: held"} else if state.aimed {"Aim: done"} else if state.toggle_aim {"Aim (tap)"} else {"Aim (hold)"}.into()),
             Visual::Jump => (control_page,action(size,2,state.drawer_enabled),if state.jump {"Jump: done"} else {"Jump"}.into()),
@@ -654,13 +665,15 @@ fn show(
         node.top = px(rect.min.y / ui);
         node.width = px(rect.width() / ui);
         node.height = px(rect.height() / ui);
-        node.border_radius = BorderRadius::all(px(
+        node.border_radius = if matches!(v, Visual::DeadZone) {
+            if state.analog { BorderRadius::MAX } else { BorderRadius::default() }
+        } else { BorderRadius::all(px(
             if matches!(v, Visual::Ring | Visual::Knob | Visual::LookMarker) {
                 999.0
             } else {
                 4.0
             },
-        ));
+        )) };
         node.padding = if matches!(
             v,
             Visual::Ring | Visual::DeadZone | Visual::Knob | Visual::LookMarker
@@ -1437,6 +1450,150 @@ mod tests {
         assert!(app.world().resource::<Practice>().fire && app.world().resource::<Practice>().looked);
         assert!(app.world().resource::<Practice>().look.x>0.0);
         isolated(&app);
+    }
+
+    #[test]
+    fn actual_practice_dead_zone_preserves_the_analog_circle_and_legacy_square() {
+        for analog in [false, true] {
+            let (mut app, w) = scene();
+            app.world_mut().resource_mut::<super::super::movement::Options>().analog = analog;
+            launch(&mut app);
+            {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Visual, &Text)>();
+                let (_, text) = query.iter(world).find(|(v, _)| matches!(v, Visual::Guide)).unwrap();
+                assert!(text.0.contains(if analog { "Inner circle" } else { "Inner box" }));
+            }
+            controls(&mut app, w);
+            {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Visual, &Node, &Visibility)>();
+                let (_, node, visibility) = query.iter(world).find(|(v, _, _)| matches!(v, Visual::DeadZone)).unwrap();
+                assert_eq!(*visibility, Visibility::Inherited);
+                assert_eq!(node.border_radius, if analog { BorderRadius::MAX } else { BorderRadius::default() });
+                assert_eq!(node.width, node.height);
+            }
+            isolated(&app);
+            assert_eq!(app.world().resource::<nvf_play::touch_movement::TouchMovementInput>().axes, Vec2::ZERO);
+        }
+    }
+
+    #[test]
+    fn actual_practice_mirrors_current_right_side_for_fixed_and_floating_owners() {
+        for floating in [false, true] {
+            let (mut app, w) = scene();
+            let saved = {
+                let mut layout = app.world_mut().resource_mut::<super::super::Layout>();
+                layout.config.apply_preset("left");
+                layout.config.floating = floating;
+                layout.config.aiming.dead_zone = 0.23;
+                layout.config.aiming.look = 1.7;
+                layout.config.aiming.ads = 0.6;
+                if !floating {
+                    // A custom right-side stick without the preset's southpaw bit
+                    // must use the same side as live movement/instructions.
+                    layout.config.stick.center.x = 0.71;
+                    layout.config.southpaw = false;
+                    layout.config.preset_name = "classic".into();
+                }
+                layout.config.clone()
+            };
+            if !floating {
+                assert_eq!(saved.preset_name, "classic", "Custom movement side must not come from the left preset ID");
+            }
+            launch(&mut app);
+            assert!(app.world().resource::<Practice>().movement_right);
+            assert_eq!(app.world().resource::<Practice>().dead_zone, 0.23);
+            let size = Vec2::new(900.0, 450.0);
+            {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Visual, &Text)>();
+                assert!(query.iter(world).find(|(v, _)| matches!(v, Visual::Guide)).unwrap().1.0.contains("MOVEMENT THUMB (right)"));
+            }
+            tap(&mut app, w, 70, begin(size).center());
+            {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Visual, &Text)>();
+                assert!(query.iter(world).find(|(v, _)| matches!(v, Visual::Guide)).unwrap().1.0.contains("LOOKING (left thumb)"));
+            }
+            tap(&mut app, w, 71, begin(size).center());
+            tap(&mut app, w, 72, begin(size).center());
+            assert!(app.world().resource::<Practice>().page == PageKind::Controls);
+            let (fixed, radius) = stick_on_side(size, true);
+            assert_eq!(displayed_ring_centre(&mut app), fixed);
+            let start = fixed + Vec2::new(radius * 0.25, 0.0);
+            send(&mut app, w, 40, TouchPhase::Started, start);
+            app.update();
+            let origin = if floating { start } else { fixed };
+            assert_eq!(app.world().resource::<Practice>().contacts[&40].origin, origin);
+            assert_eq!(displayed_ring_centre(&mut app), origin);
+            let look = area(size, true).center();
+            send(&mut app, w, 41, TouchPhase::Started, look);
+            send(&mut app, w, 41, TouchPhase::Moved, look + Vec2::new(20.0, 0.0));
+            send(&mut app, w, 42, TouchPhase::Started, fixed);
+            send(&mut app, w, 40, TouchPhase::Moved, start + Vec2::new(radius * 0.4, 0.0));
+            app.update();
+            {
+                let state = app.world().resource::<Practice>();
+                assert!(state.contacts[&40].target == Target::Move);
+                assert!(state.contacts[&41].target == Target::Look);
+                assert!(!state.contacts.contains_key(&42), "another thumb cannot steal movement");
+                assert!(state.move_delta.x > 0.0 && state.look.x > 0.0 && state.looked);
+            }
+            {
+                let world = app.world_mut();
+                let mut query = world.query::<(&Visual, &Node, &Text)>();
+                let (_, node, text) = query.iter(world).find(|(v, _, _)| matches!(v, Visual::Left)).unwrap();
+                assert_eq!(node.left, px(area(size, false).min.x));
+                assert!(text.0.starts_with(if floating { "Touch right" } else { "Drag ring" }));
+                let (_, node, _) = query.iter(world).find(|(v, _, _)| matches!(v, Visual::LookMarker)).unwrap();
+                let Val::Px(x) = node.left else { panic!("look marker must use logical pixels") };
+                assert!(x < size.x * 0.5, "look marker must stay in the opposite panel");
+            }
+            send(&mut app, w, 42, TouchPhase::Ended, fixed);
+            app.update();
+            assert!(app.world().resource::<Practice>().contacts.contains_key(&40));
+            send(&mut app, w, 40, TouchPhase::Ended, start);
+            send(&mut app, w, 41, TouchPhase::Ended, look);
+            app.update();
+            assert!(app.world().resource::<Practice>().contacts.is_empty());
+            assert_eq!(app.world().resource::<Practice>().move_delta, Vec2::ZERO);
+            let drawer = app.world().resource::<Practice>().drawer_enabled;
+            tap(&mut app, w, 60, action(size, 0, drawer).center());
+            tap(&mut app, w, 61, action(size, 2, drawer).center());
+            assert!(app.world().resource::<Practice>().fire && app.world().resource::<Practice>().jump,
+                    "Mirroring teaching panels retains real practice action hit targets");
+            assert_eq!(app.world().resource::<super::super::Layout>().config, saved);
+            assert_eq!(app.world().resource::<nvf_play::touch_movement::TouchMovementInput>().axes, Vec2::ZERO);
+            isolated(&app);
+            tap(&mut app, w, 80, header(size, false).center());
+            assert!(app.world().resource::<Practice>().page == PageKind::Guide);
+            assert!(app.world().resource::<Practice>().movement_right, "Reset retains the selected movement side");
+            controls(&mut app, w);
+            send(&mut app, w, 43, TouchPhase::Started, fixed);
+            send(&mut app, w, 43, TouchPhase::Moved, fixed + Vec2::new(24.0, 0.0));
+            app.update();
+            assert!(app.world().resource::<Practice>().move_delta.x > 0.0);
+            send(&mut app, w, 43, TouchPhase::Canceled, fixed);
+            app.update();
+            assert_eq!(app.world().resource::<Practice>().move_delta, Vec2::ZERO);
+            assert!(app.world().resource::<Practice>().movement_right);
+            tap(&mut app, w, 81, header(size, true).center());
+            for _ in 0..3 { app.update(); }
+            assert!(!app.world().resource::<Practice>().blocking());
+            app.world_mut().resource_mut::<super::super::Layout>().config.stick.center.x = 0.2;
+            launch(&mut app);
+            assert!(!app.world().resource::<Practice>().movement_right, "Reopening reads the current provider again");
+            controls(&mut app, w);
+            let (left, _) = stick(size);
+            assert_eq!(displayed_ring_centre(&mut app), left);
+            send(&mut app, w, 44, TouchPhase::Started, left);
+            send(&mut app, w, 44, TouchPhase::Moved, left + Vec2::new(24.0, 0.0));
+            app.update();
+            assert!(app.world().resource::<Practice>().contacts[&44].target == Target::Move);
+            assert!(app.world().resource::<Practice>().move_delta.x > 0.0, "Mirroring positions never reverses directional signs");
+            isolated(&app);
+        }
     }
 
 }

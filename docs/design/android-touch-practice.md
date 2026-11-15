@@ -1,8 +1,9 @@
 # Touch practice (#2436)
 
-[design] Settings > Controls > Touch offers an optional practice screen. This is a
-first-use explanation, not an automatic interruption: read the left-thumb movement and
-right-thumb look instructions on separate short pages before pressing Begin. Reset
+[design] Android Settings > Mobile > Touch layout and guide offers an optional
+practice screen (Controls > Touch on desktop). This is a first-use explanation,
+not an automatic interruption: read movement-thumb and opposite-thumb look
+instructions on separate short pages before pressing Begin. Reset
 returns to that guide. Close and Escape return to Settings. No Seen bit or active
 session is persisted.
 
@@ -14,8 +15,11 @@ stored row text cannot open it. It refuses an existing form.
 [design] Practice consumes its own raw TouchInput route before live touch contacts,
 mouse-look synthesis, aim latches or drawer commands. It only changes local lesson
 state: joystick direction/dead-zone display, a pretend look marker and Fire/Aim/Jump
-acknowledgements. The per-axis dead zone, floating/fixed explanation, Aim hold/toggle
-mode and optional drawer distance are copied from current touch settings on opening.
+acknowledgements. The current dead zone, analog/legacy mode, floating/fixed explanation,
+Aim hold/toggle mode and optional drawer distance are copied on opening. The movement
+side follows the current stick position, including mirrored/custom layouts;
+the movement ring/target and opposite look panel/marker mirror together. The analog
+dead-zone display is circular; legacy directional movement retains a square.
 Its optional drawer exercise only acknowledges a local swipe. It never
 presses input buttons or writes gameplay controls, inventory messages, ammo/AP, player
 transforms or gameplay saves. Live touch contacts, aim latch, held-sneak and drawer
@@ -45,7 +49,7 @@ passed all fifteen `touch::practice` routing, lifecycle, settings and gesture ca
 at source `28d5469`. This includes hardware-preserving entry/close and isolated
 synthetic actions. Phone layout, accessibility and font fit remain unqualified.
 
-[design, review revision 2] Floating movement admits the left practice panel and
+[design, review revision 2] Floating movement admits the selected movement-side panel and
 anchors the ring/dead-zone at the owning contact's Started position. That origin
 stays fixed until release/cancellation; another movement finger cannot replace it.
 Fixed movement retains its demonstration-ring anchor and ring-only
@@ -58,3 +62,12 @@ on any Canceled touch. Hold mode stays active while an Aim contact remains. Thes
 changes only update the local guide model; live input synthesis remains blocked.
 The corrected Aim route and floating/fixed-origin cases both passed in the R9
 CPU run; that result does not establish physical-device gesture usability.
+
+[documented: touch/profiles.rs and touch.rs] The Style panel's "Pad backup" preset
+is a fallback touch layout. Its persisted id remains `controller`; it changes
+only touch placement/size. Physical gamepad mappings and Auto/Xbox prompt names
+remain in Controls > Controller and are not selected by this touch preset.
+
+[qualification] The handedness/dead-zone/preset-wording correction adds authored
+App/provider/serialization controls. They are unexecuted in this source-only
+packet; the historical R9 result above does not qualify the changed presentation.

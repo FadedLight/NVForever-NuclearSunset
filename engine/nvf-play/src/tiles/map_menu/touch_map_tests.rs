@@ -15,9 +15,16 @@ mod map_touch_consumer_routes {
         app.insert_resource(script).insert_resource(TileMenus{map:true,..default()})
             .init_resource::<MapTiles>().init_resource::<crate::tiles::draw::TileFonts>()
             .init_resource::<crate::pause::PlayClock>()
+            .init_resource::<crate::tiles::menus::TileMenuBlur>()
             .add_systems(Update,data::prepare.after(crate::pipboy::flat_pointer).before(data::draw))
-            .add_systems(Update,settle.after(data::prepare).before(data::draw));
+            .add_systems(Update,settle.after(data::prepare).before(data::draw))
+            // Only the real native painter publishes MapTiles::shown after accepting ready.
+            .add_systems(Update,crate::tiles::draw::draw.after(settle).after(data::draw));
         mobile::settle(&mut app);
+        {
+            let tiles=app.world().resource::<MapTiles>();
+            assert!(tiles.ready.is_some(),"native map settle rejected tab {tab}: {}",tiles.written.reason);
+        }
         assert!(app.world().resource::<MapTiles>().shown.is_some(),"the real native page must be accepted, not a fallback facade");
         let measured=app.world().resource::<MapTiles>().written.counted.map.as_ref().unwrap().0;
         assert_eq!(mobile::shown(&app).window,measured);assert_ne!(measured,mobile::handbuilt_window());

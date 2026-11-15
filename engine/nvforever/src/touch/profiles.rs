@@ -136,7 +136,7 @@ pub const PRESETS: &[(&str, &str)] = &[
     ("claw", "Four fingers"),
     ("compact", "Compact grid"),
     ("wide", "Wide reach"),
-    ("controller", "Controller"),
+    ("controller", "Pad backup"),
 ];
 pub const SLOT_NAMES: &[&str] = &[
     "My layout",
@@ -449,5 +449,19 @@ mod tests {
         let a = Appearance { shape: "future-shape".into(), ..Appearance::default() };
         assert_eq!(a.geometry(80.0).radius, 40.0);
         assert_eq!(a.shape, "future-shape");
+    }
+    #[test]
+    fn pad_backup_label_keeps_the_existing_controller_preset_identity_and_geometry() {
+        assert_eq!(PRESETS.iter().find(|p| p.0 == "controller").unwrap().1, "Pad backup");
+        let mut config = super::super::layout::Config::default();
+        config.apply_preset("controller");
+        let encoded = config.encode();
+        assert_eq!(encoded["preset"], "controller");
+        let decoded = super::super::layout::Config::decode(&encoded).unwrap();
+        assert_eq!(decoded.preset_name, "controller");
+        assert_eq!(decoded.encode(), encoded);
+        assert_eq!(decoded.stick.center.to_array(), [0.17, 0.74]);
+        assert_eq!(decoded.buttons[3].center.to_array(), [0.94, 0.43]);
+        assert_eq!(decoded.buttons[3].scale, 1.15);
     }
 }

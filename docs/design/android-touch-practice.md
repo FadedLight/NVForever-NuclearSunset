@@ -40,9 +40,10 @@ feedback; the look area is separate from action targets. The drawer exercise is 
 only when the real optional drawer setting is enabled, but never uses its OpenInventory
 bridge. No dependencies or game-derived artwork are added.
 
-[qualification] Rust routing, lifecycle and settings-action tests are authored, not
-compiled or executed until admitted separately. Layout/accessibility on a phone, font
-fit and merged interaction with other input increments need qualification.
+[qualification] The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379)
+passed all fifteen `touch::practice` routing, lifecycle, settings and gesture cases
+at source `28d5469`. This includes hardware-preserving entry/close and isolated
+synthetic actions. Phone layout, accessibility and font fit remain unqualified.
 
 [design, review revision 2] Floating movement admits the left practice panel and
 anchors the ring/dead-zone at the owning contact's Started position. That origin
@@ -55,5 +56,5 @@ The synthetic Aim model mirrors live source timing: toggle at Started once while
 no other Aim contact is down, retain through drag and Ended, and clear the toggle
 on any Canceled touch. Hold mode stays active while an Aim contact remains. These
 changes only update the local guide model; live input synthesis remains blocked.
-The corrected Aim route test and added floating/fixed origin test remain uncompiled
-and unrun until separately admitted.
+The corrected Aim route and floating/fixed-origin cases both passed in the R9
+CPU run; that result does not establish physical-device gesture usability.

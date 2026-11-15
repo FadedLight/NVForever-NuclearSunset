@@ -22,9 +22,11 @@ common safe insets, Pip-Boy ratio, menu units and UI scale. Changed or invalid
 metadata cancels queued projections and virtual intent before they can release
 on old bounds. A first valid stamp preserves fresh input. The actual laid-out
 node's geometry check remains an additional guard, rather than the only signal.
-Platform inset publication precedes this invalidation. Authored regression
-fixtures exercise the actual flat image/layout/projector and pointer driver;
-they have not yet been compiled or executed in this candidate.
+Platform inset publication precedes this invalidation. The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379)
+passed all nine `pipboy::touch_presentation` cases at source `28d5469`, including
+actual flat image/layout/inverse projection, independent settings, metadata/inset
+cancellation, invalid-layout recovery and a fresh-start control. This does not
+qualify physical device readability or later map integration.
 
 [hypothesis: qualification] Verify independent INI persistence, original 100%
 projection, device and flat inverse mappings at multiple sizes/densities, warm

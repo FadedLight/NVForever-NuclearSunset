@@ -92,14 +92,16 @@ Aim can hold or toggle. Sneak can toggle or act only while held, preserving inde
 keyboard/controller toggle state when the touch hold ends. Reset aiming leaves button
 positions alone; Save/Cancel includes both the layout and aiming settings.
 
-This follow-up source still needs compilation, execution and rendered device validation;
-it is separate from the earlier experimental APK.
+The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379) passed the aiming persistence, actual-ADS scaling, dead-zone and aim/sneak ownership regressions.
+These results apply to R9 source `28d5469`; later integration changes need their own
+execution evidence. Rendered device validation remains separate.
 An additional source increment adds **Adaptive touch actions** in the Touch settings
 group. The existing Aim action displays **Block** for ready drawn melee weapons or
 fists, and **Scope** for a ready drawn scope-equipped gun. Turn it off to keep the
 static Aim caption and icon. Its action binding, saved `Aim` layout key, node and
-position remain the same. Compilation, merged input/toggle qualification and device
-rendering remain pending; this is not yet an installed feature.
+position remain the same. The same R9 CPU run passed ten presentation/routing tests
+and two preference tests, including held/toggled contacts, controller handoff and
+pistol visibility/action checks. Physical-device rendering remains unqualified.
 
 ## Original touch icon families follow-up
 
@@ -118,7 +120,8 @@ look marker. Fire, Aim and Jump only update this screen. If Swipe to Pip-Boy is
 enabled, Try drawer offers an isolated swipe exercise without opening inventory.
 Reset returns to the guide; Close or Escape returns to the paused Settings page.
 The active session is never saved and practice does not change a gameplay save.
-This source increment still needs Rust execution and rendered device validation.
+The R9 CPU run passed all fifteen practice routing, lifecycle, settings and gesture
+tests. Rendered device validation remains separate.
 
 ## Touch inventory menus
 

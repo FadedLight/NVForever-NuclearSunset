@@ -51,11 +51,17 @@ eligibility remain authoritative, including while a new list appears during inpu
 fast taps, entry and list replacement, drag-away-and-back, scrolling, multi-touch,
 focus/suspend/resize cancellation, both tap modes, selection/confirmation indices,
 and settings persistence. Layout checks must cover wrapped long choices and
-independent text sizes. Rust tests and native/device rendering are pending until
-the parent admits compilation and execution; source authorship is not a test pass.
+independent text sizes.
+
+[qualification] The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379)
+passed all thirty `dialogue_touch` cases: raw touch/release and scroll guards,
+entry/list replacement, multi-touch and lifecycle cancellation, controller return,
+both tap modes, persistence, wrapping, independent sizes and split-camera/layout
+controls. This result applies to R9 source `28d5469`; the later shared touch-owner
+filter is a separate integration change. Native/device rendering remains unqualified.
 
 [design, Android compact choices] New Android settings default choice text to 85% (17 logical pixels); explicit saved choice and subtitle scales remain authoritative. Subtitles keep the 100% default. Desktop defaults and the desktop touch view retain their previous layout. No setting key changes or new gameplay state are introduced.
 
 [design] Android's touch conversation panel uses 75% of the window height, 8-pixel outer padding, 4-pixel gaps and 48-pixel minimum choice/confirm targets. Choice padding is 6 pixels; wrapped text can grow the row and the existing viewport scrolls it. The previous touch layout remains the desktop profile. This density change is intended to expose more choices on short landscape screens while keeping full labels and the same offered choice order and guarded release actions. Existing text-size sliders remain 75–200%.
 
-[qualification plan] Authored headless tests will use the real production draw, Bevy text measurement and UI layout at phone-sized viewports, assert a larger fully visible choice count and usable target bounds, then exercise actual raw touch release/scroll routes on those computed bounds. Existing INI loading/roundtrip will prove explicit old sizes survive. No native rendering or device usability result is implied by source preparation.
+[qualification] All four compact-choice cases passed in that R9 run using production draw, Bevy text measurement and real UI layout. They check more whole visible choices, 48-pixel targets, wrapped text, raw release/scroll guards and explicit saved INI sizes. These are headless CPU/layout results, not native rendering or device usability acceptance.

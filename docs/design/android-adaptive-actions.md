@@ -39,5 +39,10 @@ holstering/drawing/modal fallbacks and static preference persistence, then actua
 touch/render-model routing with a held contact and hardware ownership preserved.
 The combined touch-toggle/controller packet also needs a merged lifecycle test:
 presentation must not replace nodes or prevent that owner's cancellation/release.
-Source authorship and Rust parsing do not qualify compilation, execution or device
-rendering; those remain pending until admitted by the parent.
+
+[qualification] The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379)
+passed ten `touch::action_presentation` cases and two preference cases. They include
+held/toggled input across presentation changes, independent mouse ownership,
+controller handoff/consumed return, drawer cancellation and an actual pistol
+visibility/raster/action control. This is CPU execution at R9 source `28d5469`,
+not physical-device rendering or acceptance of later source changes.

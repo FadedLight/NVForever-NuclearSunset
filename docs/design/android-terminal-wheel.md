@@ -31,8 +31,11 @@ focus/suspend/session changes, cancel multi-touch ambiguity and never activate o
 hover or cancellation. A touch while saved input is Controller only restores device
 selection through the parent's controller bridge; the next touch acts. Options are
 persisted in separate owned JSON files under NVForever's engine home, with desktop
-defaults disabled. These are source-only changes pending compilation, execution and
-rendered physical-device validation. No shipped game data is included in fixtures.
+defaults disabled. The [R9 hosted CPU run](https://github.com/LootJunkieAzza/NVForever/actions/runs/43669164991/job/132675180379)
+passed all eighteen `terminal::touch` and ten `companion_wheel::touch` cases at
+source `28d5469`, including real command outcomes, ownership/cancellation,
+controller return, loading gates and settings-file guards. Rendered physical-device
+validation remains separate. No shipped game data is included in fixtures.
 
 ## Review revision 2
 

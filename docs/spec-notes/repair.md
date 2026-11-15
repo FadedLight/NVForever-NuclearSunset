@@ -9,6 +9,10 @@ works when the existing native-file presentation is selected and when its
 hand-built fallback is selected. Existing keyboard, mouse and controller routes
 and the repair formulas in this note remain authoritative.
 
+[design] `touch-maintenance-v1` is a saved Menus switch, on by default on Android
+and off on desktop. Turning it off restores the ordinary maintenance presentation;
+changing it cancels pending sheet actions and retains owned contacts until neutral.
+
 [design] A touch selects a row without consuming anything. A separate confirmation
 shows the selected target, donor and resulting condition, or the vendor's quoted
 condition/caps/skill requirements. Cancel changes neither equipment nor caps.

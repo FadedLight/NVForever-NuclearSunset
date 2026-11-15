@@ -5,6 +5,8 @@ use fnv_sim::FormId;
 use std::collections::BTreeMap;
 
 mod view;
+#[cfg(test)]
+mod tests;
 
 pub const KEY: &str = "touch-barter-v1";
 const TRAVEL: f32 = 12.0;
@@ -26,6 +28,7 @@ pub struct Frame {
     pub size: Vec2,
     pub safe: crate::touch_safe_area::SafeInsets,
     pub ui_scale: f32,
+    pub density: f32,
     pub admitted: bool,
     pub fresh: bool,
     pub neutral: bool,
@@ -77,7 +80,7 @@ enum Target { Row(RowToken), Category(Side, i32), One, All, Accept, Close,
 struct Hit { rect: Rect, target: Target }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Identity { session: Session, window: Entity, camera: Entity, size: Vec2,
-    safe: crate::touch_safe_area::SafeInsets, ui_scale: f32, category: [Category; 2], prompt: Option<Prompt> }
+    safe: crate::touch_safe_area::SafeInsets, ui_scale: f32, density: f32, category: [Category; 2], prompt: Option<Prompt> }
 #[derive(Clone)]
 struct Contact { id: u64, origin: Vec2, previous: Vec2, target: Option<Target>, identity: Identity,
     dragged: bool, scroll: bool, remainder: f32, quote: Option<Quote>, selection: Option<RowToken> }
@@ -100,7 +103,12 @@ impl Default for TouchBarter {
 impl TouchBarter {
     fn retire(&mut self, id: u64) {
         if self.retired.contains(&id) { return; }
-        if self.retired.len() == MAX_IDS { self.overflow = true; }
+        if self.retired.len() == MAX_IDS {
+            // Once IDs cannot be represented, abandon all owned proposals and
+            // swallow the whole window until neutral; do not strand an owner.
+            self.overflow = true; self.contact = None; self.pending = None;
+            self.barrier = true; self.revision = self.revision.wrapping_add(1);
+        }
         else { self.retired.push(id); }
     }
     fn cancel_contact(&mut self) {
@@ -139,7 +147,7 @@ impl TouchBarter {
         let pane = view::Panel::of(frame);
         let next = m.filter(|_| options.enabled).and_then(|m| Some(Identity {
             session: session(m)?, window: frame.window, camera: frame.camera, size: frame.size,
-            safe: frame.safe, ui_scale: frame.ui_scale, category: m.category, prompt: prompt(m),
+            safe: frame.safe, ui_scale: frame.ui_scale, density: frame.density, category: m.category, prompt: prompt(m),
         }));
         if self.identity != next || !frame.admitted || frame.fresh || pane.is_none() {
             self.cancel_contact();
@@ -257,6 +265,11 @@ struct Admission<'w, 's> {
     switch: Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<'w, crate::pad::PlatformInputGate>>,
     paused: Option<Res<'w, crate::pause::Paused>>,
+    safe: Option<Res<'w, crate::touch_safe_area::SafeInsets>>,
+    scale: Option<Res<'w, UiScale>>,
+    fresh: Option<Res<'w, super::FreshMenu>>,
+    capture: Option<Res<'w, crate::bindings::KeyboardCapture>>,
+    free_cam: Option<Res<'w, crate::free_cam::FreeCam>>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
     cameras: Query<'w, 's, (&'static Camera, &'static RenderTarget)>,
 }
@@ -266,11 +279,19 @@ impl Admission<'_, '_> {
             && self.switch.as_ref().is_none_or(|s| s.allows_actions())
             && self.platform.as_ref().is_none_or(|g| g.allows_actions() && g.allows_touch(id))
             && !self.paused.as_ref().is_some_and(|p| p.0)
-            && self.windows.get(frame.window).is_ok_and(|w| w.focused && w.resolution.size() == frame.size)
+            && !self.fresh.as_ref().is_some_and(|f| f.0)
+            && !self.capture.as_ref().is_some_and(|c| c.0)
+            && !self.free_cam.as_ref().is_some_and(|c| c.active)
+            && self.safe.as_ref().map_or_else(Default::default, |s| **s) == frame.safe
+            && self.scale.as_ref().map_or(1.0, |s| s.0) == frame.ui_scale
+            && self.windows.get(frame.window).is_ok_and(|w| w.focused && w.resolution.size() == frame.size
+                && w.scale_factor() == frame.density)
             && self.cameras.get(frame.camera).is_ok_and(|(camera, target)| camera.is_active
                 && target.normalize(Some(frame.window)).is_some_and(|target| matches!(target,
                     bevy::camera::NormalizedRenderTarget::Window(w) if w.entity() == frame.window))
-                && camera.logical_viewport_size().is_some_and(|size| size.abs_diff_eq(frame.size, 0.01)))
+                && camera.logical_viewport_size().is_some_and(|size| size.abs_diff_eq(frame.size, 0.01))
+                && self.windows.get(frame.window).is_ok_and(|w| camera.physical_viewport_rect()
+                    == Some(URect::from_corners(UVec2::ZERO, UVec2::new(w.physical_width(), w.physical_height())))))
     }
 }
 

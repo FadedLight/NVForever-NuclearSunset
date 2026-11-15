@@ -279,7 +279,7 @@ mod tests {
         let button=app.world_mut().spawn((Button,Node {position_type:PositionType::Absolute,left:px(20.0),top:px(20.0),width:px(100.0),height:px(50.0),..default()},UiTargetCamera(camera))).id();
         for _ in 0..4 {app.update();}
         let mut stack=app.world_mut().resource_mut::<UiStack>();
-        stack.uinodes=vec![button];stack.partition=vec![0..1];
+        stack.uinodes=vec![button];stack.partition.clear();stack.partition.push(0..1);
         (app,window,button)
     }
 

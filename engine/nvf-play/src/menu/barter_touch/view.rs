@@ -2,6 +2,8 @@
 use super::*;
 
 const ROW: f32 = 48.0;
+// Two 15px text lines at Bevy's default 1.2 line height plus 10px padding.
+const HEADER: f32 = 48.0;
 #[derive(Clone, Copy)]
 pub(super) struct Panel {
     pub area: Rect,
@@ -18,17 +20,21 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
 }
 impl Panel {
     pub fn of(f: Frame) -> Option<Self> {
-        if !f.size.is_finite() || !f.ui_scale.is_finite() || f.ui_scale <= 0.0 { return None; }
+        if !f.size.is_finite() || !f.ui_scale.is_finite() || f.ui_scale <= 0.0
+            || !f.density.is_finite() || f.density <= 0.0 || !(f.size / f.ui_scale).is_finite()
+            || !(48.0 / f.ui_scale).is_finite() { return None; }
         let s = f.safe;
         crate::touch_safe_area::SafeInsets::from_array([s.left, s.top, s.right, s.bottom])?;
-        let area = rect(s.left + 8.0, s.top + 8.0,
-            f.size.x - s.left - s.right - 16.0, f.size.y - s.top - s.bottom - 16.0);
-        if area.width() < 480.0 || area.height() < 240.0 { return None; }
-        let rows = (((area.height() - 184.0) / ROW).floor() as usize).clamp(1, 8);
+        let span = f.size - Vec2::new(s.left + s.right + 16.0, s.top + s.bottom + 16.0);
+        // Rect::from_corners sorts inverted corners, so reject signed available
+        // space before construction instead of turning invalid insets into UI.
+        if span.x < 480.0 || span.y < 240.0 { return None; }
+        let area = rect(s.left + 8.0, s.top + 8.0, span.x, span.y);
+        let rows = (((area.height() - HEADER - ROW * 3.0) / ROW).floor() as usize).clamp(1, 8);
         let width = (area.width() - 8.0) * 0.5;
         let left = area.min.x;
         let right = left + width + 8.0;
-        let top = area.min.y + 40.0;
+        let top = area.min.y + HEADER;
         let lists = [rect(right, top + ROW, width, rows as f32 * ROW),
             rect(left, top + ROW, width, rows as f32 * ROW)];
         let categories = [rect(right, top, width, ROW), rect(left, top, width, ROW)];
@@ -123,8 +129,10 @@ pub(super) fn draw(mut commands: Commands, state: Res<TouchBarter>, active: Opti
                 else { format!("Receive {}", t.paid()) };
             let warning = if t.balance < 0 && !t.affordable() { " — insufficient caps" }
                 else if t.paid() != t.balance { " — merchant caps limit" } else { "" };
-            paint(parent, rect(p.area.min.x, p.area.min.y, p.area.width(), 40.0), f.ui_scale,
-                format!("Your caps {} · Merchant caps {} · {balance}{warning}", t.purse[1], t.purse[0]), false);
+            paint(parent, rect(p.area.min.x, p.area.min.y, p.area.width(), HEADER), f.ui_scale,
+                format!("Your caps {} · Merchant caps {} · {balance}{warning} · Basket buy {} / sell {}",
+                    t.purse[1], t.purse[0], t.offered[0].values().map(|n| i64::from(*n)).sum::<i64>(),
+                    t.offered[1].values().map(|n| i64::from(*n)).sum::<i64>()), false);
             if let Some(q) = m.quantity {
                 let name = &m.list(q.side).rows[q.row].name;
                 paint(parent, rect(p.quantity.min.x, p.quantity.min.y, p.quantity.width(), ROW), f.ui_scale,

@@ -139,6 +139,11 @@ impl TouchMap {
     fn overflow(&mut self) {
         self.cancel();self.overflow=true;self.blocked.clear();self.drain=true;
     }
+    fn remember(&mut self,id:u64)->bool {
+        if self.ids.contains(&id) {return true;}
+        if self.ids.len()>=MAX_IDS {self.overflow();return false;}
+        self.ids.push(id);true
+    }
     fn push(&mut self, edit:Edit, view:MapView,mag:f32)->bool {
         if self.edits.len()>=MAX_EDITS {self.overflow();return false;}
         self.base.get_or_insert((view,mag));self.edits.push(edit);true
@@ -243,16 +248,17 @@ impl Bridge<'_,'_> {
                 self.state.ids.clear();self.state.moved=false;self.state.multiple=false;self.state.marker=surface.marker(at.unwrap());
                 self.state.pointer=at;
             } else {self.state.multiple=true;self.state.moved=true;}
-            if !self.state.ids.contains(&event.id) {
-                if self.state.ids.len()>=MAX_IDS {self.state.overflow();return true;}
-                self.state.ids.push(event.id);
-            }
+            if !self.state.remember(event.id) {return true;}
             self.state.fingers[index]=Some(Finger{id:event.id,origin:event.position,at:event.position});
             // Cursor-only batch, with no action edge, follows a held finger too.
             self.state.base.get_or_insert((surface.view,surface.mag));
             return true;
         }
         let Some(index)=self.state.fingers.iter().position(|f|f.is_some_and(|f|f.id==event.id)) else {return false;};
+        // A previous frame consumed the queue's IDs. Re-add the owner on every
+        // new sample, including Ended before removing its last Finger, so a
+        // late per-contact quarantine still invalidates this batch.
+        if !self.state.remember(event.id) {return true;}
         if event.phase==TouchPhase::Canceled || !event.position.is_finite() {
             self.state.cancel();self.state.blocked.retain(|id|*id!=event.id);self.state.drain=true;return true;
         }

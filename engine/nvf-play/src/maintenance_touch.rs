@@ -7,10 +7,13 @@ use std::{collections::VecDeque, sync::Arc};
 use crate::{pipboy::{item_mod, repair as player_repair}, touch_safe_area::SafeInsets};
 
 mod sheet;
+#[cfg(test)]
+pub(crate) mod tests;
 
 const QUEUED: usize = 32;
 const DRAG: f32 = 12.0;
 const ROW: f32 = 48.0;
+pub const SETTING_KEY: &str = "touch-maintenance-v1";
 
 /// Exact presentation supplied by the common router, in logical window pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,15 +23,16 @@ pub struct Context {
     pub logical: Vec2,
     pub physical: UVec2,
     pub density: f32,
+    pub focused: bool,
     pub safe: SafeInsets,
     pub ui_scale: f32,
 }
 impl Context {
     pub fn from_window(window: Entity, camera: Entity, value: &Window, safe: SafeInsets, ui_scale: f32) -> Self {
-        Self { window, camera, logical: value.resolution.size(), physical: value.resolution.physical_size(), density: value.resolution.scale_factor(), safe, ui_scale }
+        Self { window, camera, logical: value.resolution.size(), physical: value.resolution.physical_size(), density: value.resolution.scale_factor(), focused: value.focused, safe, ui_scale }
     }
     fn valid(self) -> bool {
-        self.logical.is_finite() && self.logical.min_element() > 0.0
+        self.focused && self.logical.is_finite() && self.logical.min_element() > 0.0
             && self.physical.min_element() > 0 && self.density.is_finite() && self.density > 0.0
             && self.ui_scale.is_finite() && self.ui_scale > 0.0
             && [self.safe.left, self.safe.top, self.safe.right, self.safe.bottom].iter().all(|v| v.is_finite() && *v >= 0.0)
@@ -112,19 +116,25 @@ pub struct State {
     allowed: bool,
     hardware_hidden: bool,
     contact: Option<Contact>,
+    retired: Vec<u64>,
     queue: VecDeque<Request>,
     generation: u64,
     painted: Option<u64>,
 }
 impl Default for State {
     fn default() -> Self {
-        Self { enabled: cfg!(target_os = "android"), source: None, context: None, allowed: false, hardware_hidden: false, contact: None, queue: VecDeque::new(), generation: 0, painted: None }
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 impl State {
+    fn for_platform(android: bool) -> Self {
+        Self { enabled: android, source: None, context: None, allowed: false, hardware_hidden: false, contact: None, retired: Vec::new(), queue: VecDeque::new(), generation: 0, painted: None }
+    }
     pub(crate) fn visible(&self) -> bool { self.enabled && self.allowed && !self.hardware_hidden && self.source.is_some() && self.context.is_some() }
     fn retire(&mut self) {
-        self.contact = None;
+        if let Some(c) = self.contact.take() {
+            if !self.retired.contains(&c.id) { self.retired.push(c.id); }
+        }
         self.queue.clear();
         self.generation = self.generation.wrapping_add(1);
     }
@@ -162,6 +172,15 @@ pub struct MaintenanceTouchPlugin;
 impl Plugin for MaintenanceTouchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<State>().init_resource::<sheet::Drawn>().add_systems(PostUpdate, (publish, sheet::draw).chain().before(bevy::ui::UiSystems::Layout));
+        crate::settings::add_setting(app, crate::settings::Setting {
+            key: SETTING_KEY, group: crate::pause::GROUP_MENUS, label: "Touch repair and weapon mods",
+            note: "Large repair, donor and weapon-mod lists with separate confirmation. Turn off to use the ordinary menus. On by default on Android.",
+            switches: "", get: |w| w.resource::<State>().enabled,
+            set: |w, enabled| {
+                let mut state = w.resource_mut::<State>();
+                if state.enabled != enabled { state.retire(); state.enabled = enabled; state.hardware_hidden = false; }
+            }, slider: None,
+        });
     }
 }
 
@@ -197,7 +216,10 @@ impl Bridge<'_> {
         s.allowed = allowed;
     }
     pub fn captures_touch(&self) -> bool { self.state.visible() }
-    pub fn owns(&self, id: u64) -> bool { self.state.contact.as_ref().is_some_and(|c| c.id == id) }
+    /// Includes hidden presentation, so the common router can offer action-free return.
+    pub fn available(&self) -> bool { self.state.enabled && self.state.allowed && self.state.context.is_some() && self.state.source.is_some() }
+    /// Retired ownership survives source/modal/hardware cancellation until real neutral.
+    pub fn owns(&self, id: u64) -> bool { self.state.retired.contains(&id) || self.state.contact.as_ref().is_some_and(|c| c.id == id) }
     pub fn hardware_intent(&mut self) { self.state.retire(); self.state.hardware_hidden = true; }
     pub fn restore_touch(&mut self) { self.state.retire(); self.state.hardware_hidden = false; }
     pub fn cancel(&mut self) { self.state.retire(); self.state.allowed = false; }
@@ -205,14 +227,21 @@ impl Bridge<'_> {
     /// space is intentionally owned; a hidden-sheet return never selects a row.
     pub fn event(&mut self, event: &TouchInput, admitted: bool) -> bool {
         let s = &mut self.state;
+        if s.retired.contains(&event.id) {
+            if matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) { s.retired.retain(|id| *id != event.id); }
+            return true;
+        }
         if !admitted || !s.enabled || !s.allowed || s.context.is_none() || s.source.is_none() {
-            s.retire(); return false;
+            let owned = s.contact.as_ref().is_some_and(|c| c.id == event.id);
+            s.retire();
+            if matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) { s.retired.retain(|id| *id != event.id); }
+            return owned;
         }
         let context = s.context.unwrap();
         if event.window != context.window { return false; }
         if !event.position.is_finite() { s.retire(); return true; }
         if event.phase == TouchPhase::Started {
-            if s.contact.is_some() { return true; }
+            if s.contact.is_some() || s.retired.len() >= 16 { return true; }
             let quarantined = s.hardware_hidden || s.painted != Some(s.generation);
             s.hardware_hidden = false;
             let source = s.source.as_ref().unwrap().clone();
@@ -226,8 +255,8 @@ impl Bridge<'_> {
             if !matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) { s.contact = Some(c); }
             return true;
         }
-        match event.phase {
-            TouchPhase::Moved => {
+        match (event.phase, c.target) {
+            (TouchPhase::Moved, _) => {
                 let geometry = sheet::Geometry::new(context);
                 if (event.position - c.origin).length() > DRAG { c.dragging = true; }
                 if c.dragging && matches!(c.target, Some(Action::Select(_))) {
@@ -242,11 +271,7 @@ impl Bridge<'_> {
                 c.at = event.position;
                 s.contact = Some(c);
             }
-            TouchPhase::Ended if !c.dragging => {
-                if c.target.is_some() && sheet::Geometry::new(context).target(event.position, &c.source) == c.target {
-                    s.enqueue(c.source, c.id, c.target.unwrap());
-                }
-            }
+            (TouchPhase::Ended, Some(target)) if !c.dragging && sheet::Geometry::new(context).target(event.position, &c.source) == Some(target) => s.enqueue(c.source, c.id, target),
             _ => {}
         }
         true
@@ -258,8 +283,8 @@ impl Bridge<'_> {
 pub struct Requests<'w, 's> {
     state: Option<ResMut<'w, State>>,
     gate: MaintenanceAdmission<'w>,
-    windows: Query<'w, 's, &'static Window>,
-    cameras: Query<'w, 's, &'static Camera>,
+    windows: Query<'w, 's, (&'static Window, Has<bevy::window::PrimaryWindow>)>,
+    cameras: Query<'w, 's, (&'static Camera, &'static bevy::camera::RenderTarget)>,
     scale: Option<Res<'w, UiScale>>,
     safe: Option<Res<'w, SafeInsets>>,
 }
@@ -270,9 +295,15 @@ impl Requests<'_, '_> {
         let mut other = VecDeque::new();
         while let Some(r) = s.queue.pop_front() {
             if r.source.kind() != kind { other.push_back(r); continue; }
-            let context_valid = self.windows.get(r.context.window).is_ok_and(|w| {
-                Context::from_window(r.context.window, r.context.camera, w, self.safe.as_ref().map_or(SafeInsets::default(), |v| **v), self.scale.as_ref().map_or(1.0, |v| v.0)) == r.context
-            }) && self.cameras.get(r.context.camera).is_ok_and(|c| c.is_active);
+            let context_valid = self.windows.get(r.context.window).is_ok_and(|(w, primary)| {
+                primary && w.focused && Context::from_window(r.context.window, r.context.camera, w, self.safe.as_ref().map_or(SafeInsets::default(), |v| **v), self.scale.as_ref().map_or(1.0, |v| v.0)) == r.context
+            }) && self.cameras.get(r.context.camera).is_ok_and(|(c, target)| {
+                c.is_active && c.viewport.as_ref().is_none_or(|v| v.physical_position == UVec2::ZERO && v.physical_size == r.context.physical)
+                    && c.physical_target_size() == Some(r.context.physical)
+                    && c.physical_viewport_rect() == Some(URect::from_corners(UVec2::ZERO, r.context.physical))
+                    && c.logical_viewport_rect().is_some_and(|rect| rect.size() == r.context.logical)
+                    && matches!(target.normalize(Some(r.context.window)), Some(bevy::camera::NormalizedRenderTarget::Window(w)) if w.entity() == r.context.window)
+            });
             if s.visible() && r.generation == s.generation && s.context == Some(r.context)
                 && context_valid && self.gate.allows(r.id) { mine.push(r); }
         }

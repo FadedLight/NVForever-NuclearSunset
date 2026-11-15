@@ -657,3 +657,10 @@ native-selected and fallback configurations, including both inventories, quantit
 category, insufficient caps, changed row/trade, cancellation, source handoff and
 no duplicate actions. Source review, compilation, CPU execution and phone/readability
 acceptance are separate evidence; none is implied by this design note.
+
+[design]
+At the command boundary the adapter rechecks current safe insets, UI scale, window
+density/size/focus, full-window camera, device/platform admission, keyboard capture,
+free camera and fresh-menu state. A stale row, quantity session or quote is refused.
+Retired contact IDs are bounded at 32; exceeding that budget abandons proposals and
+captures until an actual neutral touch frame, without clearing hardware input.

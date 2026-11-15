@@ -4,8 +4,8 @@
 
 [design] The compact Android maintenance sheet follows the touch ownership and
 late-confirmation contract in `repair.md`, "Android touch presentation". It reuses
-the existing mod session's offered slots, installed flags, descriptions, comparison
-figures and attach/detach rules. A row tap selects only; a separate Install or
+the existing mod session's offered slots, installed flags, effect descriptions
+and attach/detach rules. A row tap selects only; a separate Install or
 Remove confirmation acts on the painted weapon unit and mod choice. Back and
 Cancel consume no mod. List scroll does not silently select or install a choice.
 

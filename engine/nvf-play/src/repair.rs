@@ -784,6 +784,9 @@ fn close(mut commands: Commands, mut menu: ResMut<RepairServices>, roots: Query<
 }
 
 #[cfg(test)]
+mod maintenance_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

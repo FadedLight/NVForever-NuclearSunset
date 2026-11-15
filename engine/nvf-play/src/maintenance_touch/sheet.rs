@@ -8,6 +8,14 @@ pub(super) struct Geometry {
     shown: usize,
 }
 impl Geometry {
+    #[cfg(test)]
+    pub(super) fn center(&self, source: &Source, action: Action) -> Vec2 {
+        match action {
+            Action::Confirm => self.confirm.center(), Action::Cancel => self.cancel.center(),
+            Action::Select(i) => Vec2::new(self.list.center().x, self.list.min.y + (i - source.first()) as f32 * ROW + ROW / 2.0),
+            Action::Scroll(_) => self.list.center(),
+        }
+    }
     pub fn new(c: Context) -> Self {
         let safe = Rect::new(c.safe.left + 8.0, c.safe.top + 8.0, c.logical.x - c.safe.right - 8.0, c.logical.y - c.safe.bottom - 8.0);
         let width = safe.width().min(720.0);
@@ -45,10 +53,11 @@ fn heading(source: &Source) -> (String, String) {
         Source::Repair(s) => {
             let after = s.selected.checked_sub(1).and_then(|i| s.offer.parts.get(i)).map(|p| fnv_game::repair::merged_condition(&s.settings, s.offer.condition, p.condition, s.skill));
             let change = after.map_or(String::new(), |to| format!(" → {:.0}%", to * 100.0));
-            (format!("Repair: {}", s.offer.name), format!("Condition {:.0}%{change} · Repair {:.0}\nSelect a donor, then confirm. The donor is consumed.", s.offer.condition * 100.0, s.skill))
+            let requirement = if s.offer.parts.is_empty() { "No compatible donors available." } else { "Select a donor, then confirm. The donor is consumed." };
+            (format!("Repair: {}", s.offer.name), format!("Condition {:.0}%{change} · Repair {:.0}\n{requirement}", s.offer.condition * 100.0, s.skill))
         }
         Source::Mod(s) => {
-            let effect = s.selected.checked_sub(1).and_then(|i| s.offer.choices.get(i)).and_then(|c| c.effect.as_deref()).unwrap_or("Select a supported modification, then confirm.");
+            let effect = s.selected.checked_sub(1).and_then(|i| s.offer.choices.get(i)).and_then(|c| c.effect.as_deref()).unwrap_or(if s.offer.choices.is_empty() { "No carried or installed compatible modifications." } else { "Select a supported modification, then confirm." });
             (format!("Weapon mods: {}", s.offer.name), effect.to_owned())
         }
         Source::Vendor(_, v) => {
@@ -71,7 +80,13 @@ fn row(source: &Source, index: usize) -> (String, bool) {
 }
 
 #[derive(Component)]
-struct Sheet;
+pub(super) struct Sheet;
+#[cfg(test)]
+#[derive(Component)]
+pub(super) struct SheetRow(pub usize);
+#[cfg(test)]
+#[derive(Component)]
+pub(super) struct SheetButton(pub Action);
 #[derive(Resource, Default)]
 pub(super) struct Drawn(Option<(u64, bool)>);
 
@@ -99,14 +114,18 @@ pub(super) fn draw(mut commands: Commands, mut state: ResMut<State>, mut drawn: 
         label(p, Rect::new(g.panel.min.x + 12.0, g.panel.min.y + 34.0, g.panel.max.x - 12.0, g.list.min.y - 2.0), detail, 16.0, scale, bright);
         for (offset, index) in (source.first()..source.rows()).take(g.shown).enumerate() {
             let y = g.list.min.y + offset as f32 * ROW;
-            let rect = Rect::new(g.list.min.x, y, g.list.max.x, y + ROW - 2.0);
+            let rect = Rect::new(g.list.min.x, y, g.list.max.x, y + ROW);
             let (text, selected) = row(source, index);
-            p.spawn((node(rect, scale), BackgroundColor(if selected { Color::srgb(0.20, 0.18, 0.10) } else { Color::srgb(0.065, 0.075, 0.055) }), Pickable::IGNORE));
+            let _row = p.spawn((node(rect, scale), BackgroundColor(if selected { Color::srgb(0.20, 0.18, 0.10) } else { Color::srgb(0.065, 0.075, 0.055) }), Pickable::IGNORE)).id();
+            #[cfg(test)]
+            p.commands().entity(_row).insert(SheetRow(index));
             label(p, Rect::new(rect.min.x + 8.0, rect.min.y + 10.0, rect.max.x - 8.0, rect.max.y), text, 18.0, scale, bright);
         }
         let (confirm, enabled) = confirmation(source);
-        for (r, text, color) in [(g.cancel, "Cancel / Back", bright), (g.confirm, confirm, if enabled { bright } else { dim })] {
-            p.spawn((node(r, scale), BackgroundColor(Color::srgb(0.12, 0.13, 0.085)), Pickable::IGNORE));
+        for (r, text, color, _action) in [(g.cancel, "Cancel / Back", bright, Action::Cancel), (g.confirm, confirm, if enabled { bright } else { dim }, Action::Confirm)] {
+            let _button = p.spawn((node(r, scale), BackgroundColor(Color::srgb(0.12, 0.13, 0.085)), Pickable::IGNORE)).id();
+            #[cfg(test)]
+            p.commands().entity(_button).insert(SheetButton(_action));
             label(p, Rect::new(r.min.x + 8.0, r.min.y + 12.0, r.max.x - 8.0, r.max.y), text.to_owned(), 17.0, scale, color);
         }
     });

@@ -405,14 +405,14 @@ pub fn keys(
     mut out: MessageWriter<MenuInput>,
     (mut hold, mut hotkeys): (ResMut<HotkeyHold>, ResMut<Hotkeys>),
     (pads, bindings): (crate::pad::ActionPads, Option<Res<crate::bindings::Bindings>>),
+    taken: Res<super::KeysTaken>,
 ) {
     let keys = keys.snapshot();
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
     let _canvas = crate::interface::original_units();
     use KeyCode::*;
-    // The repair list and the mod menu have the keys while one is shown (`super::repair`,
-    // `super::item_mod`, which opens on X before this runs).
-    let items = pip.open() && pip.page == Page::Items && !repair.is_open() && !modding.is_open() && active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory);
+    // [design, #2553] Repair/mod keys stay theirs through the frame that closes the list.
+    let items = pip.open() && pip.page == Page::Items && !taken.taken() && !repair.is_open() && !modding.is_open() && active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory);
     let mut send = |c| {
         out.write(MenuInput(c));
     };

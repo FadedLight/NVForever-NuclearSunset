@@ -2040,6 +2040,7 @@ mod tests {
             .init_resource::<TouchItems>().init_resource::<pipboy::touch_scroll::WheelFrame>().init_resource::<NativeGuardSeen>()
             .init_resource::<pipboy::PipBoyAid>().init_resource::<pipboy::PointerMoved>()
             .init_resource::<PipRepair>().init_resource::<PipItemMod>().init_resource::<HotkeyHold>().init_resource::<Hotkeys>()
+            .init_resource::<pipboy::KeysTaken>().add_systems(First,pipboy::clear_keys_taken)
             .add_message::<PointerInput>().add_message::<bevy::window::WindowEvent>().add_message::<PipBoyInput>()
             .add_message::<TabHovered>().add_message::<MenuInput>().add_message::<RepairInput>().add_message::<ModInput>()
             .insert_resource(script).insert_resource(sim).insert_resource(ActiveMenu(Some(model))).insert_resource(tiles)

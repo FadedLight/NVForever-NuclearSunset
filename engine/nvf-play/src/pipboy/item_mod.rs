@@ -311,13 +311,15 @@ pub fn keys(
     mut sounds: MessageWriter<UiSound>,
     prompt: Res<crate::menu::PromptKeys>,
     mut touch: crate::maintenance_touch::Requests,
+    mut taken: ResMut<super::KeysTaken>,
     script: Option<Res<crate::script::ScriptState>>,
 ) {
     let keys = keys.snapshot();
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
     let _canvas = crate::interface::original_units();
     use KeyCode::*;
-    let mut steps: Vec<(ModInput, Option<crate::maintenance_touch::Request>)> = aid.read().copied().map(|s| (s, None)).collect();
+    // Only physical steps take keys; aid and touch requests retain their original paths.
+    let mut steps: Vec<(ModInput, Option<crate::maintenance_touch::Request>, bool)> = aid.read().copied().map(|s| (s, None, false)).collect();
     let mobile = touch.take(crate::maintenance_touch::Kind::Mod);
     let items = pip.open() && pip.page == Page::Items && active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory);
     if !items {
@@ -331,21 +333,24 @@ pub fn keys(
     }
     let shift = keys.any_pressed([ShiftLeft, ShiftRight]);
     if keys.just_pressed(KeyX) && !shift && !menu.is_open() {
-        steps.push((ModInput::Open, None));
+        steps.push((ModInput::Open, None, true));
     }
     if menu.is_open() {
         for (k, s) in [(&[ArrowUp, KeyW][..], ModInput::Up), (&[ArrowDown, KeyS], ModInput::Down), (&[Enter, NumpadEnter, Space], ModInput::Use), (&[KeyE, Escape], ModInput::Cancel)] {
             if keys.any_just_pressed(k.iter().copied()) {
-                steps.push((s, None));
+                steps.push((s, None, true));
             }
         }
     }
     for request in mobile {
         use crate::maintenance_touch::Action;
         let step = match request.action { Action::Select(i) => ModInput::Hover(i), Action::Confirm => ModInput::Use, Action::Cancel => ModInput::Cancel, Action::Scroll(_) => ModInput::Hover(usize::MAX) };
-        steps.push((step, Some(request)));
+        steps.push((step, Some(request), false));
     }
-    for (step, request) in steps {
+    for (step, request, physical) in steps {
+        if physical && (menu.is_open() || step == ModInput::Open) {
+            taken.take();
+        }
         if let Some(request) = &request {
             if !crate::maintenance_touch::menu_allows(crate::maintenance_touch::Kind::Mod, script.as_ref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game)) { continue; }
             if !request.modding(menu.0.as_ref()) { continue; }

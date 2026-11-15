@@ -80,7 +80,7 @@ actor meshes`]:
   `Prn` whose string names the parent bone (`Bip01 Head` for hair, beards and eyes); 19
   headgear models (cowboy hats, fiend helmets, NCR trooper helmets, berets) and the
   child-female mouth parts have none.
-- A rigid part on the head has its vertices in the **skeleton's axes** with the origin
+- Most surveyed rigid parts on the head have vertices in the **skeleton's axes** with the origin
   at the parent bone: hair spans z −0.7…15.3 and a cowboy hat z 3.8…17.5 above
   `Bip01 Head` (bind position (0, 0.4, 112.8) in `skeleton.nif`), while the head bone's
   own x axis points up. Node rotations of the 206 rigid shapes placed NPCs use: all
@@ -91,6 +91,34 @@ actor meshes`]:
   render in place]: a part whose root stores the bone's inverse bind rotation is an
   ordinary child of the bone; any other part gets that inverse rotation from the
   attachment; node transforms are kept in both cases.
+- **Bone-local rigid headgear (#2529).** [documented: #2529 writer brief, fnvtool,
+  FalloutNV.esm + Fallout - Meshes.bsa] General Lee Oliver (`VHDGeneralOliver`, NPC_
+  0x001300A9) carries `NVGenOliverCap` (ARMO 0x00134490, slots Hair, Headband, Hat) and
+  `OutfitGeneralOliver` (0x0015E35D). The cap's worn MODL is
+  `armor\headgear\GeneralOliverCap\GenOliverCap.NIF`; MOD2 is `GenOliverCapGO.NIF`.
+  The worn file has identity root `BSFadeNode` "GenOliverCap", one identity child
+  `NiTriStrips` "GenOliverCap:5", no skin and no bone-naming extra data. Its 700
+  vertices span x 8.89..17.71, y -7.71..10.99, z -8.57..8.57; bounding sphere centre
+  (13.30, 1.64, 0), radius 10.3. [hypothesis] This is the head bone's own frame,
+  whose +X runs up the skull, rather than the skeleton-axis layout above.
+  [design: `engine/nvf-assets/src/actor.rs::spawn_parts`, `rigid_local`] The cap already
+  hangs from `Bip01 Head`; the old unconditional inverse-bind correction turns its
+  +X offset sideways at the bind pose. This is a frame-selection error, not a missing
+  parent. [design, #2529] `rigid_part_frame` chooses one frame per part using combined
+  bounds of its unskinned, non-cap shapes, with root * shape applied to each vertex.
+  Hidden shapes contribute so visibility changes do not change the frame. It keeps
+  root * shape for every rigid shape when those bounds straddle skeleton Z=0 and their
+  centre's unit direction aligns with bone-local up by at least
+  `BONE_LOCAL_HEAD_ALIGNMENT` (0.9). Splitting geometry into material submeshes keeps
+  the same placement, including each shape's authored transform.
+  Bone-local up is inverse bind linear transform times skeleton +Z, normalized.
+  Other layouts, empty combined geometry, missing position attributes, any nonfinite
+  rigid vertex and singular bind transforms keep the old rule for the whole part.
+  The bone-local part inherits the head's full animated transform, including
+  head tracking and dialogue turns, at spawn and equipment changes; skinned shapes
+  and creatures use their existing paths. [hypothesis] The geometry test identifies
+  this layout in other rigid hats, but asymmetric meshes can be ambiguous. Owner
+  review tracks the threshold; observer check 168 asks for original-game parity.
 - A rigid part on **another bone is in that bone's own axes**: an ordinary child, node
   transforms kept, no rotation added. Over the worn models of every ARMO in the ten
   masters (498 models, placed or not; `fnvtool actor meshes`, `armor_rigid_bones`), 61

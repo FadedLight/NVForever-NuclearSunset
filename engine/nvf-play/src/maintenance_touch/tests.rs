@@ -37,6 +37,8 @@ pub(crate) fn fixture(modding: bool, native_configuration: bool) -> App {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, bevy::input::InputPlugin, MaintenanceTouchPlugin))
         .init_resource::<player_repair::PipRepair>().init_resource::<item_mod::PipItemMod>()
+        .init_resource::<crate::pipboy::KeysTaken>()
+        .add_systems(First, crate::pipboy::clear_keys_taken)
         .init_resource::<PromptKeys>().init_resource::<SafeInsets>().init_resource::<UiScale>()
         .insert_resource(sim).insert_resource(ActiveMenu(Some(model)))
         .insert_resource(pip)
@@ -90,12 +92,14 @@ fn actual_donor_consumer_selects_then_confirms_once_and_cancel_preserves_units()
     for native_configuration in [false, true] {
         let mut app = fixture(false, native_configuration);
         tap(&mut app, 1, Action::Select(1));
+        assert!(!app.world().resource::<crate::pipboy::KeysTaken>().taken(), "touch selection is not a physical key");
         assert_eq!(count(&app, GEAR), 2, "selection must never consume a donor");
         assert_eq!(app.world().resource::<player_repair::PipRepair>().0.as_ref().unwrap().selected, 1);
         raw_tap(&mut app, 2, Action::Confirm);
         raw_tap(&mut app, 3, Action::Confirm);
         app.update();
         assert_eq!(count(&app, GEAR), 1, "duplicate painted confirmations must not consume twice");
+        assert!(!app.world().resource::<crate::pipboy::KeysTaken>().taken(), "touch confirmation must preserve physical key provenance");
         let inv = app.world().resource::<SimState>().world.peek(FormId::PLAYER_REF).unwrap().inventory.as_ref().unwrap();
         assert!(inv.groups().any(|(id, unit, n)| id == GEAR && n == 1 && unit.condition_or_whole() > 0.4));
         let mut canceled = fixture(false, native_configuration);

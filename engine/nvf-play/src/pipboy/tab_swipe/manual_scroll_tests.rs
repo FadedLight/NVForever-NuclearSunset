@@ -26,6 +26,7 @@ mod manual_scroll_roundtrip {
         let mut menu=MenuModel::open_inventory(&mut sim.world).unwrap();menu.apply(&mut sim.world,Command::SetCategory(Side::Player,Category::Aid));
         app.insert_resource(sim).insert_resource(ActiveMenu(Some(menu)))
             .init_resource::<pipboy::repair::PipRepair>().init_resource::<pipboy::item_mod::PipItemMod>()
+            .init_resource::<pipboy::KeysTaken>().add_systems(First,pipboy::clear_keys_taken)
             .init_resource::<pipboy::hotkey_panel::HotkeyHold>().init_resource::<crate::hotkeys::Hotkeys>()
             .init_resource::<ItemsScroll>().init_resource::<PendingManual>().add_message::<MenuInput>()
             .add_plugins(ScrollbarPlugin)

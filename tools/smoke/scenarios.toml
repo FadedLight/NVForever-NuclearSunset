@@ -3347,6 +3347,24 @@ expect = [{ re = 'SwapTexture: .* not found', count = 0, label = "no swapped tex
 # ------------------------------------------------------------------ messages and menus
 
 [[scenario]]
+name = "ui-hidden-global-image-metrics"
+source = "[design] docs/spec-notes/global-image-metrics.md: a hidden own image under globals() supplies live fileheight before expression settling; authored injected XML, no installed mod text copied"
+note = "Opt in with NVF_GLOBAL_IMAGE_METRICS_TEXTURE naming a real readable own-image path relative to textures, using forward slashes. No texture is included. The console injects an invisible authored global image, records its positive height, halves numeric zoom, and then clears its filename. This checks actual scheduled metadata through the public UI functions; it does not claim rendered pixels, native parity or a full Pip-Boy fix. This new scenario has not run."
+areas = ["ui", "images"]
+paths = ["engine/nvf-play/src/tiles/global_image_metrics.rs", "engine/nvf-play/src/tiles/mod.rs", "engine/nvf-play/src/interface.rs", "crates/fnv-ui/src/tree.rs", "docs/spec-notes/global-image-metrics.md"]
+requires = ["NVF_GLOBAL_IMAGE_METRICS_TEXTURE"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = '10:PrintC "nvf global metrics injected %g", (InjectUIComponent "globals()" "<image name=%qNVFSmokeGlobalMetrics%q><visible>0</visible><filename>{env:NVF_GLOBAL_IMAGE_METRICS_TEXTURE}</filename><zoom>100</zoom><_initialheight>0</_initialheight></image>");10.4:close;12:PrintC "nvf global metrics height %.3f", (GetUIFloat "globals()/NVFSmokeGlobalMetrics/fileheight");12.1:SetUIFloat "globals()/NVFSmokeGlobalMetrics/_initialheight" (GetUIFloat "globals()/NVFSmokeGlobalMetrics/fileheight");12.4:close;14:SetUIFloat "globals()/NVFSmokeGlobalMetrics/zoom" 50;14.4:close;16:PrintC "nvf global metrics half %.3f", ((GetUIFloat "globals()/NVFSmokeGlobalMetrics/fileheight") / (GetUIFloat "globals()/NVFSmokeGlobalMetrics/_initialheight"));16.4:close;18:SetUIString "globals()/NVFSmokeGlobalMetrics/filename" "";18.4:close;20:PrintC "nvf global metrics cleared %g %g", (GetUIFloat "globals()/NVFSmokeGlobalMetrics/filewidth"), (GetUIFloat "globals()/NVFSmokeGlobalMetrics/fileheight");20.4:close' }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
+run_seconds = 24
+expect = [
+  { text = 'script: print "nvf global metrics injected 1"', count = 1, label = "the hidden authored global image is actually inserted" },
+  { re = 'script: print "nvf global metrics height ([0-9.]+)"', range = [0.001, 100000000], count = 1, label = "the real own file supplies a positive height despite visibility zero" },
+  { text = 'script: print "nvf global metrics half 0.500"', count = 1, label = "a live zoom change halves its image metric" },
+  { text = 'script: print "nvf global metrics cleared 0 0"', count = 1, label = "clearing its filename cannot retain stale dimensions" },
+]
+order = [["nvf global metrics injected", "nvf global metrics height", "nvf global metrics half", "nvf global metrics cleared"]]
+
+[[scenario]]
 name = "corner-messages"
 launch = "house-messages"
 source = "CLAUDE.md: after changes to the messages at the top left (docs/spec-notes/corner-messages.md §7); the messages at 1 s, done before the add-ons' start-up message boxes (from about 5 s of the scripts' time) hold the queue"
@@ -28949,6 +28967,45 @@ expect = [
 manual = "[design, #2534] If this passes but the reported conversation fails, run the full guard conversation in-game and inspect INFO begin/end execution and open menus; no engine cause was established by source inspection."
 
 [[scenario]]
+name = "pipboy-repair-enter"
+source = "[design, #2553] Real Enter through the repair and ITEMS key systems, using pipboy-repair's existing two-pistol setup; the last part closes the repair list without toggling the repaired row's worn state."
+areas = ["repair", "pipboy"]
+paths = ["engine/nvf-play/src/pipboy.rs", "engine/nvf-play/src/pipboy/repair.rs", "engine/nvf-play/src/pipboy/item_mod.rs", "engine/nvf-play/src/pipboy/items.rs", "engine/nvf-play/src/pad.rs", "engine/nvf-play/src/tiles/repair_menu.rs"]
+env = { NVF_PLAY_TEST_TILE_MENUS = "", NVFOREVER_HOME = "pipboy-repair-enter-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "9:call:player:AddItemHealthPercent:Weap10mmPistol:1:0.4,9.5:call:player:AddItemHealthPercent:Weap10mmPistol:1:0.3", NVF_PLAY_TEST_PIPBOY = "12:open,13:page=items,13.5:tab=0,15:repair=open,16:repair=down,20:close", NVF_PLAY_TEST_KEYS = "18:enter" }
+args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
+run_seconds = 23
+expect = [
+  { re = 'pipboy repair: open 10mm Pistol at [34]0% \(Repair \d+\): 10mm Pistol [34]0%', label = "the repair list opens with the other pistol as its part" },
+  { text = "test aid: real input Key(Enter) pressed", label = "Enter enters the real key handlers" },
+  { re = 'pipboy repair: 10mm Pistol [34]0% with 10mm Pistol [34]0% -> \d+% \(Repair \d+\)', count = 1, label = "Enter repairs once" },
+  { text = "pipboy repair: closed:", label = "using the last part closes the repair list" },
+]
+forbid = [
+  { re = 'menu: .*: (Equipped|Unequipped) 10mm Pistol', label = "the repair key must not toggle equipment" },
+]
+order = [["pipboy repair: open", "test aid: real input Key(Enter) pressed", "pipboy repair: 10mm Pistol", "pipboy repair: closed:"]]
+
+[[scenario]]
+name = "npc-launcher-round"
+source = "[design, #2512] NPC attack/reload visibility on weapon-model targets (docs/spec-notes/animation.md section 9.7): the round stays hidden after the shot until reload shows it"
+note = "[design] Reuses melee-reach-lead-pipe's Violet combat setup on open ground, moved 2200 units from the god-mode player, with the launcher/ammo IDs from missile-explosion (00004340 / 00029383) [documented: those scenario setups]. No existing human NPC launcher setup was found; body-weapons-sentry-blast uses an embedded gun without this held model. Equipment reconciliation draws the launcher. Not yet run."
+areas = ["animation", "combat"]
+paths = ["engine/nvforever/src/weapons.rs", "engine/nvforever/src/actors.rs", "engine/nvforever/src/attack_anims.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "3:moveto:FiendVioletRef:player:0:2200:0,4:call:FiendVioletRef:RemoveAllItems,4.5:call:FiendVioletRef:AddItem:0x00004340:1,4.5:call:FiendVioletRef:AddItem:0x00029383:12,5:call:FiendVioletRef:EquipItem:0x00004340,7:combat:FiendVioletRef:player" }
+args = ["--cell", "Goodsprings", "--pos=-45600,65000,7000", "--play", "--hour", "12", "--no-voice", "--no-messages", "--npc-packages", "FiendVioletRef"]
+run_seconds = 45
+expect = [
+  { re = 'outfit: actor 000F570B: weapon 0x00004340.*now held', label = "the launcher model is equipped on Violet" },
+  { re = 'attack anims: 000F570B plays .*2hlattack(right|left)\.kf', label = "Violet plays a launcher attack with a round visibility track" },
+  { re = 'attack anims: 000F570B plays .*2hlreload[ae]\.kf', label = "Violet plays a launcher reload with a round visibility track" },
+]
+order = [[
+  { re = 'npc weapon part: Actor 000F570B .* ##NifRound hidden', label = "the fired round is hidden" },
+  { re = 'npc weapon part: Actor 000F570B .* ##NifRound shown', label = "the reload shows the round again" },
+  { re = 'npc weapon part: Actor 000F570B .* ##NifRound hidden', label = "the next shot hides the round again" },
+]]
+
+[[scenario]]
 name = "grass-fire"
 source = "owner request 2026-11-14 (#2567, docs/design/grass-fire.md): fire from a burning weapon spreads across grass, sets the actors in it alight and goes out within a hard limit; the grass blackens and sinks away and grows back when its cell reloads"
 note = "the player (god mode) fires the Flamer (0000432D, fuel 00029371) north at the grass by the Prospector Saloon (nearest tufts about 230 units north) for a second from 26 s (message boxes off: one open stops the trigger), then looks at the fire; Easy Pete is held in place and put 250 units in front, in the fire's path, at 27 s; the fire runs to its end. Frames for the eye: the front spreading, the black grass sinking, the scorched ground left behind"
@@ -29112,3 +29169,26 @@ expect = [
   { re = 'lip: skipped \S*0013ca2a_1\.lip: speaker VHDIntakeTowerCenturionREF has no face rig', count = 0, label = "his first line is not left without lip sync" },
 ]
 order = [["dialogue: conversation with VHDIntakeTowerCenturionREF started", "dialogue look: VHDIntakeTowerCenturionREF faces the player"]]
+
+[[scenario]]
+name = "rigid-headgear-oliver"
+source = "[documented: #2529 writer brief, fnvtool FalloutNV.esm + Fallout - Meshes.bsa] VHDGeneralOliver 001300A9 wears rigid NVGenOliverCap 00134490, identity-root GenOliverCap:5 with bounds centre (13.30,1.64,0). [hypothesis: actors.md section 1.2] The mesh uses the head bone's own axes. [design, #2529] Preserve the full head transform for that layout at spawn and equipment changes."
+note = "PlaceAtMe follows hitvol-marked-created-actor. The sole created actor is Oliver; restrain him, move him near the player and use Look with rotateBody 0 while the player moves to change the head pose. The read-only probe logs cap world and head-relative centres and full-frame error after transform propagation. This does not assume any quest-conditioned Oliver greeting; observer check 168 requests a repeatable conversation setup."
+areas = ["actors", "head-tracking"]
+paths = ["engine/nvf-assets/src/actor.rs", "engine/nvforever/src/actors.rs", "engine/nvforever/src/outfits.rs", "engine/nvforever/src/rigid_head_probe.rs", "engine/nvforever/src/head_look.rs", "engine/nvforever/src/dialogue_look.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_RIGID_HEAD = "001300A9|GenOliverCap:5", NVF_PLAY_TEST_SCRIPT = "2:call:player:PlaceAtMe:VHDGeneralOliver:1,3:call:0xFF000000:SetRestrained:1,4:moveto:0xFF000000:player:0:160:0,5:call:0xFF000000:Look:player:0,10:moveto:player:0xFF000000:100:0:0,18:moveto:player:0xFF000000:-100:0:0,25:call:0xFF000000:StopLook" }
+args = ["--cell", "GSGeneralStore", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 32
+expect = [
+  { re = 'ai \[[^\]]*\] VHDGeneralOliver 0xFF[0-9A-F]{6}: created by a script \(PlaceAtMe\)', count = 1, label = "Oliver is spawned from his base record" },
+  { re = 'ai \[[^\]]*\] .*: created by a script \(PlaceAtMe\)', count = 1, label = "the dynamic reference used by the aid is the only created actor" },
+  { re = 'rigid head check: .*parent_head=false', count = 0, label = "the rigid cap is parented directly to the head bone" },
+  { text = 'rigid head check: actor=', min = 10, label = "cap placement is logged throughout the run" },
+  { re = 'rigid head check: .*relative=\((?P<n>[-\d.]+),', range = [13.25, 13.35], all = true, label = "the cap stays above the head along its local X" },
+  { re = 'rigid head check: .*relative=\([-\d.]+,(?P<n>[-\d.]+),', range = [1.59, 1.69], all = true, label = "the authored local Y offset is kept" },
+  { re = 'rigid head check: .*relative=\([-\d.]+,[-\d.]+,(?P<n>[-\d.]+)\)', range = [-0.05, 0.05], all = true, label = "the authored local Z offset is kept" },
+  { re = 'rigid head check summary: samples=(?P<n>\d+)', range = [60, 100000000], label = "the probe sampled the moving head" },
+  { re = 'rigid head check summary: .*max_error=(?P<n>[\d.]+)', range = [0, 0.02], label = "every sampled centre follows the full head transform" },
+  { re = 'rigid head check summary: .*max_frame_error=(?P<n>[\d.]+)', range = [0, 0.001], label = "every sampled cap frame follows head rotation and scale" },
+  { re = 'rigid head check summary: .*turn_deg=(?P<n>[\d.]+)', range = [0.5, 180], label = "the head actually turned during the check" },
+]

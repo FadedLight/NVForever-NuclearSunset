@@ -416,6 +416,8 @@ mod tests {
             .init_resource::<pipboy::PointerMoved>()
             .init_resource::<pipboy::repair::PipRepair>()
             .init_resource::<pipboy::item_mod::PipItemMod>()
+            .init_resource::<pipboy::KeysTaken>()
+            .add_systems(First, pipboy::clear_keys_taken)
             .init_resource::<pipboy::hotkey_panel::HotkeyHold>()
             .init_resource::<crate::hotkeys::Hotkeys>()
             .init_resource::<Seen>()

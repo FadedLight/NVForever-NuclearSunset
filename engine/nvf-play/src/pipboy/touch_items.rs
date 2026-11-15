@@ -97,7 +97,15 @@ pub struct TouchItems {
 }
 impl TouchItems {
     pub fn begin_frame(&mut self) {
-        self.frame = PointerFrame::default();
+        // A held, already-projected marker remains held between sparse OS
+        // motion points. Its next projected Ended/cancel retires it; never
+        // replay the initial press, tap or scroll on an idle render frame.
+        let previous = self.frame;
+        self.frame = if previous.control && previous.held && previous.at.is_some_and(|at| at.is_finite())
+            && self.contact.is_some_and(|contact| contact.intent == Intent::Control)
+        {
+            PointerFrame { at: previous.at, held: true, control: true, native: previous.native, ..default() }
+        } else { PointerFrame::default() };
     }
     pub fn pointer_frame(&self) -> PointerFrame {
         self.frame

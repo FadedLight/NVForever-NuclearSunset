@@ -411,13 +411,30 @@ mod tests {
         assert_eq!(fresh.iter().filter(|p| p.pointer_id == super::super::touch_items::POINTER && matches!(p.action, PointerAction::Release(_))).count(), 1, "fresh touch on the newly drawn bounds works once");
     }
 
+    #[derive(Resource, Default)]
+    struct SampledUnitScope(f32);
+    fn sample_unit_scope(mut sample: ResMut<SampledUnitScope>) {
+        sample.0 = crate::interface::unit_scale();
+    }
+
     #[test]
     fn presentation_metadata_changes_retire_old_projection_and_invalid_metadata_stays_closed() {
         use bevy::picking::pointer::PointerAction;
         for case in 0..7 {
             let _units = crate::interface::units_at(1.0);
             let mut app = pointer_scene();
+            if case == 6 {
+                // units_at is deliberately thread-local, unlike the published
+                // next-start menu scale. Keep this scoped case on its owning
+                // thread; all ordinary metadata cases retain the real executor.
+                app.edit_schedule(PreUpdate, |schedule| {
+                    schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+                });
+                app.init_resource::<SampledUnitScope>()
+                    .add_systems(PreUpdate, sample_unit_scope.before(cancel_changed));
+            }
             for _ in 0..4 { app.update(); }
+            if case == 6 { assert_eq!(app.world().resource::<SampledUnitScope>().0, 1.0); }
             pointer_events(&mut app);
             projected_contact(&mut app, 710 + case);
             app.update(); // Pending real projected Started.
@@ -445,6 +462,7 @@ mod tests {
             // Exercise the real admission/driver boundary without asking layout
             // to interpret intentionally invalid platform metadata.
             app.world_mut().run_schedule(PreUpdate);
+            if case == 6 { assert_eq!(app.world().resource::<SampledUnitScope>().0, 0.9); }
             let events = pointer_events(&mut app);
             assert!(events.iter().any(|p| p.pointer_id == super::super::touch_items::POINTER && matches!(p.action, PointerAction::Cancel)), "case {case}");
             assert!(!events.iter().any(|p| p.pointer_id == super::super::touch_items::POINTER && matches!(p.action, PointerAction::Press(_) | PointerAction::Release(_))), "case {case} must reject the old projected point");

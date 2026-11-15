@@ -227,10 +227,14 @@ mod tests {
     use fnv_sim::FormId;
 
     fn app() -> App {
-        let mut sim=crate::sim::test_world::sim((1..=12).map(|i|crate::sim::test_world::item_base(0xF300+i)).collect(),vec![]);
+        let mut sim=crate::sim::test_world::sim((1..=12).map(|i| {
+            let mut base=crate::sim::test_world::item_base(0xF300+i);
+            base.name=Some(format!("Item {i:02}"));base
+        }).collect(),vec![]);
         for i in 1..=12 {sim.world.add_item(FormId::PLAYER_REF,FormId(0xF300+i),3).unwrap();}
         let mut model=crate::menu::model::MenuModel::open_inventory(&mut sim.world).unwrap();
         model.apply(&mut sim.world,crate::menu::model::Command::SetCategory(Side::Player,Category::Aid));
+        assert_eq!(model.list(Side::Player).rows.len(),12,"the real menu must actually list the twelve authored fixture items");
         let mut scroll=ItemsScroll::default();assert_eq!(scroll.resolve(&model,&[40.0;12],200.0),0);
         let pip=PipBoy{phase:super::super::Phase::Up,page:Page::Items,tabs:[0,2,0],..default()};
         let mut app=App::new();app.add_plugins((MinimalPlugins,ScrollbarPlugin)).insert_resource(pip)

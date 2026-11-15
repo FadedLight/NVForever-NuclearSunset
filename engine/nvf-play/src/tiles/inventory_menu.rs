@@ -2300,8 +2300,7 @@ mod tests {
         assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),2.0,"a guarded actual page-region tap pages the list");
         assert_eq!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().selected[Side::Player as usize],0);
         app.world_mut().resource_mut::<PipBoyScreen>().pointer=Some(down);
-        app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
-        // InputPlugin owns edge reset; its real WindowEvent is the hardware press source.
+        // InputPlugin owns edge reset; its real input event is the sole press source.
         app.world_mut().write_message(bevy::input::mouse::MouseButtonInput {button:MouseButton::Left,state:bevy::input::ButtonState::Pressed,window:Entity::PLACEHOLDER});
         app.update();
         assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left),"scrollbar never clears physical mouse ownership");
@@ -2325,6 +2324,44 @@ mod tests {
         app.world_mut().resource_mut::<PipBoyScreen>().pointer=Some(point);app.update();
         assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),5.0,"subsequent physical motion cannot resume the old finger's marker drag");
         assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn actual_native_marker_sparse_motion_keeps_ownership_until_projected_release_without_replaying_actions() {
+        use bevy::input::touch::TouchPhase;
+        let (mut app,point)=native_scrollbar_fixture();
+        native_guard_event(&mut app,193,TouchPhase::Started,point);
+        app.update();app.update();
+        assert!(app.world().resource::<InventoryTiles>().view.drag.is_some(),"the actual native marker press must establish ownership");
+        for _ in 0..8 {
+            app.update();
+            let tiles=app.world().resource::<InventoryTiles>();
+            assert!(tiles.view.drag.is_some(),"an idle OS frame is not a release");
+            assert_eq!(tiles.view.value(Side::Player),0.0,"idle hold cannot page or replay its press");
+            let frame=app.world().resource::<crate::pipboy::touch_items::TouchItems>().pointer_frame();
+            assert!(frame.held && frame.control && frame.native);
+            assert!(!frame.started && !frame.tap && !frame.scrolling && !frame.press(),"idle continuation has no action edge");
+        }
+        native_guard_event(&mut app,193,TouchPhase::Moved,point+Vec2::new(0.0,60.0));
+        app.update();app.update();
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),3.0);
+        for _ in 0..8 {
+            app.update();
+            let tiles=app.world().resource::<InventoryTiles>();
+            assert!(tiles.view.drag.is_some());
+            assert_eq!(tiles.view.value(Side::Player),3.0,"no new motion means no new scroll");
+        }
+        native_guard_event(&mut app,193,TouchPhase::Ended,point+Vec2::new(0.0,60.0));
+        app.update();app.update();
+        assert!(app.world().resource::<InventoryTiles>().view.drag.is_none(),"the projected Ended retires the owned hold");
+        assert!(!app.world().resource::<crate::pipboy::touch_items::TouchItems>().pointer_frame().held);
+        for _ in 0..4 {app.update();}
+        assert_eq!(app.world().resource::<InventoryTiles>().view.value(Side::Player),3.0);
+        assert_eq!(app.world().resource::<ActiveMenu>().0.as_ref().unwrap().selected[Side::Player as usize],0);
+        let seen=app.world().resource::<NativeGuardSeen>();
+        assert_eq!((seen.selects,seen.used,seen.ones),(0,0,0),"control continuation never repeats a gameplay action");
+        assert!(app.world().resource::<Hotkeys>().0.iter().all(Option::is_none));
+        assert_eq!(app.world_mut().resource_mut::<crate::sim::SimState>().world.item_count(FormId::PLAYER_REF,FormId(0xF201)).unwrap(),3);
     }
 
     #[test]

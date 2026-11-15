@@ -241,6 +241,16 @@ fn camera_peek_range_and_foreign_window_cannot_bypass_player_los() {
 #[test]
 fn hold_loss_never_rearms_until_new_contact_and_fresh_hold_executes_once() {
     let (mut app, w, c) = scene(&[], [0., 0., 100.], [1., 0., 0.]);
+    #[derive(Resource, Default)]
+    struct Heard(Vec<u32>);
+    fn hear(mut events: MessageReader<crate::world_sounds::Activated>, mut heard: ResMut<Heard>) {
+        heard.0.extend(events.read().map(|event| event.reference));
+    }
+    // The fixture schedules activate directly, not inside PlaySet::Activation.
+    // Observe every update after the actual producer so a completed long hold
+    // cannot age its message out before the eventual assertion.
+    app.init_resource::<Heard>()
+        .add_systems(Update, hear.after(crate::activate::activate));
     let entity = visual(&mut app, 0x301, [80., 20., 100.]);
     let p = point(&app, w, c, [80., 20., 100.]);
     begin(&mut app, p, Confirmation::Hold);
@@ -262,13 +272,22 @@ fn hold_loss_never_rearms_until_new_contact_and_fresh_hold_executes_once() {
         app.update();
     }
     assert_eq!(count(&app), 0);
+    assert!(app.world().resource::<Heard>().0.is_empty(), "the invalidated old contact emits no activation");
     begin(&mut app, p, Confirmation::Hold);
     for _ in 0..8 {
         app.update();
     }
     assert_eq!(count(&app), 3);
-    assert_eq!(drain::<crate::world_sounds::Activated>(&mut app).len(), 1);
+    assert_eq!(app.world().resource::<Heard>().0.len(), 1);
+    assert_eq!(app.world().resource::<Heard>().0, vec![0x301]);
     assert_eq!(app.world().resource::<TouchActivation>().progress(), 0.);
+    app.world_mut().resource_mut::<TouchActivation>().end(true);
+    for _ in 0..10 {
+        app.update();
+    }
+    assert_eq!(count(&app), 3, "a completed hold and its later release cannot take twice");
+    assert_eq!(app.world().resource::<Heard>().0.len(), 1);
+    assert_eq!(app.world().resource::<Heard>().0, vec![0x301]);
 }
 
 #[test]

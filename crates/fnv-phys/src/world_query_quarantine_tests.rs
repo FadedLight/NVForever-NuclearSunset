@@ -157,3 +157,61 @@ fn ordinary_refresh_preserves_interpolation_pending_kinematic_target_and_user_dy
     assert_eq!(w.w.bodies[k].position().translation,target);assert_ne!(w.ref_bodies(99)[0].linvel,body.linvel);
     assert_eq!(w.steps(),clock.0+1);assert!(w.quarantined().is_empty());
 }
+
+// Post-fix neighbor coverage: no pre-fix execution is claimed for this case.
+#[test]
+fn query_only_invalid_kinematic_target_is_reenabled_found_and_can_move_on_the_next_step() {
+    let (mut w,_) = fixture();
+    let owner=Owner::Ref {form_id:200,object:0,layer:crate::layers::STATIC};
+    let k=w.insert_body(RigidBodyBuilder::kinematic_position_based()
+        .translation(Vector::new(400.,0.,100.)*w.k).user_data(owner.encode()));
+    let collider=w.w.insert_collider(ColliderBuilder::cuboid(10.*w.k,10.*w.k,10.*w.k)
+        .active_collision_types(ActiveCollisionTypes::all()).user_data(owner.encode()),Some(k));
+    w.mark_dirty_bodies();w.step();
+    assert_eq!(w.w.bodies[k].body_type(),RigidBodyType::KinematicPositionBased);
+    assert_eq!(w.w.colliders[collider].parent(),Some(k));
+    assert_eq!(ray(&mut w,400.).map(|h|h.owner),Some(owner),
+        "the real parented collider is visible through the default owner filter before poisoning");
+    assert!(w.quarantined().is_empty());
+    let current=*w.w.bodies[k].position();let clock=time(&w);
+    w.w.bodies[k].set_next_kinematic_translation(Vector::splat(f32::NAN));
+    assert!(w.w.bodies[k].position().is_finite());
+    assert!(!w.w.bodies[k].next_position().is_finite(),"the actual native target is invalid");
+    w.mark_dirty_bodies();
+    assert_eq!(ray(&mut w,400.).map(|h|h.owner),Some(owner),
+        "the same query republishes the Enabled remedy's actual collider");
+    assert_eq!(time(&w),clock);
+    assert_eq!(*w.w.bodies[k].position(),current);
+    assert_eq!(*w.w.bodies[k].next_position(),current);
+    assert_eq!(w.w.bodies[k].body_type(),RigidBodyType::KinematicPositionBased);
+    assert!(w.w.bodies[k].is_enabled() && w.w.colliders[collider].is_enabled());
+    assert_eq!(w.w.bodies[k].linvel(),Vector::ZERO);
+    assert!(!w.dirty && w.new_bodies.is_empty(),"re-enable flags are registered before returning the hit");
+    assert_eq!(w.quarantined().len(),1);
+    let report=w.quarantined()[0];
+    assert_eq!(report.owner,Some(owner));assert!(!report.collider);
+    assert_eq!(report.remedy,crate::quarantine::Remedy::Enabled);
+    assert_eq!(report.step,clock.0);
+    let at=report.at.expect("finite current pose is reported in game units");
+    for (actual,expected) in at.into_iter().zip([400.,0.,100.]) {assert!((actual-expected).abs()<0.001);}
+    assert_eq!((w.stats().quarantined_bodies,w.stats().quarantined_colliders),(1,0));
+    for _ in 0..3 {
+        assert_eq!(ray(&mut w,400.).map(|h|h.owner),Some(owner));healthy_ray(&mut w);
+        assert_eq!(w.quarantined(),&[report]);assert_eq!(time(&w),clock);
+    }
+    w.step();
+    assert_eq!(*w.w.bodies[k].position(),current);
+    assert_eq!(w.steps(),clock.0+1);
+    assert_eq!(w.stepped_secs(),clock.1+f64::from(clock.2));
+    assert_eq!(ray(&mut w,400.).map(|h|h.owner),Some(owner));
+    assert_eq!(w.quarantined(),&[report]);
+    // Re-enabling preserves the kinematic owner: its next valid target really moves.
+    let target=current.translation+Vector::X;
+    w.w.bodies[k].set_next_kinematic_translation(target);w.step();
+    assert_eq!(w.w.bodies[k].position().translation,target);
+    assert!(w.w.bodies[k].position().is_finite() && w.w.bodies[k].is_enabled());
+    let target_x=target.x/w.k;
+    assert_eq!(ray(&mut w,target_x).map(|h|h.owner),Some(owner));healthy_ray(&mut w);
+    assert_eq!(w.quarantined(),&[report]);
+    assert_eq!((w.stats().quarantined_bodies,w.stats().quarantined_colliders),(1,0));
+}

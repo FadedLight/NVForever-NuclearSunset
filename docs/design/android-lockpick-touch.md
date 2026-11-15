@@ -20,7 +20,7 @@ switch filter. The adapter uses these public views, not raw platform or Gamepad 
 
 ## User settings and layout
 
-[design] Android Controls settings offer **Lockpicking touch controls**: Off,
+[design] Android Mobile > Lockpicking settings offer **Lockpicking touch controls**: Off,
 **Arc + turn** (default), **Precision slider + turn**. **Lockpicking control size** offers
 75%, 100% (default), 125%, 150%. Choices use the normal NVForever.ini settings routes.
 Desktop touch remains Off by default and these Android settings are not registered there;
@@ -32,7 +32,7 @@ alone does not jump the pin. Right thumb holds the separate Turn target to apply
 The angle, hold feedback and a short original instruction line are visible while picking.
 No new touch shortcut forces a lock. The original Force/Exit and help remain available.
 The general Android menu-direction overlay yields to this dedicated layout while it is
-active; the placement editor and its gear/help stay outside this input path.
+active; the independent Mobile Settings editor/help actions stay outside this input path.
 
 [design] One geometry function computes logical-pixel rectangles for both drawing and hit
 testing. A shared factor applies the chosen size and fits narrow/short windows. Nodes
@@ -75,3 +75,23 @@ remain later qualification.
 logical positions with the window scale factor before TouchInput is emitted. The adapter
 therefore compares TouchInput directly with Window logical-pixel geometry and does not
 apply device density again. UiScale affects drawing conversion only.
+
+## Optional hints and live interface palette
+
+[design] `lockpick-touch-hints` is an independent saved **Show lockpicking hints**
+switch, on by default. Off hides only the gesture guide and first-use tutorial;
+it does not select Off for enhanced controls or remove Turn/Turning, the angle,
+pin/skill/level values, Force/Exit actions, refusal, wear or success feedback.
+Turning hints off while the tutorial is already open uses its normal CloseHelp
+command. A future first-use tutorial is not marked seen merely because hints were
+disabled. Existing puzzle, torque, eligibility and controller consumers are unchanged.
+
+[documented: interface.rs, ui_colour.rs] The HUD/interface colour is the established
+live `interface::amber` provider, including the user's preset/custom RGB selection.
+[design] Dedicated controls read it each draw for text, strokes and highlights.
+Neutral thin translucent surfaces, smaller decorative dots/knob and compact type
+reduce visual weight without changing the shared angle/Turn hit rectangles or size
+choices. Source-authored controls must prove hints-off real input still reaches
+the existing pin/torque rules, actual colour updates reach UI components, and INI
+store/reload remains independent from the enhanced-control scheme. Qualification
+of this follow-on is pending; it does not change the served APK.

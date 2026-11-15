@@ -88,6 +88,8 @@ use crate::sim::SimState;
 use crate::vats_classic::{self as classic, Candidate, VatsSlowdown, VatsStyle};
 use crate::{space, PlaySet, PlayState, PlayerCamera};
 
+pub mod touch;
+
 /// The clock's speed while marking [design: the owner's "very, very slow"].
 pub const MARK_SCALE: f32 = 0.05;
 /// The swipe across the screen on entering, and the easing of the clock with it, real
@@ -1304,13 +1306,14 @@ fn update(
     locks: Res<ControlLocks>,
     mut hud: ResMut<HudMessage>,
     mut sounds: Sounds,
+    mut touch: touch::Consumer,
 ) {
     let ClassicIn { style, slowdown, kill_cam } = settings;
     let v = &mut *vats;
     v.now = real.elapsed_secs_f64();
     v.player_rate = kill_cam.as_deref().and_then(|k| k.player_scale()).unwrap_or(1.0);
     v.shot = None;
-    let keys = std::mem::take(&mut v.keys);
+    let mut keys = std::mem::take(&mut v.keys);
     let playing = *state.get() == PlayState::Playing;
     let dead = script.as_deref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.is_dead(FormId::PLAYER_REF));
     // A conversation (a forced greeting too) or a script's menu, caught before the state
@@ -1391,6 +1394,19 @@ fn update(
         (Phase::Marking, None) => {
             follow(v, &phys);
             rechance(v, &combat, player.eye());
+            // A finger request is consumed here, not by a separate effect writer.
+            // Preview and mark_actor retain the same actor/part/AP legality rules.
+            let direct = touch.take(v, &mut phys, &keys);
+            let direct_part = direct.selection.filter(|s| sim.present(s.actor) && barred(v, script.as_deref_mut(), &mut sim, s.actor).is_ok());
+            if direct.selection.is_some() && direct_part.is_none() { touch.refuse(); }
+            if let Some(s) = direct_part {
+                if v.classic.selected != Some(s.actor) {
+                    v.classic.selected = Some(s.actor);
+                    v.classic.part_set = None;
+                }
+                (keys.hover_part, keys.near_part, keys.ray) = (None, None, None);
+            }
+            if direct.fire { keys.accept = true; }
             let chosen = if v.style == VatsStyle::Classic {
                 classic_frame(v, &keys, &combat, script.as_deref_mut(), &mut sim, &mut phys, &mut player, &control, real.delta_secs(), &mut sounds)
             } else {
@@ -1401,7 +1417,23 @@ fn update(
             if on {
                 preview(v, &combat, &parts, script.as_deref_mut(), &mut sim, &mut phys, &player, &control, chosen);
             }
+            let direct_part = direct_part.filter(|s| v.selected() == Some(s.actor) && v.preview.actor == Some(s.actor));
+            let direct_part = direct_part.and_then(|s| {
+                let i = v.preview.parts.iter().position(|p| p.part == s.part)?;
+                v.classic.part = i;
+                v.classic.part_set = Some(s.actor);
+                for (n, p) in v.preview.parts.iter_mut().enumerate() { p.under = n == i; }
+                Some(s)
+            });
+            if direct.selection.is_some() && direct_part.is_none() { touch.refuse(); }
             if !on {
+            } else if let Some(s) = direct_part.filter(|s| s.queue) {
+                // Selection never accepts. In enhanced mode only touch Fire requests
+                // accept, through the existing branch below on a later contact.
+                let point = point_of(&phys, s.actor, s.part).unwrap_or(player.eye());
+                let before = v.queue.len();
+                mark_actor(v, &combat, &parts, script.as_deref_mut(), &mut sim, &phys, &player, &mut hud, &mut sounds, s.actor, s.part, point, false);
+                touch.queued(v.queue.len() > before);
             } else if keys.toggle {
                 end(v, "V pressed again", &mut sounds);
             } else if keys.unmark {
@@ -3156,6 +3188,7 @@ pub struct VatsModePlugin;
 impl Plugin for VatsModePlugin {
     fn build(&self, app: &mut App) {
         classic::register(app);
+        touch::install(app);
         app.init_resource::<VatsMode>()
             .add_systems(Startup, spawn_marks)
             .add_systems(Update, read_keys.after(PlaySet::Input).after(crate::control::enforce_locks).after(crate::player::encumbered_walks).before(PlaySet::Physics))

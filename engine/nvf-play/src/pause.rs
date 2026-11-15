@@ -1702,7 +1702,27 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
     };
     root.spawn((SwitchNote, Text::new(note.clone()), Node { display: Display::None, ..default() }));
     let shown = (entries.len() - first.min(entries.len())).min(lines) as f32;
-    note_lines(root, f, &note, lb, top + shown * OPTION_ROW + NOTE_GAP);
+    let note_top = top + shown * OPTION_ROW + NOTE_GAP;
+    let appearance_row = selected.and_then(|id| match id { RowId::Setting(i) => list.get(i), _ => None })
+        .is_some_and(|s| crate::dialogue_touch::appearance::is_row(s.key));
+    let preview_height = (NOTE_BOTTOM - note_top).clamp(0.0, NOTE_STEP * NOTE_LINES as f32);
+    // Keep the actual note, rail, scrollbar and all action rows available. This
+    // passive sample lives only beside the note, above Report/Back/version.
+    let preview_width = 200.0;
+    let preview_note = ListBox{width:lb.width-preview_width-20.0,..lb};
+    let fits_note = appearance_row && lb.width >= 520.0 && preview_height >= crate::dialogue_touch::appearance::MIN_PREVIEW_UNITS && {
+        let width=note_width(preview_note);
+        // Test original glyph advances before note_wrapped can add CUT_MARK.
+        let lines=f.small.font.lines(&note,Some(width));
+        lines.iter().all(|line|line.width<=width) && note_fit(lines.len(),note_top)==lines.len()
+    };
+    if fits_note {
+        note_lines(root, f, &note, preview_note, note_top);
+        let node=from_middle(lb.left+lb.width-preview_width,note_top,preview_width,preview_height);
+        crate::dialogue_touch::appearance::preview(root,Node{flex_direction:FlexDirection::Column,padding:UiRect::all(u(6.)),border:UiRect::all(u(1.)),overflow:Overflow::clip(),..node});
+    } else {
+        note_lines(root, f, &note, lb, note_top);
+    }
     version(root, f);
     // The open dropdown over the rows under its own (over those above near the bottom).
     let Some((o, names)) = d.dropdown.and_then(|o| Some((o, d.list(o.row)?.0))) else { return };
@@ -6182,4 +6202,6 @@ mod tests {
         assert!(texts(&mut app).contains(&("Large".to_string(), color(Shade::Dim))));
         assert_eq!(row_state(&mut app), "1920x1080");
     }
+    include!("pause/dialogue_preview_tests.rs");
+
 }

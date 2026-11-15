@@ -18,6 +18,10 @@ use fnv_game::lockpick::{Phase, PIN_RANGE};
 
 const SCHEME_KEY: &str = "lockpick-touch";
 const SIZE_KEY: &str = "lockpick-touch-size";
+pub const HINTS_KEY: &str = "lockpick-touch-hints";
+#[derive(Resource)]
+pub(super) struct Hints(pub bool);
+impl Default for Hints { fn default() -> Self { Self(true) } }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scheme {
     Off,
@@ -72,7 +76,16 @@ fn pick_scheme(world: &mut World, name: &str) -> bool {
     else {
         return false;
     };
+    if world.resource::<Options>().scheme == scheme { return true; }
     world.resource_mut::<Options>().scheme = scheme;
+    let (window, ids) = if let Some(mut gestures) = world.get_resource_mut::<Gestures>() {
+        let owned = (gestures.window, [gestures.angle.map(|a| a.id), gestures.turn].into_iter().flatten().collect::<Vec<_>>());
+        gestures.angle = None;
+        gestures.turn = None;
+        owned
+    } else { (None, Vec::new()) };
+    if let Some(mut held) = world.get_resource_mut::<HeldTorque>() { held.touch = false; }
+    crate::touch_ui_options::retire(world, crate::touch_ui_options::Feature::Lockpick, window, &ids);
     true
 }
 fn pick_size(world: &mut World, name: &str) -> bool {
@@ -86,6 +99,21 @@ fn pick_size(world: &mut World, name: &str) -> bool {
     true
 }
 fn register(app: &mut App) {
+    crate::touch_ui_options::install(app);
+    app.init_resource::<Hints>();
+    settings::add_setting(app, settings::Setting {
+        key: HINTS_KEY, group: "Touch", label: "Show lockpicking hints",
+        note: "Show gesture instructions and the first-use tutorial. Turn, angle, lock status and error feedback remain visible when hints are off.",
+        switches: "", get: |w| w.resource::<Hints>().0,
+        set: |w, on| {
+            w.resource_mut::<Hints>().0 = on;
+            if !on && w.get_resource::<LockpickScreen>().is_some_and(|s| s.0.as_ref().is_some_and(|s| s.help.is_some())) {
+                if let Some(mut commands) = w.get_resource_mut::<bevy::ecs::message::Messages<LockpickInput>>() {
+                    commands.write(LockpickInput::CloseHelp);
+                }
+            }
+        }, slider: None,
+    });
     for (key,label,note,names,chosen,pick) in [
         (SCHEME_KEY,"Lockpicking touch controls","Drag the arc to choose an angle, or use a precision slider. Hold Turn with the other thumb.",
          (|_: &World| Scheme::ALL.iter().map(|s|s.name().to_string()).collect()) as fn(&World)->Vec<String>,
@@ -170,6 +198,7 @@ struct AngleContact {
 #[derive(Resource, Default)]
 pub(super) struct Gestures {
     context: Option<Context>,
+    window: Option<Entity>,
     angle: Option<AngleContact>,
     turn: Option<u64>,
     pad_armed: bool,
@@ -180,6 +209,7 @@ pub(super) struct Gestures {
 impl Gestures {
     fn cancel(&mut self) {
         self.context = None;
+        self.window = None;
         self.angle = None;
         self.turn = None;
         self.pad_armed = false;
@@ -261,6 +291,7 @@ impl Gestures {
 
 pub(super) fn install(app: &mut App) {
     app.init_resource::<Options>()
+        .init_resource::<Hints>()
         .init_resource::<Gestures>()
         .init_resource::<HeldTorque>()
         .add_message::<TouchInput>()
@@ -271,7 +302,7 @@ pub(super) fn install(app: &mut App) {
         .add_systems(Startup, spawn)
         .add_systems(
             Update,
-            draw.after(crate::PlaySet::Ui).before(crate::PlaySet::Sync),
+            draw.after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync),
         );
     if cfg!(target_os = "android") {
         register(app)
@@ -324,6 +355,8 @@ pub(super) fn input(
     pads: ActionPads,
     touch_switch: Option<Res<crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<crate::pad::PlatformInputGate>>,
+    ui_capture: Option<Res<crate::ui_pointer::TouchUiCapture>>,
+    retirements: Option<Res<crate::touch_ui_options::Retirements>>,
     time: AidTime,
     mut touches: MessageReader<TouchInput>,
     mut out: MessageWriter<LockpickInput>,
@@ -365,13 +398,16 @@ pub(super) fn input(
         options: *options,
         controller,
     });
+    gestures.window = Some(window_id);
     if fresh {
         return;
     } // consume the opening/help-dismissal touch batch, never inherit torque
     let mut desired = None;
     if !controller && options.scheme != Scheme::Off
+        && retirements.as_ref().is_none_or(|r| !r.barrier(crate::touch_ui_options::Feature::Lockpick))
         && touch_switch.as_ref().is_none_or(|switch| switch.allows_actions()) {
         for event in events.iter().filter(|e| e.window == window_id
+            && ui_capture.as_ref().is_none_or(|capture| capture.allows(e.id))
             && platform.as_ref().is_none_or(|gate| gate.allows_touch(e.id))) {
             if let Some(angle) = gestures.event(
                 event.id,
@@ -442,7 +478,7 @@ fn spawn(mut commands: Commands) {
             UiTransform::default(),
         ));
         if matches!(visual, Visual::Angle | Visual::Turn) {
-            e.insert(BorderColor::all(Color::srgba(0.65, 0.95, 0.86, 0.9)));
+            e.insert(BorderColor::all(crate::interface::amber(255.0).with_alpha(0.65)));
         }
         match visual {
             Visual::Guide | Visual::Value | Visual::TurnLabel => {
@@ -471,6 +507,7 @@ fn ui_rect(rect: Rect, scale: f32, node: &mut Node) {
 fn draw(
     screen: Res<LockpickScreen>,
     options: Res<Options>,
+    hints: Res<Hints>,
     held: Res<HeldTorque>,
     gestures: Res<Gestures>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -484,6 +521,8 @@ fn draw(
         Option<&mut BackgroundColor>,
         &mut UiTransform,
         Option<&mut TextFont>,
+        Option<&mut TextColor>,
+        Option<&mut BorderColor>,
     )>,
 ) {
     let geometry = windows
@@ -499,11 +538,12 @@ fn draw(
         && ui.is_finite()
         && ui > 0.0;
     let pin = screen.0.as_ref().map_or(90.0, |s| s.game.pin);
-    for (visual, mut node, mut visibility, text, background, mut transform, font) in &mut visuals {
+    let ink = crate::interface::amber(255.0);
+    for (visual, mut node, mut visibility, text, background, mut transform, font, text_color, border_color) in &mut visuals {
         let touch = options.scheme != Scheme::Off;
         let visible = show
             && match visual {
-                Visual::Guide => touch || gestures.controller,
+                Visual::Guide => hints.0 && (touch || gestures.controller),
                 Visual::Track | Visual::Knob => options.scheme == Scheme::Slider,
                 Visual::Dot(_) | Visual::Needle => options.scheme == Scheme::Arc,
                 _ => touch,
@@ -520,17 +560,18 @@ fn draw(
         let s = g.scale;
         transform.rotation = Rot2::IDENTITY;
         let mut label = None;
-        let mut colour = Color::srgba(0.85, 1.0, 0.94, 0.95);
+        let mut colour = ink.with_alpha(0.95);
         let rect = match *visual {
             Visual::Angle => {
-                colour = Color::srgba(0.02, 0.08, 0.1, 0.9);
+                colour = Color::BLACK.with_alpha(0.28);
+                node.border_radius = BorderRadius::all(px(6.0 * s / ui));
                 g.angle
             }
             Visual::Turn => {
                 colour = if held.touch || held.pad {
-                    Color::srgba(0.12, 0.48, 0.32, 0.96)
+                    ink.with_alpha(0.22)
                 } else {
-                    Color::srgba(0.03, 0.15, 0.17, 0.94)
+                    Color::BLACK.with_alpha(0.35)
                 };
                 node.border_radius = BorderRadius::MAX;
                 g.turn
@@ -539,7 +580,7 @@ fn draw(
                 label = Some(if held.touch || held.pad {
                     "Turning".to_string()
                 } else {
-                    "Hold to turn".to_string()
+                    "Turn".to_string()
                 });
                 Rect::from_center_size(
                     g.turn.center(),
@@ -579,21 +620,21 @@ fn draw(
                     g.angle.min.x + 16.0 * s + (g.angle.width() - 32.0 * s) * pin / PIN_RANGE,
                     g.angle.center().y,
                 ),
-                Vec2::splat(12.0 * s),
+                Vec2::splat(10.0 * s),
             ),
             Visual::Dot(i) => {
-                Rect::from_center_size(g.point(i as f32 * PIN_RANGE / 8.0), Vec2::splat(4.0 * s))
+                Rect::from_center_size(g.point(i as f32 * PIN_RANGE / 8.0), Vec2::splat(3.0 * s))
             }
             Visual::Needle => {
                 let a = g.pivot();
                 let b = g.point(pin);
                 transform.rotation = Rot2::radians((b.y - a.y).atan2(b.x - a.x));
-                Rect::from_center_size((a + b) * 0.5, Vec2::new(g.radius(), 2.0 * s))
+                Rect::from_center_size((a + b) * 0.5, Vec2::new(g.radius(), 1.5 * s))
             }
         };
         ui_rect(rect, ui, &mut node);
         if matches!(visual, Visual::Angle | Visual::Turn) {
-            node.border = UiRect::all(px(1.5 * s / ui));
+            node.border = UiRect::all(px(s / ui));
         }
         if let Some(mut value) = text {
             if let Some(label) = label {
@@ -604,8 +645,10 @@ fn draw(
             bg.0 = colour
         }
         if let Some(mut font) = font {
-            font.font_size = FontSize::Px(14.0 * s / ui)
+            font.font_size = FontSize::Px(12.0 * s / ui)
         }
+        if let Some(mut text_color) = text_color { text_color.0 = ink; }
+        if let Some(mut border_color) = border_color { *border_color = BorderColor::all(ink.with_alpha(0.65)); }
     }
 }
 
@@ -1093,4 +1136,6 @@ mod tests {
         assert_eq!(loaded.world().resource::<Options>().size, 3);
         std::fs::remove_file(path).unwrap();
     }
+    include!("touch_optional_tests.rs");
+    include!("touch/hints_tests.rs");
 }

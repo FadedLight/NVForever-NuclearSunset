@@ -33,6 +33,32 @@ Opens isolated movement, aiming and gesture lessons without sending gameplay
 actions. Close or Escape returns to Settings. Its existing saved key is unchanged.
 These actions replace the removed persistent settings/help shortcuts on the HUD.
 
+## Mobile optional interaction preferences
+
+These rows use the normal `[Settings]` INI consumer. Enhanced views, hints,
+appearance and the existing text-size/confirmation choices are independent.
+Android uses the Mobile headings below; the desktop settings layout retains
+Gameplay > Dialogue/Inventory menus and Controls > Touch.
+
+| Mobile heading | Key | Behavior |
+|---|---|---|
+| Inventory and quick access | `touch-terminal-v1` | Enhanced terminal view; Off retains the standard menu/input path. |
+| Inventory and quick access | `touch-companion-v1` | Enhanced companion wheel; independent of drag-release preference. |
+| Inventory and quick access | `touch-pipboy-dismiss-left`, `touch-pipboy-dismiss-right` | Optional downward dismissal handles; both off by default. |
+| Inventory and quick access | `touch-pipboy-close-button` | Optional explicit Close target; off by default. |
+| Inventory and quick access | `touch-pipboy-button-graphics` | Show overlay paint; Off keeps the same active targets and dispatch. DefaultOn. |
+| Inventory and quick access | `touch-pipboy-model-wheel` | Touch the physical model wheel to scroll; on by default, independent of mouse/pad scrolling. |
+| Movement and gestures | `touch-vats-targeting-v1` | Off (default), Tap or Hold; body selection queues, separate Fire confirms. |
+| Dialogue | `dialogue-theme-v1` | Minimal (default), Classic Glass, Split Panel, Retro Console or Wrist Terminal. |
+| Dialogue | `dialogue-background-opacity-v1` | Backing opacity, default 18%, maximum 80%; the stored slider is normalized. |
+| Dialogue | `dialogue-frame-opacity-v1` | Frame opacity, default 60%; independent of backing and full-contrast text/feedback. |
+| Dialogue | `dialogue-hints-v1` | Show explanatory dialogue hints, on by default; choices, speech and requirements stay. |
+| Lockpicking | `lockpick-touch-hints` | Show lockpicking hints, on by default; scheme, Turn, status and errors stay. |
+
+Appearance updates existing UI; it does not change choice words/order, semantic
+actions or input bindings. New controls are authored but uncompiled/unrun until
+separately qualified; their registration is not device acceptance.
+
 ## Gameplay › Game
 
 ### `difficulty`: Difficulty

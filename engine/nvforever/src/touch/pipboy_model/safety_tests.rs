@@ -240,4 +240,5 @@ mod safety_regressions {
         assert!(app.world().resource::<Geometry>().screen.is_some());
         assert!(!unclaimed(&mut app),"one unprojectable visible recognized button invalidates closing completeness too");
     }
+    include!("optional_tests.rs");
 }

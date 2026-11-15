@@ -11,6 +11,16 @@
   touch. It calls for input-specific prompts and correct state restoration after
   leaving and returning to a session. Its streaming APIs do not apply to this
   native Android implementation.
+- [documented] Epic's 2020 [Fortnite mobile guide](https://www.fortnite.com/news/getting-started---fortnite-for-mobile?lang=en-US)
+  describes movable, resizable HUD buttons and alternate presets. Its
+  [mobile design guidance](https://dev.epicgames.com/documentation/fortnite/designing-for-mobile-in-fortnite)
+  emphasizes a clear hierarchy and controls suited to the activity. NVForever
+  applies that rationale through its existing profile editor and optional views.
+- [documented] Mojang's [Minecraft Bedrock 1.19.50 notes](https://www.minecraft.net/de-de/article/1-19-50-update-available-bedrock)
+  document distinct joystick/tap, joystick/crosshair and directional-pad schemes,
+  settings onboarding and independent joystick preferences. This supports teaching
+  the selected scheme and preserving explicit alternatives, rather than changing
+  interaction policy invisibly. It is a historical release reference.
 - [hypothesis] For NVForever, movement should remain visibly explained in the
   controls practice screen: drag the left stick to move, and drag free right-hand
   space to look. Icons need action names in help and the editor so unfamiliar

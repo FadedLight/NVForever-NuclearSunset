@@ -127,6 +127,30 @@ pub(super) fn load(mut settings: ResMut<Settings>) {
 pub fn captures(settings: &Settings, screen: &TerminalScreen) -> bool {
     settings.enabled && screen.0.is_some()
 }
+
+/// Register the saved presentation switch for full or independently hosted menus.
+pub fn register(app: &mut App) {
+    crate::touch_ui_options::install(app);
+    app.init_resource::<Settings>();
+    crate::settings::add_setting(app, crate::settings::Setting {
+        key: "touch-terminal-v1", group: crate::pause::GROUP_MENUS,
+        label: "Enhanced hacking and terminal", switches: "",
+        note: "Large terminal targets, word selection and separate Guess. Off keeps standard menu touch arrows, Confirm, Back and Exit, plus mouse/controller input. Text and scheme preferences are kept.",
+        get: |w| w.resource::<Settings>().enabled, set: set_enabled, slider: None,
+    });
+}
+fn set_enabled(world: &mut World, enabled: bool) {
+    if world.resource::<Settings>().enabled == enabled { return; }
+    world.resource_mut::<Settings>().enabled = enabled;
+    let (window, ids) = if let Some(mut state) = world.get_resource_mut::<TouchState>() {
+        let owned = (state.viewport.map(|v| v.0), state.contacts.iter().copied().take(33).collect::<Vec<_>>());
+        state.gesture = None;
+        state.contacts.clear();
+        state.close_options();
+        owned
+    } else { (None, Vec::new()) };
+    crate::touch_ui_options::retire(world, crate::touch_ui_options::Feature::Terminal, window, &ids);
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Hit {
     Cell(usize),
@@ -377,6 +401,8 @@ pub(super) fn input(
     bindings: Option<Res<crate::bindings::Bindings>>,
     touch_switch: Option<Res<crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<crate::pad::PlatformInputGate>>,
+    ui_capture: Option<Res<crate::ui_pointer::TouchUiCapture>>,
+    retirements: Option<Res<crate::touch_ui_options::Retirements>>,
     mut out: MessageWriter<TerminalInput>,
     script: Option<Res<ScriptState>>,
 ) {
@@ -430,6 +456,15 @@ pub(super) fn input(
         touches.clear();
         return;
     }
+    if retirements.as_ref().is_some_and(|r| r.barrier(crate::touch_ui_options::Feature::Terminal)) {
+        state.gesture = None;
+        state.contacts.clear();
+        state.options = false;
+        // This reader owns no keyboard/controller state. Root handles persistent
+        // per-window ID masking; this closes the post-publisher callback interval.
+        touches.read().for_each(drop);
+        return;
+    }
     let device_allows_actions = touch_switch.as_deref().is_none_or(crate::pad::TouchDeviceSwitch::allows_actions);
     let controller = bindings.is_some_and(|b| b.device == crate::bindings::InputDevice::Controller);
     if controller && state.options { state.close_options(); }
@@ -481,6 +516,7 @@ pub(super) fn input(
     state.first_row = state.first_row.min(ROWS.saturating_sub(geometry.visible));
     let mut drop_tail = false;
     for touch in touches.read().filter(|e| e.window == window_id
+        && ui_capture.as_ref().is_none_or(|capture| capture.allows(e.id))
         && platform.as_ref().is_none_or(|gate| gate.allows_touch(e.id))) {
         if !touch.position.is_finite() {
             state.gesture = None;
@@ -1498,4 +1534,5 @@ mod tests {
             assert_eq!(app.world().resource::<TerminalStats>().hacked, 1);
         }
     }
+    include!("touch_toggle_tests.rs");
 }

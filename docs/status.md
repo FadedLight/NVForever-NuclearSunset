@@ -48,11 +48,23 @@ and unexecuted, with phone acceptance pending.
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule
 consumers. Canonical launcher/adaptive icon resources and an explicit diagnostics
-build option are implemented. R30 hosted execution passed pointer ownership, but a
-native-map control still fails and wrapper execution remains unrun. Native build
+build option are implemented. R31 passed all play tests, including the former
+native-map failure, and all eight root-routing controls. Four wrapper fixtures
+failed: three map parents omit their real DATA message provider, and practice
+snapshots an implicit tray before its normal migration settles. Narrow setup
+corrections are authored; corrected execution remains pending. Native build
 success does not qualify the new APK: final packaging and device acceptance remain
 open. The qualified R9 development APK remains the test baseline; these new features
 are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
+
+The optional touch-view/appearance follow-up is **In progress**: independent
+terminal/companion switches, dialogue themes and opacity, separate dialogue and
+lockpicking hints, live interface/Pip-Boy palettes, optional dismissal/wheel controls
+and VATS tap/hold queueing are composed in source. Required choice/status feedback
+and ordinary hardware routes remain part of the contract. Actual-plugin palette
+and shared input-ownership regressions are authored; compilation, corrected
+runtime, native packaging and phone acceptance remain pending. This work is
+separate from the R31 fixture correction and does not change the qualified R9 APK.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

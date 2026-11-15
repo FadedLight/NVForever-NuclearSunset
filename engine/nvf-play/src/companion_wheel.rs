@@ -263,6 +263,7 @@ impl Plugin for CompanionWheelPlugin {
             .add_systems(Update, touch::draw.after(draw).in_set(PlaySet::Ui))
             .add_systems(OnExit(PlayState::Menu), close)
             .add_systems(Last, report);
+        touch::register(app);
     }
 }
 

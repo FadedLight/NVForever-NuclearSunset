@@ -65,3 +65,43 @@ filter is a separate integration change. Native/device rendering remains unquali
 [design] Android's touch conversation panel uses 75% of the window height, 8-pixel outer padding, 4-pixel gaps and 48-pixel minimum choice/confirm targets. Choice padding is 6 pixels; wrapped text can grow the row and the existing viewport scrolls it. The previous touch layout remains the desktop profile. This density change is intended to expose more choices on short landscape screens while keeping full labels and the same offered choice order and guarded release actions. Existing text-size sliders remain 75–200%.
 
 [qualification] All four compact-choice cases passed in that R9 run using production draw, Bevy text measurement and real UI layout. They check more whole visible choices, 48-pixel targets, wrapped text, raw release/scroll guards and explicit saved INI sizes. These are headless CPU/layout results, not native rendering or device usability acceptance.
+
+
+## Dialogue appearance [design]
+
+Enhanced dialogue keeps its own on/off switch, text scales, confirmation and
+speaker-side framing. Appearance adds independently saved Minimal, Classic Glass,
+Split Panel, Retro Console and Wrist Terminal choices, background/frame opacity,
+and Show dialogue hints. These are original thin node/vector trims inspired by
+interface styles; no reference pixels, game artwork or fonts are imported.
+
+The HUD/interface palette is authoritative at full text brightness. Surfaces use
+a dark tint and restrained alpha (default18% background/60% frame), with backing
+capped at80% and thin frame opacity independent. A functional selection mark
+keeps full HUD contrast even when both cosmetic opacities are zero. Text, required
+feedback, NPC speech, choices and selected-action captions never inherit those
+opacity sliders. The existing selected unmet-check red is semantic feedback, not
+a theme override. Cosmetic borders follow frame opacity, while the existing
+functional selection mark stays opaque red for a selected unmet check, even at
+zero frame/backing opacity. Other selected marks use full HUD contrast. The
+original requirement text remains at every opacity. Theme and opacity changes repaint existing entities without
+changing targets, selection, scrolling, ownership or camera framing. Decorative
+nodes ignore picking. Show dialogue hints affects only the explanatory gesture
+caption; it cannot hide speech/choices/requirements/Confirm selection. Its layout
+change invalidates a pending touch release through the existing guard. Fresh
+neutral contacts remain usable with the independently enabled view.
+
+A noninteractive live sample sits beside the selected appearance row's existing
+settings note, only when the actual note region has at least78interface units
+and every uncut measured note line fits beside it. Overlong words/reasons retain
+the full-width note instead of being truncated to admit a sample. It shares the real
+paint path, is absent from gameplay, and cannot cover rows, scrollbars, the rail
+or Back. Narrow notes retain their full text and omit the sample. Generic palette
+recolour runs before the appearance owner's paint, preventing a live palette
+change from applying twice. New options use the existing INI settings consumer.
+
+Authored controls exercise actual nodes/alpha, Taffy hit bounds, live settings,
+scroll/selection preservation, hints off with real raw choices, both framing
+sides, long/disabled choices, saved restoration and actual note-region sample.
+All new controls remain uncompiled/unrun until an owner-admitted check. They do
+not qualify phone pixels or installed mod/version/profile behavior.

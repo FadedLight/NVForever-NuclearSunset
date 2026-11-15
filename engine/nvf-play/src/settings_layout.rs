@@ -125,7 +125,7 @@ pub const SECTIONS: &[Section] = &[
             "autosave-scripts",
         ],
     ),
-    section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1"]),
+    section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1"]),
     section(
         "Gameplay",
         Some("Dialogue"),
@@ -140,6 +140,7 @@ pub const SECTIONS: &[Section] = &[
             "dialogue-choice-text-size",
             "dialogue-subtitle-text-size",
             "dialogue-touch-choice", "dialogue-speaker-side",
+            "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
         ],
     ),
     section(
@@ -243,11 +244,14 @@ pub const SECTIONS: &[Section] = &[
             "touch-bottom-swipe-target-v1",
             "touch-pipboy-swipe-v1",
             "touch-pipboy-distance-v1",
+            "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+            "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
             "touch-direct-pipboy-v1", "touch-world-activation-v1",
             "touch-icon-family",
             "adaptive-touch-actions",
             "lockpick-touch",
             "lockpick-touch-size",
+            "lockpick-touch-hints",
             "touch-gyro-v1",
             "touch-gyro-sensitivity-v1",
             "touch-gyro-ads-v1",
@@ -260,6 +264,7 @@ pub const SECTIONS: &[Section] = &[
             "touch-fire-drag-look-v1",
             "touch-auto-move-lock-v1",
             "touch-vats-double-tap-v1",
+            "touch-vats-targeting-v1",
 
         ],
     ),
@@ -329,7 +334,7 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     ]),
     section(MOBILE_TAB, Some("Movement and gestures"), &[
         "touch-analog-movement-v1", "touch-fire-drag-look-v1",
-        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-world-activation-v1",
+        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1", "touch-world-activation-v1",
     ]),
     section(MOBILE_TAB, Some("Gyroscope"), &[
         "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1",
@@ -338,12 +343,15 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     section(MOBILE_TAB, Some("Inventory and quick access"), &[
         "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
         "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1", "touch-pipboy-size-v1", "touch-pipboy-tab-swipes", "touch-direct-pipboy-v1",
-        "touch-barter-v1", "touch-maintenance-v1",
+        "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+        "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
+        "touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1",
     ]),
     section(MOBILE_TAB, Some("Dialogue"), &[
         "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side",
+        "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
     ]),
-    section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size"]),
+    section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints"]),
     section(MOBILE_TAB, Some("Interface size"), &[
         "menu-scale", "ui-scale", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
     ]),
@@ -591,7 +599,11 @@ mod tests {
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with, plus main da13f4f8a's grass-fire row (#2567), the viewmodel
     /// field of view and menu scale rows, and main 6b29ee76b's Physics rate row.
-    const KNOWN: [(&str, &str); 162] = [
+    const KNOWN: [(&str, &str); 175] = [
+        ("lockpick-touch-hints", "Touch"),
+        ("touch-pipboy-dismiss-left", "Controls"), ("touch-pipboy-dismiss-right", "Controls"),
+        ("touch-pipboy-close-button", "Controls"), ("touch-pipboy-button-graphics", "Controls"), ("touch-pipboy-model-wheel", "Controls"),
+        ("touch-terminal-v1", "Gameplay"), ("touch-companion-v1", "Gameplay"),
         ("touch-layout-editor-v1", "Controls"),
         ("touch-barter-v1", "Gameplay"),
         ("touch-maintenance-v1", "Gameplay"),
@@ -632,6 +644,10 @@ mod tests {
         ("dialogue-subtitle-text-size", "Gameplay"),
         ("dialogue-touch-choice", "Gameplay"),
         ("dialogue-speaker-side", "Gameplay"),
+        ("dialogue-theme-v1", "Gameplay"),
+        ("dialogue-background-opacity-v1", "Gameplay"),
+        ("dialogue-frame-opacity-v1", "Gameplay"),
+        ("dialogue-hints-v1", "Gameplay"),
         ("true-iron-sights", "Gameplay"),
         ("scope-3d", "Gameplay"),
         ("button-style", "Controller"),
@@ -655,6 +671,7 @@ mod tests {
         ("touch-fire-drag-look-v1", "Touch"),
         ("touch-auto-move-lock-v1", "Touch"),
         ("touch-vats-double-tap-v1", "Touch"),
+        ("touch-vats-targeting-v1", "Touch"),
 
 
         ("aim-assist", "Controller"),
@@ -815,9 +832,9 @@ mod tests {
         );
         let gameplay = keys(&list, &l, "Gameplay");
         let dialogue = gameplay.iter().position(|k| k == "[Dialogue]").unwrap();
-        assert_eq!(&gameplay[dialogue..dialogue+12], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
+        assert_eq!(&gameplay[dialogue..dialogue+16], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
             "dialogue-look", "dialogue-recentre", "dialogue-zoom", "lip-sync", "touch-dialogue",
-            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side"]);
+            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]);
         assert_eq!(
             keys(&list, &l, "Audio"),
             [
@@ -844,11 +861,14 @@ mod tests {
                     "touch-bottom-swipe-target-v1",
                     "touch-pipboy-swipe-v1",
                     "touch-pipboy-distance-v1",
+                    "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+                    "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
             "touch-direct-pipboy-v1", "touch-world-activation-v1",
                     "touch-icon-family",
                     "adaptive-touch-actions",
                     "lockpick-touch",
                     "lockpick-touch-size",
+                    "lockpick-touch-hints",
                     "touch-gyro-v1",
                     "touch-gyro-sensitivity-v1",
                     "touch-gyro-ads-v1",
@@ -860,7 +880,7 @@ mod tests {
                     "touch-analog-movement-v1",
                     "touch-fire-drag-look-v1",
                     "touch-auto-move-lock-v1",
-                    "touch-vats-double-tap-v1"
+                    "touch-vats-double-tap-v1", "touch-vats-targeting-v1"
 
                 ])
                 .collect::<Vec<_>>()
@@ -879,7 +899,7 @@ mod tests {
                 .path()
         };
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
-        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side"] {assert_eq!(at(key), "Gameplay > Dialogue");}
+        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"] {assert_eq!(at(key), "Gameplay > Dialogue");}
         assert_eq!(at("head-bob"), "Gameplay > Camera");
         assert_eq!(at("grass-fire"), "Gameplay > World");
         assert_eq!(at("hud-red"), "Display > Interface");
@@ -1034,7 +1054,7 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 55);
+        assert_eq!(mobile_keys.len(), 68);
         assert!(!mobile_keys.contains("physics-rate"), "upstream screen setting is shared, not mobile-only");
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "Gameplay > World");
@@ -1078,6 +1098,7 @@ mod tests {
             Some(RowId::Setting(at("controller-ads-v1"))), Visibility::default(), &empty);
         assert_eq!((scope, selected), (SettingsScope::Tab(CONTROLS_TAB), Some(RowId::Control(ControlRow::Device))));
         for (key, heading) in [
+            ("touch-vats-targeting-v1", "Movement and gestures"),
             ("touch-practice-v1", "Touch layout and guide"), ("touch-gyro-v1", "Gyroscope"),
             ("touch-hotbar", "Inventory and quick access"), ("touch-dialogue", "Dialogue"),
             ("menu-scale", "Interface size"), ("mobile-performance", "Performance and battery"),

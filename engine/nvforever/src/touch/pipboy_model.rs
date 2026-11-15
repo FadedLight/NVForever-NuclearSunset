@@ -65,9 +65,16 @@ struct ModelTouch {
     scroll: Option<(u64, Stamp, i32)>,
     admitted: bool,
 }
+pub(super) fn cancel_wheel(world:&mut World) {
+    if let Some(mut state)=world.get_resource_mut::<ModelTouch>() {
+        if state.contact.as_ref().is_some_and(|c|matches!(c.kind,Kind::Knob {..})) {state.contact=None;}
+        state.scroll=None;
+    }
+}
 #[derive(SystemParam)]
 pub(super) struct Bridge<'w, 's> {
     geometry: Res<'w, Geometry>,
+    options: Res<'w, super::pipboy_options::Options>,
     state: ResMut<'w, ModelTouch>,
     pip: Option<Res<'w, PipBoy>>,
     screen: Option<Res<'w, PipBoyScreen>>,
@@ -91,6 +98,9 @@ impl Bridge<'_, '_> {
         self.state.admitted = allowed && !self.paused.as_ref().is_some_and(|p| p.0) && !modal && current(&self.geometry, self.pip.as_deref(), self.screen.as_deref(), size)
             && self.geometry.camera.is_some_and(|e|self.cameras.get(e).is_ok_and(|c|c.is_active))
             && self.geometry.entities.iter().all(|e| self.parts.get(*e).is_ok_and(|(v,i)|*v!=Visibility::Hidden && i.get()));
+        if !self.options.wheel && self.state.contact.as_ref().is_some_and(|c|matches!(c.kind,Kind::Knob {..})) {
+            self.state.contact=None; self.state.scroll=None;
+        }
         if !self.state.admitted || self.state.contact.as_ref().is_some_and(|c| c.stamp != self.geometry.stamp()
             || matches!(c.kind, Kind::Button(target) if !self.geometry.buttons.contains(&target))) {
             self.state.contact = None; self.state.pending = None; self.state.scroll = None;
@@ -129,6 +139,17 @@ impl Bridge<'_, '_> {
             && !self.geometry.buttons.iter().any(|b|b.bounds.contains(position))
             && !self.geometry.knob.is_some_and(|r|r.contains(position))
     }
+    pub(super) fn closing_region_unclaimed(&self, rect:Rect)->bool {
+        if !rect.min.is_finite() || !rect.max.is_finite() || rect.size().min_element()<=0.0 || !self.closing_unclaimed(rect.center()) {return false;}
+        let overlaps=|r:Rect| {let i=r.intersect(rect);i.width()>0.0 && i.height()>0.0};
+        if self.pip.as_deref().zip(self.screen.as_deref()).is_some_and(|(p,s)|p.frame==Frame::Screen || !s.on_model) {
+            let Ok((node,at))=self.flat.single() else {return false;};
+            let Ok(window)=self.windows.single() else {return false;};
+            return !overlaps(Rect::from_center_size(at.translation/window.scale_factor(),node.size()/window.scale_factor()));
+        }
+        !self.geometry.screen.is_some_and(overlaps) && !self.geometry.knob.is_some_and(overlaps)
+            && !self.geometry.buttons.iter().any(|b|overlaps(b.bounds))
+    }
     pub fn event(&mut self, event: &TouchInput, unclaimed: bool) -> bool {
         if let Some(contact) = self.state.contact.as_mut().filter(|c| c.id == event.id) {
             contact.cancelled |= !event.position.is_finite() || contact.stamp != self.geometry.stamp() || event.phase == TouchPhase::Canceled;
@@ -159,14 +180,15 @@ impl Bridge<'_, '_> {
         if self.state.contact.is_some() || self.state.pending.is_some() || self.state.scroll.is_some() { return true; }
         if !self.state.admitted || !unclaimed || event.phase != TouchPhase::Started { return false; }
         let kind=if let Some(target)=self.geometry.target(event.position) {Kind::Button(target)}
-            else if event.position.is_finite() && !self.geometry.on_screen(event.position) && self.geometry.knob.is_some_and(|r|r.contains(event.position)) {Kind::Knob {previous:event.position,remainder:0.0}}
+            else if self.options.wheel && event.position.is_finite() && !self.geometry.on_screen(event.position) && self.geometry.knob.is_some_and(|r|r.contains(event.position)) {Kind::Knob {previous:event.position,remainder:0.0}}
             else {return false};
         self.state.contact = Some(Contact { id: event.id, kind, origin: event.position, stamp: self.geometry.stamp(), cancelled: false });
         true
     }
 }
 #[allow(clippy::too_many_arguments)]
-fn dispatch(mut commands: Commands, mut state: ResMut<ModelTouch>, geometry: Res<Geometry>, pip: Option<Res<PipBoy>>, screen: Option<Res<PipBoyScreen>>, admission: nvf_play::pipboy::touch_items::Admission, script: Option<Res<nvf_play::script::ScriptState>>, paused: Option<Res<nvf_play::pause::Paused>>, physical: Option<Res<nvf_play::pipboy::touch_scroll::PhysicalPriority>>, parts: Query<(&Visibility,&InheritedVisibility), With<crate::pipboy_arm::PipBoyPart>>, cameras: Query<&Camera,With<nvf_play::PlayerCamera>>, mut out: MessageWriter<PipBoyInput>) {
+fn dispatch(mut commands: Commands, mut state: ResMut<ModelTouch>, geometry: Res<Geometry>, pip: Option<Res<PipBoy>>, screen: Option<Res<PipBoyScreen>>, admission: nvf_play::pipboy::touch_items::Admission, script: Option<Res<nvf_play::script::ScriptState>>, paused: Option<Res<nvf_play::pause::Paused>>, physical: Option<Res<nvf_play::pipboy::touch_scroll::PhysicalPriority>>, options: Res<super::pipboy_options::Options>, parts: Query<(&Visibility,&InheritedVisibility), With<crate::pipboy_arm::PipBoyPart>>, cameras: Query<&Camera,With<nvf_play::PlayerCamera>>, mut out: MessageWriter<PipBoyInput>) {
+    if !options.wheel && state.contact.as_ref().is_some_and(|c|matches!(c.kind,Kind::Knob {..})) {state.contact=None;}
     let pending=state.pending.take(); let scroll=state.scroll.take();
     let owner=state.contact.as_ref().map(|c|c.id).or_else(||pending.as_ref().map(|(id,..)|*id)).or_else(||scroll.as_ref().map(|(id,..)|*id));
     let modal = script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| nvf_play::tiles::stats_menu::modal_over(rt.game.menu));
@@ -178,7 +200,7 @@ fn dispatch(mut commands: Commands, mut state: ResMut<ModelTouch>, geometry: Res
         if admission.allows_contact(Some(id)) && geometry.stamp()==stamp && geometry.target(at)==Some(target) {out.write(PipBoyInput::Page(target.page));}
     }
     if let Some((id,stamp,lines))=scroll {
-        if geometry.stamp()==stamp && admission.allows_contact(Some(id)) {
+        if options.wheel && geometry.stamp()==stamp && admission.allows_contact(Some(id)) {
             if let Some(request)=pip.as_deref().zip(screen.as_deref()).and_then(|(p,s)|nvf_play::pipboy::scrollbar::ListScrollRequest::new(p,s,nvf_play::pipboy::scrollbar::ScrollBy::Lines(lines))) {
                 let request=request.with_contact(id); commands.queue(move |world:&mut World| {request.apply(world);});
             }
@@ -187,26 +209,44 @@ fn dispatch(mut commands: Commands, mut state: ResMut<ModelTouch>, geometry: Res
 }
 #[derive(Component)]
 struct Visual;
-fn draw(mut commands: Commands, geometry: Res<Geometry>, state: Res<ModelTouch>, old: Query<Entity, With<Visual>>, mut previous: Local<Option<(Geometry, Option<Page>, bool)>>) {
+#[derive(Component)]
+struct VisualButton(Page);
+#[derive(Component)]
+struct VisualCaption;
+type VisualState=(Geometry,Option<Page>,bool,Option<super::pipboy_options::PaintFrame>);
+fn draw(mut commands: Commands, geometry: Res<Geometry>, state: Res<ModelTouch>, old: Query<Entity, With<Visual>>, canvas:super::pipboy_options::OverlayCanvas, mut previous: Local<Option<VisualState>>) {
     let pressed = state.contact.as_ref().filter(|c| !c.cancelled).and_then(|c|if let Kind::Button(t)=c.kind {Some(t.page)}else{None});
-    let next = (geometry.clone(), pressed, state.admitted);
+    let frame=canvas.frame();
+    let next = (geometry.clone(), pressed, state.admitted,frame);
     if previous.as_ref() == Some(&next) { return; }
     *previous = Some(next);
     for e in &old { commands.entity(e).despawn(); }
-    if !state.admitted { return; }
+    let Some(frame)=frame.filter(|_|state.admitted) else {return;};
     for button in &geometry.buttons {
         let pressed = pressed == Some(button.page);
         let r = button.bounds;
-        commands.spawn((Visual, Node { position_type: PositionType::Absolute, left: px(r.min.x), top: px(r.min.y), width: px(r.width()), height: px(r.height()), border: UiRect::all(px(if pressed { 3.0 } else { 1.0 })), align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
-            BorderColor::all(Color::srgba(0.4, 1.0, 0.65, if pressed { 1.0 } else { 0.55 })),
-            BackgroundColor(Color::srgba(0.04, 0.2, 0.08, if pressed { 0.65 } else { 0.2 })), GlobalZIndex(1800), Pickable::IGNORE))
-            .with_children(|p| { p.spawn((Text::new(button.page.title()), TextFont { font_size: FontSize::Px(12.0), ..default() }, TextColor(Color::WHITE), Pickable::IGNORE)); });
+        commands.spawn((Visual, VisualButton(button.page), UiTargetCamera(frame.camera), Node { position_type: PositionType::Absolute, left: px(r.min.x/frame.scale), top: px(r.min.y/frame.scale), width: px(r.width()/frame.scale), height: px(r.height()/frame.scale), border: UiRect::all(px((if pressed { 3.0 } else { 1.0 })/frame.scale)), align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
+            BorderColor::all(nvf_play::interface::pipboy_amber(255.0).with_alpha(if pressed { 1.0 } else { 0.55 })),
+            BackgroundColor(Color::srgba(0.02, 0.025, 0.02, if pressed { 0.65 } else { 0.2 })), GlobalZIndex(1800), Pickable::IGNORE))
+            .with_children(|p| { p.spawn((VisualCaption, Text::new(button.page.title()), TextFont { font_size: FontSize::Px(12.0/frame.scale), ..default() }, TextColor(nvf_play::interface::pipboy_amber(255.0)), Pickable::IGNORE)); });
     }
 }
+fn paint_graphics(options:Res<super::pipboy_options::Options>,state:Res<ModelTouch>,mut buttons:Query<(&VisualButton,&mut BackgroundColor,&mut BorderColor),With<Visual>>,mut captions:Query<&mut TextColor,With<VisualCaption>>) {
+    let pressed=state.contact.as_ref().filter(|c|!c.cancelled).and_then(|c|if let Kind::Button(t)=c.kind {Some(t.page)}else{None});
+    let alpha=if options.graphics {1.0} else {0.0};
+    for (button,mut background,mut border) in &mut buttons {
+        let held=pressed==Some(button.0);
+        background.0=Color::srgba(0.02,0.025,0.02,alpha*if held {0.65} else {0.2});
+        *border=BorderColor::all(nvf_play::interface::pipboy_amber(255.0).with_alpha(alpha*if held {1.0} else {0.55}));
+    }
+    for mut caption in &mut captions {caption.0=nvf_play::interface::pipboy_amber(255.0).with_alpha(alpha);}
+}
 pub(super) fn install(app: &mut App) {
-    app.init_resource::<Geometry>().init_resource::<ModelTouch>().add_message::<PipBoyInput>()
+    app.init_resource::<super::pipboy_options::Options>().init_resource::<Geometry>().init_resource::<ModelTouch>().add_message::<PipBoyInput>()
         .add_systems(Update, dispatch.after(nvf_play::pipboy::PointerSet).after(crate::pipboy_arm::show_screen).after(nvf_play::PlaySet::Scripts).before(nvf_play::PlaySet::Ui))
-        .add_systems(Update, draw.after(dispatch).before(nvf_play::PlaySet::Ui));
+        .add_systems(Update, draw.after(dispatch).before(nvf_play::PlaySet::Ui))
+        // Paint after the core Update recolour; these overlay roots are not PipBoyRoot descendants.
+        .add_systems(PostUpdate, paint_graphics);
 }
 
 #[cfg(test)]

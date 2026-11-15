@@ -57,3 +57,30 @@ unversioned document is silently migrated. Known-v1 values use bounded defaults 
 normalization. Rejected-file status is shown when a user tries to save options.
 The original source-only revision is preserved separately; its unversioned files
 were never claimed as a shipped format.
+
+## Independent enhanced-view switches
+
+[design] Enhanced hacking and terminal (`touch-terminal-v1`) and Enhanced companion
+wheel (`touch-companion-v1`) are independent saved switches. Off restores the standard
+touch menu arrows, Confirm, Back/Exit and ordinary mouse/controller consumers. It does
+not change terminal text size, direct/cursor mode, separate Guess confirmation or the
+wheel's drag-release preference. Android places these rows in Mobile > Inventory and
+quick access; desktop uses Gameplay > Inventory menus.
+
+[design] Existing versioned JSON preferences load first. An explicitly stored switch
+in the normal settings INI takes precedence during PostStartup restoration. Missing INI
+values retain the existing JSON/default choice, and toggling does not rewrite a rejected
+JSON document. Disabling closes terminal configuration and retires owned contacts;
+re-enabling needs a fresh contact after neutral, never the old release.
+
+[qualification] New source controls cover registered on/off and INI restoration,
+real terminal/wheel standard-key effects, cancellation and generic wrapper touch
+fallback. They are authored but uncompiled/unrun. Central contact-retirement integration,
+native presentation coexistence and physical-device acceptance remain pending; the
+historical R9 result above does not qualify the new switches.
+
+The optional-presentation switch callbacks retire only their own touch state.
+A shared core lifecycle plugin separates a frame-local leaf barrier from pending
+window/contact retirement records: Last expires only the former; the Android
+router adopts the latter before publishing its neutral-recovery mask. Standalone
+core touch consumers therefore recover on fresh contacts without a wrapper.

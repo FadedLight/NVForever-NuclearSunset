@@ -44,6 +44,7 @@ pub mod dialogue_menu;
 pub mod dialogue_touch;
 pub mod dialogue_split;
 pub mod touch_safe_area;
+pub mod touch_ui_options;
 pub mod difficulty;
 pub mod hardcore;
 pub mod dismember;

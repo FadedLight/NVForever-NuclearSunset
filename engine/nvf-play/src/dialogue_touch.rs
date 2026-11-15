@@ -2,6 +2,7 @@
 #[cfg(test)]
 #[path = "dialogue_touch/split_tests.rs"]
 mod split_tests;
+pub(crate) mod appearance;
 use crate::dialogue::{ListId, ViewInput};
 use crate::dialogue_menu::DialogueMenu;
 use crate::ui_pointer::{Button, PointerState};
@@ -96,8 +97,24 @@ fn set_mode(w: &mut World, name: &str) -> bool {
     true
 }
 
+fn set_enabled(world: &mut World, enabled: bool) {
+    if world.resource::<TouchDialogue>().enabled == enabled { return; }
+    world.resource_mut::<TouchDialogue>().enabled = enabled;
+    let (window, ids) = if let Some(mut gestures) = world.get_resource_mut::<Gestures>() {
+        let owned = (gestures.guard.as_ref().map(|g| g.window), gestures.contacts.iter().copied().take(33).collect::<Vec<_>>());
+        gestures.gesture = None;
+        gestures.armed = None;
+        gestures.contacts.clear();
+        owned
+    } else { (None, Vec::new()) };
+    if let Some(mut frame) = world.get_resource_mut::<TouchFrame>() { frame.active = false; frame.asked = ViewInput::default(); }
+    crate::touch_ui_options::retire(world, crate::touch_ui_options::Feature::Dialogue, window, &ids);
+}
+
 pub(crate) fn install(app: &mut App) {
     crate::dialogue_split::install(app);
+    crate::touch_ui_options::install(app);
+    appearance::install(app);
     app.init_resource::<TouchDialogue>()
         .init_resource::<TouchLayout>()
         .init_resource::<TouchFrame>()
@@ -122,7 +139,7 @@ pub(crate) fn install(app: &mut App) {
     add_setting(app, Setting { key: "touch-dialogue", group: crate::pause::GROUP_MENUS, label: "Touch dialogue",
         note: "Wide wrapped dialogue choices, large targets and swipe scrolling. Uses the same offered choices and game actions. On by default on Android.",
         switches: "",
-        get: |w| w.resource::<TouchDialogue>().enabled, set: |w,v| w.resource_mut::<TouchDialogue>().enabled=v, slider: None });
+        get: |w| w.resource::<TouchDialogue>().enabled, set: set_enabled, slider: None });
     add_setting(app, Setting { key: "dialogue-choice-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue choice text",
         note: "Choice text size (75-200%), independent of subtitles. Android starts at 85% to fit more choices; your saved size is kept.",
         switches: "",
@@ -180,6 +197,7 @@ struct Guard {
     split: crate::dialogue_split::Frame,
     side: crate::dialogue_split::Side,
     safe: crate::touch_safe_area::SafeInsets,
+    hints: bool,
 }
 struct Gesture {
     id: u64,
@@ -266,13 +284,14 @@ type InputGates<'w> = (
     Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     Option<Res<'w, crate::pad::PlatformInputGate>>,
     Option<Res<'w, crate::ui_pointer::TouchUiCapture>>,
+    Option<Res<'w, crate::touch_ui_options::Retirements>>,
 );
 type Availability<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::creator::CreatorMenu>>);
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn read(
     settings: Res<TouchDialogue>,
     menu: Res<DialogueMenu>,
-    (bindings, touch_switch, platform, touch_owner): InputGates<'_>,
+    (bindings, touch_switch, platform, touch_owner, retirements): InputGates<'_>,
     (state, paused, script, creator): Availability<'_>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     targets: Query<(Entity, TargetData)>,
@@ -291,7 +310,7 @@ fn read(
     mut gestures: ResMut<Gestures>,
     mut frame: ResMut<TouchFrame>,
     cameras: Query<&Camera>,
-    (split, split_options, safe): (Res<crate::dialogue_split::Frame>, Res<crate::dialogue_split::Options>, Res<crate::touch_safe_area::SafeInsets>),
+    (split, split_options, safe, appearance): (Res<crate::dialogue_split::Frame>, Res<crate::dialogue_split::Options>, Res<crate::touch_safe_area::SafeInsets>, Res<appearance::Appearance>),
 ) {
     *frame = TouchFrame::default();
     let Ok((window_id, window)) = windows.single() else {
@@ -341,13 +360,23 @@ fn read(
         split: *split,
         side: split_options.side,
         safe: *safe,
+        hints: appearance.hints,
     };
     let fresh = gestures.guard.as_ref() != Some(&guard);
     gestures.guard = Some(guard);
+    let retiring = retirements.as_ref().is_some_and(|r| r.barrier(crate::touch_ui_options::Feature::Dialogue));
+    if retiring {
+        gestures.gesture = None;
+        gestures.contacts.clear();
+        gestures.armed = None;
+    }
+    let mut retired_raw = false;
     let events: Vec<_> = touches
         .read()
         .filter(|e| e.window == window_id)
         .filter(|e| touch_owner.as_ref().is_none_or(|owner| owner.allows(e.id)))
+        .inspect(|_| retired_raw |= retiring)
+        .filter(|_| !retiring)
         .cloned()
         .collect();
     if gestures.gesture.as_ref().is_some_and(|g| touch_owner.as_ref().is_some_and(|owner| !owner.allows(g.id))) {
@@ -393,7 +422,9 @@ fn read(
                 .then_some(a.kind)
         })
     };
-    let mut touched = false;
+    // A discarded raw touch must not re-enter via its aggregate UiPointer press.
+    // With no admitted raw touch, the independent physical pointer path remains.
+    let mut touched = retired_raw;
     let mut drop_tail = false;
     for event in &events {
         touched = true;
@@ -559,34 +590,24 @@ struct DrawKey {
     split: crate::dialogue_split::Frame,
     ui_scale: f32,
 }
-fn row_colors(short: bool, selected: bool) -> (Color, Color) {
-    if selected {
-        (
-            if short {
-                Color::srgb(0.8, 0.2, 0.15)
-            } else {
-                Color::srgb(0.7, 0.95, 0.8)
-            },
-            Color::srgba(0.2, 0.4, 0.3, 0.65),
-        )
-    } else {
-        (
-            Color::srgb(0.15, 0.25, 0.22),
-            Color::srgba(0.04, 0.08, 0.07, 0.5),
-        )
-    }
+fn row_colors(short: bool, selected: bool, appearance: &appearance::Appearance) -> (Color, Color) {
+    let rgb=crate::interface::hud_rgb();
+    (if selected && short {appearance::check_line().with_alpha(appearance.frame)}else{crate::interface::tint(rgb,255.).with_alpha(appearance.frame * if selected {1.}else if short {0.65}else{0.25})},
+     crate::interface::tint(rgb,if selected {48.}else{16.}).with_alpha(appearance.background * if selected {1.}else{0.35}))
 }
-fn text(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, color: Color) {
+fn text(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, paint: appearance::Paint, appearance: &appearance::Appearance) {
     p.spawn((
+        paint,
         Text::new(value.into()),
         TextFont {
             font_size: FontSize::Px(size),
             ..default()
         },
-        TextColor(color),
+        TextColor(crate::interface::tint(crate::interface::hud_rgb(),255.)),
         TextLayout::linebreak(bevy::text::LineBreak::WordOrCharacter),
         Node {
             width: percent(100.0),
+            display: if matches!(paint,appearance::Paint::Hint) && !appearance.hints {Display::None}else{Display::Flex},
             ..default()
         },
     ));
@@ -607,7 +628,7 @@ fn draw(
     gestures: Res<Gestures>,
     mut captions: Query<&mut Text, With<ConfirmCaption>>,
     mut reveal: ResMut<RevealRequest>,
-    (split, ui_scale): (Res<crate::dialogue_split::Frame>, Option<Res<UiScale>>),
+    (split, ui_scale, appearance): (Res<crate::dialogue_split::Frame>, Option<Res<UiScale>>, Res<appearance::Appearance>),
 ) {
     let confirm_label = if gestures.armed == Some(menu.selected) {
         "Confirm selection"
@@ -662,13 +683,16 @@ fn draw(
             }
             let mut root = commands.spawn((
                     Root,
-                    panel,
+                    appearance::Paint::Panel,
+                    Node { border: UiRect::all(px(1.)), ..panel },
                     GlobalZIndex(2400),
-                    BackgroundColor(Color::srgba(0.015, 0.025, 0.025, 0.95)),
+                    BackgroundColor(Color::NONE),
+                    BorderColor::all(Color::NONE),
                 ));
             if let Some(camera)=key.split.ui_camera { root.insert(UiTargetCamera(camera)); }
             root.with_children(|p| {
-                    text(p, &v.speaker, 18.0, Color::WHITE);
+                    appearance::decoration(p);
+                    text(p, &v.speaker, 18.0, appearance::Paint::Speaker, &appearance);
                     text(
                         p,
                         if v.choices.is_empty() {
@@ -679,7 +703,8 @@ fn draw(
                             "Swipe to scroll. Tap and release a choice to answer."
                         },
                         14.0,
-                        Color::srgb(0.7, 0.85, 0.8),
+                        appearance::Paint::Hint,
+                        &appearance,
                     );
                     p.spawn((
                         Viewport,
@@ -722,7 +747,8 @@ fn draw(
                                         p,
                                         line,
                                         20.0 * scale(settings.subtitle_scale),
-                                        Color::WHITE,
+                                        appearance::Paint::Speech,
+                                        &appearance,
                                     )
                                 });
                             }
@@ -733,6 +759,7 @@ fn draw(
                                         kind: Kind::Choice(index),
                                         list: menu.list.clone(),
                                     },
+                                    appearance::Paint::Choice {index,short:row.short},
                                     Row {
                                         index,
                                         short: row.short,
@@ -741,27 +768,26 @@ fn draw(
                                         width: percent(100.0),
                                         min_height: px(layout.row_min),
                                         padding: UiRect::all(px(layout.row_padding)),
-                                        border: UiRect::all(px(2.0)),
+                                        border: UiRect::all(px(1.0)),
                                         flex_shrink: 0.0,
                                         ..default()
                                     },
                                     BorderColor::all(
-                                        row_colors(row.short, index == menu.selected).0,
+                                        row_colors(row.short, index == menu.selected, &appearance).0,
                                     ),
                                     BackgroundColor(
-                                        row_colors(row.short, index == menu.selected).1,
+                                        row_colors(row.short, index == menu.selected, &appearance).1,
                                     ),
                                 ))
                                 .with_children(|p| {
+                                    p.spawn((appearance::Paint::Focus{index,short:row.short},bevy::picking::Pickable::IGNORE,
+                                        Node{position_type:PositionType::Absolute,left:px(3.),top:percent(50.),width:px(2.),height:px(8.),..default()},BackgroundColor(Color::NONE)));
                                     text(
                                         p,
                                         &row.label,
                                         20.0 * scale(settings.choice_scale),
-                                        if row.darkened {
-                                            Color::srgb(0.55, 0.65, 0.6)
-                                        } else {
-                                            Color::srgb(0.9, 0.95, 0.85)
-                                        },
+                                        appearance::Paint::ChoiceText {darkened:row.darkened},
+                                        &appearance,
                                     );
                                 });
                             }
@@ -778,20 +804,24 @@ fn draw(
                                 width: percent(100.0),
                                 min_height: px(layout.row_min),
                                 padding: UiRect::all(px(layout.confirm_padding)),
+                                border: UiRect::all(px(1.0)),
                                 flex_shrink: 0.0,
                                 ..default()
                             },
-                            BackgroundColor(Color::srgb(0.12, 0.25, 0.22)),
+                            appearance::Paint::Confirm,
+                            BorderColor::all(Color::NONE),
+                            BackgroundColor(Color::NONE),
                         ))
                         .with_children(|p| {
                             p.spawn((
                                 ConfirmCaption,
+                                appearance::Paint::Caption,
                                 Text::new(confirm_label),
                                 TextFont {
                                     font_size: FontSize::Px(layout.confirm_text),
                                     ..default()
                                 },
-                                TextColor(Color::WHITE),
+                                TextColor(crate::interface::tint(crate::interface::hud_rgb(),255.)),
                             ));
                         });
                     }
@@ -800,7 +830,7 @@ fn draw(
         *shown = key;
     }
     for (row, mut border, mut background) in &mut rows {
-        let (line, fill) = row_colors(row.short, row.index == menu.selected);
+        let (line, fill) = row_colors(row.short, row.index == menu.selected, &appearance);
         *border = BorderColor::all(line);
         background.0 = fill;
     }
@@ -1408,6 +1438,7 @@ mod tests {
             assert_eq!(asked(&app).pick, Some(1));
         }
     }
+    include!("dialogue_touch_optional_tests.rs");
 }
 
 #[cfg(test)]

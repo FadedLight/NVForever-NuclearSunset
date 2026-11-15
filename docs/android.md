@@ -155,11 +155,18 @@ Hardware input restores the ordinary menu presentation. A first return touch can
 restore the touch sheet without activating an item. These presentations still need
 phone acceptance for readability, reach and native-menu coexistence.
 
-[qualification] R30 hosted execution passed 178 asset tests and 2,052 play tests,
-including pointer ownership; one native-map test failed. Of the selected 56 new
-menu controls, 43 passed, one failed and 12 were not run. Wrapper tests were not run.
-The native build succeeded but its APK remains unqualified; final packaging and
-phone acceptance are still required. R9 remains the qualified test baseline.
+[qualification] R31 tested merge `86e010a5` of source `79891b03` with main
+`6692d2da`, with a tree identical to that source. It passed 178 asset and 2,067 play
+tests (one existing ignored), including the formerly failing native-map control.
+The wrapper ran 1,308 passes, four failures and one existing ignored test. Three
+failures share a map-parent fixture whose actual DATA consumer requires the
+omitted `MenuInput` message stream; its narrow setup correction registers that
+real provider. Their logs omit panic payloads, so this cause is source-derived.
+The fourth failure is the practice snapshot above. Of the same 56 selected menu
+controls, 53 passed and three map-parent cases failed; none was unrun. All eight
+root routing cases passed. Strict engine lint and 3,142 core tests passed, with
+five existing core tests ignored. The aggregate failed: native-build success
+cannot qualify this APK. Both fixture corrections still require actual execution.
 
 ## Mobile performance
 
@@ -174,3 +181,35 @@ frames to 45 or 30 FPS and may lower an already-selected FSR resolution. Native
 rendering stays native. The status row shows the effective limit and world resolution.
 Settings recover gradually after sustained cooling; your latest choices remain saved.
 Unavailable thermal feedback uses manual settings. Performance varies by phone and scene.
+
+## Optional touch views and appearance
+
+Pause > Settings > Mobile keeps controls under topic headings. Enhanced terminal
+and companion views have separate saved switches; turning one off keeps the
+ordinary touch/menu and controller routes available. Controls help / gesture
+practice explains the selected movement thumb, dead zone, walking/running and
+fixed or floating joystick without using ammo or sending game actions.
+
+Mobile > Dialogue adds Minimal, Classic Glass, Split Panel, Retro Console and
+Wrist Terminal themes. Background opacity (up to 80%) and frame opacity are
+independent; text, required feedback and selection cues keep their contrast.
+The existing conversation text-size, confirmation and speaker-side settings stay
+separate. Show dialogue hints and Show lockpicking hints hide explanatory captions
+without disabling the interaction. The palette follows the live HUD/interface
+colour; Pip-Boy overlays follow the independently selected Pip-Boy colour.
+
+Mobile > Inventory and quick access offers optional left/right downward dismissal,
+an explicit Close control and touch use of the physical model wheel. Hiding
+Pip-Boy button graphics changes alpha only; the same controls remain interactive.
+Mobile > Movement and gestures offers VATS targeting Off, Tap or Hold. Selecting
+a body part queues through the existing AP/ammunition rules; a separate deliberate
+Fire confirms the queue. Existing controller, cancel and standard VATS input stay
+available.
+
+[qualification] These optional-view/appearance additions and their combined-input
+regressions are source work awaiting compilation, runtime and phone checks. They
+are absent from the qualified R9 APK. Neither this description nor a headless test
+result establishes phone comfort, visible resume recovery or Doc Mitchell exit
+stability. See the owning [dialogue](design/android-dialogue-accessibility.md),
+[lockpicking](design/android-lockpick-touch.md), [VATS](design/android-vats-touch.md)
+and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.

@@ -372,3 +372,13 @@ notes are the full account).
   them all, no cell loaded after the first lit part and a door's loading screen waited
   out its 120 s [observed: the fork owner's playtest 2026-11-10]. While a part is lit
   they still rest (§9b).
+
+## 13. Optional direct touch selection [design]
+
+The independently saved Off/Tap/Hold presentation is specified in
+[Android VATS touch](android-vats-touch.md). It uses actual posed-body ray hits and
+the existing AP/legality queue consumer, without changing the physical/controller
+rules above. Selecting queues; only a separate touch Fire confirmation starts the
+existing execution path. The separate look-space double tap only enters VATS.
+The source and authored App controls await compiler/runtime/phone qualification;
+this addition does not alter the currently served APK.

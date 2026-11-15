@@ -439,6 +439,7 @@ fn open(
     mut sim: ResMut<SimState>,
     mut script: Option<ResMut<ScriptState>>,
     aid: Res<LockpickAid>,
+    hints: Option<Res<touch::Hints>>,
     time: AidTime,
     (mut stats, mut corner, mut sounds, bindings): (ResMut<LockpickStats>, Option<ResMut<crate::corner_messages::CornerMessages>>, MessageWriter<UiSound>, Res<Bindings>),
 ) {
@@ -501,7 +502,9 @@ fn open(
                 game.force_chance()
             );
             rt.game.open_menu(MENU_LOCKPICK);
-            let help = rules::first_help(&mut rt.game).map(|(title, text)| Help::new(&rt.game, title, &text, &bindings));
+            let help = hints.as_ref().is_none_or(|h| h.0)
+                .then(|| rules::first_help(&mut rt.game)).flatten()
+                .map(|(title, text)| Help::new(&rt.game, title, &text, &bindings));
             if let Some(h) = &help {
                 info!("lockpick: help message {} {:?} shown (first use): {:?}", rules::HELP_MESSAGE, h.title, h.text.lines().next().unwrap_or(""));
             }

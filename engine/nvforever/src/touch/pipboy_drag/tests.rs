@@ -278,3 +278,7 @@ fn sole_parent_raw_arm_owner_cancels_on_focus_loss_without_replaying_tail_or_cle
 }
 
 include!("tests/closing_parent.rs");
+
+include!("tests/optional_controls.rs");
+
+include!("tests/palette_tests.rs");

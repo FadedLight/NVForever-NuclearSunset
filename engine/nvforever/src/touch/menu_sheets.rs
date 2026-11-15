@@ -154,10 +154,14 @@ fn replay(
     windows: Query<(Entity, &Window), With<PrimaryWindow>>, touches: Res<Touches>,
     mut barter: barter_touch::Bridge, mut maintenance: maintenance_touch::Bridge,
     mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>, mut editor: ResMut<super::entrypoints::Session>,
+    mut modal: ResMut<super::modal::Capture>,
+    mut vats: super::vats_targeting::Bridge,
+    mut arm: ResMut<super::pipboy_drag::State>,
     mut items: ResMut<nvf_play::pipboy::touch_items::TouchItems>,
     mut map: ResMut<nvf_play::pipboy::data::touch_map::TouchMap>,
 ) {
     ownership.begin_frame();
+    arm.publish_mask(&mut ownership, &touches);
     let current = sources.kind(maintenance.enabled());
     let context = windows.single().ok().and_then(|(entity, window)| {
         let stamp = sources.stamp(entity, window);
@@ -166,12 +170,14 @@ fn replay(
     });
     let consumed = gates.switching.as_ref().is_some_and(|s| !s.allows_actions());
     let fresh = consumed || gates.fresh.as_ref().is_some_and(|f| f.0);
+    vats.after_switch(state.hardware_intent, consumed && gates.allows());
     let allowed = batch.allowed && !batch.overflow && !state.suspended && gates.allows()
         && state.physical_keys.is_empty() && state.physical_mouse.is_empty()
         && batch.kind == current && context.is_some_and(|(s, w, _)| batch.stamp == Some(s) && w.focused);
     let neutral = touches.iter().next().is_none() && !touches.any_just_released() && !touches.any_just_canceled();
     editor.observe_neutral(neutral);
     editor.publish(&mut ownership);
+    modal.publish(&mut ownership, neutral);
     maintenance.observe_neutral(neutral);
     if let Some((stamp, window, camera)) = context {
         barter.prepare(barter_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
@@ -191,7 +197,8 @@ fn replay(
     events.clear(); batch.events = events;
     for id in batch.ids.iter().flatten() { ownership.block(*id); }
     for touch in touches.iter().chain(touches.iter_just_pressed()).chain(touches.iter_just_released()).chain(touches.iter_just_canceled()) {
-        if barter.captures_touch(touch.id()) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures() { ownership.block(touch.id()); }
+        if barter.captures_touch(touch.id()) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()
+            || vats.owns(touch.id()) { ownership.block(touch.id()); }
     }
     if batch.overflow { ownership.quarantine_overflow(); }
     ownership.suppress_pointer(barter.visible() || maintenance.captures_touch() || editor.blocking());

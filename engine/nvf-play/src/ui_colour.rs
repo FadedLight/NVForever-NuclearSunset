@@ -246,11 +246,15 @@ fn recolour(
     *drawn = now;
 }
 
+/// Owners with authoritative live palette painting run after generic recolouring.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Recolour;
+
 pub struct UiColourPlugin;
 
 impl Plugin for UiColourPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Drawn { hud: hud_rgb(), pipboy: pipboy_rgb() }).init_resource::<CustomColours>().add_systems(Update, recolour.after(crate::PlaySet::Ui).before(crate::PlaySet::Sync));
+        app.insert_resource(Drawn { hud: hud_rgb(), pipboy: pipboy_rgb() }).init_resource::<CustomColours>().add_systems(Update, recolour.in_set(Recolour).after(crate::PlaySet::Ui).before(crate::PlaySet::Sync));
         rows::<0>(
             app,
             "hud-colour",

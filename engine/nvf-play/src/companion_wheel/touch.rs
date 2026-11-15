@@ -110,6 +110,29 @@ pub(super) fn load(mut settings: ResMut<Settings>) {
 pub fn captures(settings: &Settings, screen: &WheelScreen) -> bool {
     settings.enabled && screen.0.is_some()
 }
+
+/// Register the saved presentation switch for full or independently hosted menus.
+pub fn register(app: &mut App) {
+    crate::touch_ui_options::install(app);
+    app.init_resource::<Settings>();
+    crate::settings::add_setting(app, crate::settings::Setting {
+        key: "touch-companion-v1", group: crate::pause::GROUP_MENUS,
+        label: "Enhanced companion wheel", switches: "",
+        note: "Direct sector taps and optional drag-release. Off keeps standard menu touch arrows, Confirm and Exit, plus mouse/controller input. Drag-release preference is kept.",
+        get: |w| w.resource::<Settings>().enabled, set: set_enabled, slider: None,
+    });
+}
+fn set_enabled(world: &mut World, enabled: bool) {
+    if world.resource::<Settings>().enabled == enabled { return; }
+    world.resource_mut::<Settings>().enabled = enabled;
+    let (window, ids) = if let Some(mut state) = world.get_resource_mut::<TouchState>() {
+        let owned = (state.viewport.map(|v| v.0), state.contacts.iter().copied().take(33).collect::<Vec<_>>());
+        state.gesture = None;
+        state.contacts.clear();
+        owned
+    } else { (None, Vec::new()) };
+    crate::touch_ui_options::retire(world, crate::touch_ui_options::Feature::Companion, window, &ids);
+}
 #[derive(Clone, Copy, PartialEq)]
 enum Hit {
     Sector(usize),
@@ -188,6 +211,8 @@ pub(super) fn input(
     bindings: Option<Res<crate::bindings::Bindings>>,
     touch_switch: Option<Res<crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<crate::pad::PlatformInputGate>>,
+    ui_capture: Option<Res<crate::ui_pointer::TouchUiCapture>>,
+    retirements: Option<Res<crate::touch_ui_options::Retirements>>,
     mut out: MessageWriter<WheelInput>,
 ) {
     let mut interrupted = false;
@@ -234,6 +259,12 @@ pub(super) fn input(
         return;
     }
     let device_allows_actions = touch_switch.as_deref().is_none_or(crate::pad::TouchDeviceSwitch::allows_actions);
+    if retirements.as_ref().is_some_and(|r| r.barrier(crate::touch_ui_options::Feature::Companion)) {
+        state.gesture = None;
+        state.contacts.clear();
+        touches.read().for_each(drop);
+        return;
+    }
     if !settings.enabled
         || state.suspended
         || !window.focused
@@ -255,6 +286,7 @@ pub(super) fn input(
     let size = Vec2::new(window.width(), window.height());
     let mut sent = false;
     for touch in touches.read().filter(|e| e.window == window_id
+        && ui_capture.as_ref().is_none_or(|capture| capture.allows(e.id))
         && platform.as_ref().is_none_or(|gate| gate.allows_touch(e.id))) {
         if !touch.position.is_finite() {
             state.gesture = None;
@@ -754,4 +786,5 @@ mod tests {
         assert!(app.world().resource::<Settings>().drag_release);
         assert!(app.world().resource::<WheelStats>().commands.is_empty());
     }
+    include!("touch_toggle_tests.rs");
 }

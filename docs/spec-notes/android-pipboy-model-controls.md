@@ -27,3 +27,12 @@ for full wrapper arbitration or physical phone acceptance. Additional composed
 fixtures cover knob-to-list routing, hidden/inactive parts, malformed skin data,
 late ownership changes and actual parent closing-handle arbitration. Their source
 presence does not establish a successful compiler or test run.
+
+[documented: `pipboy/data.rs::DataState::has_popup`, `touch/pipboy_drag.rs`]
+The wrapper's late close-admission predicate reads the current DATA popup through
+a public boolean query. That query delegates to the existing private popup
+authority without exposing the popup model or retaining another flag. Closing
+still yields while a map question owns the view; the ordered camera, context,
+lifecycle and contact-owner checks remain unchanged. This repairs the cross-crate
+API boundary without changing popup eligibility policy. Corrected compilation
+and runtime acceptance remain pending.

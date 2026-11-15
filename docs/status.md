@@ -99,6 +99,17 @@ tests unchanged and passing. These are host protocol checks, not native renderin
 physical Android dialog, installed-APK or phone-resume/crash acceptance. The
 [loading-cover note](design/android-loading-cover.md) records the exact scope.
 
+The first hosted cycle for optional-UI source `07084cfc` checked merge `e9f38ba6`
+with Main `1790ab94`. It passed 3,212 core tests with five existing ignored, plus
+tools and data guards, but the cycle failed. Engine Rust tests did not execute:
+old repair and terminal fixture literals lacked fields added by Main. Strict
+checking also rejected a redundant VATS field and the merged row observer's
+argument count. The native cross-check exposed a private popup-query call across
+crates, with an unused test import warning. Shader controls, native construction
+and final packaging did not run; no APK artifact was produced. The narrow source
+corrections retain constructor defaults, observer effects and all old oracles;
+fresh corrected compiler/runtime/native checks remain required. R9 is unchanged.
+
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate
 production and identical six authored fixtures in validation context 54830c0 gave

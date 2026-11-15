@@ -274,6 +274,11 @@ packaging and phone acceptance remain unrun. Earlier ARM/R31
 results belong to their stated historical checkpoints; no new qualified download
 or resume/Doc Mitchell crash resolution is established here.
 
+[qualification] The first published combined source stopped at Rust compilation,
+before executing engine touch tests or constructing a new APK. Its repaired
+fixture initializers and popup-query interface still need fresh checks; separate
+Java protocol results below do not qualify the combined engine/UI or a download.
+
 ## Loading recovery qualification
 
 [design] Loading completes only after checking that the current loading cover was

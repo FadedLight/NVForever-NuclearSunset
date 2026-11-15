@@ -7,8 +7,10 @@ use bevy::{input::touch::TouchPhase,prelude::*};
 pub const KEY: &str="touch-pipboy-tab-swipes";
 const PLAYER:usize=crate::menu::model::Side::Player as usize;
 #[derive(Resource)]
+#[cfg_attr(not(target_os="android"),derive(Default))]
 pub struct Options {pub enabled:bool}
-impl Default for Options {fn default()->Self {Self {enabled:cfg!(target_os="android")}}}
+#[cfg(target_os="android")]
+impl Default for Options {fn default()->Self {Self {enabled:true}}}
 pub(super) fn install(app:&mut App) {
     app.init_resource::<Swipe>().init_resource::<Options>()
         .add_systems(Update,dispatch.in_set(crate::PlaySet::Ui).in_set(Systems::Dispatch).before(super::apply_input))

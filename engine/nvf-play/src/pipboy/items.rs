@@ -559,8 +559,7 @@ pub(super) fn binding_fixture_row(world: &mut World, index: usize) -> Entity {
 }
 fn on_row_click(
     click: On<PointerClick>,
-    rows: Query<&RowButton>,
-    active: Res<ActiveMenu>,
+    (rows, active): (Query<&RowButton>, Res<ActiveMenu>),
     keys: crate::pad::ActionButtons<KeyCode>,
     (mut hold, mut hotkeys): (ResMut<HotkeyHold>, ResMut<Hotkeys>),
     mut out: MessageWriter<MenuInput>,

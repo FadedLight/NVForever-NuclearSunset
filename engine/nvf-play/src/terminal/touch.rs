@@ -981,6 +981,8 @@ mod tests {
             used: vec![],
             log: vec![],
             state: GameState::Guessing,
+            rules: fnv_game::hacking::HackRules::default(),
+            guessed: Vec::new(),
         }
     }
     fn scene() -> (App, Entity) {

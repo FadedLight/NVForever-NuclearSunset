@@ -91,7 +91,7 @@ pub(super) fn install(app: &mut App) {
         switches: "", get: |_| false, set: |_, _| {}, slider: None,
     }, crate::settings::ChoiceList {
         names: |_| [Mode::Off, Mode::Tap, Mode::Hold].iter().map(|m| m.name().to_owned()).collect(),
-        chosen: |w| w.resource::<State>().mode.name().to_owned(), pick: pick,
+        chosen: |w| w.resource::<State>().mode.name().to_owned(), pick,
         save: |w| w.resource::<State>().mode.name().to_owned(), load: pick, ask_keep: false,
     });
     app.add_systems(PostUpdate, feedback.after(VatsUpdate).before(bevy::ui::UiSystems::Layout));

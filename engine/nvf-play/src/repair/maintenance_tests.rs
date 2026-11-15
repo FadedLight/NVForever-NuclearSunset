@@ -11,7 +11,7 @@ fn vendor_app(native_configuration: bool) -> App {
         .init_resource::<crate::pause::PlayClock>().init_resource::<crate::pad::PadGlyphs>()
         .init_resource::<Assets<Image>>().insert_resource(RepairAid(Vec::new()))
         .add_message::<RepairServicesInput>().add_message::<bevy::window::CursorMoved>()
-        .insert_resource(RepairServices(Some(Open { vendor: VENDOR, selected: 0, first: 0, drawn: None, pointer_pick: false, navigated: 0 })))
+        .insert_resource(RepairServices(Some(Open { vendor: VENDOR, selected: 0, first: 0, drawn: None, pointer_pick: false, navigated: 0, confirming: false })))
         .insert_resource(crate::pipboy::PipBoy::default()).insert_resource(crate::menu::ActiveMenu(None))
         .insert_resource(crate::pipboy::repair::PipRepair::default())
         .insert_resource(crate::tiles::vanilla::TileMenus { repair_services: native_configuration, ..default() })

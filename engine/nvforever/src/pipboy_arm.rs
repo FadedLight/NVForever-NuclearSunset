@@ -718,6 +718,9 @@ fn follow_pointer(
     };
     #[cfg(any(target_os = "android", test))]
     let mut admitted = Vec::new();
+    #[cfg(any(target_os = "android", test))]
+    let model_presented = map_windows.single().ok().is_some_and(|primary|
+        crate::touch::pipboy_model::Geometry::camera_presented(cam, _map_target, primary));
     let posed: Vec<(PipBoyPart, Posed, bool)> = parts
         .iter()
         .filter(|(_, p, ..)| matches!(p, PipBoyPart::Screen | PipBoyPart::Button(_)) || (cfg!(any(target_os = "android", test)) && matches!(p, PipBoyPart::ScrollKnob)))
@@ -733,7 +736,7 @@ fn follow_pointer(
             let shape = pointer_pose(&mesh.0, joints.as_deref(), gt.to_matrix())?;
             let touch_visible = cam.is_active && visible.is_some_and(|v| *v != Visibility::Hidden) && inherited.is_some_and(|v| v.get());
             #[cfg(any(target_os = "android", test))]
-            if touch_visible {
+            if touch_visible && model_presented {
                 if let Some(bounds) = crate::touch::pipboy_model::Geometry::projected_bounds(cam, at, &shape.points, window.resolution.size()) {
                     let triangles = if *p == PipBoyPart::Screen {
                         shape.triangles.iter().filter_map(|[a,b,c]| Some([

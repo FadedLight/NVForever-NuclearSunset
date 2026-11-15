@@ -12,7 +12,7 @@ mod safety_regressions {
     fn camera(app:&mut App)->Entity {
         let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<nvf_play::PlayerCamera>>();q.single(world).unwrap()
     }
-    fn bounds(app:&App,page:Page)->Rect {app.world().resource::<Geometry>().buttons.iter().find(|b|b.page==page).unwrap().bounds}
+    pub(super) fn bounds(app:&App,page:Page)->Rect {app.world().resource::<Geometry>().buttons.iter().find(|b|b.page==page).unwrap().bounds}
     fn square()->Mesh {
         let mut mesh=Mesh::new(PrimitiveTopology::TriangleList,RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION,vec![[-1.0_f32,-1.,0.],[1.,-1.,0.],[1.,1.,0.],[-1.,1.,0.]]);
@@ -45,7 +45,7 @@ mod safety_regressions {
         assert!(geometry.target(point).is_none(),"a page button must not steal the knob fixture contact");
         entity
     }
-    fn page_messages(app:&App)->Vec<PipBoyInput> {
+    pub(super) fn page_messages(app:&App)->Vec<PipBoyInput> {
         let mut cursor=bevy::ecs::message::MessageCursor::<PipBoyInput>::default();
         cursor.read(app.world().resource::<Messages<PipBoyInput>>()).copied().collect()
     }
@@ -239,6 +239,43 @@ mod safety_regressions {
         let button=part(&mut app,PipBoyPart::Button(Page::Data));app.world_mut().entity_mut(button).remove::<PartMesh>();app.update();
         assert!(app.world().resource::<Geometry>().screen.is_some());
         assert!(!unclaimed(&mut app),"one unprojectable visible recognized button invalidates closing completeness too");
+    }
+    #[test]
+    fn queued_real_model_scroll_rechecks_camera_destination_after_dispatch_then_fresh_alias_drag_works() {
+        use bevy::{camera::RenderTarget,window::WindowRef,ecs::schedule::ScheduleBuildSettings};
+        #[derive(Resource)]struct Retarget(Option<RenderTarget>,bool);
+        fn retarget(mut next:ResMut<Retarget>,mut cameras:Query<&mut RenderTarget,With<nvf_play::PlayerCamera>>,state:Res<ModelTouch>) {
+            if let Some(target)=next.0.take() {
+                assert!(state.admitted && state.contact.is_some(),"the real dispatcher must still have an admitted held owner before the late queued-consumer denial");
+                next.1=true;*cameras.single_mut().unwrap()=target;
+            }
+        }
+        let (mut app,_)=item_scroll_scene();let camera=camera(&mut app);
+        let world=app.world_mut();let mut windows=world.query_filtered::<Entity,With<bevy::window::PrimaryWindow>>();let primary=windows.single(world).unwrap();
+        let image=world.resource_mut::<Assets<Image>>().add(Image::new_target_texture(1280,960,bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,None));
+        assert_eq!(world.resource::<Assets<Image>>().get(&image).unwrap().size(),UVec2::new(1280,960));
+        // Keep the actual Commands queue until the end of Update, allowing a
+        // genuine same-frame destination change after dispatch but before the
+        // queued ListScrollRequest consumer. No pending/scroll effect is seeded.
+        app.edit_schedule(Update,|schedule| {schedule.set_build_settings(ScheduleBuildSettings {auto_insert_apply_deferred:false,..default()});});
+        app.insert_resource(Retarget(None,false)).add_systems(Update,retarget.after(dispatch).before(draw).before(nvf_play::PlaySet::Ui));
+        let point=app.world().resource::<Geometry>().knob.unwrap().center();
+        event(&mut app,520,TouchPhase::Started,point);
+        assert!(app.world().resource::<ModelTouch>().contact.is_some());
+        app.world_mut().resource_mut::<Retarget>().0=Some(RenderTarget::Image(image.into()));
+        event(&mut app,520,TouchPhase::Moved,point+Vec2::Y*40.);
+        assert!(app.world().resource::<Retarget>().1,"the target actually changes after production dispatch, before deferred application");
+        assert_eq!(first(&app),Some(0),"the real queued scroll refuses a now-offscreen source");
+        assert!(app.world().resource::<ModelTouch>().contact.is_none(),"failed queued source retires only its own live contact");
+        assert!(page_messages(&app).is_empty());keep_items(&mut app);
+        event(&mut app,520,TouchPhase::Ended,point+Vec2::Y*40.);
+        app.world_mut().entity_mut(camera).insert(RenderTarget::Window(WindowRef::Entity(primary)));settle(&mut app);
+        let point=app.world().resource::<Geometry>().knob.unwrap().center();
+        event(&mut app,521,TouchPhase::Started,point);
+        app.world_mut().entity_mut(camera).insert(RenderTarget::Window(WindowRef::Primary));
+        event(&mut app,521,TouchPhase::Moved,point+Vec2::Y*40.);event(&mut app,521,TouchPhase::Ended,point+Vec2::Y*40.);
+        assert_eq!(first(&app),Some(2),"fresh direct wheel drag accepts equivalent current-primary aliases");
+        assert!(page_messages(&app).is_empty());keep_items(&mut app);
     }
     include!("optional_tests.rs");
 }

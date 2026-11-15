@@ -630,7 +630,7 @@ fn input(
         &layout.config,gyro_options.enabled,&reserved);
     model.prepare(interactive && !controller && !sheet_menu && layout.editor.is_none() && !modal_captures
         && platform.as_ref().is_none_or(|gate|gate.allows_actions())
-        && !bar.captures_actions() && state.physical_mouse.is_empty() && state.physical_keys.is_empty(), size);
+        && !bar.captures_actions() && state.physical_mouse.is_empty() && state.physical_keys.is_empty(), size, touches.is_empty());
     arm.prepare_regions(size, |rect| model.closing_region_unclaimed(rect)
         && !bar.items_pending() && !bar.blocks(rect));
     state.ui_capture = bar.captures_actions();
@@ -1432,6 +1432,7 @@ fn show_labels(
 
 #[cfg(test)]
 mod tests {
+    include!("touch/pipboy_model_parent_ownership_tests.rs");
     include!("touch/vats_parent_tests.rs");
     include!("touch/tray_editor_tests.rs");
     include!("touch/map_parent_tests.rs");

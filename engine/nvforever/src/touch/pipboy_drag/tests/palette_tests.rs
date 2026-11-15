@@ -55,9 +55,10 @@ fn actual_model_and_dismissal_palette_remains_pipboy_after_same_frame_core_recol
     closing_idle(&mut scene,2);
     assert_eq!(nvf_play::interface::hud_rgb(),nvf_play::interface::AMBER_RGB);
     assert_eq!(nvf_play::interface::pipboy_rgb(),nvf_play::interface::AMBER_RGB);
-    scene.app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:scene.window,key_code:KeyCode::F12,logical_key:bevy::input::keyboard::Key::F12,state:bevy::input::ButtonState::Pressed,text:None,repeat:false});
-    scene.app.update();
-    assert!(scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    // Real physical priority removes model controls. Keep the visual witness neutral;
+    // hardware preservation is a separate final phase after all geometry checks.
+    assert!(!scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    assert!(scene.app.world().resource::<crate::touch::TouchState>().physical_keys.is_empty());
     let mut targets=Vec::new();
     for (label,border_alpha) in [("Close",0.65),(nvf_play::pipboy::Page::Stats.title(),0.55)] {
         let (entity,rect,camera)=painted_control(&mut scene.app,label);
@@ -92,5 +93,43 @@ fn actual_model_and_dismissal_palette_remains_pipboy_after_same_frame_core_recol
     assert_eq!(scene.app.world().resource::<State>().regions,regions);
     assert!(scene.app.world().resource::<State>().drag.is_none());
     assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some());
+    // Separate hardware phase: actual capture_physical keeps F12 authoritative,
+    // and model.prepare must reject/draw must remove the touch model controls.
+    scene.app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:scene.window,key_code:KeyCode::F12,logical_key:bevy::input::keyboard::Key::F12,state:bevy::input::ButtonState::Pressed,text:None,repeat:false});
+    scene.app.update();
+    assert!(scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    assert!(scene.app.world().resource::<crate::touch::TouchState>().physical_keys.contains(&KeyCode::F12));
+    {
+        let world=scene.app.world_mut();let mut q=world.query::<&Text>();
+        assert_eq!(q.iter(world).filter(|text|text.0==nvf_play::pipboy::Page::Stats.title()).count(),0,"physical priority removes actual model controls");
+    }
+    assert_eq!(nvf_play::settings::flip(scene.app.world_mut(),graphics),Some(false));
+    pip_palette_rgb(&mut scene.app,false,[80,40,20]);pip_palette_rgb(&mut scene.app,true,[40,80,160]);scene.app.update();
+    assert!(scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    assert!(scene.app.world().resource::<crate::touch::TouchState>().physical_keys.contains(&KeyCode::F12));
+    assert_eq!(nvf_play::settings::flip(scene.app.world_mut(),graphics),Some(true));
+    pip_palette_rgb(&mut scene.app,false,[100,50,25]);pip_palette_rgb(&mut scene.app,true,[50,100,200]);scene.app.update();
     assert!(scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12),"colour and graphics changes preserve the physical owner");
+    assert!(scene.app.world().resource::<crate::touch::TouchState>().physical_keys.contains(&KeyCode::F12));
+    assert!(scene.app.world().resource::<State>().drag.is_none());
+    assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some());
+    scene.app.world_mut().write_message(bevy::input::keyboard::KeyboardInput{window:scene.window,key_code:KeyCode::F12,logical_key:bevy::input::keyboard::Key::F12,state:bevy::input::ButtonState::Released,text:None,repeat:false});
+    scene.app.update();
+    assert!(!scene.app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
+    assert!(scene.app.world().resource::<crate::touch::TouchState>().physical_keys.is_empty());
+    let mut recovered=Vec::new();
+    for (label,border_alpha) in [("Close",0.65),(nvf_play::pipboy::Page::Stats.title(),0.55)] {
+        let (entity,rect,camera)=painted_control(&mut scene.app,label);
+        let node=scene.app.world().get::<Node>(entity).unwrap().clone();
+        let caption=pip_palette_caption(&mut scene.app,label);
+        recovered.push((entity,node,rect,camera,caption,border_alpha));
+    }
+    assert_ne!(recovered[1].0,targets[1].0,"fresh model controls are recreated only after the real hardware release");
+    for (fresh,original) in recovered.iter().zip(&targets) {
+        assert_eq!((&fresh.1,fresh.2,fresh.3),(&original.1,original.2,original.3),"recovered controls retain actual measured geometry/camera");
+    }
+    assert_eq!(nvf_play::interface::pipboy_rgb(),[50,100,200]);
+    pip_palette_assert(&mut scene.app,&recovered,true);
+    assert!(scene.app.world().resource::<crate::touch::pipboy_model::Geometry>()==&geometry);
+    assert_eq!(scene.app.world().resource::<State>().regions,regions);
 }

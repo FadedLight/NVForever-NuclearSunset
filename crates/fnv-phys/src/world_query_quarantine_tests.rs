@@ -134,8 +134,18 @@ fn positive_step_quarantine_keeps_new_remedy_marks_until_the_next_query_register
 #[test]
 fn ordinary_refresh_preserves_interpolation_pending_kinematic_target_and_user_dynamics() {
     let (mut w,h) = fixture();
-    w.add_ref(&at(200,400.),&[box_object(Motion::Keyframed)]);w.step();
-    let k=w.refs[&200][0];let current=*w.w.bodies[k].position();let target=current.translation+Vector::X;
+    // add_ref intentionally turns Motion::Keyframed into a fixed, teleported
+    // wrapper body. Use a real position-based native body, as the unchanged
+    // queued-motion contract does; do not relabel a fixed body as kinematic.
+    let owner=Owner::Ref {form_id:200,object:0,layer:crate::layers::STATIC}.encode();
+    let k=w.insert_body(RigidBodyBuilder::kinematic_position_based()
+        .translation(Vector::new(400.,0.,100.)*w.k).user_data(owner));
+    let collider=w.w.insert_collider(ColliderBuilder::cuboid(10.*w.k,10.*w.k,10.*w.k)
+        .active_collision_types(ActiveCollisionTypes::all()).user_data(owner),Some(k));
+    assert_eq!(w.w.bodies[k].body_type(),RigidBodyType::KinematicPositionBased);
+    assert_eq!(w.w.colliders[collider].parent(),Some(k));
+    w.mark_dirty_bodies();w.step();
+    let current=*w.w.bodies[k].position();let target=current.translation+Vector::X;
     w.w.bodies[k].set_next_kinematic_translation(target);
     w.w.bodies[h].add_force(Vector::new(3.,4.,5.),true);
     let force=w.w.bodies[h].user_force();let body=w.ref_bodies(99)[0];let drawn=w.drawn_ref_body(99,0,0.5);let clock=time(&w);

@@ -247,9 +247,10 @@ and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
 ## Current-main integration status
 
 [design] The next source integration retains the optional touch views alongside
-accepted Main `ed684e8`, including its engine implementation of Stewie-related
-preferences. This is separate from verified execution of a particular original
-mod/plugin/version/profile. Controller keyboard/mouse contributions keep their
+accepted Main `7e638d4e`, following the earlier `ed684e8` checkpoint and retaining
+its engine implementation of Stewie-related preferences. This is separate from
+verified execution of a particular original mod/plugin/version/profile.
+Controller keyboard/mouse contributions keep their
 physical hold ownership; controller toggles and touch gestures remain distinct.
 An explicit custom left/right stick deadzone preference takes precedence only
 while enabled; disabling it restores the separately saved controller calibration.
@@ -267,12 +268,22 @@ PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
 all map assertions. This additional source setup correction is unexecuted; it is
 not an observed explanation for the earlier runtime failures.
 
-[qualification] Source comparison retains all 1,536 Main scenario records plus
+[qualification] Source comparison retains all 1,552 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
 integrity, not scenario execution. Integrated engine/UI regressions, native
 packaging and phone acceptance remain unrun. Earlier ARM/R31
 results belong to their stated historical checkpoints; no new qualified download
 or resume/Doc Mitchell crash resolution is established here.
+
+[qualification] The normal `7e638d4e` merge also retains Main's terrain anti-tiling,
+changes to loading/doors and pipeline diagnostics, projectile lifecycle, actor
+and first-person providers. The settings union keeps the independent Android layout
+and Main's new terrain row; its fixed `KNOWN` fixture is not the total dynamic
+registry. Main's new `above` scenario expectation and its controls are retained.
+The old merge driver ran the previous parser and rejected that new key, so the
+resolved scenario file still requires the actual current verifier after commit.
+Source composition does not establish current shader, rendering, save/load or
+phone behavior. The separate DXT1 source-alpha proposal remains excluded.
 
 [qualification] The first published combined source stopped at Rust compilation,
 before executing engine touch tests or constructing a new APK. Its repaired

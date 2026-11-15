@@ -48,16 +48,17 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Audio | (none) | `volume-master`, `volume-music`, `volume-footstep`, `volume-voice`, `volume-effects`, `volume-radio`, `music`, `voice`, `reverb`, `voice-reverb` |
 | Controls | (none) | the Controls tab's own rows (§4), then `button-style`, `aim-assist`, `aim-slowdown`, `aim-lock` |
 | Graphics | Quality | `quality` (#1966; only when the install has its preset files: docs/spec-notes/quality-presets.md) |
-| Graphics | Picture | `enhanced` (#1966), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `light-shafts`, `water-reflections`, `water-mirror` |
+| Graphics | Picture | `enhanced` (#1966), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `terrain-anti-tiling` (#2551), `light-shafts`, `water-reflections`, `water-mirror` |
 | Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance` |
 | Graphics | World | `head-tracking`, `foot-ik`, `sky-clock` |
 | Tweaks | (none) | none named yet |
 | Debug | (none) | `overlay`, `hit-markers`, `god-mode`, `navmesh`, `scope-3d` |
 
-The table names the 176 potential built-in rows in the combined `KNOWN` fixture
+The table names the 177 potential built-in rows in the combined `KNOWN` fixture
 [documented: `settings_layout.rs::SECTIONS`], including #1966's `quality` and `enhanced`,
 #2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling`, #2317's
-`frame-generation-frames`, #2550's `terrain-height-blend` and #2662's `grass-fire` (`KNOWN` in
+`frame-generation-frames`, #2550's `terrain-height-blend`, #2662's `grass-fire` and
+#2551's `terrain-anti-tiling` (`KNOWN` in
 `settings_layout.rs`); a test keeps
 it so (`settings_layout.rs`, `the_table_names_each_key_once_in_one_of_the_tabs`). The
 original puts the HUD and Pip-Boy colours and the crosshair in its Display category
@@ -88,7 +89,7 @@ registrations nor `resolve_layout`'s interface change for it.
 
 [design] Android uses the same dynamic settings page, adding **Mobile** after Controls.
 Desktop keeps its seven tabs and existing placements. This changes presentation only:
-all 176 known settings retain their registration order, keys, callbacks, saved values
+all 177 known settings retain their registration order, keys, callbacks, saved values
 and defaults. Missing optional rows and empty headings stay omitted. Search, Changed,
 keyboard/controller navigation and row identity use the existing page implementation.
 
@@ -106,13 +107,14 @@ keyboard/controller navigation and row identity use the existing page implementa
 The eight controller-specific registry rows remain in **Controls > Controller** on
 Android. Hardware bindings and Input Device remain in the original Controls page;
 changing devices keeps its native hidden-row projection and remapping behavior.
-The overlay cog opens the existing transactional layout editor: Style / profiles for
-appearance, Save to keep changes, Cancel to restore them. The practice note points to
-this route; there is no second editor, extra action row or new persistence schema.
+The existing transactional layout editor opens from **Pause > Settings > Mobile >
+Touch layout and guide** on Android, or **Controls > Touch** on desktop: Style / profiles
+for appearance, Save to keep changes, Cancel to restore them. The practice note points
+to this route; there is no second editor or new persistence schema.
 
 `settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
 original sections claim their remaining rows. One row is resolved once, with its original
-registry index. Authored controls cover all 176 potential rows, optional sections, actual page projection,
+registry index. Authored controls cover all 177 potential rows, optional sections, actual page projection,
 search/Changed/device handoff, and a real Settings callback through its original index.
 Fresh Rust execution of the current merge and Android device acceptance remain
 pending and are recorded separately from source review.
@@ -548,6 +550,14 @@ Controls page's additional unbound tweak keys are separate from this fixed
 registry fixture. Saved per-device controller calibration is retained; an enabled
 custom per-stick tweak temporarily supplies its explicit values without rewriting
 the saved calibration. Disabling that tweak restores the saved values.
-[qualification] All 1,536 current Main scenario records and Android's startup record
-are retained as source. Compiler/test discovery, execution and device acceptance
-still require exact integrated-head qualification.
+[qualification] At that checkpoint, all 1,536 Main scenario records and Android's
+startup record were retained as source. Compiler/test discovery, execution and device
+acceptance still require exact integrated-head qualification.
+
+[design] The subsequent `7e638d4` Main import adds `terrain-anti-tiling` (#2551)
+beside `terrain-height-blend` in **Graphics > Picture**, bringing the combined fixed
+`KNOWN` fixture to 177 unique keys. The 68 Android overrides remain 60 Mobile and
+8 Controls > Controller placements; generated Tweaks rows and additional unbound
+Controls rows remain outside this fixed fixture. All 1,552 incoming Main scenario
+records and Android's startup record are retained as source. These source counts
+do not claim compilation, scenario execution or device acceptance of this merge.

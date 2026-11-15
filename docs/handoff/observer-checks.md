@@ -2509,6 +2509,16 @@ already talking takes over at once, same topic or another; nothing is queued or 
      coming, or coming only within some distance of his spot, says the search area is
      wrong; walking up and standing without a word says the talk is not the Find's.
 
+## Added 2026-11-15 (Vulpes Inculta in Caesar's tent, #2560)
+
+177. **Does a shared ally faction win over an enemy one?** (P2; #2560, factions.md §4.)
+     FortVulpesInculta 0x00122B9A is in VCaesarsLegionFaction (an Ally of itself) and in
+     ArmorNCRFactionNVEnemy, which VCaesarsLegionFaction names an Enemy [observed: the
+     data]. In Caesar's tent (TheFortCaesarTents) at 21:00, after a load there: do
+     Caesar, Lucius or the Praetorians ever go into combat with Vulpes? `prid 00121FF0`
+     then `getfactionrelation 00122B9A` (2 ally, 1 enemy). Ours since #2560: 2, and they
+     stay calm [hypothesis: the original agrees, as the owner never saw the fight].
+
 ## Added 2026-11-14 (children in fights, #2438)
 
 178. **Does a child ever fight back?** (P3; #2438, combat-ai.md §12.2.) Ours, by the
@@ -2530,6 +2540,21 @@ already talking takes over at once, same topic or another; nothing is queued or 
      from the Mojave outside Freeside and inside the dam's visitor centre. Also: does
      the World Map draw a second marker at the Strip's gate while the player is on the
      Strip?
+
+## Added 2026-11-14 (allies of an actor given StartCombat, #2520)
+
+180. **Do an actor's allies join a fight a script gave it against a player who did
+     nothing?** (P1; #2520, combat-ai.md §10.) Ours: no; Assistance answers an ally being
+     attacked (hit by the player, or fought by someone it did not start on), so a
+     StartCombat on a player it would leave alone draws neither its allies nor an alarm
+     [hypothesis]. Also ours: a Cowardly actor in a fight flees from its start, hurt or
+     not [hypothesis from GECK wiki Confidence, "will always flee from combat"]. To check:
+     in a game where VMS29a has not started, walk into the Silver Rush (FreesideSilverRush),
+     stand still by the door and watch the intro to its end (INFO 0012423E, the customer's
+     `startcombat player`): does Jean-Baptiste (0010D8E5) or a Van Graff thug draw on the
+     player, what stage is VMS29a afterwards (`GetStage VMS29a`), and does the customer
+     (00124121) run out without swinging? Then again, hitting the customer once as he
+     runs: do the Van Graffs turn on the player then?
 
 ## Added 2026-11-14 (Mr. House's screens after his death, #2431)
 
@@ -2575,6 +2600,18 @@ already talking takes over at once, same topic or another; nothing is queued or 
      whether the dialogue menu opens, which INFO is said (Ramos's 000E3664 or none),
      and when the controls come back. Also `HVIntercomREF.IsTalkingActivatorActor
      RamosREF` just before McNamara's line.
+
+## Added 2026-11-14 (Dialogue packages that control the target, #2453)
+
+186. **Does a Dialogue package walk the player into its trigger location?** (P2; #2453,
+     packages.md §3.) The GECK wiki says the target "will walk towards that location when
+     the dialogue package starts" when Do Not Control Target Movement is off [documented];
+     ours walks the player, once within the activate distance and in sight, to 48 units
+     inside the trigger box at walking pace and greets there [hypothesis]. On a save before the Hidden Valley bunker, sneak past the
+     intercom into HiddenValley01 and stop on the stairs about 300 units from Ramos's
+     RamosWaitingMarker: record the player's position every frame, whether the controls
+     are taken, the pace, and when the dialogue menu opens, relative to the box
+     HVRamosTargetDialogTriggerREF (y from -6132 to -5408).
 
 ## Added 2026-11-12 (the player's marker on the compass)
 
@@ -2650,3 +2687,101 @@ already talking takes over at once, same topic or another; nothing is queued or 
     player stopped at the edge like a wall, or pushed back; is the line a corner message
     or a message box, and how often does it repeat? Does Edge Fall-off (RPLI) move the
     edge?
+
+## Added 2026-11-15 (REPCONN test-site load-door lock, #2538)
+
+198. **Is a load door without lock data locked as its other side is?** (P1; #2538,
+     cells-refs.md section 6.) **Answered [observed: capture run15b_a, 2026-11-15;
+     xNVSE 6.4.9, JIP LN 57.30]: yes for reads and player activation.** Fresh
+     `coc RocketLabBasement` (0x0007EA61, REPCONN Basement) from a Goodsprings save
+     that never visited it: 0x000CE1AD, without XLOC, and its XTEL partner
+     0x0008F97C, with XLOC 255 / no key / flags 0, both read `GetLocked` 1 and
+     `GetLockLevel` 255. The tunnel-side door is at (9812, -2504, 7180); from
+     (9902, -2414, 7180), 130 units in front, `000CE1AD.Activate player` did not
+     move the player or teleport. Activating 0x0008F97C from inside the room was
+     refused too, with all four reads unchanged after each attempt. The hatch pair
+     0x000CD777 / 0x001694E6 read 0 / 0 on both sides. [observed: FalloutNV.esm,
+     fnvtool esm decode / world refs, 2026-11-15] The two load doors share base
+     UtlDoorBg01 0x0003D205 (no script); 0x0008F97C is at (9760, -2572, 7176),
+     85 units from 0x000CE1AD. The hatches use REPCONHatch2 0x001694DD (no name
+     or script), at (7756, -3644, 7316) / (8222, -3377, 6615); neither has XLOC.
+     No FalloutNV.esm script names any of these four references. [hypothesis,
+     #2538] Key/pick/script unlocking through either side changes the source lock;
+     creating an own lock leaves the partner independent. Those mutations, key
+     inheritance, broken-lock sharing and NPC use were not captured.
+
+## Answered 2026-11-15 (weather region lookup timing, #2531)
+
+199. **When does the weather follow a weather region: by its outline or the cell's
+     region list, and when is it looked up?** (P2; #2531, world.md §6.) **Answered
+     [observed: captures run15b_w and run15b_w2, 2026-11-15; first person, GameHour 12,
+     xNVSE 6.4.9, JIP LN 57.30 GetCurrentWeather/GetCurrentWeatherPercent]:** script
+     MoveTo to (110686, 19125), cell 27,4: NVWastelandClear; (109775, 18882), cell 26,4,
+     260 units outside NVLegateRegion's outline: clear for 40 s despite that cell's
+     XCLR listing the region [observed: FalloutNV.esm, fnvtool esm decode, 2026-11-15].
+     MoveTo (109330, 18852), inside: NVlegateCampWeather;
+     back outside: clear. All complete (percent 1.0) at the first sample 4 s after
+     moving. Walking east at y 18849 kept camp weather past outline x 109513 and
+     fall-off distance x 110537: last camp sample x 110567.9, first clear x 110596.0
+     at percent 0.000, across cell border x 110592. Fade rose 0.033/s, complete in
+     about 30 s. Walking west entered cell 26,4 outside the outline and kept clear
+     to (109067, 18849), 450 units inside, for another 49 s standing. Thus membership
+     uses the outline, sampled on exterior cell entry; walking inside a cell holds
+     the result, while script moves resample and snap. [hypothesis: extend that
+     placement refresh to load doors, other teleports, fast travel, loaded games,
+     worldspace changes and coming outdoors; only script MoveTo was captured.]
+
+## Answered 2026-11-15 (combat distraction, #2573)
+
+200. **Does a fighter detect its own foe better than a bystander? Answered: yes.**
+     (P2; #2573, [actor-behaviour §2.1a](../spec-notes/actor-behaviour.md#21a-combat-distraction-2573-answered-observer-check-200), detection.md §9.)
+
+     [observed: captures run15b_t1 and run15b_t2, 2026-11-15] xNVSE 6.4.9 and JIP LN
+     57.30 `GetDetectionValue`, Searchlight Airport's runway, GameHour 12; the player
+     sneaking, standing still, in god mode. Detectors GoodspringsSettler01Ref 0x00104F03
+     and GoodspringsSettler03Ref 0x00104F0A both had Perception 5 and line of sight.
+     "Fighter" used `StartCombat player` (IsInCombat 1, IsCombatTarget player 1);
+     "watcher" used `StartCombat` on a restrained gecko after RemoveFromAllFactions and
+     Assistance 0 (IsInCombat 1, IsCombatTarget player 0). Run 2 swapped the NPCs' roles.
+
+     [observed: captures run15b_t1 and run15b_t2, 2026-11-15] Distances and readings:
+
+     | State of the detector | Distance to the player | GetDetectionValue player |
+     |---|---|---|
+     | Not in combat, facing the player (both NPCs, both runs) | 695 | 79 |
+     | Not in combat, walking (both NPCs) | 669-674 / 650 / 633-640 / 621-627 / 601 / 567 | 80 / 82 / 83 / 84 / 85 / 86-87 |
+     | In Combat, the player its combat target (run 1) | 687-693 / 672-685 / 650 / 627 | 83 / 83-84 / 85 / 87 |
+     | In Combat, the player its combat target (run 2, the other NPC) | 695 / 675-681 / 650 / 618-627 | 83 / 84-86 / 86 / 87-88 |
+     | In Combat with the gecko, the player not its target (run 1) | 609-636 | 81 |
+     | In Combat with the gecko, the player not its target (run 2) | 547-591 | 83-84 |
+
+     [observed: captures run15b_t1 and run15b_t2, 2026-11-15] At comparable distances,
+     a fighter read its own target 3-4 higher than the same NPC out of combat, in both
+     role assignments. Fighting someone else read the player 2-4 lower; those samples
+     were fewer because line of sight came and went. This settles the direction in
+     favour of the setting's description: fSneakCombatMod applies to a detector in
+     Combat against actors outside its combat target list, giving 0.8 at defaults;
+     its own targets retain 1 + fSneakAlertMod = 1.2. The wiki formula's IsCombatTarget
+     reading and the Fallout Wiki's 0.8 / 1.2 table are reversed (§2.1).
+
+     [observed: captures run15b_t1 and run15b_t2, 2026-11-15] `SetRestrained 1` on a
+     combatant ended combat (IsInCombat 0 from the next sample), as `tcai` did.
+     GetDetectionValue read -100 for a detector in combat without line of sight.
+     These captures did not time detection loss or the search after breaking sight.
+
+     [design, #2573; tools/smoke/scenarios.toml] `detection-combat-target-sneak`
+     uses the cleared Searchlight Airport runway at hour 12 with god mode. The
+     player sneaks from 2 s and stands still. Fighter GoodspringsSettler01Ref
+     (00104F03) and watcher GoodspringsSettler03Ref (00104F0A) have Perception 5 and
+     Assistance 0; the watcher is removed from all factions. A gecko is created at
+     the watcher with Aggression 0 and Perception 0, then positioned 150 units
+     toward the player. Both settlers reset to mirrored 690-unit offsets at 5.8 s
+     and the gecko resets at 5.9 s. At 6 s the fighter starts combat with the player
+     and the watcher with the gecko. Five paired GetDetectionValue/GetDistance reads
+     run every 0.5 s from 6.6 to 8.6 s. Every fighter value must exceed its paired
+     watcher value; distances are logged without absolute ranges.
+
+     [observed: smoke runs on the combined build, 2026-11-15] With the fix, both
+     detectors at 690 units read fighter 64 / watcher 56; the fighter closing to 610
+     read 69 (PASS). With both detection.rs files reverted to upstream main, fighter
+     84-88 / watcher 91 in all five pairs (FAIL).

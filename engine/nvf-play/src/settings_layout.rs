@@ -297,6 +297,7 @@ pub const SECTIONS: &[Section] = &[
             "sharpen",
             "anisotropic",
             "terrain-height-blend",
+            "terrain-anti-tiling",
             "light-shafts",
             "water-reflections",
             "water-mirror",
@@ -595,14 +596,15 @@ mod tests {
             .collect()
     }
 
-    /// Every row the registry can hold today (upstream main 9af0a4552 and f4015fae8, with #1966's
+    /// The fixed named rows (upstream main 9af0a4552 and f4015fae8, with #1966's
     /// quality and enhanced rows, #2014's counter rows, the two VATS rows and #2198's Upscaler
     /// and Upscaling mode rows in place of the one upscaling row, its DLSS model row and #2169's
     /// FSR library row, #2242's upscaling counter row and #2317's Generated frames row), by the group it
     /// registers with, plus main da13f4f8a's grass-fire row (#2567), the viewmodel
     /// field of view and menu scale rows, main 6b29ee76b's Physics rate row, and
-    /// the terrain height blending row from main af16a793f.
-    const KNOWN: [(&str, &str); 176] = [
+    /// the terrain height blending row from main af16a793f and terrain anti-tiling
+    /// from main 7e638d4e2. Dynamic Tweaks and unbound controls are separate.
+    const KNOWN: [(&str, &str); 177] = [
         ("lockpick-touch-hints", "Touch"),
         ("touch-pipboy-dismiss-left", "Controls"), ("touch-pipboy-dismiss-right", "Controls"),
         ("touch-pipboy-close-button", "Controls"), ("touch-pipboy-button-graphics", "Controls"), ("touch-pipboy-model-wheel", "Controls"),
@@ -760,6 +762,7 @@ mod tests {
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
         ("terrain-height-blend", "Graphics"),
+        ("terrain-anti-tiling", "Graphics"),
         ("light-shafts", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-mirror", "Graphics"),
@@ -923,6 +926,7 @@ mod tests {
         assert_eq!(at("quality"), "Graphics > Quality");
         assert_eq!(at("enhanced"), "Graphics > Picture");
         assert_eq!(at("terrain-height-blend"), "Graphics > Picture", "beside the texture filtering (#2550)");
+        assert_eq!(at("terrain-anti-tiling"), "Graphics > Picture", "beside terrain height blending (#2551)");
         assert_eq!(
             keys(&list, &l, "Graphics")[..4],
             ["[Quality]", "quality", "[Picture]", "enhanced"],

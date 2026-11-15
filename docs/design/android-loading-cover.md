@@ -48,7 +48,8 @@ remain necessary. The protocol checks the current state, request/epoch, cover an
 lease generation, asks that lease to hide, and inspects the backend postcondition
 before committing completion or sending the existing success callback. A failed
 or unavailable hide postcondition keeps loading blocked and uses the existing
-failure/recovery callback without removing its watchdog. Reentrant callbacks that
+failure/recovery callback. Existing lifecycle handling still owns watchdog
+scheduling; the protocol runs its completion callback only on success. Reentrant callbacks that
 retire the episode, activity or cover cannot complete or fail the newer owner.
 There is no timer-based success, repeated hide retry or hardware-input reset.
 

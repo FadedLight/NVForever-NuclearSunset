@@ -3759,6 +3759,7 @@ mod tests {
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
         }
     }
+    include!("touch/menu_sheet_router_tests.rs");
 }
 
 #[cfg(test)]

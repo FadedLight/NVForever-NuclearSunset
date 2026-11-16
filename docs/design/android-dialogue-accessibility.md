@@ -75,7 +75,7 @@ row and vertical accent; Field Notes uses numbered responses and a short rule;
 Retro Console uses prompt characters, a terminal cursor and faint scanlines;
 Wrist Terminal uses instrument ticks and a selection rail. The enclosing panel
 and all response borders are transparent. These treatments share the same wrapped
-text, scrolling and minimum 48-pixel Android targets.
+text, scrolling and minimum 48 UI-unit Android targets, scaled by UiScale.
 
 Text and functional selection cues use the preferred HUD palette. A subtle text
 shadow keeps lettering readable over the world without an enclosing panel. Background

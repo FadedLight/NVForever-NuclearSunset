@@ -149,6 +149,17 @@ Corrected strict checking, code generation, engine tests and final packaging/
 phone acceptance remain pending. Neither the native pass nor earlier historical
 tests qualify this corrective source or establish a phone recovery/crash cure.
 
+The subsequent normal Main `ac8f1d6d` integration is **In progress**. A real
+model-loader conflict after Main's attachment merge requires retaining both its
+reference attachment producer and Android's numeric admission/publication checks.
+The 37 incoming commits in 59 paths also retain loading timing, gas traps,
+classic VATS click handling and AI/package changes. Static comparison retains all
+1,563 Main scenarios in order plus Android startup options, for 1,564. Settings
+remain 177 fixed keys with 68 Android overrides, and the executed Java protocol
+source is unchanged. This source union needs its own strict/code-generation,
+engine/runtime, native/final packaging and phone checks; Main's separate scoped
+attachment results and failed Android cycles do not qualify it or a new APK.
+
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate
 production and identical six authored fixtures in validation context 54830c0 gave
@@ -218,6 +229,7 @@ Deleted engine-shot associations also have a focused next-consumer retirement br
 | Actor values | Done, awaiting owner | From the records and the GECK wiki's formulas; `fnvtool actor values` | [actor-values](spec-notes/actor-values.md) |
 | Player body and camera | Done, awaiting owner | Animated body, first-person arms rig and optional first-person body, the first-person weapon lowered near walls and friendly actors or by hand with H (player-body.md §1.4b), arms and weapon never hidden by the world (first-person-depth.md), orbit camera, Pip-Boy on the arm, player shadow, lying in beds, sitting; first-person Movement-section camera overlays and Activation camera idles do not acquire a position hold, while other cinematic starts and visible fades keep their hold ([movement-camera-holds](spec-notes/movement-camera-holds.md); 805 source composition awaiting canonical checks; installed-game smoke unrun) | [player-body](design/player-body.md), [camera](spec-notes/camera.md), [furniture](spec-notes/furniture.md) |
 | Player NIF model selection (#2387) | In progress | Separate first/third mirrors and JIP selectors preserve the third-person default; missing selected rigs do not fall back. First-rig file metadata remains unavailable. Prior b241 CI passed eight core and 13 producer controls; the cold-write correction below still needs execution. | [Player model selection](spec-notes/nif-player-model-selection.md) |
+| Drawn reference AttachModel | In progress | Cached source indices drive actual mesh/material descendants, including duplicate or unnamed nodes and multiple static roots. Authored consumer controls cover mode 0/1/2/3, cold creation, per-instance removal, replacement, and neighboring owners. Qualification is source-revision specific; native/rendered parity, base-form replay, attached particles and complete B42 remain separate. | [Model attachments](spec-notes/nif-attachments.md) |
 | Explicit NIF skeleton-root names | In progress | Entity-owned explicit renames retain script names without exposing factory labels. Prior b241 CI includes the exact six-query CPU producer control; the actual query-job smoke and native/rendered acceptance remain pending. | [Script root renames](spec-notes/nif-script-root-renames.md) |
 | Lifetime and startup compatibility of NIF edits | In progress | A cold TRS hold waits for its first node, pins its model as soon as available, and promotes once to concrete model/node identity. Warm disappearance and replacement do not rebind; cold structural edits consume once on an already drawn root. Corrected cold-write/late-node controls are authored, execution pending; prior b241 passes included an erroneous cold-drop assertion. File-only legacy behavior is retained. Full Update3D, material lifetime, native/rendered parity and complete armor HUD support remain separate. | [NIF edit lifetime](spec-notes/nif-held-node-lifetime.md) |
 

@@ -1774,6 +1774,41 @@ expect = [
 ]
 
 [[scenario]]
+name = "ai-no-door-out-of-sight"
+kind = "tool"
+source = "docs/spec-notes/packages.md §11 (#2405): out of sight, an actor whose package's place no door at all leads to (Gomez in the NCR safehouse's side room, a two-triangle navmesh island, sent to GomezDoor by SafehouseNCRRangerLeave) is put there instead of reporting it unreachable every hour; a creature that cannot open doors (Rey, following Old Lady Gibson out of her shack) stays without a path failure"
+areas = ["ai"]
+paths = ["crates/fnv-ai/src/carry.rs", "crates/fnv-nav/src/path.rs", "crates/fnvtool/src/ai_run.rs"]
+commands = [
+  ["ai", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--hours", "3", "--start-hour", "12", "--actor", "GomezREF", "--quest-var", "vSafehouse:10=1", "--out-of-sight"],
+  ["ai", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--hours", "3", "--start-hour", "12", "--actor", "GibsonDogReyRef", "--actor", "OldLadyGibsonRef"],
+]
+expect = [
+  { json = "actors.?actor=GomezREF.event_counts.put_there", schema = "fnv.ai.run/1", equals = 1, label = "Gomez is put at GomezDoor once, out of sight" },
+  { json = "actors.?actor=GomezREF.event_counts.arrived", schema = "fnv.ai.run/1", equals = 1, label = "and has arrived there" },
+  { json = "actors.?actor=GomezREF.event_counts.unreachable", schema = "fnv.ai.run/1", count = 0, label = "no hourly 'cannot reach' for Gomez" },
+  { json = "actors.?actor=GibsonDogReyRef.event_counts.doors_closed_to_it", schema = "fnv.ai.run/1", range = [1, 10], label = "Rey stays when Old Lady Gibson goes out of her door" },
+  { json = "actors.?actor=GibsonDogReyRef.event_counts.unreachable", schema = "fnv.ai.run/1", count = 0, label = "no path failure for Rey" },
+  { json = "actors.?actor=OldLadyGibsonRef.event_counts.door", schema = "fnv.ai.run/1", range = [1, 10], label = "she does go out (the case is met)" },
+]
+
+[[scenario]]
+name = "ai-no-door-out-of-sight-game"
+source = "docs/spec-notes/packages.md §11 (#2405): in the game, with the player outside the NCR safehouse's cave door (0x001593B6, WastelandNV), Gomez in the interior behind it is out of the loaded area; his Leave package (vSafehouse variable 10, GomezGoToSleep, = 1) sends him from the side room's navmesh island to GomezDoor, which no door joins: he is put there instead of logging 'cannot reach' every game hour (players' reports, build 0.7.0)"
+areas = ["ai"]
+paths = ["crates/fnv-ai/src/carry.rs", "crates/fnv-nav/src/path.rs", "engine/nvforever/src/residents.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_CONSOLE = "2:set vSafehouse.GomezGoToSleep to 1;2.5:close" }
+args = ["--play", "--world", "WastelandNV", "--pos=-3600,26900,5460", "--hour", "12", "--no-voice", "--no-messages", "--npc-packages", "all,GomezREF"]
+run_seconds = 150
+expect = [
+  { re = 'GomezREF: put at the place of SafehouseNCRRangerLeave out of sight, no door joining the two: \(2811, 951, 6438\) in SafehouseNCRINT', label = "Gomez is put at GomezDoor out of sight" },
+  "ai summary",
+]
+forbid = [
+  { re = 'GomezREF: cannot reach the place of SafehouseNCRRangerLeave', label = "Gomez's Leave is not reported unreachable" },
+]
+
+[[scenario]]
 name = "ai-observed"
 kind = "tool"
 source = "CLAUDE.md: after AI package changes, with the owner's observer captures: fnvtool ai observed and ai run --samples (actor-behaviour.md §4, §5.3)"
@@ -4037,6 +4072,28 @@ expect = [
 ]
 
 [[scenario]]
+name = "vigor-tester-new-game"
+source = "#2406 (reports: Doc Mitchell's house has the most frame hitches): in a new game the Vigor Tester's machine is spawned hidden behind the start's loading screen and its first opening takes it (docs/spec-notes/vigor-tester.md §7, docs/design/streaming-hitches.md §6)"
+note = "vigor-tester's steps in a --new-game start (the opening's own menus held off; menu 1074 asked by the test aid 3 s after the screen comes down); the machine made ready is the one shown, turned and clicked"
+areas = ["chargen", "vigor", "menus"]
+paths = ["engine/nvf-play/src/chargen/vigor.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "off", NVF_PLAY_TEST_SCRIPT = "3:menu:1074", NVF_PLAY_TEST_VIGOR = "2:click:LookInside_Btn:0,4.5:raise,4.6:raise,4.7:done,5.5:page:review,8:select:luck,8.1:raise,8.2:raise:L,8.3:raise:endurance,8.5:click:P1_RT_Btn:0" }
+args = ["--play", "--new-game", "--no-voice"]
+messages = true  # its checks read message boxes: no --no-messages added (smoke/scenarios.py)
+run_seconds = 20
+order = [[
+  { re = 'vigor tester: made ready behind the loading screen in \d+ ms \(\d+ parts\)', label = "the machine is spawned behind the start's loading screen" },
+  "loading screen down after",
+  "vigor tester: the machine made ready behind the loading screen is used",
+  "vigor tester: open, S.P.E.C.I.A.L.",
+  "done, S.P.E.C.I.A.L. 7 5 6 5 5 5 7 (click)",
+]]
+expect = [
+  "Endurance 6, 0 points remaining",
+  "vigor tester summary: opened 1 times, 5 changes, 8 page turns, 2 clicks on its buttons, done 1 times",
+]
+
+[[scenario]]
 name = "vigor-sounds"
 source = "playtest list 5 item 39 (2026-10-16): the Vigor Tester's sounds between pages and raising and lowering an attribute (docs/spec-notes/vigor-tester.md §6)"
 note = "vigor-tester's steps with Luck lowered once and raised once more, so that every sound is heard; not shared with it (a launch of its own, as vigor-tester)"
@@ -4951,6 +5008,38 @@ order = [[
 expect = [
   { text = "combat: 0x0016526B destruction stage", count = 3, label = "each of the bouquet's stages is reached exactly once" },
 ]
+
+[[scenario]]
+name = "gas-trap-gun-fired-inside"
+source = "#2687; GECK wiki Traps [documented]: a gas trap goes off when a weapon is fired inside it; engine/nvf-play/src/gas_traps.rs. The GasTrapDummy hit is a [hypothesis]"
+note = "Vault 22's spore purge gas (V22SporePurgeGasRef 0x000F0908, V22TrapGasFire01: a Gas Trap-layer sphere phantom, nothing solid) is enabled at 3 s, as Keely's line INFO 0x000F43F8 does. The player is moved into it at 5 s and fires a 10mm pistol at 9 s. The 10mm is in neither gas list, so the cloud is hit with GasTrapDummy (in ExplodesGasTrapsOnHit). Its script's DamageObject 5 takes it to stage 1 (burning), its self-damage to stage 2 and explosion 0x000348D0, and its OnDestructionStageChange completes There Stands the Grass (VMS06) objective 50. Before #2687 the phantom was dropped and nothing happened"
+areas = ["traps", "scripts", "combat"]
+paths = ["engine/nvf-play/src/gas_traps.rs", "engine/nvf-play/src/script_trigger.rs", "engine/nvf-play/src/phys/prepare.rs", "engine/nvf-play/src/combat.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "3:enable:0x000F0908,5:moveto:player:0x000F0908", NVF_PLAY_TEST_EQUIP = "0000434F", NVF_PLAY_TEST_GIVE = "00004241:30", NVF_PLAY_TEST_CONTROL = "6:weapon,9:fire", NVF_PLAY_TEST_CONSOLE = "16:getobjectivecompleted VMS06 50;0F0908.getdestructionstage;16.5:close" }
+args = ["--cell", "Vault22e", "--pos=3592,2200,8470", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 18
+order = [[
+  { re = 'script: .* has 1 gas volume\(s\) in its model' },
+  { re = 'combat: a shot fired inside it reaches gas cloud 0x000F0908, hit with GasTrapDummy: its hit blocks ran' },
+  "combat: 0x000F0908 destruction stage -1 -> 1",
+  { re = 'combat: 0x000F0908 destruction stage 1 -> 2, disabled, 1 explosion\(s\)' },
+  { re = 'console: GetObjectiveCompleted.* >> 1\.00' },
+]]
+
+[[scenario]]
+name = "gas-trap-shishkebab-walk-in"
+source = "#2687; V22TrapGasSCRIPT 0x000EF405 OnTriggerEnter: an actor with a weapon of ExplodesGasTrapsOnTouch drawn sets the cloud off [observed: fnvtool script decompile]; the Gas Trap-layer phantom kept as a trigger volume"
+note = "Vault 22's spore purge gas (V22SporePurgeGasRef 0x000F0908) is enabled at 3 s, as Keely's line does (the vault's other clouds hang on disabled enable parents until it burns). The player draws the Shishkebab (0000434E) at 4 s and is moved into the gas at 7 s. Its OnTriggerEnter (IsWeaponInList ExplodesGasTrapsOnTouch, IsWeaponOut) runs DamageObject 5, so it reaches stage 1, and its OnDestructionStageChange completes VMS06 objective 50"
+areas = ["traps", "scripts"]
+paths = ["engine/nvf-play/src/script_trigger.rs", "engine/nvf-play/src/phys/prepare.rs", "engine/nvf-play/src/gas_traps.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "3:enable:0x000F0908,7:moveto:player:0x000F0908", NVF_PLAY_TEST_EQUIP = "0000434E", NVF_PLAY_TEST_CONTROL = "4:weapon", NVF_PLAY_TEST_CONSOLE = "14:getobjectivecompleted VMS06 50;14.5:close" }
+args = ["--cell", "Vault22e", "--pos=3592,2200,8470", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 16
+order = [[
+  "script: player entered trigger V22SporePurgeGasRef",
+  "combat: 0x000F0908 destruction stage -1 -> 1",
+  { re = 'console: GetObjectiveCompleted.* >> 1\.00' },
+]]
 
 # ------------------------------------------------------------------ dialogue, Pip-Boy, terminals
 
@@ -19486,6 +19575,26 @@ expect = [
 manual = "on a failure, the chain's notes say what each step stands for; the stalls are in the side-quest walkthrough report (batch 4, issue #918)"
 
 [[scenario]]
+name = "mq-there-stands-the-grass-spore-purge"
+kind = "tool"
+source = "headless walkthrough crates/fnv-game/walkthrough/there-stands-the-grass-spore-purge.actions.json: There Stands the Grass (VMS06), Keely's spore purge: the purge gas lit completes objective 50 (#2687)"
+areas = ["quests", "scripts", "traps"]
+paths = ["crates/fnv-game/walkthrough/there-stands-the-grass-spore-purge.actions.json", "crates/fnv-game/src/runner.rs", "crates/fnv-game/src/combat.rs", "crates/fnv-game/src/functions/objects.rs", "crates/fnv-game/src/game.rs"]
+commands = [["script", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--actions", "crates/fnv-game/walkthrough/there-stands-the-grass-spore-purge.actions.json"]]
+expect = [
+  { json = "observations.?label=purge gas before Keely's line.disabled", equals = true, label = "the purge gas starts disabled" },
+  { json = "observations.?label=purge gas after Keely's line.disabled", equals = false, label = "Keely's line enables it" },
+  { json = "observations.?label=milestone: VMS06 objective 50 shown.objective.50.displayed", equals = true, label = "objective 50 shown" },
+  { json = "observations.?label=milestone: VMS06 objective 50 shown.objective.50.completed", equals = false, label = "and not done before the gas burns" },
+  { json = "observations.?label=laser through the purge gas.ran", equals = true, label = "the laser's hit runs the gas's OnHitWith" },
+  { json = "observations.?label=purge gas lit.destroyed", equals = true, label = "the gas reaches its Destroy stage" },
+  { json = "observations.?label=final: VMS06 objective 50.objective.50.completed", equals = true, label = "objective 50 completed" },
+  { json = "observations.?label=final: VMS06 objective 50.objective.60.displayed", equals = true, label = "objective 60 shown" },
+  { json = "steps.*.error", count = 0, label = "spore purge: no step fails" },
+  { json = "given_errors.*", count = 0, label = "spore purge: no given fails" },
+]
+
+[[scenario]]
 name = "mq-vault-21-tour"
 kind = "tool"
 source = "headless walkthrough crates/fnv-game/walkthrough/vault-21-tour.actions.json: Vault 21 tour (VVault21Tour): Sarah Weintraub's tour (20)"
@@ -23680,6 +23789,50 @@ args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice
 run_seconds = 13
 expect = [
   { re = 'playgroup: vMEGoodSpringsRef plays Forward \(once', label = "the object's Forward sequence plays by name" },
+]
+
+[[scenario]]
+name = "nif-reference-attach-owned"
+source = "[design: docs/spec-notes/nif-attachments.md] Authored duplicate-name geometry and unequal bound materials through real AttachModel dispatch. UNRUN; no native or pixel comparison."
+areas = ["scripts", "actors"]
+paths = ["crates/fnv-game/src/nif_blocks.rs", "engine/nvf-assets/src/model/attachment.rs", "engine/nvforever/src/nif_attachments.rs", "engine/nvforever/src/nif_attach_model_probe.rs", "tools/smoke/fixtures/attach-model-owned/"]
+requires = ["NVF_PLAY_TEST_ATTACH_MODEL_HOME", "NVF_PLAY_TEST_ATTACH_MODEL_ASSET_VIEW", "NVF_PLAY_TEST_ATTACH_MODEL_PROBE_PATH"]
+note = "Run exact manifest/Data/HOME admission before launch, then pass the owned Data view with CLI --data. The normal smoke CLI does not itself validate this manifest. HOME/mods is not a loose-mesh root. Run the field judge on the same complete log; scenario regexes alone do not establish geometry/material pairing or captured-entity retirement."
+env = { RUST_LOG = "info,nvf_play::script=debug", NVFOREVER_HOME = "{env:NVF_PLAY_TEST_ATTACH_MODEL_HOME}", NVF_PLAY_TEST_ATTACH_MODEL_ASSET_VIEW = "{env:NVF_PLAY_TEST_ATTACH_MODEL_ASSET_VIEW}", NVF_PLAY_TEST_ATTACH_MODEL_PROBE = "1", NVF_PLAY_TEST_ATTACH_MODEL_PROBE_PATH = "{env:NVF_PLAY_TEST_ATTACH_MODEL_PROBE_PATH}", NVF_PLAY_TEST_CONSOLE = '4:ToggleFirstPerson 0;4.3:close;5:player.GetChildBlocks "" 1;5.3:close;7:PrintC "nvf attach warm %g", (Ar_Size (player.GetChildBlocks "" 1));7.3:close;9:PrintC "nvf attach requested %g", (AttachModel player 3 "|*_nvfa*nvf_smoke/attach_model.nif");9.5:close;14:PrintC "nvf attach removal submitted %g", (AttachModel player 2 "|*_nvfa*nvf_smoke/attach_model.nif");14.5:close' }
+args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages"]
+run_seconds = 20
+timeout = 180
+ends = "run log: the game exited normally"
+expect = [
+  { re = "nif attach probe: preflight prepared shapes=2 .* rig=0 ", count = 1, label = "ordinary baseline ModelCtx prepares two authored static drawables" },
+  { re = "nif attach probe: preflight shape .* vertices=4 .* positions_finite=1 .* roughness_finite=1", count = 2, label = "real prepared geometry and material fields before Attach" },
+  { re = 'script: print "nvf attach warm [1-9][0-9]*"', label = "real third-person recipient is published" },
+  { re = 'script: print "nvf attach requested [01]"', count = 1, label = "submission return only; physical fields are checked independently" },
+  { re = 'nif attach probe: present .* vertices=4 ', count = 2, label = "two actual mesh/material field rows" },
+  { re = 'nif attach probe: captured .* count=2 distinct_entities=1 distinct_meshes=1', count = 1, label = "physical entity and mesh identity" },
+  { re = 'nif attach probe: retained .* captured_count=2 matching_named=2 same_handles=1 same_ancestry=1', count = 1, label = "stable captured ownership before mode2" },
+  { re = 'script: print "nvf attach removal submitted [01]"', count = 1, label = "explicit authored removal submission before deferred producer execution" },
+  { re = 'nif attach probe: removed .* captured_count=2 gone=2 matching_named=0 host_live=1 selected_same=1', count = 1, label = "captured entities gone and recipient preserved" },
+]
+order = [[
+  { text = "nif attach probe: preflight prepared shapes=2 " },
+  { text = "nif attach probe: preflight shape " },
+  { re = 'script: print "nvf attach requested [01]"' },
+  { text = "nif attach probe: present " },
+  { text = "nif attach probe: captured " },
+  { text = "nif attach probe: retained " },
+  { re = 'script: print "nvf attach removal submitted [01]"' },
+  { text = "nif attach probe: removed " },
+]]
+forbid = [
+  { text = "nif attach probe: preflight unavailable " },
+  { text = "nif attach probe: terminal " },
+  { text = "nif attach probe: unavailable " },
+  { text = "nif attach probe: recipient " },
+  { re = "script error in " },
+  { re = "(?i)script: attachmodel failed in " },
+  { re = "NVF_PLAY_TEST_CONSOLE: .*: (?:expected <seconds>:<line>|bad seconds)" },
+  { re = 'attachment .*could not supply a complete graph' },
 ]
 
 [[scenario]]
@@ -29685,8 +29838,8 @@ run_seconds = 40
 order = [[
   { re = 'use weapon: VMS18SecuritronREF 0x001299AB uses WeapNVSecuritronSubmachineGun on VMS18HeckGundersonREF \(its package VMS18SecuritronFire1\): 6 shots; always hit, no damage', label = "the Securitron opens fire on Heck with its Do No Damage package" },
   { text = "combat: a harmless shot by 0x001299AB hits 0x0010D4EF: its hit blocks ran, no damage", label = "a harmless shot runs Heck's OnHit for the Securitron" },
-  { text = "script: OnDeath of FalloutNV.esm|SCPT 0x00125AF0 ran on Some(0x0010D4EF)", label = "its KillActor kills Heck: his OnDeath block runs" },
-  { text = "script: VMS18SecuritronREF says 0x00129988", label = "the Securitron says its death reaction (VMS18SecuritronHeckDeathReaction)" },
+  { text = "script: VMS18SecuritronREF says 0x00129988", label = "the Securitron says its death reaction (VMS18SecuritronHeckDeathReaction), said from within his OnDeath block" },
+  { text = "script: OnDeath of FalloutNV.esm|SCPT 0x00125AF0 ran on Some(0x0010D4EF)", label = "its KillActor kills Heck: his OnDeath block has run (logged once the block is over, so after the line it says; #2738)" },
 ]]
 expect = [
   { text = "use weapon: VMS18SecuritronREF 0x001299AB stops: VMS18HeckGundersonREF is dead or gone", label = "the Securitron stops firing at the dead Heck (same frame as its line: not ordered)" },
@@ -30129,6 +30282,24 @@ expect = [
 ]
 
 [[scenario]]
+name = "load-phases-goodsprings"
+source = "#2407: players' Goodsprings door and save loads took 20-37 s; a loading screen now logs, and a slow load reports, when each thing it waited for came in, its longest frame and what the game files gave under it (nvf_play::loading::LoadPhases, fnv_vfs::read_stats). Out of Doc Mitchell's house into Goodsprings, the heaviest door of a new game"
+note = "2026-11-15 on the bench (i9-14900K, RTX 4070, SATA SSD, files in the OS cache): the start 2.4 s, the door 2.5 s with 2,106 files (248 MB) read. The cap is the reports' slow-load limit (reports/anomaly.rs SLOW_LOAD_MS), far above it"
+areas = ["loading", "streaming"]
+paths = ["engine/nvf-play/src/loading.rs", "crates/fnv-vfs/src/lib.rs", "engine/nvforever/src/reports/mod.rs"]
+env = { NVFOREVER_HOME = "load-phases-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_FACE = "10:00103E61", NVF_PLAY_TEST_ACTIVATE = "12" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--hour", "12", "--no-voice"]
+run_seconds = 20
+order = [[
+  { re = 'loading screen phases: up [\d.]+ s; .*cells to draw .*; longest frame [\d.]+ s of \d+; read \d+ files, [\d.]+ MB, [\d.]+ s reading, [\d.]+ s queued for an archive', label = "the start's screen is timed" },
+  "GSDocMitchellHouseIntDoorREF activated",
+  { re = 'loading screen phases: up [\d.]+ s; the travel to go out .*actors to draw .*; read (?P<n>\d+) files', range = [100, 100000], label = "the door's screen is timed, the files of Goodsprings read under it" },
+]]
+expect = [
+  { re = 'loading screen down after (?P<n>[\d.]+) s$', range = [0, 20], all = true, label = "the door's load stays under the 20 s slow-load limit" },
+]
+
+[[scenario]]
 name = "repconn-load-door-lock"
 source = "[observed: capture run15b_a, 2026-11-15] #2538: RocketLabBasement tunnel load door 0x000CE1AD has no XLOC but reads its partner 0x0008F97C as locked, level 255, no key; activation is refused (docs/spec-notes/cells-refs.md section 6)"
 note = "[design, #2538] Written without running the game. Start in the tunnel 130 units in front of the door, heading 225; aim and activate it. Require the Locked level-255 result and no teleport. Pitch 0 is provisional [hypothesis]."
@@ -30205,4 +30376,26 @@ manual = "gomorrah_sconce_near.png: the wash of light above the bowl is brightes
 expect = [
   { re = 'test aid: screenshot .*gomorrah_sconce_near\.png', label = "the frame facing the sconce is saved" },
   { re = 'test aid: screenshot .*gomorrah_sconce_side\.png', label = "the frame from the side is saved" },
+]
+
+[[scenario]]
+name = "vats-classic-arrow-click"
+source = "#2657 (engine/nvf-play/src/vats_mode.rs read_keys; engine/nvf-play/src/tiles/vats_menu.rs VatsTiles::clicked): a click on the classic target screen is tested against the pointer's place at the click, by the boxes as last drawn, not against the hover of the frame before"
+note = "the Fists, no fight, two calm targets: Easy Pete and a Goodsprings settler are put 150 units in front of the player, 60 to either side, at 4 s and held. V at 8 s starts the screen on one of them. At 11 s the test aid puts the pointer on the right arrow and clicks in the same frame (the hover of the frame before has no arrow): the target changes and no attack is queued. V at 14 s leaves"
+areas = ["combat", "vats", "ui"]
+paths = ["engine/nvf-play/src/vats_mode.rs", "engine/nvf-play/src/vats_classic.rs", "engine/nvf-play/src/tiles/vats_menu.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "4:moveto:EasyPeteRef:player:-60:150:0,4:moveto:GoodspringsSettler03Ref:player:60:150:0,4.2:call:EasyPeteRef:SetRestrained:1,4.2:call:GoodspringsSettler03Ref:SetRestrained:1", NVF_PLAY_TEST_CONTROL = "3:weapon", NVF_PLAY_TEST_KEYS = "8:v,14:v", NVF_PLAY_TEST_VATS_STYLE = "classic", NVF_PLAY_TEST_VATS_POINTER = "11:right:click" }
+args = ["--cell", "Goodsprings", "--pos=-68375,4800,8700", "--heading", "0", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 17
+order = [[
+  { re = 'vats mode: classic: 2 targets, [0-9A-F]{8} selected', label = "V starts the screen with the two targets" },
+  { text = "NVF_PLAY_TEST_VATS_POINTER: the pointer comes onto the right arrow at", label = "the pointer comes onto the right arrow and clicks in the same frame" },
+  { text = "vats mode: classic: a click on the target screen: Target(1) (the hover of the frame before: arrow None)", label = "the click is on the arrow, though the hover has none yet" },
+  { re = 'vats mode: classic: target [12] of 2, [0-9A-F]{8}', label = "one target change" },
+]]
+expect = [
+  { re = 'vats mode summary: entered 1 times, 0 marks, 0 shots, 0 AP spent, 0 refused', label = "no attack queued" },
+]
+forbid = [
+  { text = "a click on the target screen: Queue", label = "the click queues no attack" },
 ]

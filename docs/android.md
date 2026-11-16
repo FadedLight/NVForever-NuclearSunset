@@ -247,7 +247,7 @@ and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
 ## Current-main integration status
 
 [design] The next source integration retains the optional touch views alongside
-accepted Main `df17cc6d`, following the earlier `7e638d4e` and `ed684e8` checkpoints and retaining
+accepted Main `ac8f1d6d`, following the earlier `df17cc6d`, `7e638d4e` and `ed684e8` checkpoints and retaining
 its engine implementation of Stewie-related preferences. This is separate from
 verified execution of a particular original mod/plugin/version/profile.
 Controller keyboard/mouse contributions keep their
@@ -268,7 +268,7 @@ PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
 all map assertions. This additional source setup correction is unexecuted; it is
 not an observed explanation for the earlier runtime failures.
 
-[qualification] Source comparison retains all 1,554 Main scenario records plus
+[qualification] Source comparison retains all 1,563 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
 integrity, not scenario execution. Integrated engine/UI regressions, native
 packaging and phone acceptance remain unrun. Earlier ARM/R31
@@ -285,13 +285,13 @@ resolved scenario file still requires the actual current verifier after commit.
 Source composition does not establish current shader, rendering, save/load or
 phone behavior. The separate DXT1 source-alpha proposal remains excluded.
 
-[qualification] The bounded follow-up accepts Main `df17cc6d`: six more commits
+[qualification] The earlier bounded follow-up accepts Main `df17cc6d`: six more commits
 covering resurrection and unlit/additive material rendering. Android's material
 selection and numeric/image admission remain separate from those rendering
 policies. The sole scenario-list conflict is resolved with all Main records
 unchanged and in order, plus Android's unchanged startup record before its prior
 middle anchor rather than at the file's end. That placement avoids ordinary
-future Main appends competing with the Android record; the final list has 1,555
+future Main appends competing with the Android record; that list contains 1,555
 entries. The fixed settings fixture remains 177 with 68 Android overrides.
 Incoming observer prompts, including 201, are retained without renumbering.
 Original-game parity hypotheses and NVForever observations retain their distinct
@@ -316,6 +316,19 @@ groups and unambiguous assignment spacing. The two one-off preview fixtures use
 the existing one-shot system API, retaining their captures, real painter calls,
 deferred commands and every assertion. These are source corrections; fresh strict
 checking, test code generation and actual engine test execution remain required.
+
+[qualification] Main advanced to `ac8f1d6d` before that correction was published.
+Its real model-loader conflict requires a normal integration: 37 incoming commits
+in 59 paths after `df17cc6d`, including reference attachments, loading timing,
+gas traps, classic VATS click coordinates and AI/package updates. The resolved
+loader retains attachment object indexing and the ordinary/attachment cache
+distinction alongside Android's numeric admission, checked skin and final mesh
+guard before bounds and mesh/material/bind-pose publication. Material preparation
+may already cache textures. Attachment graph capture and rejected-shape reporting
+both remain. Main's own scoped attachment results do not qualify this Android
+union. The final scenario list contains 1,564 records, including Android's
+unchanged startup record; scenario execution and current file verification remain
+pending. No current engine, native APK, phone or crash result is transferred.
 
 ## Loading recovery qualification
 

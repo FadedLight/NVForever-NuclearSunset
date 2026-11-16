@@ -74,3 +74,17 @@ at runtime or establish visible resume/input recovery on a phone. The historical
 `NATIVE_CONTENT_SUBMITTED` event remains evidence of admission and a hide attempt;
 its old meaning is not strengthened by this later correction. The reported resume
 hang and Doc Mitchell exit still require current APK/device acceptance.
+
+
+[design: `ui_pointer.rs`] After a covered/focus transition, the retained mouse
+coordinate must not redirect a new admitted touch on the main menu. When no
+admitted left-mouse hold/press/release owns the pointer, use the current admitted
+touch position, including its ordinary release frame, before passive mouse hover.
+Keep mouse hold/release priority, controller pointer sleeping and platform/sheet
+contact filtering. No hardware state, loading epoch or raw input stream changes.
+
+[qualification] The separate retained-cursor source proposal adds real Taffy,
+raw-input and Main Menu action controls. Its baseline/candidate outcomes are
+uncompiled/unrun predictions. This source path is not evidence that it caused the
+reported R10 resume hang or that an actual Android window recovered. The existing
+Java protocol and all-DEX checks retain their prior CPU/structural scope.

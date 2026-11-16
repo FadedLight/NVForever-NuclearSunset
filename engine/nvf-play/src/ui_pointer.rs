@@ -209,11 +209,17 @@ fn update_pointer_state(
             };
             let window = windows.get(window.entity()).ok()?;
             let origin = camera.physical_viewport_rect().map(|r| r.min.as_vec2()).unwrap_or_default();
-            window
-                .physical_cursor_position()
-                .filter(|_| !sleeping)
-                .or_else(|| touches.iter().chain(touches.iter_just_pressed()).find(|t| touch_allowed(t.id())).map(|t| t.position() * window.scale_factor()))
-                .map(|p| (entity, p - origin))
+            let mouse_position = window.physical_cursor_position().filter(|_| !sleeping);
+            let touch_position = || touches.iter().chain(touches.iter_just_pressed())
+                .chain(touches.iter_just_released()).find(|t| touch_allowed(t.id()))
+                .map(|t| t.position() * window.scale_factor());
+            // A passive retained mouse coordinate is not a fresh touch's position.
+            // An admitted mouse hold/press/release keeps its existing priority.
+            let mouse_active = mouse.pressed(MouseButton::Left)
+                || mouse.just_pressed(MouseButton::Left) || mouse.just_released(MouseButton::Left);
+            let position = if mouse_active { mouse_position.or_else(touch_position) }
+                else { touch_position().or(mouse_position) };
+            position.map(|p| (entity, p - origin))
         })
         .collect();
 

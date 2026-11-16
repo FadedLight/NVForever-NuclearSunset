@@ -685,3 +685,37 @@ Close, so a later modal cannot receive a touch intended for the underlying trade
 Scroll resolves a fixed Focus/Scroll pair through the original effects body with no
 interleaving. An obsolete token cannot discard a newer live guard; only its matching
 token is consumed, including when an existing row guard drops that command.
+
+
+## Ordinary touch quantity meter
+
+[design] The ordinary barter prompt's meter supports a held finger, as its
+existing mouse meter does. Start and movement propose only the amount under the
+current painted meter, clamped at its ends even when the owned finger leaves
+its footprint. A separate Confirm still stages the quantity; a separate trade
+Accept still moves inventory/caps. Lists keep their existing browse-only drag.
+
+[design] Every changed sample uses the existing one-shot MenuInput consumer and
+its exact quantity/row/trade/frame/source guards. Only an acknowledged original
+Amount application updates the held contact's expected quantity. Its own
+hand-built redraw may replace the meter entity once at the same geometry;
+unrelated replacements and native tile-ID changes do not inherit the owner.
+Foreign quantity edits and cancel/reopen in one command queue retire the old
+contact. Same-value samples coalesce without dirtying the view. Raw cancellation
+discards an unapplied sample and retains the last applied amount; it does not
+confirm or undo a previously applied meter edit. Secondary fingers cannot press
+Confirm for the owning finger. Hardware, modal, window and settings priority
+retain their existing cancellation/neutral/return behavior.
+
+[design] Continuous native samples are guarded Amount commands, without physical
+input synthesis or PointerState writes. A stationary native End retains its real
+native click pulse only when its endpoint still hits that same meter. A subslop
+End just outside it remains an amount clamp, never a click on a nearby button.
+
+[hypothesis: qualification] Authored Apps exercise actual hand-built Taffy/fill
+geometry and the existing native QuantityMenu writer/amount text, actual raw
+input and original apply_input, including density/nonunit Bevy UiScale and a
+large-stack short edge crossing. They remain uncompiled/unrun. Native prompt XML
+is authored test data; it does not establish full game-file/class lifecycle,
+GPU pixels or physical-phone acceptance. Originalbc8's missing live Start can
+fail before later edge assertions; no edge-isolated baseline result is claimed.

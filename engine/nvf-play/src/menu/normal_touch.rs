@@ -1,6 +1,7 @@
 //! Finger input over the ordinary barter presentation. No replacement UI is drawn.
-//! The wrapper owns raw input/provenance; this adapter delays a tap until End and
-//! resolves its one-shot envelope inside the ordinary MenuInput consumer.
+//! The wrapper owns raw input/provenance. Taps wait for End; a held quantity
+//! meter proposes live Amount only. Both resolve one-shot envelopes inside the
+//! ordinary MenuInput consumer.
 use super::{model::{Category, Command, MenuModel, Mode, Quantity, RowKey, Side, Trade},
     ActiveMenu, CmdButton, MenuInput, RowButton, AmountMeter};
 use bevy::{ecs::system::SystemParam, input::touch::{TouchInput, TouchPhase},
@@ -69,10 +70,17 @@ pub(crate) struct RenderedMenu(Guard);
 impl RenderedMenu {
     pub(crate) fn of(m:&MenuModel)->Self {Self(Guard::of(m,Target::Command(Command::Accept)))}
 }
+#[derive(Clone,Copy,PartialEq)]
+enum MeterShape { Node([Vec2;3]), Tile([f64;4]) }
+#[derive(Clone,Copy)]
+struct MeterContact { shape:MeterShape, repaint:bool }
+#[derive(Clone,Copy)]
+struct MeterRequest { origin:Vec2, shape:MeterShape, pulse:bool }
+struct MeterReceipt { token:u64,epoch:u64,window:Entity,id:u64,guard:Guard,amount:i32 }
 struct Contact { window:Entity,id:u64,stamp:Stamp,origin:Vec2,previous:Vec2,
-    hit:Hit,guard:Guard,dragged:bool,vertical:bool,remainder:f64 }
+    hit:Hit,guard:Guard,dragged:bool,vertical:bool,remainder:f64,meter:Option<MeterContact> }
 struct Tap { frame:Frame,id:u64,point:Vec2,source:Source,target:Target,
-    guard:Guard,commands:[Option<Command>;2] }
+    guard:Guard,commands:[Option<Command>;2],meter:Option<MeterRequest> }
 struct Scroll { frame:Frame,id:u64,mode:Mode,category:[Category;2],side:Side,
     pixels:f64,rows:i64,native:bool }
 struct Armed { token:u64,epoch:u64,tap:Tap }
@@ -96,6 +104,27 @@ impl NormalBarter {
         else {
             self.overflow=Some(w);self.contact=None;self.pending=None;self.scroll=None;self.armed=None;self.native=None;
             self.draining=Some(w);self.epoch=self.epoch.wrapping_add(1);
+        }
+    }
+    fn meter(&mut self,f:Frame,c:&Contact,point:Vec2,hit:Hit,pulse:bool) {
+        let Some(meter)=c.meter else{return};
+        let Some(q)=c.guard.quantity else{return};
+        let Target::Meter(part)=hit.target else{return};
+        let amount=super::model::amount_at(part,q.max);
+        // Do not dirty/rebuild the ordinary prompt for unchanged live values.
+        // Coalescing back to the current amount also removes an earlier sample.
+        if amount==q.amount && !pulse {
+            if self.pending.as_ref().is_some_and(|t|t.frame==f && t.id==c.id && t.meter.is_some()){self.pending=None;}
+            return
+        }
+        let command=Command::Amount(amount);
+        if let Some(t)=self.pending.as_mut().filter(|t|t.frame==f && t.id==c.id && t.meter.is_some()) {
+            t.point=point;t.source=hit.source;t.target=hit.target;t.commands=[Some(command),None];
+            t.meter=Some(MeterRequest {origin:c.origin,shape:meter.shape,pulse});
+        } else {
+            self.pending=Some(Tap {frame:f,id:c.id,point,source:hit.source,target:hit.target,
+                guard:c.guard.clone(),commands:[Some(command),None],
+                meter:Some(MeterRequest {origin:c.origin,shape:meter.shape,pulse})});
         }
     }
     pub fn cancel(&mut self) {
@@ -159,6 +188,30 @@ struct Geometry<'w,'s> {
     menus:Query<'w,'s,&'static RenderedMenu>,
 }
 impl Geometry<'_,'_> {
+    fn meter(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,
+        origin:Vec2,point:Vec2)->Option<(Hit,MeterShape)> {
+        let mut hit=self.hit(script,f,m,origin)?;
+        if !matches!(hit.target,Target::Meter(_)){return None}
+        let (part,shape)=match hit.source {
+            Source::Node(entity)=>{
+                let (node,at,..)=self.nodes.get(entity).ok()?;
+                let basis=[node.normalize_point(*at,Vec2::ZERO)?,node.normalize_point(*at,Vec2::X)?,node.normalize_point(*at,Vec2::Y)?];
+                if !basis.iter().all(|v|v.is_finite()){return None}
+                (node.normalize_point(*at,point*f.density)?.x+0.5,MeterShape::Node(basis))
+            }
+            Source::Tile(..)=>{
+                let ui=&script?.rt.as_ref()?.game.ui_tree;
+                let b=crate::tiles::menus::meter_box(ui)?;
+                let bounds=[b.left,b.top,b.width,b.height];
+                if !bounds.iter().all(|v|v.is_finite()) || b.width<=0.0 || b.height<=0.0{return None}
+                let at=crate::tiles::input::to_menu_units(point,f.size,Vec2::splat(0.5));
+                (((at.0-b.left)/b.width) as f32,MeterShape::Tile(bounds))
+            }
+        };
+        if !part.is_finite(){return None}
+        hit.target=Target::Meter(part.clamp(0.0,1.0));Some((hit,shape))
+    }
+
     fn hit(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,point:Vec2)->Option<Hit> {
         if let Some(tiles)=self.tiles.as_ref().filter(|t|t.menu().is_some()) {
             let rt=script?.rt.as_ref()?;
@@ -211,6 +264,16 @@ pub struct Bridge<'w,'s> {
     admission:Admission<'w,'s>,geometry:Geometry<'w,'s>,
 }
 impl Bridge<'_,'_> {
+    fn meter_hit(&self,f:Frame,m:&MenuModel,c:&mut Contact,point:Vec2)->Option<Hit> {
+        let meter=c.meter.as_mut()?;
+        if !c.guard.matches(m){return None}
+        let (hit,shape)=self.geometry.meter(self.admission.script.as_deref(),f,m,c.origin,point)?;
+        let same_source=hit.source==c.hit.source
+            || (meter.repaint && matches!((hit.source,c.hit.source),(Source::Node(_),Source::Node(_))));
+        if shape!=meter.shape || !same_source{return None}
+        c.hit=hit;meter.repaint=false;Some(hit)
+    }
+
     /// Once per real parent replay frame, before its raw batch. Unconsumed work
     /// expires here instead of being retried when a later native menu reappears.
     pub fn prepare(&mut self,f:Frame) {
@@ -234,6 +297,14 @@ impl Bridge<'_,'_> {
             && self.options.as_ref().is_none_or(|o|o.enabled)).map(|_|f);
         self.state.frame=mode.filter(|_|f.admitted && !f.fresh
             && self.options.as_ref().is_none_or(|o|o.enabled)).map(|_|f);
+        if let Some(mut c)=self.state.contact.take() {
+            let valid=c.meter.is_none() || self.state.frame.is_some()
+                && self.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|{
+                    let point=c.previous;self.meter_hit(f,m,&mut c,point).is_some()
+                });
+            self.state.contact=Some(c);
+            if !valid{self.state.cancel();}
+        }
     }
     pub fn event(&mut self,e:&TouchInput)->bool {
         if self.state.retired.contains(&(e.window,e.id)) || self.state.overflow==Some(e.window){return true}
@@ -258,9 +329,18 @@ impl Bridge<'_,'_> {
             }
             if let Some(hit)=self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
                 .filter(|h|matches!(h.source,Source::Tile(..)) || h.row_step.is_finite() && h.row_step>0.0) {
-                self.state.contact=Some(Contact {window:e.window,id:e.id,stamp:Stamp::from(f),
+                let meter=if matches!(hit.target,Target::Meter(_)) {
+                    if m.quantity.is_none(){self.state.retire(e.window,e.id);return true}
+                    let Some((_,shape))=self.geometry.meter(self.admission.script.as_deref(),f,m,e.position,e.position) else {
+                        self.state.retire(e.window,e.id);return true
+                    };
+                    Some(MeterContact {shape,repaint:false})
+                } else {None};
+                let c=Contact {window:e.window,id:e.id,stamp:Stamp::from(f),
                     origin:e.position,previous:e.position,hit,guard:Guard::of(m,hit.target),
-                    dragged:false,vertical:false,remainder:0.0});
+                    dragged:false,vertical:false,remainder:0.0,meter};
+                if c.meter.is_some(){self.state.meter(f,&c,e.position,hit,false);}
+                self.state.contact=Some(c);
             } else {self.state.retire(e.window,e.id);}
             return true
         }
@@ -273,6 +353,22 @@ impl Bridge<'_,'_> {
             self.state.retire(e.window,e.id);return true
         }
         c.dragged|=e.position.distance(c.origin)>SLOP;
+        if c.meter.is_some() {
+            let Some(hit)=self.meter_hit(f,m,&mut c,e.position) else {
+                self.state.contact=Some(c);self.state.cancel();return true
+            };
+            let pulse=e.phase==TouchPhase::Ended && !c.dragged
+                && self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
+                    .is_some_and(|end|end.source==hit.source && same_target(end.target,hit.target));
+            self.state.meter(f,&c,e.position,hit,pulse);
+            c.previous=e.position;
+            if e.phase==TouchPhase::Ended {
+                self.state.barrier=true;
+                if self.state.secondary{self.state.draining=Some(e.window);}
+                self.state.retire(e.window,e.id);
+            } else {self.state.contact=Some(c);}
+            return true
+        }
         if c.dragged && c.hit.pane.is_some() {
             let d=e.position-c.origin;c.vertical|=d.y.abs()>=d.x.abs();
         }
@@ -306,7 +402,7 @@ impl Bridge<'_,'_> {
                     .filter(|h|h.source==c.hit.source && same_target(h.target,c.hit.target)) {
                 self.state.pending=Some(Tap {frame:f,id:e.id,point:e.position,
                     source:hit.source,target:hit.target,guard:c.guard,
-                    commands:commands(hit.target,m)});
+                    commands:commands(hit.target,m),meter:None});
             }
             self.state.barrier=true;
             if self.state.secondary{self.state.draining=Some(e.window);}
@@ -377,7 +473,7 @@ fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
     if matches!(tap.source,Source::Tile(..)) && script.as_ref().is_none_or(|s|s.rt.is_none()){return}
     state.next=state.next.wrapping_add(1).max(1);
     let token=state.next;let epoch=state.epoch;
-    let native=matches!(tap.source,Source::Tile(..)).then_some(NativeTap {
+    let native=(matches!(tap.source,Source::Tile(..)) && tap.meter.is_none_or(|m|m.pulse)).then_some(NativeTap {
         token,frame:tap.frame,id:tap.id,point:tap.point,source:tap.source,target:tap.target });
     state.armed=Some(Armed {token,epoch,tap});
     if let Some(native)=native {state.native=Some(native);}
@@ -406,26 +502,60 @@ pub(crate) struct Commits<'w,'s> {
     live:super::barter_touch::LiveAdmission<'w,'s>,
     creator:Option<Res<'w,crate::creator::CreatorMenu>>,
     geometry:Geometry<'w,'s>,
+    applied:Local<'s,Option<MeterReceipt>>,
 }
 impl Commits<'_,'_> {
     pub(crate) fn discard(&mut self,token:u64){
         if let Some(s)=self.state.as_mut()
             && s.armed.as_ref().is_some_and(|a|a.token==token){s.armed=None;}
     }
+    /// Acknowledge only the original consumer's completed Amount. Foreign prompt
+    /// changes retire the owner, including cancel/reopen within one queue batch.
+    pub(crate) fn applied(&mut self,token:Option<u64>,command:Command,before:Option<Quantity>,m:&MenuModel) {
+        let Some(s)=self.state.as_mut() else{return};
+        if self.applied.as_ref().is_some_and(|r|Some(r.token)==token) {
+            let mut r=self.applied.take().unwrap();
+            if let Some(q)=r.guard.quantity.as_mut(){q.amount=r.amount;}
+            if command!=Command::Amount(r.amount) || r.epoch!=s.epoch || !r.guard.matches(m) {
+                s.cancel();return
+            }
+            if let Some(c)=s.contact.as_mut().filter(|c|c.window==r.window && c.id==r.id)
+                && let Some(meter)=c.meter.as_mut() {
+                // A successfully consumed Amount dirties ActiveMenu even if clamped/no-op.
+                meter.repaint=true;c.guard=r.guard;
+            }
+        } else if before!=m.quantity && s.contact.as_ref().is_some_and(|c|c.meter.is_some()) {
+            s.cancel();
+        }
+    }
     pub(crate) fn resolve(&mut self,token:u64,m:&mut MenuModel,world:&mut fnv_sim::World<'_>,
         script:Option<&crate::script::ScriptState>)->Option<[Option<Command>;2]> {
         let s=self.state.as_mut()?;
         if s.armed.as_ref()?.token!=token{return None}
-        let a=s.armed.take()?;
-        if a.epoch!=s.epoch || s.hidden || s.frame!=Some(a.tap.frame)
-            || s.stamp!=Some(Stamp::from(a.tap.frame))
-            || self.options.as_ref().is_some_and(|o|!o.enabled)
-            || !self.live.allows(a.tap.frame,a.tap.id)
-            || !super::barter_touch::menu_allows(script,self.creator.as_deref(),m) {return None}
-        if m.refresh(world).is_err() || !a.tap.guard.matches(m)
-            || !self.geometry.hit(script,a.tap.frame,m,a.tap.point)
-                .is_some_and(|h|h.source==a.tap.source && same_target(h.target,a.tap.target)) {
+        let a=s.armed.take()?;*self.applied=None;
+        let live=a.epoch==s.epoch && !s.hidden && s.frame==Some(a.tap.frame)
+            && s.stamp==Some(Stamp::from(a.tap.frame))
+            && self.options.as_ref().is_none_or(|o|o.enabled)
+            && self.live.allows(a.tap.frame,a.tap.id)
+            && super::barter_touch::menu_allows(script,self.creator.as_deref(),m);
+        if !live {if a.tap.meter.is_some(){s.cancel();}return None}
+        let refreshed=m.refresh(world).is_ok() && a.tap.guard.matches(m);
+        let geometry=refreshed && if let Some(request)=a.tap.meter {
+            self.geometry.meter(script,a.tap.frame,m,request.origin,a.tap.point)
+                .is_some_and(|(h,shape)|h.source==a.tap.source && shape==request.shape
+                    && same_target(h.target,a.tap.target) && commands(h.target,m)==a.tap.commands)
+        } else {
+            self.geometry.hit(script,a.tap.frame,m,a.tap.point)
+                .is_some_and(|h|h.source==a.tap.source && same_target(h.target,a.tap.target))
+        };
+        if !geometry {
+            if a.tap.meter.is_some(){s.cancel();}
             m.status=Some("Trade changed. Review the item and amount again.".into());return None
+        }
+        if a.tap.meter.is_some() && s.contact.as_ref().is_some_and(|c|c.window==a.tap.frame.window && c.id==a.tap.id)
+            && let Some(Command::Amount(amount))=a.tap.commands[0] {
+            *self.applied=Some(MeterReceipt {token,epoch:s.epoch,window:a.tap.frame.window,id:a.tap.id,
+                guard:a.tap.guard,amount});
         }
         Some(a.tap.commands)
     }

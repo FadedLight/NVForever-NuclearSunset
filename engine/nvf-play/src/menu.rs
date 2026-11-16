@@ -904,6 +904,7 @@ fn apply_input(
             if let Command::CommitNormalBarter(token) = cmd { normal_barter.discard(token); }
             continue;
         }
+        let normal_token=if let Command::CommitNormalBarter(token)=cmd {Some(token)} else {None};
         let commands = if let Command::CommitBarter(token) = cmd {
             let Some(commands) = mobile_barter.resolve(token, m, &mut sim.world, script.as_deref()) else { continue };
             commands
@@ -949,7 +950,9 @@ fn apply_input(
             }
             let before = crate::ui_sounds::MenuBefore::of(m);
             let asking = m.quantity.is_some();
+            let quantity_before=m.quantity;
             let a = m.apply(&mut sim.world, cmd);
+            normal_barter.applied(normal_token,cmd,quantity_before,m);
             held.0 |= m.quantity.is_some();
             if let (false, Some(q)) = (asking, m.quantity) {
                 info!("menu: {cmd:?}: how many? ({} of {})", q.amount, q.max);

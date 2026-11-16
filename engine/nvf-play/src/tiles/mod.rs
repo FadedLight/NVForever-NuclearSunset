@@ -1253,3 +1253,11 @@ mod tests {
         assert_eq!(screen_size(1280.0, 720.0).1, 960.0);
     }
 }
+
+/// Lean authored-input Apps still use the real production writer, including its
+/// prompt lifecycle publication, native amount traits and text measurement.
+#[cfg(test)]
+pub(crate) fn install_quantity_writer_for_touch_tests(app:&mut App) {
+    app.init_resource::<draw::TileFonts>().init_resource::<crate::pause::ModsEntry>()
+        .add_systems(Update,write.before(crate::menu::normal_touch::Dispatch));
+}

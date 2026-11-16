@@ -147,6 +147,37 @@ pub fn ui_scale_part(s: f32) -> f32 {
     (((fit_ui_scale(s) - lo) / (hi - lo)) * 1000.0).round() / 1000.0
 }
 
+/// Expanded HUD slider has its own key so earlier 50..150% saved parts keep their size.
+pub const HUD_SCALE_KEY: &str = "hud-scale-v2";
+const HUD_SCALE_CHOICES: usize = 46;
+
+fn fit_hud_scale(scale: f32) -> f32 {
+    if !scale.is_finite() { return 1.0; }
+    (scale.clamp(0.25, 2.5) * 100.0).round() / 100.0
+}
+fn hud_scale_part(scale: f32) -> f32 {
+    (((fit_hud_scale(scale) - 0.25) / 2.25) * 1000.0).round() / 1000.0
+}
+fn hud_scale_of_part(part: f32) -> f32 {
+    if !part.is_finite() { return 1.0; }
+    fit_hud_scale(0.25 + part.clamp(0.0, 1.0) * 2.25)
+}
+
+pub fn register_hud_scale(app: &mut App, group: &'static str) {
+    use crate::settings::{self, Setting, Slider};
+    settings::add_setting(app, Setting::slider(HUD_SCALE_KEY, group, "HUD scale",
+        "Size of the in-game HUD, from 25% to 250%. Menus have separate sizes. Takes effect at the next start.",
+        Slider::choice(HUD_SCALE_CHOICES, |_| hud_scale_part(ui_scale_setting()),
+            |_, part| UI_SCALE_SETTING.store(hud_scale_of_part(part).to_bits(), Ordering::Relaxed),
+            |part| format!("{:.0}%", hud_scale_of_part(part) * 100.0))));
+    settings::set_older_key(app, HUD_SCALE_KEY, "ui-scale");
+    settings::set_older_split(app, "ui-scale", crate::menu_scale::legacy_menu);
+}
+
+pub(crate) fn legacy_hud_scale(value: f32) -> String {
+    format!("{:.3}", hud_scale_part(ui_scale_of_part(value)))
+}
+
 /// The UI scale a slider's part stands for ([`ui_scale_part`]'s inverse).
 pub fn ui_scale_of_part(part: f32) -> f32 {
     let (lo, hi) = UI_SCALE_RANGE;
@@ -1045,3 +1076,7 @@ pub(crate) mod tests {
         assert_eq!(x_height(&face), line_base(&face));
     }
 }
+
+#[cfg(test)]
+#[path = "interface/hud_scale_extended_tests.rs"]
+mod hud_scale_extended_tests;

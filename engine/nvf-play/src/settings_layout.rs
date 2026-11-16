@@ -140,7 +140,7 @@ pub const SECTIONS: &[Section] = &[
             "dialogue-choice-text-size",
             "dialogue-subtitle-text-size",
             "dialogue-touch-choice", "dialogue-speaker-side",
-            "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
+            "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
         ],
     ),
     section(
@@ -175,7 +175,7 @@ pub const SECTIONS: &[Section] = &[
             "display-sync",
             "frame-cap",
             "physics-rate",
-            "ui-scale",
+            "ui-scale", "hud-scale-v2",
             "menu-scale",
         ],
     ),
@@ -352,11 +352,12 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     ]),
     section(MOBILE_TAB, Some("Dialogue"), &[
         "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side",
-        "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
+        "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
     ]),
     section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints"]),
     section(MOBILE_TAB, Some("Interface size"), &[
-        "menu-scale", "ui-scale", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
+        "menu-scale", "ui-scale", "hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
+        "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1",
     ]),
     section(CONTROLS_TAB, Some("Controller"), &CONTROLLER_KEYS),
     section(MOBILE_TAB, Some("Performance and battery"), &[
@@ -605,7 +606,7 @@ mod tests {
     /// the terrain height blending row from main af16a793f and terrain anti-tiling
     /// from main 7e638d4e2, plus main 5a9414585's sound-cover row (#2688).
     /// Dynamic Tweaks and unbound controls are separate.
-    const KNOWN: [(&str, &str); 178] = [
+    const KNOWN: [(&str, &str); 183] = [
         ("lockpick-touch-hints", "Touch"),
         ("touch-pipboy-dismiss-left", "Controls"), ("touch-pipboy-dismiss-right", "Controls"),
         ("touch-pipboy-close-button", "Controls"), ("touch-pipboy-button-graphics", "Controls"), ("touch-pipboy-model-wheel", "Controls"),
@@ -653,6 +654,7 @@ mod tests {
         ("dialogue-speaker-side", "Gameplay"),
         ("dialogue-theme-v1", "Gameplay"),
         ("dialogue-background-opacity-v1", "Gameplay"),
+        ("dialogue-background-tint-v1", "Gameplay"),
         ("dialogue-frame-opacity-v1", "Gameplay"),
         ("dialogue-hints-v1", "Gameplay"),
         ("true-iron-sights", "Gameplay"),
@@ -717,6 +719,10 @@ mod tests {
         ("touch-pipboy-size-v1", "Gameplay"),
         ("touch-pipboy-tab-swipes", "Gameplay"),
         ("ui-scale", "Display"),
+        ("hud-scale-v2", "Display"),
+        ("barter-menu-size-v1", "Display"),
+        ("repair-menu-size-v1", "Display"),
+        ("workbench-menu-size-v1", "Display"),
         ("menu-scale", "Display"),
         ("hud-health-size-v1", "Display"),
         ("hud-action-points-size-v1", "Display"),
@@ -842,9 +848,9 @@ mod tests {
         let gameplay = keys(&list, &l, "Gameplay");
         assert_eq!(gameplay[gameplay.len() - 3..], ["[World]", "grass-fire", "sound-cover"]);
         let dialogue = gameplay.iter().position(|k| k == "[Dialogue]").unwrap();
-        assert_eq!(&gameplay[dialogue..dialogue+16], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
+        assert_eq!(&gameplay[dialogue..dialogue+17], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
             "dialogue-look", "dialogue-recentre", "dialogue-zoom", "lip-sync", "touch-dialogue",
-            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]);
+            "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]);
         assert_eq!(
             keys(&list, &l, "Audio"),
             [
@@ -909,7 +915,7 @@ mod tests {
                 .path()
         };
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
-        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"] {assert_eq!(at(key), "Gameplay > Dialogue");}
+        for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"] {assert_eq!(at(key), "Gameplay > Dialogue");}
         assert_eq!(at("head-bob"), "Gameplay > Camera");
         assert_eq!(at("grass-fire"), "Gameplay > World");
         assert_eq!(at("sound-cover"), "Gameplay > World");
@@ -1067,7 +1073,10 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 68);
+        assert_eq!(mobile_keys.len(), 73);
+        let added = ["hud-scale-v2", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1", "dialogue-background-tint-v1"];
+        assert!(added.iter().all(|key| mobile_keys.contains(key)));
+        assert_eq!(mobile_keys.iter().filter(|key| !added.contains(key)).count(), 68, "every original mobile placement retained");
         assert!(!mobile_keys.contains("physics-rate"), "upstream screen setting is shared, not mobile-only");
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "Gameplay > World");

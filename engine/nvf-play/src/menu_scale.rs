@@ -32,11 +32,11 @@ fn of_part(value: f32) -> f32 {
 }
 
 /// Legacy ui-scale is a 50..150% slider part, not an already decoded scale.
-fn legacy_menu(value: &str) -> Vec<(&'static str, String)> {
+pub(crate) fn legacy_menu(value: &str) -> Vec<(&'static str, String)> {
     let Some(value) = value.parse::<f32>().ok().filter(|v| v.is_finite()) else { return Vec::new() };
     let value = settings::choice_part(settings::choice_index(value, crate::interface::UI_SCALE_CHOICES), crate::interface::UI_SCALE_CHOICES);
     let scale = crate::interface::menu_scale_of(crate::interface::ui_scale_of_part(value));
-    vec![(KEY, format!("{:.3}", part(scale)))]
+    vec![(KEY, format!("{:.3}", part(scale))), (crate::interface::HUD_SCALE_KEY, crate::interface::legacy_hud_scale(value))]
 }
 
 pub fn register(app: &mut App, group: &'static str) {
@@ -46,7 +46,7 @@ pub fn register(app: &mut App, group: &'static str) {
         "Size of the main, pause and other menus, independent of HUD scale. Takes effect at the next start.",
         Slider::choice(CHOICES, |w| part(w.resource::<MenuScale>().0), |w, v| w.resource_mut::<MenuScale>().0 = of_part(v), |v| format!("{:.0}%", of_part(v) * 100.0)),
     ));
-    // Synthesize only the missing menu value before ordinary settings loading.
+    // Decode the old shared value into missing independent menu/HUD keys before loading.
     // store() writes both registered rows on any edit, freezing this initial value
     // even when the player changes only the HUD. An explicit menu key always wins.
     settings::set_older_key(app, KEY, "ui-scale");

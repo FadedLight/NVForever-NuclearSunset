@@ -88,6 +88,7 @@ pub mod loading;
 pub mod loading_look;
 pub mod main_menu;
 pub mod menu_scale;
+pub mod menu_readability;
 pub mod location_markers;
 pub mod lockpick;
 pub mod roulette;

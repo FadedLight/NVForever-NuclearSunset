@@ -441,8 +441,9 @@ fn register_display(app: &mut App) {
         .with_switches("--viewmodel-fov"),
     );
     // The HUD's size (#1631), kept by nvf-play's interface and fixed for the run at start.
-    add_setting(app, nvf_play::interface::ui_scale_row(GROUP_PICTURE));
+    nvf_play::interface::register_hud_scale(app, GROUP_PICTURE);
     nvf_play::menu_scale::register(app, GROUP_PICTURE);
+    nvf_play::menu_readability::register(app, GROUP_PICTURE);
     nvf_play::hud_readability::register(app, GROUP_PICTURE);
 
     add_setting(

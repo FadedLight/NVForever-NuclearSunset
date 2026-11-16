@@ -227,7 +227,11 @@ fn instrument(
     for (entity,kind,mut background,image) in &mut cursors {
         if !matches!(kind,Paint::Focus{..}|Paint::PreviewFocus) {continue;}
         if let Some(Some((handle,rect)))=loaded.as_ref().filter(|_|appearance.theme==Theme::WristTerminal) {
-            if image.is_none() {commands.entity(entity).insert(ImageNode {rect:*rect,color:background.0,..ImageNode::new(handle.clone())});}
+            if image.is_none() {
+                let tint=background.0;
+                background.0=Color::NONE;
+                commands.entity(entity).insert(ImageNode {rect:*rect,color:tint,..ImageNode::new(handle.clone())});
+            }
         } else if let Some(image)=image {
             background.0=image.color;
             commands.entity(entity).remove::<ImageNode>();

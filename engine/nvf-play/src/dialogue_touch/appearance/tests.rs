@@ -361,3 +361,63 @@ fn installed_cursor_uses_texture_alpha_instead_of_a_solid_procedural_backing() {
     assert_eq!(app.world().get::<BackgroundColor>(cursor).unwrap().0,Color::NONE);
     assert_eq!(app.world().get::<ImageNode>(cursor).unwrap().color,crate::interface::tint(crate::interface::hud_rgb(),255.));
 }
+
+#[test]
+fn installed_cursor_first_insertion_frame_clears_backing_and_preserves_tint() {
+    // Authored DDS through the production VFS/Pictures loader, never game assets.
+    struct MarkerFiles(std::path::PathBuf);
+    impl Drop for MarkerFiles {
+        fn drop(&mut self) {
+            let _=std::fs::remove_file(self.0.join("textures/interface/shared/scrollbar/vert_marker.dds"));
+            for relative in ["textures/interface/shared/scrollbar","textures/interface/shared","textures/interface","textures",""] {
+                let _=std::fs::remove_dir(self.0.join(relative));
+            }
+        }
+    }
+    let files=MarkerFiles(std::env::temp_dir().join(format!("nvf-dialogue-cursor-insertion-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())));
+    let folder=files.0.join("textures/interface/shared/scrollbar");
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut dds=crate::interface::tests::authored_rgba_dds(2,2);
+    dds[128..132].copy_from_slice(&[255,255,255,255]);
+    std::fs::write(folder.join("vert_marker.dds"),dds).unwrap();
+    let vfs=fnv_vfs::Vfs::open(&files.0,&[]).unwrap();
+    let schema=fnv_nif::Schema::load_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/nif")).unwrap();
+    let mut app=App::new();
+    app.insert_resource(nvf_assets::GameData{vfs:std::sync::Arc::new(vfs),schema:std::sync::Arc::new(schema)})
+        .insert_resource(Appearance{theme:Theme::WristTerminal,..default()})
+        .init_resource::<Assets<Image>>()
+        .init_resource::<crate::dialogue_menu::DialogueMenu>()
+        .add_systems(Update,(paint,instrument).chain());
+    let cursor=app.world_mut().spawn((Paint::Focus{index:0,short:false},Node::default(),BackgroundColor(Color::WHITE))).id();
+    assert!(app.world().get::<ImageNode>(cursor).is_none());
+    let tint=crate::interface::tint(crate::interface::hud_rgb(),255.);
+    app.update();
+    let image=app.world().get::<ImageNode>(cursor).expect("real instrument producer inserts the loaded cursor on its first frame");
+    assert!(app.world().resource::<Assets<Image>>().get(&image.image).is_some());
+    assert_eq!(image.color,tint,"insertion keeps the pre-clear selection tint");
+    assert_eq!(app.world().get::<BackgroundColor>(cursor).unwrap().0,Color::NONE,"first insertion frame already has no solid backing; a second paint must not be needed");
+    app.update();
+    assert_eq!(app.world().get::<ImageNode>(cursor).unwrap().color,tint);
+    assert_eq!(app.world().get::<BackgroundColor>(cursor).unwrap().0,Color::NONE);
+    app.world_mut().resource_mut::<Appearance>().theme=Theme::Minimal;
+    app.update();
+    assert!(app.world().get::<ImageNode>(cursor).is_none());
+    assert_eq!(app.world().get::<BackgroundColor>(cursor).unwrap().0,tint,"removing the installed cursor restores the procedural cue in the same frame");
+}
+
+#[test]
+fn legacy_split_panel_saved_name_loads_field_notes_without_an_extra_choice() {
+    let mut app=App::new();
+    install(&mut app);
+    let (load,chosen,save)={
+        let settings=app.world().resource::<crate::settings::Settings>();
+        let row=settings.index(THEME_KEY).unwrap();
+        let choices=settings.choices(row).unwrap();
+        assert_eq!((choices.names)(app.world()),["Minimal","Classic Glass","Field Notes","Retro Console","Wrist Terminal"]);
+        (choices.load,choices.chosen,choices.save)
+    };
+    assert!(load(app.world_mut(),"Split Panel"),"legacy persisted value is accepted by the registered loader");
+    assert_eq!(app.world().resource::<Appearance>().theme,Theme::SplitPanel);
+    assert_eq!(chosen(app.world()),"Field Notes");
+    assert_eq!(save(app.world()),"Field Notes");
+}

@@ -109,11 +109,32 @@ fn following_camera_off_and_mark_and_fire_retain_explicit_existing_touch_policy(
         assert_eq!(app.world().resource::<State>().mode(),Mode::Off);
         assert_eq!(app.world().resource::<VatsMode>().queue.len(),0);
     }
+    // Enabled Mark and Fire now targets the actual body, with no Classic list.
     let (mut app, _, f)=following_camera_scene(Mode::Hold);
-    app.world_mut().resource_mut::<VatsMode>().style=VatsStyle::DeadEye;
-    prepare(&mut app,f,true); let at=point(&app,f,B,0);
-    assert!(!raw(&mut app,f,1331,TouchPhase::Started,at,false)); app.update();
-    assert_eq!(app.world().resource::<VatsMode>().queue.len(),0,"Mark and Fire body touch remains unsupported");
+    {let mut v=app.world_mut().resource_mut::<VatsMode>();v.style=VatsStyle::DeadEye;v.classic=ClassicState::default();}
+    prepare(&mut app,f,true); let at=point(&app,f,B,0);let before=live_view(&app);
+    assert_eq!(real_ray_body(&mut app,f,at),Some((B,0)));
+    assert!(raw(&mut app,f,1331,TouchPhase::Started,at,false)); app.update();
+    assert_eq!(app.world().resource::<VatsMode>().queue.len(),0,"hold start only previews");
+    assert!(raw(&mut app,f,1331,TouchPhase::Canceled,at,false));app.update();
+    assert_eq!(app.world().resource::<VatsMode>().queue.len(),0,"short canceled hold cannot queue");
+    prepare(&mut app,f,true);
+    assert!(raw(&mut app,f,1332,TouchPhase::Started,at,false));app.update();
+    for _ in 0..20 {
+        prepare(&mut app,f,false);app.update();
+        assert_eq!(real_ray_body(&mut app,f,at),Some((B,0)));
+        assert_eq!(live_view(&app),before,"Mark and Fire never adopts Classic camera follow");
+    }
+    let v=app.world().resource::<VatsMode>();
+    assert_eq!(v.queue.marks().iter().map(|m|(m.target,m.part)).collect::<Vec<_>>(),[(FormId(B),Some(0))]);
+    assert_eq!(v.reserved(),20.0);assert_eq!(v.phase,Phase::Marking);assert_eq!(v.stats.shots,0);
+    assert!(v.classic.targets.is_empty() && v.classic.selected.is_none());
+    assert!(raw(&mut app,f,1332,TouchPhase::Ended,at,false));app.update();
+    assert_eq!(app.world().resource::<VatsMode>().queue.len(),1);
+    assert_eq!(app.world().resource::<VatsMode>().phase,Phase::Marking,"release does not confirm");
+    prepare(&mut app,f,true);
+    assert!(raw(&mut app,f,1333,TouchPhase::Started,Vec2::new(900.,500.),true));app.update();
+    assert_eq!(app.world().resource::<VatsMode>().phase,Phase::Firing,"a separate explicit Fire confirms");
 }
 
 #[test]

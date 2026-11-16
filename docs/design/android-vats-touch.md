@@ -88,5 +88,8 @@ posed parts through Bridge and VATS update, Tap/Hold, unchanged Classic state an
 camera, AP/ammunition limits, empty Fire, canceled or stale body/geometry/style/
 modal/hardware contacts, late actor/cloak rejection, native reticle mouse/controller
 behavior with explicit Off, and actual wrapper raw-touch Fire confirmation. Original
-Classic cases and camera-follow controls remain. These new controls are uncompiled
+Classic cases, both explicit-Off style controls and Classic camera-follow assertions
+remain. The former enabled-DeadEye refusal section in the live-camera policy test
+intentionally becomes a live body Hold/short-cancel/queue/explicit-Fire control;
+its old unsupported-policy oracle does not apply to this feature. These controls are uncompiled
 and unrun; no device acceptance or default-APK VATS repair is claimed.

@@ -164,7 +164,7 @@ source is unchanged. This source union needs its own strict/code-generation,
 engine/runtime, native/final packaging and phone checks; Main's separate scoped
 attachment results and failed Android cycles do not qualify it or a new APK.
 
-The next normal Main `5a941458` integration is **In progress**. Its 21 commits
+At the earlier Main `5a941458` checkpoint, integration was **In progress**. Its 21 commits
 in 42 paths require unions for the root workspace, precise owned-image guard and
 shared settings documentation/layout. Main's desktop launcher and sound-cover
 setting coexist with Android's local Rapier patch and Mobile layout: 178 fixed
@@ -220,6 +220,22 @@ production gate change. These source-supported diagnoses are not corrected
 runtime or phone results. Actual tested composition has two changed graph
 inputs/root packages 470 to 477 for desktop launcher updates; future native/legal
 checks must bind actual source. Optional editor/dialogue proposals stay separate.
+
+The required Main `cfa60c0f` integration is **In progress** after an actual
+root Cargo conflict: 26 incoming commits/52 paths retain the shared DLSS-file
+crate, launcher updates and license/notice moves together with Android's local
+Rapier workspace policy. The shared crate's unchanged HTTP dependency is moved
+to its existing Windows target table, matching the real Windows-only HTTP
+consumer; pure cross-platform helpers and all old test bodies remain. This is
+a source-derived platform dependency correction, not an observed compiler failure
+or Android crash cure. The incoming 39 scenario edits change path metadata only;
+all 1,568 Main records/order/top metadata plus Android for 1,569 are retained.
+All four preceding wrapper corrections, 72 tests/453 assertion macros, settings
+178/68, Java and VATS source remain. Root and engine graphs now change for the
+shared crate, so old graph/build results do not qualify this merge. New full
+runtime/strict/native/metadata/notices and final packaging checks are unrun;
+physical resume/input/save/Doc Mitchell/controller acceptance stays open. R9
+remains the qualified test baseline; optional editor/dialogue work is separate.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

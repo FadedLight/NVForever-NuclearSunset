@@ -341,7 +341,7 @@ Main's sound-cover row in Gameplay > World, with 178 fixed keys and the existing
 parity or verified mod support. The scenario union retains all 1,564 Main records
 and Android startup options, for 1,565.
 
-The complete source graph-input inventory now has 1,154 entries: root Cargo.toml,
+At that checkpoint, the source graph inventory had 1,154 entries: root Cargo.toml,
 root Cargo.lock and the new launcher manifest differ from the Android parent,
 while the other 1,151 entries remain exact. Root lock package count changes from
 216 to 470; the 791 engine-prefixed graph inputs remain exact. These static
@@ -419,6 +419,30 @@ inputs and local Rapier policy remain exact the PR head. These are source facts,
 not final metadata, ABI, notices or APK qualification. Future packages must use
 their actual tested checkout. The separate Controls/Move editor and dialogue
 overflow proposals remain uncompiled/unrun and excluded from this correction.
+
+[qualification] Main `cfa60c0f` introduced an actual root-workspace conflict
+before the four-wrapper fixture correction could be published. The normal merge
+accepts 26 commits in 52 paths after `95fd3197`. It keeps Main's shared
+`nvf-dlss-files` crate, launcher updates, download consumers, relocated licence
+text and notice integration alongside Android's local Rapier patch/exclusion.
+The shared crate's identical HTTP dependency is scoped to Windows, matching its
+actual HTTP implementation. Cross-platform types and pure helpers remain;
+no Rust body or existing test is changed by that dependency correction. This
+prevents an unused Android TLS/OpenSSL dependency expansion in source; it is not
+an observed compiler failure, new backend or phone-crash result.
+
+The incoming scenario changes affect only path metadata on 39 existing records.
+All 1,568 Main scenario objects and their order/top-level metadata are retained,
+plus the unchanged Android record for 1,569; no expectation or eligibility is
+weakened. All four wrapper corrections, their 72 existing tests/453 assertion
+macros, 178 fixed settings/68 overrides, Java loading-cover source and VATS
+fixture remain exact the preceding correction. The graph now includes the new
+shared crate and changed root/engine manifests and locks; earlier whole-graph
+identity claims apply only to their stated checkpoints. Actual selected Android
+metadata, locked builds, notices, full engine tests and native/final APK gates
+must run on the new tested checkout. The four corrected outcomes remain unrun,
+optional editor/dialogue proposals stay separate, and R9 remains the qualified
+test/rollback pending a new qualifying cycle and physical acceptance.
 
 ## Loading recovery qualification
 

@@ -63,6 +63,9 @@ public final class DiagnosticsArchive {
         + "((?:nvforever|nvf_[a-z0-9_]+|fnv_[a-z0-9_]+|bevy(?:_[a-z0-9_]+)?|"
         + "wgpu(?:_[a-z0-9_]+)?|naga|std|core|alloc|rapier3d(?:_f64)?|"
         + "parry3d(?:_f64)?|ash|jni|winit)::[A-Za-z0-9_:<>$.-]{1,512})\\s*$");
+    // The existing engine panic report's numeric UTC header dates its own stack.
+    // Keep only that complete header in crash reports, never arbitrary report prose.
+    private static final Pattern CRASH_TIME = Pattern.compile("time \\(UTC\\): [0-9]{8}-[0-9]{6}");
     private static final Pattern QUOTED = Pattern.compile("\"[^\"\\r\\n]*\"|'[^'\\r\\n]*'");
     private static final Pattern PATH = Pattern.compile(
         "(?:[A-Za-z]:[\\\\/]|\\\\\\\\|/|file:|content:)[^\\s\"'<>]*");
@@ -163,10 +166,10 @@ public final class DiagnosticsArchive {
             byte[] tail;
             try { tail = tail(file, logs, counts); }
             catch (IOException e) { counts.omittedFiles++; continue; }
-            byte[] clean = scrub(tail, secret, counts);
+            String name = file.getFileName().toString();
+            byte[] clean = scrub(tail, secret, counts, name.startsWith("crash-"));
             if (clean.length > MAX_TEXT_BYTES - total) { counts.omittedFiles++; continue; }
             total += clean.length;
-            String name = file.getFileName().toString();
             parts.add(new Part(name.startsWith("events-") ? "events"
                 : name.startsWith("crash-") ? "crash" : "engine", clean));
         }
@@ -270,7 +273,7 @@ public final class DiagnosticsArchive {
         }
         return text.toString().getBytes(StandardCharsets.UTF_8);
     }
-    private static byte[] scrub(byte[] input, String secret, Counts counts) {
+    private static byte[] scrub(byte[] input, String secret, Counts counts, boolean crashReport) {
         if (input.length > 0 && input[input.length - 1] != '\n') {
             // The engine may be appending while we read. A partial final line could
             // expose only a fragment of a secret, or end inside a UTF-8 character.
@@ -290,6 +293,11 @@ public final class DiagnosticsArchive {
         StringBuilder clean = new StringBuilder();
         for (String line : text.split("\\r?\\n", -1)) {
             if (line.isEmpty()) continue;
+            if (crashReport && line.length() <= MAX_LINE && CRASH_TIME.matcher(line).matches()
+                && (secret == null || secret.isEmpty() || !line.contains(secret))) {
+                clean.append(line).append('\n');
+                continue;
+            }
             var frame = FRAME.matcher(line);
             if (line.length() <= MAX_LINE && frame.matches()
                 && (secret == null || secret.isEmpty() || !line.contains(secret))) {

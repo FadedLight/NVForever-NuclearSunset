@@ -39,6 +39,13 @@ identifiers, full-system telemetry, tokens, private filesystem paths and player/
 identity are excluded. This conservative filtering can omit useful evidence; omitted
 and truncated data are counted. Generic ZIP entry names avoid revealing local filenames.
 
+The existing engine panic report's exact numeric `time (UTC): YYYYMMDD-HHMMSS`
+header is retained beside its stack in the same anonymous crash entry. This narrow
+exception does not admit arbitrary report prose, appended fields, paths or known
+secrets. It is restricted to owned crash reports; ordinary logs retain their existing
+technical-line filter. The archive and receiver formats are unchanged. This dates the
+retained report; it does not make the collection's build revision that report's source.
+
 Additional metadata contains validated source revisions, package version/API level,
 the app's own historical game-process exit codes, and bounded restart breadcrumbs made
 from fixed phase enums, timestamps and app-owned PIDs. No raw Intent arguments or exit

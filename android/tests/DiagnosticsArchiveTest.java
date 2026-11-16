@@ -31,7 +31,8 @@ public final class DiagnosticsArchiveTest {
             boundedTailAndRetention(root.resolve("bounded"));
             malformedUtf8AndMetadata(root.resolve("utf8"));
             invalidLocationsAndSymlinks(root.resolve("links"));
-            System.out.println("DiagnosticsArchive: 4 fixture groups passed");
+            crashUtcHeaders(root.resolve("crash-time"));
+            System.out.println("DiagnosticsArchive: 5 fixture groups passed");
         } finally {
             // All paths are inside this freshly created test root; do not follow links.
             try (var paths = Files.walk(root)) {
@@ -244,6 +245,53 @@ public final class DiagnosticsArchiveTest {
         Files.createSymbolicLink(outAlias, root.toAbsolutePath());
         fails(() -> DiagnosticsArchive.collect(logs.toFile(), outAlias.resolve("out.zip").toFile(), SOURCE, RUNTIME, ""));
         require(!Files.exists(root.resolve("out.zip")), "symlink output parent refused");
+    }
+    private static void crashUtcHeaders(Path root) throws Exception {
+        Path logs = logs(root);
+        String first = "time (UTC): 20261116-130443";
+        String second = "time (UTC): 20261115-010203";
+        String engineOnly = "time (UTC): 20261113-040506";
+        String frame = "0: bevy_render::gpu_readback::map_buffers\n";
+        String data = first + "\n" + frame
+            + "prefix " + first + "\n"
+            + first + "suffix\n"
+            + first + " username=ExamplePerson\n"
+            + first + " 'private nickname'\n"
+            + "time (UTC): 2026-11-16T13:04:43Z\n"
+            + "time (UTC): 20261116-130443 " + "x".repeat(9000) + "\n"
+            + "time (UTC): 20261116-130443\t\n";
+        Path original = logs.resolve("crash-20261116-130443-42.txt");
+        Files.writeString(original, data);
+        Files.writeString(logs.resolve("crash-20261115-010203-41.txt"), second + "\n" + frame);
+        Files.writeString(logs.resolve("nvforever-20261113-040506-40.log"), engineOnly + "\n");
+        Path output = root.resolve("dated.zip");
+        DiagnosticsArchive.collect(logs.toFile(), output.toFile(), SOURCE, RUNTIME, "");
+        Map<String, String> files = unzip(output);
+        String text = joined(files);
+        var headers = text.lines().filter(line -> line.startsWith("time (UTC):")).toList();
+        require(headers.size() == 2 && headers.contains(first) && headers.contains(second),
+            "actual crash collect-to-ZIP keeps each exact UTC header beside its stack");
+        var datedParts = files.values().stream()
+            .filter(part -> part.contains(first) || part.contains(second)).toList();
+        require(datedParts.size() == 2, "different reports retain separate anonymous ZIP entries");
+        for (String part : datedParts) {
+            require(part.contains(first) != part.contains(second), "one original report date per entry");
+            require(part.contains(frame), "retained UTC is bound to that report's stack entry");
+        }
+        require(!text.contains(engineOnly), "UTC exception is limited to owned crash reports");
+        for (String omitted : new String[] {"prefix ", "suffix", "ExamplePerson", "private nickname",
+                "2026-11-16T13:04:43Z", "x".repeat(100), original.getFileName().toString()})
+            require(!text.contains(omitted), "near-miss or sensitive report prose remains omitted");
+        require(Files.readString(original).equals(data), "collecting dates leaves original crash untouched");
+        Path protectedOutput = root.resolve("secret.zip");
+        DiagnosticsArchive.collect(logs.toFile(), protectedOutput.toFile(), SOURCE, RUNTIME,
+            "20261116-130443");
+        Map<String, String> protectedFiles = unzip(protectedOutput);
+        String protectedText = joined(protectedFiles);
+        require(!protectedText.contains(first) && protectedText.contains(second),
+            "known secret exclusion still precedes an otherwise valid UTC header");
+        require(protectedFiles.values().stream().filter(part -> part.contains(frame)).count() == 2,
+            "secret-bearing date omission keeps both reports' safe frames in distinct entries");
     }
     private interface Operation { void run() throws Exception; }
     private static void fails(Operation op) throws Exception {

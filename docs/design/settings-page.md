@@ -41,7 +41,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
 | Gameplay | Dialogue | `menu-pause`, `dialogue-goodbye-hint`, `dialogue-look`, `dialogue-recentre`, `dialogue-zoom`, `lip-sync` |
 | Gameplay | Camera | `detached-camera`, `true-iron-sights`, `first-person-body`, `weapon-sway`, `head-bob`, `weapon-lower`, `field-of-view`, `viewmodel-field-of-view` |
-| Gameplay | World | `grass-fire` (#2662) |
+| Gameplay | World | `grass-fire` (#2662), `sound-cover` (#2688) |
 | Display | Screen | `resolution`, `borderless`, `monitor`, `display-sync`, `frame-cap`, `physics-rate`, `ui-scale`, `menu-scale` |
 | Display | Interface | `hud-colour`, `hud-red`, `hud-green`, `hud-blue`, `pipboy-colour`, `pipboy-red`, `pipboy-green`, `pipboy-blue`, `language`, `dynamic-crosshair`, `crosshair-style`, `sneak-gauges` |
 | Display | Performance | `fps-counter`, `fps-counter-fps`, `fps-counter-low`, `fps-counter-graph`, `fps-counter-split`, `fps-counter-cpu`, `fps-counter-gpu`, `fps-counter-vram`, `fps-counter-ram`, `fps-counter-loaded`, `fps-counter-upscaling` |
@@ -54,11 +54,11 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Tweaks | (none) | none named yet |
 | Debug | (none) | `overlay`, `hit-markers`, `god-mode`, `navmesh`, `scope-3d` |
 
-The table names the 177 potential built-in rows in the combined `KNOWN` fixture
+The table names the 178 potential built-in rows in the combined `KNOWN` fixture
 [documented: `settings_layout.rs::SECTIONS`], including #1966's `quality` and `enhanced`,
 #2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling`, #2317's
 `frame-generation-frames`, #2550's `terrain-height-blend`, #2662's `grass-fire` and
-#2551's `terrain-anti-tiling` (`KNOWN` in
+#2551's `terrain-anti-tiling` and #2688's `sound-cover` (`KNOWN` in
 `settings_layout.rs`); a test keeps
 it so (`settings_layout.rs`, `the_table_names_each_key_once_in_one_of_the_tabs`). The
 original puts the HUD and Pip-Boy colours and the crosshair in its Display category
@@ -561,3 +561,12 @@ beside `terrain-height-blend` in **Graphics > Picture**, bringing the combined f
 Controls rows remain outside this fixed fixture. All 1,552 incoming Main scenario
 records and Android's startup record are retained as source. These source counts
 do not claim compilation, scenario execution or device acceptance of this merge.
+
+[design] The following `5a941458` Main import adds `sound-cover` (#2688) after
+`grass-fire` in **Gameplay > World**, bringing the combined fixed `KNOWN` fixture
+to 178 unique keys. The saved sound-cover option keeps Main's on-by-default
+engine behavior; it is not an original-game parity claim. The 68 Android overrides
+remain 60 Mobile and 8 Controls > Controller placements, while generated Tweaks
+and unbound Controls rows stay separate. Static composition retains all 1,564
+Main scenarios and Android's startup record, for 1,565; current file verification,
+scenario execution and device acceptance remain pending.

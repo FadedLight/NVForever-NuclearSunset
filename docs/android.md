@@ -247,7 +247,7 @@ and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
 ## Current-main integration status
 
 [design] The next source integration retains the optional touch views alongside
-accepted Main `ac8f1d6d`, following the earlier `df17cc6d`, `7e638d4e` and `ed684e8` checkpoints and retaining
+accepted Main `5a941458`, following the earlier `ac8f1d6d`, `df17cc6d`, `7e638d4e` and `ed684e8` checkpoints and retaining
 its engine implementation of Stewie-related preferences. This is separate from
 verified execution of a particular original mod/plugin/version/profile.
 Controller keyboard/mouse contributions keep their
@@ -268,7 +268,7 @@ PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
 all map assertions. This additional source setup correction is unexecuted; it is
 not an observed explanation for the earlier runtime failures.
 
-[qualification] Source comparison retains all 1,563 Main scenario records plus
+[qualification] Source comparison retains all 1,564 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
 integrity, not scenario execution. Integrated engine/UI regressions, native
 packaging and phone acceptance remain unrun. Earlier ARM/R31
@@ -326,9 +326,29 @@ distinction alongside Android's numeric admission, checked skin and final mesh
 guard before bounds and mesh/material/bind-pose publication. Material preparation
 may already cache textures. Attachment graph capture and rejected-shape reporting
 both remain. Main's own scoped attachment results do not qualify this Android
-union. The final scenario list contains 1,564 records, including Android's
+union. That integration's scenario list contains 1,564 records, including Android's
 unchanged startup record; scenario execution and current file verification remain
 pending. No current engine, native APK, phone or crash result is transferred.
+
+[qualification] A later real four-file conflict requires normal integration with
+Main `5a941458`: 21 incoming commits in 42 paths. The root workspace retains
+Main's desktop launcher and Android's local Rapier patch/exclusion; the image
+guard retains both sets of explicit owned-icon paths. Shared settings retain
+Main's sound-cover row in Gameplay > World, with 178 fixed keys and the existing
+68 Android overrides. This is Main's saved-on engine feature, not original-game
+parity or verified mod support. The scenario union retains all 1,564 Main records
+and Android startup options, for 1,565.
+
+The complete source graph-input inventory now has 1,154 entries: root Cargo.toml,
+root Cargo.lock and the new launcher manifest differ from the Android parent,
+while the other 1,151 entries remain exact. Root lock package count changes from
+216 to 470; the 791 engine-prefixed graph inputs remain exact. These static
+inventories do not establish Cargo resolution, a locked build, ABI or notices.
+The final Android notices must use the actual native package graph, independently
+of the desktop launcher's workspace dependencies. Two shared Main sound-cover
+expiry/playback-admission findings remain a coordinated follow-up; incoming
+behavior is preserved here, without an Android-only fork or phone-cause claim.
+Current strict/code-generation, runtime, packaging and phone checks remain open.
 
 ## Loading recovery qualification
 

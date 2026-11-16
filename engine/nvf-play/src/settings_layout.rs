@@ -164,7 +164,7 @@ pub const SECTIONS: &[Section] = &[
         ],
     ),
     // After the tab's other headings, so the rows above keep their places (#2662).
-    section("Gameplay", Some("World"), &["grass-fire"]),
+    section("Gameplay", Some("World"), &["grass-fire", "sound-cover"]),
     section(
         "Display",
         Some("Screen"),
@@ -603,8 +603,9 @@ mod tests {
     /// registers with, plus main da13f4f8a's grass-fire row (#2567), the viewmodel
     /// field of view and menu scale rows, main 6b29ee76b's Physics rate row, and
     /// the terrain height blending row from main af16a793f and terrain anti-tiling
-    /// from main 7e638d4e2. Dynamic Tweaks and unbound controls are separate.
-    const KNOWN: [(&str, &str); 177] = [
+    /// from main 7e638d4e2, plus main 5a9414585's sound-cover row (#2688).
+    /// Dynamic Tweaks and unbound controls are separate.
+    const KNOWN: [(&str, &str); 178] = [
         ("lockpick-touch-hints", "Touch"),
         ("touch-pipboy-dismiss-left", "Controls"), ("touch-pipboy-dismiss-right", "Controls"),
         ("touch-pipboy-close-button", "Controls"), ("touch-pipboy-button-graphics", "Controls"), ("touch-pipboy-model-wheel", "Controls"),
@@ -626,6 +627,7 @@ mod tests {
 
         ("detached-camera", "Gameplay"),
         ("grass-fire", "Gameplay"),
+        ("sound-cover", "Gameplay"),
         ("menu-pause", "Gameplay"),
         ("dialogue-goodbye-hint", "Gameplay"),
         ("reload-slows", "Gameplay"),
@@ -838,7 +840,7 @@ mod tests {
             ]
         );
         let gameplay = keys(&list, &l, "Gameplay");
-        assert_eq!(gameplay[gameplay.len() - 2..], ["[World]", "grass-fire"]);
+        assert_eq!(gameplay[gameplay.len() - 3..], ["[World]", "grass-fire", "sound-cover"]);
         let dialogue = gameplay.iter().position(|k| k == "[Dialogue]").unwrap();
         assert_eq!(&gameplay[dialogue..dialogue+16], &["[Dialogue]", "menu-pause", "dialogue-goodbye-hint",
             "dialogue-look", "dialogue-recentre", "dialogue-zoom", "lip-sync", "touch-dialogue",
@@ -910,6 +912,7 @@ mod tests {
         for key in ["touch-dialogue","dialogue-choice-text-size","dialogue-subtitle-text-size","dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"] {assert_eq!(at(key), "Gameplay > Dialogue");}
         assert_eq!(at("head-bob"), "Gameplay > Camera");
         assert_eq!(at("grass-fire"), "Gameplay > World");
+        assert_eq!(at("sound-cover"), "Gameplay > World");
         assert_eq!(at("hud-red"), "Display > Interface");
         assert_eq!(at("physics-rate"), "Display > Screen");
         for key in [

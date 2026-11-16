@@ -62,8 +62,8 @@ are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging
 The earlier normal Main `af16a793` integration retains Android numeric admission and image
 allocation guards alongside incoming BC5 normal roles/source alpha and the new
 terrain graphics row. The current combined UI has 68 Android overrides and a fixed
-`KNOWN` fixture with 177 unique literal keys after the `7e638d4e` terrain
-anti-tiling row; additional Main Tweaks and unbound control rows are separate,
+`KNOWN` fixture with 178 unique literal keys after the `5a941458` sound-cover
+row, retaining the earlier terrain anti-tiling row; additional Main Tweaks and unbound control rows are separate,
 rather than a total live-registry count. The historical
 import retained all 1,524 incoming Main smoke records plus Android's startup-options
 record and both parents' order. Integrated
@@ -159,6 +159,19 @@ remain 177 fixed keys with 68 Android overrides, and the executed Java protocol
 source is unchanged. This source union needs its own strict/code-generation,
 engine/runtime, native/final packaging and phone checks; Main's separate scoped
 attachment results and failed Android cycles do not qualify it or a new APK.
+
+The next normal Main `5a941458` integration is **In progress**. Its 21 commits
+in 42 paths require unions for the root workspace, precise owned-image guard and
+shared settings documentation/layout. Main's desktop launcher and sound-cover
+setting coexist with Android's local Rapier patch and Mobile layout: 178 fixed
+keys, 68 Android overrides and 1,564 Main scenarios plus Android startup options
+for 1,565. The source graph inventory changes to 1,154 entries, with root lock
+packages 216 to 470; 791 engine-prefixed inputs remain exact. This is static
+source comparison, not current dependency resolution, locked compilation,
+notices, runtime or device acceptance. Shared Main sound-cover expiry and pending
+ambient-playback admission findings have a coordinated follow-up; neither is a
+measured Android crash cause or an Android-only policy change. R9 remains the
+qualified test baseline while all new build/runtime/packaging/phone gates are open.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

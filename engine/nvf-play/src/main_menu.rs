@@ -885,4 +885,6 @@ mod tests {
         assert_eq!(intros.read(app.world().resource::<Messages<crate::intro::PlayIntro>>()).count(), 0);
     }
 
+    include!("main_menu_retained_cursor_tests.rs");
+
 }

@@ -375,4 +375,6 @@ mod tests {
         assert!(app.world().resource::<Touches>().any_just_pressed(), "hardware touch ownership is preserved");
     }
 
+    include!("ui_pointer_retained_cursor_tests.rs");
+
 }

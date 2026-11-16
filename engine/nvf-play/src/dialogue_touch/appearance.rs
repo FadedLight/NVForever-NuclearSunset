@@ -92,6 +92,8 @@ pub(super) enum Paint {
 }
 #[derive(Component)]
 pub(crate) struct Preview;
+#[derive(Component)]
+pub(crate) struct PreviewSelection;
 // Existing unmet-check feedback is semantic, not a selectable theme colour.
 pub(super) fn check_line() -> Color { Color::srgb(0.8,0.2,0.15) }
 fn palette(rgb: [u8;3], brightness: f32, alpha: f32) -> Color {
@@ -245,7 +247,7 @@ pub(crate) fn preview(parent:&mut ChildSpawnerCommands,node:Node) {
         .with_children(|p| {
             decoration(p);
             p.spawn((Text::new("Dialogue preview"),Paint::Speaker,bevy::picking::Pickable::IGNORE,TextFont{font_size:crate::interface::font_units(16.0),..default()},TextColor(crate::interface::tint(crate::interface::hud_rgb(),255.))));
-            p.spawn((Paint::PreviewSelected,Node{width:percent(100.),min_height:percent(45.),border:UiRect::all(px(1.)),padding:UiRect::horizontal(px(3.)),..default()},BackgroundColor(Color::NONE),BorderColor::all(Color::NONE),bevy::picking::Pickable::IGNORE))
+            p.spawn((PreviewSelection,Paint::PreviewSelected,Node{width:percent(100.),min_height:percent(45.),border:UiRect::all(px(1.)),padding:UiRect::horizontal(px(3.)),..default()},BackgroundColor(Color::NONE),BorderColor::all(Color::NONE),bevy::picking::Pickable::IGNORE))
                 .with_children(|p| {p.spawn((Paint::PreviewFocus,bevy::picking::Pickable::IGNORE,Node{position_type:PositionType::Absolute,left:px(1.),top:percent(50.),width:px(2.),height:px(4.),..default()},BackgroundColor(crate::interface::tint(crate::interface::hud_rgb(),255.))));p.spawn((Text::new("Selected response"),Paint::Caption,bevy::picking::Pickable::IGNORE,TextFont{font_size:crate::interface::font_units(16.0),..default()},TextColor(crate::interface::tint(crate::interface::hud_rgb(),255.))));});
         });
 }

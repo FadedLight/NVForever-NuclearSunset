@@ -18,12 +18,15 @@ fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_a
     assert!(entities.iter().all(|e|app.world().get::<bevy::picking::Pickable>(*e)==Some(&bevy::picking::Pickable::IGNORE)));
     assert!(app.world().get::<Node>(preview).unwrap().overflow==Overflow::clip());
     let notes:Vec<_>=app.world_mut().query_filtered::<&Text,With<SwitchNote>>().iter(app.world()).map(|t|t.0.clone()).collect();
-    assert!(notes.iter().any(|n|n.contains("Thin dialogue frames")));
+    assert!(notes.iter().any(|n|n.contains("Unframed choices")));
     let mut before:Vec<_>=app.world_mut().query::<&PauseButton>().iter(app.world()).map(|b|format!("{b:?}")).collect();before.sort();
     assert!(app.world_mut().query::<&PauseButton>().iter(app.world()).any(|b|*b==PauseButton::Row(RowId::Setting(row))));
+    assert_eq!(app.world().get::<BackgroundColor>(preview).unwrap().0.alpha(),0.,"preview enclosing surface is intentionally unframed");
+    let mut selected=app.world_mut().query_filtered::<&BackgroundColor,With<crate::dialogue_touch::appearance::PreviewSelection>>();
+    assert!(selected.single(app.world()).unwrap().0.alpha()>0.,"selected response initially shows configured backing");
     let opacity=app.world().resource::<Settings>().index(crate::dialogue_touch::appearance::BACKGROUND_KEY).unwrap();
     crate::settings::set_slider(app.world_mut(),opacity,0.0);app.update();app.update();
-    let mut q=app.world_mut().query_filtered::<&BackgroundColor,With<crate::dialogue_touch::appearance::Preview>>();
+    let mut q=app.world_mut().query_filtered::<&BackgroundColor,With<crate::dialogue_touch::appearance::PreviewSelection>>();
     assert_eq!(q.single(app.world()).unwrap().0.alpha(),0.);
     let mut after:Vec<_>=app.world_mut().query::<&PauseButton>().iter(app.world()).map(|b|format!("{b:?}")).collect();after.sort();
     assert_eq!(after,before);

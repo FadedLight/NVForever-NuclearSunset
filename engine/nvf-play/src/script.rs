@@ -2675,10 +2675,11 @@ pub fn asks_nothing(buttons: usize) -> bool {
     buttons <= 1
 }
 
-#[cfg(any(test, feature = "report-test-support"))]
+#[cfg(any(test, feature = "report-test-support", feature = "test-fixtures"))]
 impl ScriptState {
     /// A runtime over an empty load order, for tests of what works the open menu: nothing
     /// has run, no menu is open.
+    #[cfg(any(test, feature = "report-test-support"))]
     pub(crate) fn over_no_plugins() -> ScriptState {
         Self::over_plugins(&[])
     }
@@ -2728,6 +2729,16 @@ impl ScriptState {
     #[cfg(test)]
     pub(crate) fn answered(&self) -> bool {
         self.rt.as_ref().is_some_and(|rt| rt.closing.is_some())
+    }
+}
+
+// Shared only with the wrapper's dev-dependency: private Runtime fields and the
+// actual authored constructor stay owned by this module.
+#[cfg(feature = "test-fixtures")]
+#[doc(hidden)]
+pub mod fixtures {
+    pub fn over_plugins(plugins: &[fnv_esm::Plugin]) -> super::ScriptState {
+        super::ScriptState::over_plugins(plugins)
     }
 }
 

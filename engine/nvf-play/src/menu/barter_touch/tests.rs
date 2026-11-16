@@ -724,4 +724,6 @@ include!("main_preferences_tests.rs");
 include!("normal_tests.rs");
 include!("normal_size_tests.rs");
 
+include!("normal_typography_tests.rs");
+
 include!("normal_meter_tests.rs");

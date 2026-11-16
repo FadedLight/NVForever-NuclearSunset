@@ -63,6 +63,8 @@
 pub mod barter;
 pub mod barter_touch;
 pub mod normal_touch;
+pub(crate) mod readability;
+pub mod normal_services;
 pub(crate) mod look;
 pub mod model;
 mod test_aid;
@@ -185,6 +187,7 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         barter_touch::install(app);
         normal_touch::install(app);
+        normal_services::install(app);
         app.configure_sets(Update, WheelHoldSet.before(MenuSystems)).add_systems(Update, wheel_hold.in_set(WheelHoldSet));
         app.init_resource::<ActiveMenu>()
             .insert_resource(DevKeys::from_env())
@@ -1089,6 +1092,7 @@ fn draw(
     (combat, play, mut script): DrawSources,
     mut forms: Local<Option<crate::pipboy::stats::read::Forms>>,
     (tiles, mut was_tiled, tile_menu, barter_tiles, inventory_tiles): DrawTiles,
+    (readability,mut last_text_size):(Option<Res<crate::menu_readability::MenuReadability>>,Local<f32>),
 ) {
     // [design] With ContainerMenu or BarterMenu enabled the item menu draws from tiles
     // once its writer has the file built; a sheet takes the
@@ -1101,10 +1105,14 @@ fn draw(
     let prompt = active.0.as_ref().is_some_and(|m| m.quantity.is_some());
     let inventory_tiled = inventory_tiles.is_some_and(|t| t.ready.is_some());
     let tiled = script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| crate::tiles::menus::quantity_tiled(tiles.as_ref().is_some_and(|t| t.quantity), &rt.game, prompt, item_tiled || inventory_tiled));
-    if !active.is_changed() && !roots.is_empty() && (tiled, item_tiled) == *was_tiled {
+    let text_size=if active.0.as_ref().is_some_and(|m|matches!(m.mode,Mode::Barter(_))) {
+        readability::size(readability.as_deref(),crate::menu_readability::MenuKind::Barter)
+    } else {1.0};
+    if !active.is_changed() && !roots.is_empty() && (tiled, item_tiled) == *was_tiled && *last_text_size==text_size {
         return;
     }
     *was_tiled = (tiled, item_tiled);
+    *last_text_size=text_size;
     for e in &roots {
         commands.entity(e).despawn();
     }
@@ -1115,6 +1123,7 @@ fn draw(
     }
     let bc = crate::interface::bc_supported(formats.as_deref());
     let kit = kit.get_or_insert_with(|| look::Kit::load(data.as_deref(), &mut images, bc));
+    kit.set_text_size(text_size);
     // The lists' scroll positions follow the rows drawn (`MenuModel::pointer_pick`).
     if m.mode != Mode::Inventory && !item_tiled {
         let first = [Side::Container, Side::Player].map(|s| look::drawn_first(m, s, kit));
@@ -1132,7 +1141,7 @@ fn draw(
         ..default()
     };
     if item_tiled {
-        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen.clone(), GlobalZIndex(100))).with_children(|root| {
+        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m,text_size), screen.clone(), GlobalZIndex(100))).with_children(|root| {
             root.spawn(crate::tiles::menus::modal_sheet());
             // [design] Barter has no subtitle tile; keep the model's own refusal words.
             if matches!(m.mode, Mode::Barter(_)) {
@@ -1149,7 +1158,7 @@ fn draw(
             *forms = play.as_ref().map(|p| crate::pipboy::stats::read::Forms::new(p.lo, p.schema));
         }
         let info = m.selected_row(m.focus).map(|r| crate::pipboy::items::info_of(r, combat.as_deref(), sim.bypass_change_detection(), forms.as_mut(), script.as_mut().map(|s| s.bypass_change_detection())));
-        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen.clone(), GlobalZIndex(100))).with_children(|root| {
+        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m,text_size), screen.clone(), GlobalZIndex(100))).with_children(|root| {
             look::spawn(root, m, note.as_deref(), info.as_ref(), kit, data.as_deref(), &mut images, bc, &glyphs);
         });
     }
@@ -1167,12 +1176,12 @@ fn draw(
                 _ => (None, None),
             };
             let extra = look::quantity_line(price, weight, q.amount);
-            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen, GlobalZIndex(101))).with_children(|root| {
+            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m,text_size), screen, GlobalZIndex(101))).with_children(|root| {
                 look::spawn_quantity(root, q, &words, kit, data.as_deref(), &mut images, bc, &glyphs, extra.as_deref());
             });
         }
         (crate::tiles::menus::Modal::Sheet, _) => {
-            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen, GlobalZIndex(101))).with_children(|root| {
+            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m,text_size), screen, GlobalZIndex(101))).with_children(|root| {
                 root.spawn(crate::tiles::menus::modal_sheet());
             });
         }

@@ -189,12 +189,19 @@ impl Plugin for MaintenanceTouchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<State>().init_resource::<sheet::Drawn>().add_systems(PostUpdate, (publish, sheet::draw).chain().before(bevy::ui::UiSystems::Layout));
         crate::settings::add_setting(app, crate::settings::Setting {
-            key: SETTING_KEY, group: crate::pause::GROUP_MENUS, label: "Touch repair and weapon mods",
-            note: "Large repair, donor and weapon-mod lists with separate confirmation. Turn off to use the ordinary menus. On by default on Android.",
+            key: SETTING_KEY, group: crate::pause::GROUP_MENUS, label: "Touch repair, mods and workbenches",
+            note: "Finger taps and list dragging in ordinary vendor repair/workbenches; Pip-Boy donor/mod lists keep their touch UI. Turn off for ordinary controls; on by default on Android.",
             switches: "", get: |w| w.resource::<State>().enabled,
             set: |w, enabled| {
-                let mut state = w.resource_mut::<State>();
-                if state.enabled != enabled { state.retire(); state.enabled = enabled; state.hardware_hidden = false; }
+                let changed={
+                    let mut state=w.resource_mut::<State>();
+                    let changed=state.enabled!=enabled;
+                    if changed {state.retire();state.enabled=enabled;state.hardware_hidden=false;}
+                    changed
+                };
+                if changed {
+                    if let Some(mut normal)=w.get_resource_mut::<crate::menu::normal_services::NormalServices>() {normal.cancel();}
+                }
             }, slider: None,
         });
     }
@@ -311,6 +318,7 @@ pub struct Requests<'w, 's> {
     safe: Option<Res<'w, SafeInsets>>,
 }
 impl Requests<'_, '_> {
+    pub(crate) fn enabled(&self)->bool {self.state.as_ref().is_some_and(|s|s.enabled)}
     pub(crate) fn take(&mut self, kind: Kind) -> Vec<Request> {
         let Some(s) = self.state.as_mut() else { return Vec::new() };
         let mut mine = Vec::new();

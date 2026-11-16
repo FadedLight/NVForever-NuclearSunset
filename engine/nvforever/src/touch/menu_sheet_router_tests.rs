@@ -301,4 +301,5 @@ mod menu_sheet_router_controls {
         let point=painted_footer(&mut app);raw_tap(&mut app,window,4236,point);
         assert_eq!(app.world().resource::<Seen>().envelopes,1,"ID flood cannot strand or re-arm the next genuine contact");
     }
+    include!("menu_services_router_tests.rs");
 }

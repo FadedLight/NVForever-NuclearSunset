@@ -148,6 +148,7 @@ impl Default for BarterTiles {
 
 impl BarterTiles {
     pub fn menu(&self) -> Option<fnv_ui::TileId> { self.view.menu }
+    pub(crate) fn normal_text_scale(&self)->f32 {self.view.text_scale()}
 
     #[cfg(test)]
     pub(crate) fn normal_touch_value(&self,side:Side)->f64 {self.view.value(side)}
@@ -310,8 +311,11 @@ pub(super) fn write_system(
     (combat, play): (Option<Res<crate::combat::Combat>>, Option<Res<crate::PlayWorld>>),
     mut forms: Local<Option<crate::pipboy::stats::read::Forms>>, mut fonts: super::draw::FontKit,
     mut st: ResMut<BarterTiles>,
+    readability:Option<Res<crate::menu_readability::MenuReadability>>,
 ) {
     if !switch.barter { return; }
+    let scale=crate::menu::readability::size(readability.as_deref(),crate::menu_readability::MenuKind::Barter);
+    st.view.set_text_scale(scale);
     let model = active.0.as_ref().filter(|_| is_barter(active.0.as_ref()));
     let Some(rt) = script.rt.as_ref() else { return };
     let game = &rt.game;
@@ -358,7 +362,8 @@ pub(super) fn write_system(
     let texts = super::menus::texts(ui, menu);
     st.view.settle_shown(ui, &mut |ui, sizes| {
         let size = fonts.menu_measure(&super::menus::fonts_of(ui, &texts));
-        super::menus::write_text_sizes_of(ui, &texts, sizes, &size)
+        super::menus::write_text_sizes_of(ui,&texts,sizes,&|font,text,wrap|
+            crate::menu::readability::measured(&size,scale,font,text,wrap))
     });
     mark_tiles(ui);
     if let (true, Some(s)) = (told, st.shown.as_ref()) {

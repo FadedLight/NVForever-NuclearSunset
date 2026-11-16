@@ -217,6 +217,10 @@ pub(crate) struct MenuInputs<'w, 's> {
     normal_event: Local<'s, Option<crate::menu::normal_touch::NativeTap>>,
     normal_emitted: Local<'s, bool>,
     normal_gate: crate::menu::normal_touch::NativeAdmission<'w,'s>,
+    services:Option<ResMut<'w,crate::menu::normal_services::NormalServices>>,
+    service_event:Local<'s,Option<crate::menu::normal_services::NativeTap>>,
+    service_emitted:Local<'s,bool>,
+    service_gate:crate::menu::normal_services::NativeAdmission<'w,'s>,
     /// A press on the prompt's meter, held: the amount follows the pointer.
     dragging: Local<'s, bool>,
     /// T15b: the Wait / Sleep menu, and its commands.
@@ -276,6 +280,24 @@ impl MenuInputs<'_, '_> {
         if let Some(token)=self.normal.as_ref().and_then(|state|state.native_commands(n,commands)) {
             self.commands.write(MenuInput(Command::CommitNormalBarter(token)));
             *self.normal_emitted=true;
+        }
+        true
+    }
+
+    fn normal_service_command(&mut self,ui:&fnv_ui::Ui,click:&fnv_ui::input::Click,
+        action:crate::menu::normal_services::Action)->bool {
+        use crate::menu::normal_services::{Action,Kind};
+        let Some(n)=*self.service_event else{return false};
+        if !matches!(click.by,fnv_ui::input::By::Pointer){return false}
+        let crate::menu::normal_touch::Source::Tile(menu,_)=n.source else{return false};
+        if *self.service_emitted || ui.root_of(click.tile)!=menu{return true}
+        if let Some(token)=self.services.as_ref().and_then(|state|state.native_command(n,action)) {
+            match (n.kind,action) {
+                (Kind::Vendor,Action::Vendor(_))=>{self.repair_commands.write(crate::repair::RepairServicesInput::CommitNormal(token));}
+                (Kind::Workbench,Action::Workbench(_))=>{self.recipe_commands.write(crate::crafting::RecipeInput::CommitNormal(token));}
+                _=>return true,
+            }
+            *self.service_emitted=true;
         }
         true
     }
@@ -436,6 +458,9 @@ impl MenuInputs<'_, '_> {
         if ask == Ask::Repair {
             *row_acted = true;
         }
+        // The owned finger envelope must reach its late guard before any legacy
+        // painted-row Select can overwrite a newer actual selection.
+        if self.normal_service_command(ui,c,crate::menu::normal_services::Action::Vendor(ask)){return Some(())}
         if let (Ask::Repair, Some(i)) = (ask, selected) {
             self.repair_commands.write(Ask::Select(i));
         }
@@ -579,6 +604,7 @@ impl MenuInputs<'_, '_> {
             }
             RecipeTile::Other => return Some(()),
         };
+        if self.normal_service_command(ui,c,crate::menu::normal_services::Action::Workbench(input)){return Some(())}
         info!("tiles: {RECIPE_MENU} {input:?} on its tiles");
         self.recipe_commands.write(input);
         Some(())
@@ -883,6 +909,7 @@ pub(crate) fn feed(
     let Others { paused, page, mut stats, mut inventory, mut map, repair, modding, mut item_mod, pip } = others;
     *inputs.normal_event=None;
     *inputs.normal_emitted=false;
+    *inputs.service_event=None;*inputs.service_emitted=false;
     let Some(rt) = script.rt.as_mut() else { return };
     if rt.game.ui_files.is_none() {
         return;
@@ -1064,11 +1091,27 @@ pub(crate) fn feed(
         if valid {*inputs.normal_event=Some(n);}
         else if let Some(state)=inputs.normal.as_mut(){state.finish_native(n.token,false);}
     }
-    let at = (*inputs.normal_event).map(|n|to_menu_units(n.point,n.frame.size,anchor)).or_else(cursor);
+    let service=inputs.services.as_mut().and_then(|state|state.take_native());
+    if let Some(n)=service {
+        let source=match n.kind {
+            crate::menu::normal_services::Kind::Vendor=>inputs.repair_services.as_ref().and_then(|tiles|
+                tiles.normal_hit(&rt.game.ui_tree,n.frame,inputs.services.as_ref()?.native_guard(n.token)?,n.point,n.text_size)),
+            crate::menu::normal_services::Kind::Workbench=>inputs.recipe.as_ref().and_then(|tiles|
+                tiles.normal_hit(&rt.game.ui_tree,n.frame,inputs.services.as_ref()?.native_guard(n.token)?,n.point,n.text_size)),
+        };
+        let valid=inputs.normal_event.is_none() && aid_at.is_none() && !aid_click
+            && inputs.service_gate.allows(n,&rt.game)
+            && source.is_some_and(|h|h.source==n.source && h.action==n.action)
+            && matches!(n.source,crate::menu::normal_touch::Source::Tile(menu,_) if taking.contains(&menu));
+        if valid {*inputs.service_event=Some(n);}
+        else if let Some(state)=inputs.services.as_mut(){state.finish_native(n.token,false);}
+    }
+    let service_at=(*inputs.service_event).map(|n|to_menu_units(n.point,n.frame.size,anchor));
+    let at = (*inputs.normal_event).map(|n|to_menu_units(n.point,n.frame.size,anchor)).or(service_at).or_else(cursor);
     let mut input = Input {
         at,
-        press: inputs.normal_event.is_some() || aid_click || devices.mouse.just_pressed(MouseButton::Left),
-        shift: inputs.normal_event.is_none() && (devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight)),
+        press: inputs.normal_event.is_some() || inputs.service_event.is_some() || aid_click || devices.mouse.just_pressed(MouseButton::Left),
+        shift: inputs.normal_event.is_none() && inputs.service_event.is_none() && (devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight)),
         ..Input::default()
     };
     // The tutorial menu's triggers stand for its own keys (`crate::pad::menu_buttons`), which
@@ -1097,9 +1140,15 @@ pub(crate) fn feed(
     let over = rt.game.ui_pointer.active(&rt.game.ui_tree);
     let ui = &rt.game.ui_tree;
     let slider = inputs.follow(ui, &report, at, over, held, input.shift, &physical, tutorial);
-    if let Some(n)=*inputs.normal_event
-        && let Some(state)=inputs.normal.as_mut() {
-        state.finish_native(n.token,*inputs.normal_emitted);
+    if let Some(n)=*inputs.normal_event {
+        if let Some(state)=inputs.normal.as_mut() {
+            state.finish_native(n.token,*inputs.normal_emitted);
+        }
+    }
+    if let Some(n)=*inputs.service_event {
+        if let Some(state)=inputs.services.as_mut() {
+            state.finish_native(n.token,*inputs.service_emitted);
+        }
     }
     if let (Some(menu), Some(v)) = (dialog_menu, inputs.view_input.as_deref_mut()) {
         let mut steps = 0;

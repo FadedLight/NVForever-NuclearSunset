@@ -20,10 +20,10 @@ pub(crate) struct Hit { pub source: Source, pub target: Target, pub pane: Option
 
 #[derive(Clone, Copy, PartialEq)]
 struct Stamp { window: Entity, camera: Entity, size: Vec2,
-    safe: crate::touch_safe_area::SafeInsets, density: f32, ui_scale: f32, menu_units:f32 }
-impl From<Frame> for Stamp {
-    fn from(f: Frame) -> Self { Self { window:f.window, camera:f.camera, size:f.size,
-        safe:f.safe, density:f.density, ui_scale:f.ui_scale, menu_units:crate::interface::unit_scale() } }
+    safe: crate::touch_safe_area::SafeInsets, density: f32, ui_scale: f32, menu_units:f32,text_size:f32 }
+impl Stamp {
+    fn of(f:Frame,text_size:f32)->Self { Self { window:f.window, camera:f.camera, size:f.size,
+        safe:f.safe, density:f.density, ui_scale:f.ui_scale, menu_units:crate::interface::unit_scale(),text_size } }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RowStamp { side: Side, index: usize, key: RowKey, count: i32,
@@ -66,9 +66,9 @@ impl Guard {
 /// Source state attached by the ordinary painter, not reconstructed from the
 /// current model at a later touch. A stale frame cannot approve a new quote.
 #[derive(Component)]
-pub(crate) struct RenderedMenu(Guard);
+pub(crate) struct RenderedMenu {guard:Guard,text_size:f32}
 impl RenderedMenu {
-    pub(crate) fn of(m:&MenuModel)->Self {Self(Guard::of(m,Target::Command(Command::Accept)))}
+    pub(crate) fn of(m:&MenuModel,text_size:f32)->Self {Self {guard:Guard::of(m,Target::Command(Command::Accept)),text_size}}
 }
 #[derive(Clone,Copy,PartialEq)]
 enum MeterShape { Node([Vec2;3]), Tile([f64;4]) }
@@ -86,7 +86,7 @@ struct Scroll { frame:Frame,id:u64,mode:Mode,category:[Category;2],side:Side,
 struct Armed { token:u64,epoch:u64,tap:Tap }
 #[derive(Clone,Copy)]
 pub(crate) struct NativeTap {
-    pub token:u64,pub frame:Frame,pub id:u64,pub point:Vec2,pub source:Source,pub target:Target,
+    pub token:u64,pub frame:Frame,pub id:u64,pub point:Vec2,pub source:Source,pub target:Target,pub text_size:f32,
 }
 
 #[derive(Resource,Default)]
@@ -151,7 +151,7 @@ impl NormalBarter {
     pub(crate) fn take_native(&mut self)->Option<NativeTap> {
         let n=self.native.take()?;
         self.armed.as_ref().filter(|a|a.token==n.token && a.epoch==self.epoch
-            && self.frame==Some(n.frame) && self.stamp==Some(Stamp::from(n.frame))
+            && self.frame==Some(n.frame) && self.stamp==Some(Stamp::of(n.frame,n.text_size))
             && !self.hidden).map(|_|n)
     }
     pub(crate) fn native_commands(&self,n:NativeTap,commands:&[Command])->Option<u64> {
@@ -186,8 +186,10 @@ struct Geometry<'w,'s> {
     tiles:Option<Res<'w,crate::tiles::barter_menu::BarterTiles>>,
     parents:Query<'w,'s,&'static ChildOf>,
     menus:Query<'w,'s,&'static RenderedMenu>,
+    readability:Option<Res<'w,crate::menu_readability::MenuReadability>>,
 }
 impl Geometry<'_,'_> {
+    fn text_size(&self)->f32 {super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)}
     fn meter(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,
         origin:Vec2,point:Vec2)->Option<(Hit,MeterShape)> {
         let mut hit=self.hit(script,f,m,origin)?;
@@ -214,6 +216,7 @@ impl Geometry<'_,'_> {
 
     fn hit(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,point:Vec2)->Option<Hit> {
         if let Some(tiles)=self.tiles.as_ref().filter(|t|t.menu().is_some()) {
+            if tiles.normal_text_scale()!=self.text_size(){return None}
             let rt=script?.rt.as_ref()?;
             if m.quantity.is_none() || tiles.normal_touch_quantity(&rt.game.ui_tree) {
                 return tiles.normal_touch_hit(&rt.game.ui_tree,m,point,f.size);
@@ -228,7 +231,7 @@ impl Geometry<'_,'_> {
             let mut ancestor=Some(entity);
             let mut current=false;
             while let Some(parent)=ancestor {
-                if let Ok(painted)=self.menus.get(parent) {current=painted.0.matches(m);break}
+                if let Ok(painted)=self.menus.get(parent) {current=painted.guard.matches(m) && painted.text_size==self.text_size();break}
                 ancestor=self.parents.get(parent).ok().map(ChildOf::parent);
             }
             if !current {continue}
@@ -281,7 +284,7 @@ impl Bridge<'_,'_> {
         self.state.observe_neutral(f.neutral);self.state.barrier=false;
         let mode=self.active.as_ref().and_then(|a|a.0.as_ref()).map(|m|m.mode)
             .filter(|m|matches!(m,Mode::Barter(_)));
-        let stamp=Stamp::from(f);
+        let stamp=Stamp::of(f,self.geometry.text_size());
         if self.state.stamp!=Some(stamp) || self.state.mode!=mode || !f.admitted || f.fresh
             || self.options.as_ref().is_some_and(|o|!o.enabled) {
             let had_owner=self.state.contact.is_some() || self.state.pending.is_some() || self.state.armed.is_some();
@@ -336,7 +339,7 @@ impl Bridge<'_,'_> {
                     };
                     Some(MeterContact {shape,repaint:false})
                 } else {None};
-                let c=Contact {window:e.window,id:e.id,stamp:Stamp::from(f),
+                let c=Contact {window:e.window,id:e.id,stamp:Stamp::of(f,self.geometry.text_size()),
                     origin:e.position,previous:e.position,hit,guard:Guard::of(m,hit.target),
                     dragged:false,vertical:false,remainder:0.0,meter};
                 if c.meter.is_some(){self.state.meter(f,&c,e.position,hit,false);}
@@ -346,7 +349,7 @@ impl Bridge<'_,'_> {
         }
         if !self.state.contact.as_ref().is_some_and(|c|c.window==e.window && c.id==e.id){return true}
         let mut c=self.state.contact.take().unwrap();
-        if e.phase==TouchPhase::Canceled || c.stamp!=Stamp::from(f)
+        if e.phase==TouchPhase::Canceled || c.stamp!=Stamp::of(f,self.geometry.text_size())
             || c.guard.mode!=m.mode || c.guard.category!=m.category || c.guard.quantity!=m.quantity {
             self.state.pending=None;self.state.scroll=None;self.state.barrier=true;
             self.state.draining=Some(e.window);
@@ -397,12 +400,13 @@ impl Bridge<'_,'_> {
         }
         c.previous=e.position;
         if e.phase==TouchPhase::Ended {
-            if !c.dragged && c.guard.matches(m)
-                && let Some(hit)=self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
+            if !c.dragged && c.guard.matches(m) {
+                if let Some(hit)=self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
                     .filter(|h|h.source==c.hit.source && same_target(h.target,c.hit.target)) {
-                self.state.pending=Some(Tap {frame:f,id:e.id,point:e.position,
-                    source:hit.source,target:hit.target,guard:c.guard,
-                    commands:commands(hit.target,m),meter:None});
+                    self.state.pending=Some(Tap {frame:f,id:e.id,point:e.position,
+                        source:hit.source,target:hit.target,guard:c.guard,
+                        commands:commands(hit.target,m),meter:None});
+                }
             }
             self.state.barrier=true;
             if self.state.secondary{self.state.draining=Some(e.window);}
@@ -447,11 +451,13 @@ fn commands(t:Target,m:&MenuModel)->[Option<Command>;2] {
 fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
     live:super::barter_touch::LiveAdmission,
     (mut script,creator):(Option<ResMut<crate::script::ScriptState>>,Option<Res<crate::creator::CreatorMenu>>),
-    mut tiles:Option<ResMut<crate::tiles::barter_menu::BarterTiles>>,mut out:MessageWriter<MenuInput>) {
+    mut tiles:Option<ResMut<crate::tiles::barter_menu::BarterTiles>>,mut out:MessageWriter<MenuInput>,
+    readability:Option<Res<crate::menu_readability::MenuReadability>>) {
     if state.scroll.is_none() && state.pending.is_none(){return}
+    let text_size=super::readability::size(readability.as_deref(),crate::menu_readability::MenuKind::Barter);
     let Some(m)=active.0.as_mut() else{state.cancel();return};
     if let Some(s)=state.scroll.take() {
-        if state.frame==Some(s.frame) && state.stamp==Some(Stamp::from(s.frame))
+        if state.frame==Some(s.frame) && state.stamp==Some(Stamp::of(s.frame,text_size))
             && s.mode==m.mode && s.category==m.category && m.quantity.is_none()
             && live.allows(s.frame,s.id)
             && super::barter_touch::menu_allows(script.as_deref(),creator.as_deref(),m) {
@@ -468,13 +474,13 @@ fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
         }
     }
     let Some(tap)=state.pending.take() else{return};
-    if state.frame!=Some(tap.frame) || !live.allows(tap.frame,tap.id)
+    if state.frame!=Some(tap.frame) || state.stamp!=Some(Stamp::of(tap.frame,text_size)) || !live.allows(tap.frame,tap.id)
         || !super::barter_touch::menu_allows(script.as_deref(),creator.as_deref(),m) {return}
     if matches!(tap.source,Source::Tile(..)) && script.as_ref().is_none_or(|s|s.rt.is_none()){return}
     state.next=state.next.wrapping_add(1).max(1);
     let token=state.next;let epoch=state.epoch;
     let native=(matches!(tap.source,Source::Tile(..)) && tap.meter.is_none_or(|m|m.pulse)).then_some(NativeTap {
-        token,frame:tap.frame,id:tap.id,point:tap.point,source:tap.source,target:tap.target });
+        token,frame:tap.frame,id:tap.id,point:tap.point,source:tap.source,target:tap.target,text_size });
     state.armed=Some(Armed {token,epoch,tap});
     if let Some(native)=native {state.native=Some(native);}
     else {out.write(MenuInput(Command::CommitNormalBarter(token)));}
@@ -484,6 +490,7 @@ fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
 /// ScriptState. It must not add an aliased ScriptState SystemParam.
 #[derive(SystemParam)]
 pub(crate) struct NativeAdmission<'w,'s> {
+    readability:Option<Res<'w,crate::menu_readability::MenuReadability>>,
     live:super::barter_touch::LiveAdmission<'w,'s>,
     options:Option<Res<'w,super::barter_touch::Options>>,
     creator:Option<Res<'w,crate::creator::CreatorMenu>>,
@@ -491,6 +498,7 @@ pub(crate) struct NativeAdmission<'w,'s> {
 impl NativeAdmission<'_,'_> {
     pub(crate) fn allows(&self,n:NativeTap,m:&MenuModel,game:&fnv_game::Game<'_>)->bool {
         matches!(m.mode,Mode::Barter(_)) && self.options.as_ref().is_none_or(|o|o.enabled)
+            && n.text_size==super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)
             && self.live.allows(n.frame,n.id)
             && super::barter_touch::game_allows(Some(game),self.creator.as_deref(),m)
     }
@@ -506,8 +514,9 @@ pub(crate) struct Commits<'w,'s> {
 }
 impl Commits<'_,'_> {
     pub(crate) fn discard(&mut self,token:u64){
-        if let Some(s)=self.state.as_mut()
-            && s.armed.as_ref().is_some_and(|a|a.token==token){s.armed=None;}
+        if let Some(s)=self.state.as_mut() {
+            if s.armed.as_ref().is_some_and(|a|a.token==token){s.armed=None;}
+        }
     }
     /// Acknowledge only the original consumer's completed Amount. Foreign prompt
     /// changes retire the owner, including cancel/reopen within one queue batch.
@@ -519,10 +528,11 @@ impl Commits<'_,'_> {
             if command!=Command::Amount(r.amount) || r.epoch!=s.epoch || !r.guard.matches(m) {
                 s.cancel();return
             }
-            if let Some(c)=s.contact.as_mut().filter(|c|c.window==r.window && c.id==r.id)
-                && let Some(meter)=c.meter.as_mut() {
-                // A successfully consumed Amount dirties ActiveMenu even if clamped/no-op.
-                meter.repaint=true;c.guard=r.guard;
+            if let Some(c)=s.contact.as_mut().filter(|c|c.window==r.window && c.id==r.id) {
+                if let Some(meter)=c.meter.as_mut() {
+                    // A successfully consumed Amount dirties ActiveMenu even if clamped/no-op.
+                    meter.repaint=true;c.guard=r.guard;
+                }
             }
         } else if before!=m.quantity && s.contact.as_ref().is_some_and(|c|c.meter.is_some()) {
             s.cancel();
@@ -534,7 +544,7 @@ impl Commits<'_,'_> {
         if s.armed.as_ref()?.token!=token{return None}
         let a=s.armed.take()?;*self.applied=None;
         let live=a.epoch==s.epoch && !s.hidden && s.frame==Some(a.tap.frame)
-            && s.stamp==Some(Stamp::from(a.tap.frame))
+            && s.stamp==Some(Stamp::of(a.tap.frame,self.geometry.text_size()))
             && self.options.as_ref().is_none_or(|o|o.enabled)
             && self.live.allows(a.tap.frame,a.tap.id)
             && super::barter_touch::menu_allows(script,self.creator.as_deref(),m);
@@ -552,10 +562,11 @@ impl Commits<'_,'_> {
             if a.tap.meter.is_some(){s.cancel();}
             m.status=Some("Trade changed. Review the item and amount again.".into());return None
         }
-        if a.tap.meter.is_some() && s.contact.as_ref().is_some_and(|c|c.window==a.tap.frame.window && c.id==a.tap.id)
-            && let Some(Command::Amount(amount))=a.tap.commands[0] {
-            *self.applied=Some(MeterReceipt {token,epoch:s.epoch,window:a.tap.frame.window,id:a.tap.id,
-                guard:a.tap.guard,amount});
+        if a.tap.meter.is_some() && s.contact.as_ref().is_some_and(|c|c.window==a.tap.frame.window && c.id==a.tap.id) {
+            if let Some(Command::Amount(amount))=a.tap.commands[0] {
+                *self.applied=Some(MeterReceipt {token,epoch:s.epoch,window:a.tap.frame.window,id:a.tap.id,
+                    guard:a.tap.guard,amount});
+            }
         }
         Some(a.tap.commands)
     }

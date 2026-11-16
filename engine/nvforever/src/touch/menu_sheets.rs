@@ -2,12 +2,12 @@
 //! The leaf bridges never read a second raw stream or mutate physical input state.
 use super::*;
 use bevy::{camera::{NormalizedRenderTarget, RenderTarget}, ecs::{entity::ContainsEntity, system::SystemParam}, input::touch::Touches, ui::DefaultUiCamera};
-use nvf_play::{maintenance_touch, menu::{barter_touch, normal_touch, model::Mode}, pipboy::{Page, Phase}};
+use nvf_play::{maintenance_touch, menu::{barter_touch, normal_touch, normal_services, model::Mode}, pipboy::{Page, Phase}};
 
 const MAX_EDGES: usize = 128;
 const MAX_IDS: usize = 32;
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind { Barter, Repair, Mod, Vendor }
+enum Kind { Barter, Repair, Mod, Vendor, Workbench }
 #[derive(Clone, Copy, PartialEq)]
 struct Stamp { window: Entity, physical: UVec2, density: f32, safe: nvf_play::touch_safe_area::SafeInsets, scale: f32 }
 #[derive(Resource, Default)]
@@ -34,6 +34,7 @@ struct Sources<'w> {
     repair: Option<Res<'w, nvf_play::pipboy::repair::PipRepair>>,
     modding: Option<Res<'w, nvf_play::pipboy::item_mod::PipItemMod>>,
     vendor: Option<Res<'w, nvf_play::repair::RepairServices>>,
+    recipe: Option<Res<'w, nvf_play::crafting::RecipeMenu>>,
     pip: Option<Res<'w, nvf_play::pipboy::PipBoy>>,
     script: Option<Res<'w, nvf_play::script::ScriptState>>,
     paused: Option<Res<'w, nvf_play::pause::Paused>>,
@@ -53,6 +54,7 @@ impl Sources<'_> {
         let kind = if model.is_some_and(|m| matches!(m.mode, Mode::Barter(_))) && self.barter.as_ref().is_some_and(|o| o.enabled) {
             Kind::Barter
         } else if maintenance_enabled && self.vendor.as_ref().is_some_and(|v| v.0.is_some()) { Kind::Vendor }
+        else if maintenance_enabled && self.recipe.as_ref().is_some_and(|r| r.is_open()) { Kind::Workbench }
         else if maintenance_enabled && self.pip.as_ref().is_some_and(|p| p.phase == Phase::Up && p.page == Page::Items)
             && model.is_some_and(|m| m.mode == Mode::Inventory && m.quantity.is_none()) {
             if self.repair.as_ref().is_some_and(|r| r.is_open()) { Kind::Repair }
@@ -69,6 +71,7 @@ impl Sources<'_> {
                 Kind::Repair => game.open_menu_code().is_none_or(|c| matches!(c, menus::INVENTORY | menus::REPAIR)),
                 Kind::Mod => game.open_menu_code().is_none_or(|c| matches!(c, menus::INVENTORY | menus::ITEM_MOD)),
                 Kind::Vendor => game.open_menu_code().is_none_or(|c| c == fnv_game::repair::REPAIR_SERVICES_MENU),
+                Kind::Workbench => game.top_menu().is_none_or(|c| c == fnv_game::crafting::RECIPE_MENU),
             };
             if !own { return None; }
         }
@@ -152,7 +155,8 @@ impl Cameras<'_, '_> {
 fn replay(
     mut batch: ResMut<Batch>, state: Res<TouchState>, sources: Sources, gates: Gates, cameras: Cameras,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>, touches: Res<Touches>,
-    mut barter: normal_touch::Bridge, mut maintenance: maintenance_touch::Bridge,
+    (mut barter, mut services): (normal_touch::Bridge, normal_services::Bridge),
+    mut maintenance: maintenance_touch::Bridge,
     mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>, mut editor: ResMut<super::entrypoints::Session>,
     mut modal: ResMut<super::modal::Capture>,
     (mut vats, mut model): (super::vats_targeting::Bridge, super::pipboy_model::Bridge),
@@ -181,41 +185,54 @@ fn replay(
     modal.publish(&mut ownership, neutral);
     maintenance.observe_neutral(neutral);
     barter.observe_neutral(neutral);
+    services.observe_neutral(neutral);
     if let Some((stamp, window, camera)) = context {
         barter.prepare(normal_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
             ui_scale: stamp.scale, density: stamp.density, admitted: allowed && current == Some(Kind::Barter), fresh, neutral });
+        let service = match current {
+            Some(Kind::Vendor) => Some(normal_services::Kind::Vendor),
+            Some(Kind::Workbench) => Some(normal_services::Kind::Workbench),
+            _ => None,
+        };
+        services.prepare(service, normal_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
+            ui_scale: stamp.scale, density: stamp.density, admitted: allowed && service.is_some(), fresh, neutral });
         maintenance.prepare(Some(maintenance_touch::Context::from_window(stamp.window, camera, window, stamp.safe, stamp.scale)),
-            allowed && !fresh && matches!(current, Some(Kind::Repair | Kind::Mod | Kind::Vendor)));
-    } else { barter.cancel(); maintenance.cancel(); }
-    if state.hardware_intent { barter.hardware_intent(); maintenance.hardware_intent(); map.cancel(); }
-    else if consumed && gates.allows() { barter.restore_touch(); maintenance.restore_touch(); }
+            allowed && !fresh && matches!(current, Some(Kind::Repair | Kind::Mod)));
+    } else { barter.cancel(); services.cancel(); maintenance.cancel(); }
+    if state.hardware_intent { barter.hardware_intent(); services.hardware_intent(); maintenance.hardware_intent(); map.cancel(); }
+    else if consumed && gates.allows() { barter.restore_touch(); services.restore_touch(); maintenance.restore_touch(); }
     let mut events = std::mem::take(&mut batch.events);
     for event in &events {
         if consumed && allowed && !state.hardware_intent && current==Some(Kind::Barter) {
             barter.consume_touch_return(event);
             continue;
         }
+        if consumed && allowed && !state.hardware_intent && matches!(current, Some(Kind::Vendor | Kind::Workbench)) {
+            services.consume_touch_return(event);
+            continue;
+        }
         // Physical hardware or the already-consumed selector edge wins this batch.
         if !allowed || fresh || state.hardware_intent { continue; }
         if current == Some(Kind::Barter) || barter.captures_touch(event.window,event.id) { barter.event(event); }
+        else if matches!(current, Some(Kind::Vendor | Kind::Workbench)) || services.captures_touch(event.window,event.id) { services.event(event); }
         else { maintenance.event(event, gates.platform.as_ref().is_none_or(|g| g.allows_touch(event.id))); }
     }
     events.clear(); batch.events = events;
     for id in batch.ids.iter().flatten() { ownership.block(*id); }
     let primary = windows.single().ok().map(|(entity,_)|entity);
     for touch in touches.iter().chain(touches.iter_just_pressed()).chain(touches.iter_just_released()).chain(touches.iter_just_canceled()) {
-        if primary.is_some_and(|w|barter.captures_touch(w,touch.id())) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()
+        if primary.is_some_and(|w|barter.captures_touch(w,touch.id()) || services.captures_touch(w,touch.id())) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()
             || vats.owns(touch.id()) || primary.is_some_and(|window|model.owns(window,touch.id())) { ownership.block(touch.id()); }
     }
     if batch.overflow { ownership.quarantine_overflow(); }
-    ownership.suppress_pointer(barter.visible() || maintenance.captures_touch() || editor.blocking());
+    ownership.suppress_pointer(barter.visible() || services.visible() || maintenance.captures_touch() || editor.blocking());
     if current.is_some() { items.cancel(); }
 }
 
 pub(super) fn install(app: &mut App) {
     app.add_plugins(maintenance_touch::MaintenanceTouchPlugin)
         .init_resource::<barter_touch::Options>().init_resource::<barter_touch::TouchBarter>()
-        .init_resource::<normal_touch::NormalBarter>()
+        .init_resource::<normal_touch::NormalBarter>().init_resource::<normal_services::NormalServices>()
         .init_resource::<Batch>().init_resource::<nvf_play::ui_pointer::TouchUiCapture>()
         .add_systems(PreUpdate, replay.after(InputSystems).after(nvf_play::pad::InputSwitchSystems::Switch)
             .after(nvf_play::pad::PlatformInputSystems::Remember).after(super::TouchInputSystems)

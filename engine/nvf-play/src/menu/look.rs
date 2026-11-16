@@ -133,14 +133,18 @@ pub struct Kit {
     pictures: Pictures,
     /// The meters' tick mark (`hud_tick_mark.dds`, not in the atlas).
     tick: Option<Handle<Image>>,
+    text_size:f32,
 }
 
 impl Kit {
+    pub(crate) fn set_text_size(&mut self,size:f32) {self.text_size=size;}
+
     pub fn load(data: Option<&GameData>, images: &mut Assets<Image>, bc: bool) -> Kit {
         Kit {
             body: face(BODY_FONT, plain_font(31.0, 12.0), data, images, bc),
             title: face(TITLE_FONT, plain_font(34.0, 14.0), data, images, bc),
             pictures: Pictures::load(data),
+            text_size:1.0,
             tick: data.and_then(|d| texture(TICK_TEXTURE, d, images, bc)).map(|t| t.0),
         }
     }
@@ -262,8 +266,8 @@ pub fn first_shown(heights: &[f32], first: usize, selected: usize) -> usize {
 /// The lines of each row of a list as drawn, and the rows' heights.
 fn row_lines(m: &MenuModel, side: Side, kit: &Kit) -> (Vec<Vec<Line>>, Vec<f32>) {
     let wrap = if matches!(m.mode, Mode::Barter(_)) { WRAP_BARTER } else { WRAP_CONTAINER };
-    let texts: Vec<Vec<Line>> = m.list(side).rows.iter().map(|r| kit.body.font.lines(&row_text(r), Some(wrap))).collect();
-    let heights = texts.iter().map(|t| row_height(t.len())).collect();
+    let texts: Vec<Vec<Line>> = m.list(side).rows.iter().map(|r| kit.body.font.lines(&row_text(r), Some(wrap/kit.text_size))).collect();
+    let heights = texts.iter().map(|t| (row_height(t.len())*kit.text_size).max(ROW_H)).collect();
     (texts, heights)
 }
 
@@ -374,14 +378,16 @@ impl Ctx<'_> {
     #[allow(clippy::too_many_arguments)]
     fn text(&mut self, p: &mut ChildSpawnerCommands, title: bool, s: &str, x: f32, top: f32, align: Align, color: Color) -> f32 {
         let face = if title { &self.kit.title } else { &self.kit.body };
-        let width = crate::pad::hint_width(face, s, self.glyphs);
+        let scale=self.kit.text_size;
+        let width = crate::pad::hint_width(face, s, self.glyphs)*scale;
         let x = match align {
             Align::Left => x,
             Align::Right => x - width,
             Align::Centre => x - width / 2.0,
         };
-        let base = top + if title { TITLE_BASE } else { BODY_BASE };
-        crate::pad::set_hint(p, face, s, x, base, color, self.glyphs);
+        let base = top + if title { TITLE_BASE } else { BODY_BASE }*scale;
+        let _units=crate::interface::units_at(crate::interface::unit_scale()*scale);
+        crate::pad::set_hint(p, face, s, x/scale, base/scale, color, self.glyphs);
         width
     }
 }
@@ -450,7 +456,7 @@ fn half(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side) {
     let x0 = if side == Side::Player { LEFT_X } else { RIGHT_X };
     let title_top = TOP + if matches!(m.mode, Mode::Barter(_)) { -10.0 } else { -12.5 };
     let title = half_title(m, side);
-    let title_w = first_line(&c.kit.title.font, &title).width;
+    let title_w = first_line(&c.kit.title.font, &title).width*c.kit.text_size;
     let (left_arrow, title_x, right_arrow, (line_x, line_len)) = heading(title_w);
     // The heading.
     c.fade(p, x0, TOP, false, bright);
@@ -549,11 +555,12 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side, x0
                     c.image(row, mark, at(MARK_AT, MARK_AT, MARK, MARK), bright);
                 }
                 for (k, line) in texts[i].iter().enumerate() {
-                    set_line(row, &c.kit.body, line, NAME_X, TEXT_Y + BODY_BASE + LINE_PITCH * k as f32, bright);
+                    super::readability::line(row,&c.kit.body,line,
+                        Vec2::new(NAME_X,(TEXT_Y+BODY_BASE+LINE_PITCH*k as f32)*c.kit.text_size),c.kit.text_size,bright);
                 }
                 if barter {
                     let price = r.price.map_or("--".to_string(), barter::price_text);
-                    c.text(row, false, &price, PRICE_RIGHT, TEXT_Y, Align::Right, bright);
+                    c.text(row, false, &price, PRICE_RIGHT, TEXT_Y*c.kit.text_size, Align::Right, bright);
                 }
             });
         }
@@ -583,10 +590,10 @@ fn buttons(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel) {
         (Mode::Barter(_), Some(t)) => vec![("Accept", hint(&[KeyA], barter), Command::Accept, !t.is_empty()), ("Exit", hint(&[KeyX, Escape], barter), Command::Close, true)],
         _ => vec![("Take All", hint(&[KeyR], container), Command::TakeAll, !m.list(Side::Container).rows.is_empty()), ("Exit", hint(&[KeyE, Escape], container), Command::Close, true)],
     };
-    let h = 31.0 + BUTTON_PAD;
+    let h = (31.0 + BUTTON_PAD)*c.kit.text_size;
     for (i, (label, hint, cmd, on)) in list.into_iter().enumerate() {
         let color = amber(255.0).with_alpha(if on { 1.0 } else { DIM });
-        let y = BUTTONS_Y + i as f32 * h;
+        let y = BUTTONS_Y + i as f32*h - 2.0*(h-(31.0+BUTTON_PAD));
         let w = c.text(p, false, label, BUTTONS_RIGHT, y + BUTTON_PAD, Align::Right, color);
         c.text(p, false, &hint, BUTTONS_RIGHT + HINT_GAP, y + BUTTON_PAD, Align::Left, color);
         p.spawn((Button, CmdButton(cmd), at(BUTTONS_RIGHT - w - 10.0, y, w + 20.0 + HINT_GAP + 30.0, h)));
@@ -764,11 +771,12 @@ pub fn spawn_quantity(root: &mut ChildSpawnerCommands, q: &Quantity, words: &[St
             if let Some(line) = extra {
                 c.text(p, false, line, Q_CENTRE, Q_EXTRA_Y, Align::Centre, bright);
             }
-            let h = 31.0 + BUTTON_PAD;
+            let h = (31.0 + BUTTON_PAD)*c.kit.text_size;
             // The prompt's own keys over any menu: A (Enter) and B (Esc) on a controller.
             let any = crate::pad::MenuAt::default();
             let (ok, cancel) = (crate::pad::hint(&[KeyCode::KeyA, KeyCode::Enter], any), crate::pad::hint(&[KeyCode::KeyE, KeyCode::Escape], any));
-            for ((label, hint, cmd), y) in [(words[0].as_str(), ok, Command::AmountOk), (words[1].as_str(), cancel, Command::AmountCancel)].into_iter().zip(Q_BUTTONS_Y) {
+            for (i,((label,hint,cmd),old_y)) in [(words[0].as_str(),ok,Command::AmountOk),(words[1].as_str(),cancel,Command::AmountCancel)].into_iter().zip(Q_BUTTONS_Y).enumerate() {
+                let y=old_y - (2-i) as f32*(h-(31.0+BUTTON_PAD));
                 let w = c.text(p, false, label, Q_BUTTONS_RIGHT, y + BUTTON_PAD, Align::Right, bright);
                 c.text(p, false, &hint, Q_BUTTONS_RIGHT + HINT_GAP, y + BUTTON_PAD, Align::Left, bright);
                 p.spawn((Button, CmdButton(cmd), at(Q_BUTTONS_RIGHT - w - 10.0, y, w + 20.0 + HINT_GAP + 30.0, h)));

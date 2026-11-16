@@ -687,6 +687,26 @@ interleaving. An obsolete token cannot discard a newer live guard; only its matc
 token is consumed, including when an existing row guard drops that command.
 
 
+### Ordinary-menu touch and independent typography
+
+[design] The optional finger route keeps the existing native or hand-built
+buying/selling presentation. Its independent menu size changes the existing
+font metrics, wrapping and row measurement within the same viewport; the painter
+and hit geometry use the same current size. The default 100% retains the prior
+row law. Hand-built rows keep at least their original 51-unit height so markers
+remain inside adjacent rows; an XML row's larger explicit height is retained.
+A changed effective saved size cancels a held proposal, including A-to-B-to-A;
+setting an equivalent quantized value preserves it. Other ordinary prompts keep
+their existing size; the actual barter quantity prompt follows barter size.
+
+The touch adapter compares the actual painted size, interface-unit scale,
+window/camera, insets and live source before the original consumer acts. It does
+not zoom the entire canvas or synthesize a mouse click. Quantity-meter dragging
+uses the composed original Amount consumer and preserves these size/source
+guards, including acknowledged same-geometry repaint. The authored native/hand-built layout and outcome controls remain
+uncompiled and unexecuted at this source checkpoint.
+
+
 ## Ordinary touch quantity meter
 
 [design] The ordinary barter prompt's meter supports a held finger, as its

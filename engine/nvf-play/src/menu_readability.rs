@@ -28,29 +28,49 @@ impl MenuReadability {
     }
 }
 
+// Retire held input at the setting consumer, including A -> B -> A in one frame.
+// Equivalent normalized values preserve the existing contact.
+fn set_size(world: &mut World, kind: MenuKind, value: f32) {
+    let next = of_part(value);
+    let previous = world.resource::<MenuReadability>().size(kind);
+    {
+        let mut sizes = world.resource_mut::<MenuReadability>();
+        match kind {
+            MenuKind::Barter => sizes.barter = next,
+            MenuKind::Repair => sizes.repair = next,
+            MenuKind::Workbench => sizes.workbench = next,
+        }
+    }
+    if previous == next { return; }
+    match kind {
+        MenuKind::Barter => {
+            if let Some(mut touch) = world.get_resource_mut::<crate::menu::normal_touch::NormalBarter>() {
+                touch.cancel();
+            }
+        }
+        MenuKind::Repair | MenuKind::Workbench => {
+            if let Some(mut touch) = world.get_resource_mut::<crate::menu::normal_services::NormalServices>() {
+                touch.cancel_size(kind);
+            }
+        }
+    }
+}
+
 /// Each consumer lays out its existing rows with this size, retaining viewport clipping.
 pub fn register(app: &mut App, group: &'static str) {
     app.init_resource::<MenuReadability>();
     settings::add_setting(app, Setting::slider("barter-menu-size-v1", group, "Buying and selling size",
         "Text and row size in the normal buying and selling menus. Other menus keep their own sizes.",
         Slider::choice(21, |w| part(w.resource::<MenuReadability>().barter),
-            |w,v| {
-                let next = of_part(v);
-                let previous = w.resource::<MenuReadability>().size(MenuKind::Barter);
-                w.resource_mut::<MenuReadability>().barter = next;
-                if previous != next
-                    && let Some(mut touch) = w.get_resource_mut::<crate::menu::normal_touch::NormalBarter>() {
-                    touch.cancel();
-                }
-            }, show)));
+            |w,v| set_size(w, MenuKind::Barter, v), show)));
     settings::add_setting(app, Setting::slider("repair-menu-size-v1", group, "Repair menu size",
         "Text and row size in repair menus. Buying, selling and workbenches keep their own sizes.",
         Slider::choice(21, |w| part(w.resource::<MenuReadability>().repair),
-            |w,v| w.resource_mut::<MenuReadability>().repair = of_part(v), show)));
+            |w,v| set_size(w, MenuKind::Repair, v), show)));
     settings::add_setting(app, Setting::slider("workbench-menu-size-v1", group, "Workbench menu size",
         "Text and row size at workbenches, campfires and reloading benches. Other menus keep their own sizes.",
         Slider::choice(21, |w| part(w.resource::<MenuReadability>().workbench),
-            |w,v| w.resource_mut::<MenuReadability>().workbench = of_part(v), show)));
+            |w,v| set_size(w, MenuKind::Workbench, v), show)));
 }
 
 #[cfg(test)]

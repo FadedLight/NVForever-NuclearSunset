@@ -113,7 +113,7 @@ winresource = "0.1"
 
 [dev-dependencies]
 # [design, #2403] Exercise the real reports system with synthetic UI navigation states.
-nvf-play = { workspace = true, features = ["report-test-support"] }
+nvf-play = { workspace = true, features = ["report-test-support", "test-fixtures"] }
 
 [features]
 default = ["intro-video"]

@@ -15,7 +15,7 @@ fn normal_raw_owner(frame:Res<Fixture>,touches:Res<Touches>,mut events:MessageRe
     }
     capture.suppress_pointer(bridge.visible());
 }
-fn normal_ui_stack(mut stack:ResMut<bevy::ui::UiStack>,
+pub(crate) fn normal_ui_stack(mut stack:ResMut<bevy::ui::UiStack>,
     roots:Query<(Entity,Option<&GlobalZIndex>),(With<Node>,Without<ChildOf>)>,
     children:Query<&Children>,nodes:Query<Entity,With<Node>>) {
     // Explicit CPU stack from the actual painter's root z order/child order,
@@ -63,6 +63,9 @@ fn normal_long_simulation() -> (crate::sim::SimState, FormId) {
 
 fn normal_scene(native:bool)->(App,FormId) { normal_scene_with_sim(native,simulation()) }
 fn normal_scene_with_sim(native:bool,pair:(crate::sim::SimState,FormId))->(App,FormId) {
+    normal_scene_with_setup(native,pair,|_|{})
+}
+fn normal_scene_with_setup(native:bool,pair:(crate::sim::SimState,FormId),setup:impl FnOnce(&mut App))->(App,FormId) {
     use bevy::{app::{HierarchyPropagatePlugin,PropagateSet},
         camera::visibility::VisibilityPlugin,
         ui::{ComputedUiTargetCamera,ComputedUiRenderTargetInfo,UiStack,
@@ -134,6 +137,7 @@ fn normal_scene_with_sim(native:bool,pair:(crate::sim::SimState,FormId))->(App,F
     app.configure_sets(PostUpdate,PropagateSet::<ComputedUiRenderTargetInfo>::default()
         .after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
     if native {barter_menu::tests::install_normal_writer(&mut app);}
+    setup(&mut app);
     for _ in 0..5{app.update();}
     let fallback=app.world_mut().query_filtered::<Entity,With<crate::menu::RowButton>>().iter(app.world()).count();
     assert_eq!(fallback==0,native,"real ordinary draw selected native versus handbuilt presentation");

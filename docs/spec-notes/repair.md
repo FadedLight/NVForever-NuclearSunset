@@ -473,3 +473,29 @@ Any future change to that policy must use a shared all-input effect boundary.
 [qualification] New actual-consumer controls cover preview reopen/stale
 confirmation, one-kit consumption and matching physical/touch Open-only behavior.
 They are source-authored and remain uncompiled/unrun until separately qualified.
+
+
+### Ordinary vendor-menu finger input and typography
+
+[design] With the saved touch maintenance preference On (the Android default),
+vendor repair now uses the ordinary native-file or hand-built menu, with finger
+End taps and vertical list dragging. Dragging changes only that list's browse
+position; it does not select, repair or pay. A tap on another row selects it; a
+tap on the selected row requests the same repair as the existing pointer. The
+original consumer remains responsible for condition, skill, caps, exact unit and
+quote checks, caps transfer, and the Repair All confirmation tweak. Done follows
+the same original close path. The alternate vendor sheet is not prepared by the
+new ordinary-menu route. Off retains ordinary physical controls.
+
+Repair menu size changes font metrics/wrapping and measured rows in the existing
+clipped viewport, with a 51-unit minimum hand-built row and larger explicit XML
+row heights preserved. Paint, current native hit data and End admission use the
+same size. Changed effective settings retire pending finger input; equivalent
+values preserve it. Late script, creator, loading, device, geometry or source
+changes refuse a proposal before the original effect.
+
+This scope is vendor RepairServices. Pip-Boy item donor repair and weapon-mod
+selection retain their existing touch presentation and saved On/Off behavior;
+normal-menu conversion of those paths is separate work. Authored actual
+native/hand-built transaction and measured condition/marker controls are
+uncompiled and unexecuted; no phone outcome is established by this source.

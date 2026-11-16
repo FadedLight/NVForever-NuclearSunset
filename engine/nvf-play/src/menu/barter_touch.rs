@@ -10,7 +10,7 @@ mod view;
 mod commit;
 pub(crate) use commit::Commits;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub const KEY: &str = "touch-barter-v1";
 const TRAVEL: f32 = 12.0;
@@ -279,6 +279,7 @@ pub(super) struct LiveAdmission<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static RenderTarget)>,
 }
 impl LiveAdmission<'_, '_> {
+    pub(super) fn creator_open(&self)->bool {self.creator.as_ref().is_some_and(|c|c.is_open())}
     pub(super) fn allows(&self, frame: Frame, id: u64) -> bool {
         self.allows_with_switch(frame,id,false)
     }

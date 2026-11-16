@@ -54,7 +54,8 @@ fn vats_raw_action(app: &mut App, w: Entity, id: u64, control: Control) {
 }
 
 struct VatsParentScene { app: App, window: Entity, camera: Entity, actor: FormId, part_points: [Vec2; 2], pad: Entity }
-fn vats_parent_scene(mode: &str) -> VatsParentScene {
+fn vats_parent_scene(mode: &str) -> VatsParentScene { vats_parent_scene_with_style(mode,"Classic") }
+fn vats_parent_scene_with_style(mode: &str, style: &str) -> VatsParentScene {
     use nvf_play::{control::{ControlLocks, LockStats, PlayerControl}, hitvol::{ActorParts, PartSegment, PosedParts},
         player::{MoveIntent, Player}, vats_mode::VatsModePlugin};
     let mut app = App::new();
@@ -135,14 +136,14 @@ fn vats_parent_scene(mode: &str) -> VatsParentScene {
         let projected = camera_value.world_to_viewport(&transform, nvf_play::space::to_bevy(centers[part])).unwrap();
         assert!(projected.distance(*point) < 0.01, "actual projection matches the authored posed body");
     }
-    vats_pick(&mut app, "vats-style", "Classic");
+    vats_pick(&mut app, "vats-style", style);
     vats_pick(&mut app, nvf_play::vats_mode::touch::SETTING_KEY, mode);
     app.update();
     vats_raw_action(&mut app, window, 901, Control::Vats);
     assert!(app.world().resource::<nvf_play::vats_mode::VatsMode>().active(), "actual VATS touch entry must succeed");
     assert!(!app.world().resource::<nvf_play::vats_mode::VatsMode>().playing_back());
     for _ in 0..2 { app.update(); }
-    assert!(app.world().resource::<nvf_play::vats_mode::VatsMode>().classic_view().is_some());
+    assert_eq!(app.world().resource::<nvf_play::vats_mode::VatsMode>().classic_view().is_some(),style=="Classic");
     VatsParentScene { app, window, camera, actor, part_points, pad }
 }
 
@@ -378,5 +379,30 @@ fn actual_parent_vats_secondary_window_interrupts_primary_hold_without_claiming_
     assert!(f.app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(997));
     vats_edge(&mut f.app, f.window, 996, TouchPhase::Ended, body); f.app.update();
     assert!(f.app.world().resource::<nvf_play::vats_mode::VatsMode>().marked().is_empty());
+}
+
+#[test]
+fn actual_parent_mark_and_fire_tap_and_hold_queue_body_then_only_separate_fire_executes() {
+    for mode in ["Tap","Hold"] {
+        let mut f=vats_parent_scene_with_style(mode,"Mark and Fire");
+        let at=f.part_points[1];
+        assert!(f.app.world().resource::<nvf_play::vats_mode::VatsMode>().selected().is_none());
+        vats_edge(&mut f.app,f.window,1500,TouchPhase::Started,at);f.app.update();
+        assert!(f.app.world().resource::<nvf_play::vats_mode::VatsMode>().marked().is_empty());
+        if mode=="Hold" {for _ in 0..20 {f.app.update();}}
+        else {vats_edge(&mut f.app,f.window,1500,TouchPhase::Ended,at);f.app.update();}
+        let v=f.app.world().resource::<nvf_play::vats_mode::VatsMode>();
+        assert_eq!(v.marked(),vec![f.actor.0]);assert_eq!(v.reserved(),20.0);
+        assert!(!v.playing_back());assert_eq!(v.stats.shots,0);
+        assert_eq!(v.highlighted(),Some((f.actor.0,Some(1))));
+        assert_eq!(f.app.world().resource::<VatsParentObserved>().uses,0);
+        assert_eq!(f.app.world().resource::<VatsParentObserved>().executions,0);
+        if mode=="Hold" {vats_edge(&mut f.app,f.window,1500,TouchPhase::Ended,at);f.app.update();}
+        f.app.update();
+        vats_raw_action(&mut f.app,f.window,1501,Control::Use);
+        assert!(f.app.world().resource::<nvf_play::vats_mode::VatsMode>().playing_back());
+        assert_eq!(f.app.world().resource::<VatsParentObserved>().uses,0,"dedicated Fire must not synthesize a physical Use edge");
+        assert_eq!(f.app.world().resource::<VatsParentObserved>().executions,1);
+    }
 }
 }

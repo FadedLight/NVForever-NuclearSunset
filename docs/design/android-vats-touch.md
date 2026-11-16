@@ -1,9 +1,11 @@
-# Direct touch selection in Classic VATS
+# Direct touch selection in VATS
 
 [design] An independently saved `touch-vats-targeting-v1` choice offers Off (the
 existing controls), Tap, and Hold. Off is the compatibility default. This setting
-does not enable the separate double-tap gesture that enters VATS. Mark and Fire (the default style),
-physical mouse/keyboard and controller selection retain their existing behavior.
+does not enable the separate double-tap gesture that enters VATS. Tap and Hold
+work in Classic and Mark and Fire (the default style). Explicit Off and existing
+physical mouse/keyboard and controller selection retain their behavior; the saved
+key and values are unchanged and no preference is migrated or forced.
 
 [documented: engine/nvf-play/src/vats_mode.rs, tiles/vats_menu.rs, hitvol.rs]
 Classic VATS already projects body-part labels, casts pointer rays against posed
@@ -19,15 +21,19 @@ presentation. It does not establish pixel-accurate mesh picking.
 Tap queues once on a matching release; Hold queues once after 450 ms on the same
 part. A highlight and a short progress caption explain the pending selection.
 Movement off that part, cancel, a second contact, changed window/viewport/FOV,
-changed stay/weapon, focus loss, a higher modal or hardware takeover cancels the
+changed stay/style/weapon, focus loss, a higher modal or hardware takeover cancels the
 pending action. Retired contact IDs remain quarantined until an actual neutral
 batch; the bounded ID limit fails closed. Moving an actor or camera is permitted
 only while the current ray still hits that same actor and part. No drag-to-paint
 or repeating hold is supported.
 
 [design] The actual VATS update rechecks the camera/window, platform, device,
-modal, current stay, current body ray and selected candidate before changing its
-selection. It then calls the existing `mark_actor` consumer, which retains current
+modal, current stay, current body ray and actor eligibility before changing its
+selection. Classic also requires its current candidate list. Mark and Fire uses
+the live ray-hit actor without creating a Classic list: the existing preview
+builds that actor for the active finger, resolves the actual hit part and updates
+its highlight. Without a finger, ordinary crosshair preview resumes. No camera
+turn or reticle change is requested for Mark and Fire. It then calls the existing `mark_actor` consumer, which retains current
 death/targetability/cloak/melee/AP/ammunition rules. Selection never sets accept,
 advances to Firing, spends AP or fires a shot. In enhanced mode only, the wrapper's
 real touch Fire control calls `Bridge::fire`: it requests the existing accept flow
@@ -62,9 +68,9 @@ body away from a stationary finger before its Tap release or Hold deadline. The
 existing view follow resumes on release, cancel or refused current-ray validation.
 Actor movement, changed part/camera/projection and ordinary hardware gates still
 require the current ray to meet the same live body. This does not freeze actors or
-ignore camera movement from another source. Off remains the saved default; the
-setting label/note states Classic only. Mark and Fire retains its existing input
-policy and does not gain direct body targeting in this correction.
+ignore camera movement from another source. Off remains the saved default.
+Mark and Fire does not run this Classic follow path; touch selection changes
+its temporary preview and queue through the shared consumers instead.
 
 [design] Five additional authored App cases pair the production place_camera and
 TransformPlugin with the existing posed-capsule fixture, real camera rays and VATS
@@ -76,3 +82,11 @@ wrapper/phone pass or cause of the reported device failure is inferred.
 releases camera follow in that same update. Preview-only rejection occurs after
 classic_frame in the existing update order; its refused contact releases follow
 on the next frame. No duplicated target/AP/preview legality rules are introduced.
+
+[qualification] Additive Mark-and-Fire controls are authored for real off-reticle
+posed parts through Bridge and VATS update, Tap/Hold, unchanged Classic state and
+camera, AP/ammunition limits, empty Fire, canceled or stale body/geometry/style/
+modal/hardware contacts, late actor/cloak rejection, native reticle mouse/controller
+behavior with explicit Off, and actual wrapper raw-touch Fire confirmation. Original
+Classic cases and camera-follow controls remain. These new controls are uncompiled
+and unrun; no device acceptance or default-APK VATS repair is claimed.

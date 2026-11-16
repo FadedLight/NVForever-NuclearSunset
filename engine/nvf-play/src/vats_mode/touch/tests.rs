@@ -10,7 +10,8 @@ const GUN: FormId = FormId(0xFE800);
 const A: u32 = 0xFE811;
 const B: u32 = 0xFE812;
 
-fn scene(mode: Mode) -> (App, Entity, Frame) {
+fn scene(mode: Mode) -> (App, Entity, Frame) { scene_with_style(mode,VatsStyle::Classic) }
+fn scene_with_style(mode: Mode, style: VatsStyle) -> (App, Entity, Frame) {
     let (mut app, pad) = crate::pad::device::tests::playing_app(InputDevice::KeyboardMouse);
     let mut weapon = test_world::item_base(GUN.0);
     if let fnv_sim::forms::BaseData::Item(item) = &mut weapon.data { item.kind = fnv_sim::forms::ItemKind::Weapon; item.health = Some(100); }
@@ -72,10 +73,10 @@ fn scene(mode: Mode) -> (App, Entity, Frame) {
                 "published authored capsule {actor:08X}/{part}: {center:?}");
         }
     }
-    app.world_mut().insert_resource(VatsMode { phase: Phase::Marking, style: VatsStyle::Classic, entered_at: Some(0.0),
+    app.world_mut().insert_resource(VatsMode { phase: Phase::Marking, style, entered_at: Some(0.0),
         queue: MarkQueue::new(20.0, 1, 2), weapon: Some(InHand { id: GUN, reach: 1000.0, style: AttackStyle::Single,
             melee_reach: 0.0, sight_fov: 0.0, skill: 60.0, hit: HitTuning::default(), special: None }),
-        classic: ClassicState { selected: Some(A), targets: [A, B].map(|actor| Candidate { actor, bearing: 0.0, off: 0.0 }).to_vec(), scanned_at: f64::MAX, ..default() }, ..default() });
+        classic: if style==VatsStyle::Classic {ClassicState { selected: Some(A), targets: [A, B].map(|actor| Candidate { actor, bearing: 0.0, off: 0.0 }).to_vec(), scanned_at: f64::MAX, ..default() }}else{default()}, ..default() });
     assert!(pick(app.world_mut(), mode.name()));
     let f = Frame { window, camera, logical: Vec2::new(1000.0, 700.0), physical: UVec2::new(1000, 700), density: 1.0, admitted: true, fresh: false, neutral: true };
     prepare(&mut app, f, true);
@@ -390,3 +391,5 @@ fn existing_feedback_updates_to_live_hud_palette_without_replacing_geometry() {
 }
 
 include!("live_camera_tests.rs");
+
+include!("deadeye_tests.rs");

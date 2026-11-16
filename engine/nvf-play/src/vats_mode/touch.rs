@@ -1,4 +1,4 @@
-//! Optional Classic VATS finger owner; see docs/design/android-vats-touch.md.
+//! Optional VATS finger owner for both targeting styles; see docs/design/android-vats-touch.md.
 //! The wrapper supplies the sole raw stream. No mouse, keyboard or Touches writes.
 use super::*;
 use bevy::{camera::{NormalizedRenderTarget, RenderTarget}, ecs::system::SystemParam,
@@ -32,8 +32,8 @@ pub struct Frame {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Geometry { frame: Frame, viewport: URect, projection: Mat4 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Stay { entered: Option<f64>, weapon: Option<FormId> }
-impl Stay { fn of(v: &VatsMode) -> Self { Self { entered: v.entered_at, weapon: v.weapon.as_ref().map(|w| w.id) } } }
+struct Stay { entered: Option<f64>, weapon: Option<FormId>, style: VatsStyle }
+impl Stay { fn of(v: &VatsMode) -> Self { Self { entered: v.entered_at, weapon: v.weapon.as_ref().map(|w| w.id), style: v.style } } }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Body { actor: u32, part: Option<u8> }
 #[derive(Clone, Copy)]
@@ -86,8 +86,8 @@ impl State {
 pub(super) fn install(app: &mut App) {
     app.init_resource::<State>();
     crate::settings::add_choice_list(app, crate::settings::Setting {
-        key: SETTING_KEY, group: "Touch", label: "Classic V.A.T.S. body selection",
-        note: "Classic style only. Mark and Fire keeps its controls. Tap or hold a body part to queue once; hold takes 0.45 seconds. Off uses existing controls. Touch Fire confirms queued attacks.",
+        key: SETTING_KEY, group: "Touch", label: "V.A.T.S. body selection",
+        note: "Classic and Mark and Fire: tap or hold a body part to queue once; hold takes 0.45 seconds. Off uses existing controls. Touch Fire confirms queued attacks.",
         switches: "", get: |_| false, set: |_, _| {}, slider: None,
     }, crate::settings::ChoiceList {
         names: |_| [Mode::Off, Mode::Tap, Mode::Hold].iter().map(|m| m.name().to_owned()).collect(),
@@ -163,7 +163,7 @@ impl Projection<'_, '_> {
         let hit = phys.ray(from, dir, v.weapon.as_ref()?.reach, shot_filter(phys))?;
         match hit.owner {
             Owner::Actor { form_id, part, .. } if phys.world.actor_volume(form_id).is_some_and(|b| !b.dead)
-                && v.classic.targets.iter().any(|t| t.actor == form_id) =>
+                && (v.style == VatsStyle::DeadEye || v.classic.targets.iter().any(|t| t.actor == form_id)) =>
                 Some(Body { actor: form_id, part: (part != fnv_phys::actors::WHOLE).then_some(part) }),
             _ => None,
         }
@@ -190,7 +190,7 @@ impl Bridge<'_, '_> {
         if neutral { self.state.retired.clear(); self.state.overflow = false; }
     }
     fn actual_contact(&self, t: &TouchInput, primary: Entity) -> bool {
-        self.state.mode != Mode::Off && self.vats.style == VatsStyle::Classic
+        self.state.mode != Mode::Off
             && self.vats.phase == Phase::Marking && t.window == primary
             && t.position.is_finite()
             && self.projection.windows.get(primary).is_ok_and(|window| window.focused)
@@ -222,7 +222,7 @@ impl Bridge<'_, '_> {
     pub fn prepare(&mut self, frame: Option<Frame>) {
         if frame.is_some_and(|f| f.neutral) { self.state.retired.clear(); self.state.overflow = false; }
         let geometry = frame.and_then(|f| self.projection.geometry(f));
-        let stay = (self.vats.style == VatsStyle::Classic && self.vats.phase == Phase::Marking && !self.vats.pad).then(|| Stay::of(&self.vats));
+        let stay = (self.vats.phase == Phase::Marking && !self.vats.pad).then(|| Stay::of(&self.vats));
         if geometry != self.state.geometry || stay != self.state.stay || geometry.is_none() || stay.is_none() {
             self.state.cancel(); self.state.geometry = geometry; self.state.stay = stay;
         }
@@ -291,7 +291,7 @@ impl Consumer<'_, '_> {
     pub(super) fn take(&mut self, v: &VatsMode, phys: &mut PhysState, keys: &Keys) -> Applied {
         let empty = || Applied { selection: None, fire: false, hold_camera: false };
         let Some(s) = self.state.as_mut() else { return empty() };
-        if !s.active() || v.phase != Phase::Marking || v.style != VatsStyle::Classic || v.pad
+        if !s.active() || v.phase != Phase::Marking || v.pad
             || s.stay != Some(Stay::of(v)) || keys.mark || keys.accept || keys.toggle || keys.unmark || keys.special || keys.target_step != 0 || keys.part_step != 0 {
             s.cancel(); return empty();
         }

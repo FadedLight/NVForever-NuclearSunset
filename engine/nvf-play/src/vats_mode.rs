@@ -1513,7 +1513,7 @@ fn update(
             let direct_part = direct.selection.filter(|s| sim.present(s.actor) && barred(v, script.as_deref_mut(), &mut sim, s.actor).is_ok());
             if direct.selection.is_some() && direct_part.is_none() { touch.refuse(); }
             if let Some(s) = direct_part {
-                if v.classic.selected != Some(s.actor) {
+                if v.style == VatsStyle::Classic && v.classic.selected != Some(s.actor) {
                     v.classic.selected = Some(s.actor);
                     v.classic.part_set = None;
                 }
@@ -1523,18 +1523,22 @@ fn update(
             let chosen = if v.style == VatsStyle::Classic {
                 classic_frame(v, &keys, &combat, script.as_deref_mut(), &mut sim, &mut phys, &mut player, &control, real.delta_secs(), !direct.hold_camera || direct_part.is_none(), &mut sounds)
             } else {
-                None
+                // A finger selects a real ray-hit actor for this preview only.
+                // Mark and Fire has no Classic target list or camera follow.
+                direct_part.map(|s| (s.actor, 0))
             };
             // (The classic style has ended the mode when no target is left.)
             let on = v.phase == Phase::Marking;
             if on {
                 preview(v, &combat, &parts, script.as_deref_mut(), &mut sim, &mut phys, &player, &control, chosen);
             }
-            let direct_part = direct_part.filter(|s| v.selected() == Some(s.actor) && v.preview.actor == Some(s.actor));
+            let direct_part = direct_part.filter(|s| (v.style == VatsStyle::DeadEye || v.selected() == Some(s.actor)) && v.preview.actor == Some(s.actor));
             let direct_part = direct_part.and_then(|s| {
                 let i = v.preview.parts.iter().position(|p| p.part == s.part)?;
-                v.classic.part = i;
-                v.classic.part_set = Some(s.actor);
+                if v.style == VatsStyle::Classic {
+                    v.classic.part = i;
+                    v.classic.part_set = Some(s.actor);
+                }
                 for (n, p) in v.preview.parts.iter_mut().enumerate() { p.under = n == i; }
                 Some(s)
             });
@@ -2433,8 +2437,9 @@ fn preview(v: &mut VatsMode, combat: &Combat, parts: &ActorParts, mut script: Op
     let (from, dir) = Crosshair::ray(control.crosshair.as_ref(), player.eye(), player.look_dir());
     let reach = v.weapon.as_ref().map_or(REACH, |w| w.reach);
     let filter = shot_filter(phys);
-    // The classic style previews its selected target, whatever the crosshair is on
-    // (vats-classic.md §4); `chosen` is that target and the place of its selected part.
+    // An explicit target comes from Classic selection or a validated body touch.
+    // The touch consumer resolves the actual part after this preview is built;
+    // without either owner, Mark and Fire follows the ordinary crosshair.
     let target = match chosen {
         Some((actor, _)) => Some((actor, None)),
         None => preview_target(phys, script.as_deref(), from, dir, reach, &filter),

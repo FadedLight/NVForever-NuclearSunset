@@ -62,6 +62,16 @@ fn scene(mode: Mode) -> (App, Entity, Frame) {
         app.world_mut().resource_mut::<ActorParts>().by_ref.insert(actor, PosedParts { data: FormId(0), weapon: None,
             segments: capsules.iter().map(|p| PartSegment { part: p.part, limb: if p.part == 0 { fnv_combat::data::Limb::Head } else { fnv_combat::data::Limb::Torso }, a: p.a, b: p.b, radius: None }).collect() });
     }
+    // Standalone capsules publish their queued local poses at query refresh.
+    // Project touches from those actual poses, not their initial body origins.
+    app.world_mut().resource_mut::<PhysState>().world.update_queries();
+    for (actor, y) in [(A, -30.0), (B, 35.0)] {
+        for (part, z) in [(0, 136.5), (1, 91.5)] {
+            let center = app.world().resource::<PhysState>().world.actor_part_center(actor, part).unwrap();
+            assert!(Vec3::from_array(center).abs_diff_eq(Vec3::new(120.0, y, z), 0.001),
+                "published authored capsule {actor:08X}/{part}: {center:?}");
+        }
+    }
     app.world_mut().insert_resource(VatsMode { phase: Phase::Marking, style: VatsStyle::Classic, entered_at: Some(0.0),
         queue: MarkQueue::new(20.0, 1, 2), weapon: Some(InHand { id: GUN, reach: 1000.0, style: AttackStyle::Single,
             melee_reach: 0.0, sight_fov: 0.0, skill: 60.0, hit: HitTuning::default(), special: None }),
@@ -70,6 +80,18 @@ fn scene(mode: Mode) -> (App, Entity, Frame) {
     let f = Frame { window, camera, logical: Vec2::new(1000.0, 700.0), physical: UVec2::new(1000, 700), density: 1.0, admitted: true, fresh: false, neutral: true };
     prepare(&mut app, f, true);
     app.update();
+    for actor in [A, B] {
+        for part in [0, 1] {
+            let at = point(&app, f, actor, part);
+            let ray = app.world().get::<Camera>(camera).unwrap()
+                .viewport_to_world(app.world().get::<GlobalTransform>(camera).unwrap(), at).unwrap();
+            let mut phys = app.world_mut().resource_mut::<PhysState>();
+            let filter = shot_filter(&phys);
+            let hit = phys.ray(space::to_game(ray.origin), space::to_game(*ray.direction), 1000.0, filter);
+            assert!(matches!(hit.map(|h| h.owner), Some(Owner::Actor { form_id, part: hit_part, .. })
+                if form_id == actor && hit_part == part), "projected fixture capsule {actor:08X}/{part}: {hit:?}");
+        }
+    }
     (app, pad, f)
 }
 fn prepare(app: &mut App, mut f: Frame, neutral: bool) {

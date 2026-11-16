@@ -247,7 +247,7 @@ and [Pip-Boy](spec-notes/android-pipboy-optional-controls.md) notes.
 ## Current-main integration status
 
 [design] The next source integration retains the optional touch views alongside
-accepted Main `5a941458`, following the earlier `ac8f1d6d`, `df17cc6d`, `7e638d4e` and `ed684e8` checkpoints and retaining
+accepted Main `95fd3197`, following the earlier `5a941458`, `ac8f1d6d`, `df17cc6d`, `7e638d4e` and `ed684e8` checkpoints and retaining
 its engine implementation of Stewie-related preferences. This is separate from
 verified execution of a particular original mod/plugin/version/profile.
 Controller keyboard/mouse contributions keep their
@@ -265,10 +265,11 @@ continues through the ordinary capped trade consumer.
 The incoming DATA consumer also requires its companion-summon message stream.
 The lean core and wrapper map fixtures register that real provider, as production
 PipBoyPlugin does, while retaining the earlier MenuInput provider correction and
-all map assertions. This additional source setup correction is unexecuted; it is
-not an observed explanation for the earlier runtime failures.
+all map assertions. The core map controls subsequently passed in `ef8a9d49`;
+the wrapper fixture remains unrun. This setup correction is not an observed
+explanation for the earlier runtime failures.
 
-[qualification] Source comparison retains all 1,564 Main scenario records plus
+[qualification] Source comparison retains all 1,568 Main scenario records plus
 Android's startup-options record, with the Main order intact. This is file
 integrity, not scenario execution. Integrated engine/UI regressions, native
 packaging and phone acceptance remain unrun. Earlier ARM/R31
@@ -349,6 +350,40 @@ of the desktop launcher's workspace dependencies. Two shared Main sound-cover
 expiry/playback-admission findings remain a coordinated follow-up; incoming
 behavior is preserved here, without an Android-only fork or phone-cause claim.
 Current strict/code-generation, runtime, packaging and phone checks remain open.
+
+[qualification] The published `ef8a9d49` cycle tested checkout `06bb2126`,
+Main `5a941458`, tree `b078db88`; the tested tree equals its PR source tree.
+All eight jobs finished: six passed, engine tests and aggregate failed. Strict
+locked release all-target Clippy passed. Core executed 3,239 passes with five
+existing ignored. Engine test code generation succeeded, including all three
+corrected preview regressions. Assets passed 207 with one ignored; the play
+parent passed 2,192 and failed six VATS touch cases, with one ignored. The owned
+palette child failure is already represented by its parent. Wrapper tests did
+not run. The selected 56 menu cases yielded 44 passes, no failures and twelve
+wrapper cases unrun. Native construction, nine shader controls and eleven
+loading-reveal cases with 169 checks plus 41/49 handoff/window checks passed,
+but its artifact remains permanently unqualified and was not downloaded,
+installed or served. These are authored host/build results, not phone recovery.
+
+The VATS fixture read actor-part centers before publishing queued standalone
+capsule poses. Its correction calls the real query-publication provider before
+projection, then checks four authored centers and four real projected ray hits.
+All ten original test bodies and 91 original assertion macros remain exact;
+two precondition macros are added. Production input/gates, AP/ammunition and Fire
+are unchanged. This omission is not proven to explain all six failures: the AP
+case makes a second tap after a ray may already have published. Corrected
+execution and all remaining failures must be recorded without weakening oracles.
+
+[qualification] Fixed Main `95fd3197` adds sixteen commits in 34 paths and one
+actual combat-test insertion conflict. The union keeps both the Android
+presentation fixture/three tests and Main's condition-policy test, alongside
+Main's god-mode AP, explosive fallback, House screen idles, weather readers and
+bounded retired-scene persistence. Touch marks retain the shared AP authority.
+All 1,568 Main scenario objects, order and top-level metadata remain exact, plus
+Android startup options for 1,569. All 1,154 graph inputs and 178 fixed settings
+with 68 Android overrides remain exact the published Android parent. These are
+static preservation checks. The new union and fixture correction are uncompiled
+and unrun, with no new APK or phone result; R9 remains the qualified test build.
 
 ## Loading recovery qualification
 

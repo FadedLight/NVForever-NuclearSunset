@@ -1,3 +1,5 @@
+use bevy::ecs::system::RunSystemOnce;
+
 #[test]
 fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_and_actions() {
     let mut app=settings_app(&[("difficulty","Gameplay")],Page::Settings{selected:None});
@@ -36,7 +38,7 @@ fn appearance_preview_never_replaces_a_narrow_note_or_its_required_reason() {
     app.init_resource::<crate::pad::PadGlyphs>();
     let row=app.world().resource::<Settings>().index(crate::dialogue_touch::appearance::HINTS_KEY).unwrap();
     let d=Drawn{page:Page::Settings{selected:Some(RowId::Setting(row))},entries:vec![ViewEntry::Row(RowId::Setting(row))],lines:1,..default()};
-    app.world_mut().run_system_cached_with(move |In(d):In<Drawn>,mut commands:Commands,settings:Res<Settings>,glyphs:Res<crate::pad::PadGlyphs>| {
+    app.world_mut().run_system_once_with(move |In(d):In<Drawn>,mut commands:Commands,settings:Res<Settings>,glyphs:Res<crate::pad::PadGlyphs>| {
         commands.spawn(Node::default()).with_children(|root|settings_page(root,&d,&PauseLook::plain(),settings.list(),Some(RowId::Setting(row)),ListBox{left:0.,width:400.},&glyphs));
     },d).unwrap();
     assert_eq!(app.world_mut().query_filtered::<Entity,With<crate::dialogue_touch::appearance::Preview>>().iter(app.world()).count(),0);
@@ -85,7 +87,7 @@ fn selected_appearance_note_and_real_unavailable_reason_keep_the_visible_uncut_w
             let row_top=OPTIONS_TOP+11.*OPTION_ROW;let popup_h=5.*DROP_ITEM+2.*LINE;
             assert!(row_top+OPTION_ROW+popup_h>950. && note_top>row_top,"real dropdown opens above, clear of the note witness");
         }
-        app.world_mut().run_system_cached_with(move |In(d):In<Drawn>,mut commands:Commands,settings:Res<Settings>,glyphs:Res<crate::pad::PadGlyphs>| {
+        app.world_mut().run_system_once_with(move |In(d):In<Drawn>,mut commands:Commands,settings:Res<Settings>,glyphs:Res<crate::pad::PadGlyphs>| {
             commands.spawn(Node::default()).with_children(|root|settings_page(root,&d,&PauseLook::plain(),settings.list(),Some(RowId::Setting(row)),lb,&glyphs));
         },d).unwrap();
         assert_eq!(app.world_mut().query_filtered::<Entity,With<crate::dialogue_touch::appearance::Preview>>().iter(app.world()).count(),0);

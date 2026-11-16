@@ -302,6 +302,21 @@ before executing engine touch tests or constructing a new APK. Its repaired
 fixture initializers and popup-query interface still need fresh checks; separate
 Java protocol results below do not qualify the combined engine/UI or a download.
 
+[qualification] The later `0c8ffbfc` cycle tested actual checkout `804592fe`,
+with Main `f4dbc82f`. It passed 3,219 core tests with five existing ignored,
+Android cross-checking and native APK construction, nine shader/layout controls,
+and the Java handoff/window/loading-reveal controls. Strict checking failed on
+six touch helper/test lints. Engine test code generation failed on two preview
+fixtures that passed capturing closures to Bevy's cached-system API; no engine
+Rust test suite ran, including the selected 56 legacy menu cases. Its APK artifact
+remains unqualified and was not downloaded, installed or served.
+
+The corrective source uses explicit lexical borrow scopes, named system parameter
+groups and unambiguous assignment spacing. The two one-off preview fixtures use
+the existing one-shot system API, retaining their captures, real painter calls,
+deferred commands and every assertion. These are source corrections; fresh strict
+checking, test code generation and actual engine test execution remain required.
+
 ## Loading recovery qualification
 
 [design] Loading completes only after checking that the current loading cover was

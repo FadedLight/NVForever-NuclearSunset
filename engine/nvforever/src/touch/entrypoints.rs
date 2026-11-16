@@ -71,11 +71,17 @@ fn open(world: &mut World, name: &str) -> bool {
     world.resource_mut::<FormOver>().0 = true;
     true
 }
+#[derive(bevy::ecs::system::SystemParam)]
+struct EditorContext<'w> {
+    paused: Option<Res<'w, Paused>>,
+    page: Option<Res<'w, Page>>,
+    play: Option<Res<'w, State<PlayState>>>,
+    next: Option<Res<'w, NextState<PlayState>>>,
+}
 fn prepare(
     mut session: ResMut<Session>, mut layout: ResMut<Layout>, mut over: ResMut<FormOver>,
     mut keys: MessageReader<KeyboardInput>, window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    paused: Option<Res<Paused>>, page: Option<Res<Page>>, play: Option<Res<State<PlayState>>>,
-    next: Option<Res<NextState<PlayState>>>,
+    EditorContext { paused, page, play, next }: EditorContext,
 ) {
     for slot in &mut session.ids { if slot.is_some_and(|(_, ended)| ended) { *slot = None; } }
     let escape = keys.read().any(|key| Some(key.window) == session.window()

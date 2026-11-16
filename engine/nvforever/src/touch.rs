@@ -504,12 +504,17 @@ struct WorldInputBridges<'w,'s> {
     map:nvf_play::pipboy::data::touch_map::Bridge<'w,'s>,
     vats:vats_targeting::Bridge<'w,'s>,
 }
+#[derive(bevy::ecs::system::SystemParam)]
+struct TouchInputState<'w> {
+    state: ResMut<'w, TouchState>,
+    held_sneak: ResMut<'w, nvf_play::control::HeldSneakInput>,
+    platform: Option<Res<'w, nvf_play::pad::PlatformInputGate>>,
+    movement: movement::Bridge<'w>,
+    editor_session: ResMut<'w, entrypoints::Session>,
+}
 #[allow(clippy::too_many_arguments)]
 fn input(
-    (mut state, mut held_sneak, platform, mut movement, mut editor_session): (
-        ResMut<TouchState>, ResMut<nvf_play::control::HeldSneakInput>,
-        Option<Res<nvf_play::pad::PlatformInputGate>>, movement::Bridge, ResMut<entrypoints::Session>,
-    ),
+    TouchInputState { mut state, mut held_sneak, platform, mut movement, mut editor_session }: TouchInputState,
     mut layout: ResMut<Layout>,
     (ads, gyro_options): (Option<Res<nvf_play::aim_zoom::AimZoom>>, Res<gyro::Options>),
     mut touches: MessageReader<TouchInput>,

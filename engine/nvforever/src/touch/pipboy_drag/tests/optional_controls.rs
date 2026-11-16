@@ -30,7 +30,7 @@ fn real_parent_left_and_right_dismissal_reverses_the_same_arm_and_cancel_preserv
             let mut nodes=scene.app.world_mut().query_filtered::<Entity,With<OptionalVisual>>();
             let before=nodes.iter(scene.app.world()).collect::<Vec<_>>();
             // Paint-only change while held cannot cancel or move its target.
-            scene.app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics=!graphics;
+            scene.app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics = !graphics;
             scene.app.update();assert!((scene.app.world().resource::<ArmGesture>().progress().unwrap()-0.8).abs()<1e-5);
             let mut nodes=scene.app.world_mut().query_filtered::<Entity,With<OptionalVisual>>();
             assert_eq!(nodes.iter(scene.app.world()).collect::<Vec<_>>(),before);

@@ -154,7 +154,15 @@ fn raw_path_cancel_second_finger_window_death_and_late_gate_cannot_queue_or_repl
             1 => { raw(&mut app, f, 20, TouchPhase::Canceled, p, false); raw(&mut app, f, 20, TouchPhase::Ended, p, false); }
             2 => { raw(&mut app, f, 21, TouchPhase::Started, p, false); raw(&mut app, f, 20, TouchPhase::Ended, p, false); }
             3 => { let other = app.world_mut().spawn(Window::default()).id(); raw(&mut app, Frame { window: other, ..f }, 20, TouchPhase::Ended, p, false); }
-            4 => { let mut phys = app.world_mut().resource_mut::<PhysState>(); let mut volume = phys.world.actor_volume(B).unwrap(); volume.dead = true; phys.world.set_actor_volume(B, volume); drop(phys); raw(&mut app, f, 20, TouchPhase::Ended, p, false); }
+            4 => {
+                {
+                    let mut phys = app.world_mut().resource_mut::<PhysState>();
+                    let mut volume = phys.world.actor_volume(B).unwrap();
+                    volume.dead = true;
+                    phys.world.set_actor_volume(B, volume);
+                }
+                raw(&mut app, f, 20, TouchPhase::Ended, p, false);
+            }
             5 => { raw(&mut app, f, 20, TouchPhase::Ended, p, false); app.world_mut().resource_mut::<crate::pause::Paused>().0 = true; }
             6 => { raw(&mut app, f, 20, TouchPhase::Ended, p, false); app.world_mut().get_mut::<Camera>(f.camera).unwrap().computed.target_info = None; }
             7 => { raw(&mut app, f, 20, TouchPhase::Ended, p, false); app.world_mut().resource_mut::<VatsMode>().entered_at = Some(99.0); }

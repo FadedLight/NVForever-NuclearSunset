@@ -9,7 +9,7 @@ fn identical_projected_button_regions_keep_native_page_dispatch_when_graphics_ar
         let mut nodes=app.world_mut().query_filtered::<Entity,With<Visual>>();
         let before=nodes.iter(app.world()).collect::<Vec<_>>();
         // Changing paint mid-contact must not change geometry or retire input.
-        app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics=!graphics;app.update();
+        app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics = !graphics;app.update();
         assert!(*app.world().resource::<Geometry>()==geometry);
         assert!(app.world().resource::<ModelTouch>().contact.is_some());
         let mut ids=app.world_mut().query_filtered::<Entity,With<Visual>>();

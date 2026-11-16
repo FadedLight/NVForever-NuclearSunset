@@ -103,5 +103,16 @@ change from applying twice. New options use the existing INI settings consumer.
 Authored controls exercise actual nodes/alpha, Taffy hit bounds, live settings,
 scroll/selection preservation, hints off with real raw choices, both framing
 sides, long/disabled choices, saved restoration and actual note-region sample.
-All new controls remain uncompiled/unrun until an owner-admitted check. They do
-not qualify phone pixels or installed mod/version/profile behavior.
+The new appearance and preview regressions still await actual engine-test
+execution. Phone pixels and installed mod/version/profile behavior remain
+unqualified.
+
+[qualification] The `0c8ffbfc` hosted cycle failed during engine test code
+generation at two preview fixtures (`dialogue_preview_tests.rs`): Bevy's
+cached-system API rejects their capturing drawing closures with `E0080`.
+The earlier cross-check did not instantiate that code-generation boundary, and
+no engine Rust tests executed in the failed cycle. The source correction uses
+the existing one-shot API for these one-off calls; the real `settings_page`
+painter, captures, typed `Drawn` input, deferred commands and all three tests'
+word/reason/preview assertions remain. Corrected code generation and execution
+remain pending; native APK construction is not a preview or phone-layout pass.

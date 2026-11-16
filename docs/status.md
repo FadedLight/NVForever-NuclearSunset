@@ -133,6 +133,22 @@ and final packaging did not run; no APK artifact was produced. The narrow source
 corrections retain constructor defaults, observer effects and all old oracles;
 fresh corrected compiler/runtime/native checks remain required. R9 is unchanged.
 
+The subsequent `0c8ffbfc` cycle tested checkout `804592fe` with Main `f4dbc82f`:
+five canonical jobs passed and three failed. Core executed 3,219 passes with five
+existing ignored. Native construction, nine shader/layout controls and Java's
+41 handoff, 49 window and eleven loading-reveal cases (169 cumulative checks)
+passed, but strict checking found six lints. Engine code generation separately
+failed on two capturing preview closures passed to a cached-system API; all engine
+Rust tests and the selected 56 legacy menu cases remain unrun. The produced APK
+artifact is unqualified and was not downloaded, installed or served.
+
+The eight-diagnostic source correction is **In progress**: explicit borrow scopes,
+named system parameter groups, assignment spacing and the existing one-shot
+preview execution API retain the real effects, test bodies and assertions.
+Corrected strict checking, code generation, engine tests and final packaging/
+phone acceptance remain pending. Neither the native pass nor earlier historical
+tests qualify this corrective source or establish a phone recovery/crash cure.
+
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate
 production and identical six authored fixtures in validation context 54830c0 gave

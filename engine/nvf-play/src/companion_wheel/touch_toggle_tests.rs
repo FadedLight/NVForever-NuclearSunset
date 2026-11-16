@@ -55,9 +55,10 @@ fn wheel_off_standard_keys_reach_real_game_command_and_exit() {
     }
     optional_key(&mut app, w, KeyCode::Enter, true);
     assert_eq!(app.world().resource::<WheelStats>().commands, [Command::BackUp.name()]);
-    let mut script = app.world_mut().resource_mut::<ScriptState>();
-    assert!(script.rt.as_mut().unwrap().game.take_back_up(FormId(0x99)).is_some());
-    drop(script);
+    {
+        let mut script = app.world_mut().resource_mut::<ScriptState>();
+        assert!(script.rt.as_mut().unwrap().game.take_back_up(FormId(0x99)).is_some());
+    }
     optional_key(&mut app, w, KeyCode::Enter, false);
     optional_key(&mut app, w, KeyCode::Escape, true);
     assert!(app.world().resource::<WheelScreen>().0.is_none());

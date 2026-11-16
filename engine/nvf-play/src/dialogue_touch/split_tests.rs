@@ -78,7 +78,8 @@ fn full_world_projects_speaker_opposite_measured_choices_at_both_densities() {
 fn current_speaker_changes_reframe_and_menu_pause_free_camera_restore_prior_camera() {
     for cause in 0..7 {
         let (mut app,_,world)=scene(Side::Left,1.0);
-        app.world_mut().resource_mut::<crate::dialogue_look::SpeakerFace>().0=Some((42,[-60.0,200.0,155.0]));
+        app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.dialogue.as_mut().unwrap().actor=fnv_sim::FormId(43);
+        app.world_mut().resource_mut::<crate::dialogue_look::SpeakerFace>().0=Some((43,[-60.0,200.0,155.0]));
         app.update();
         let transform=app.world().get::<Transform>(world).unwrap();
         let face=crate::space::to_bevy([-60.0,200.0,155.0]);

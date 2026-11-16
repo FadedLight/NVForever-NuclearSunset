@@ -116,6 +116,7 @@ fn appearance_ini_restores_independently_of_enabled_sizes_confirmation_and_side(
     let current=saved.world().resource::<crate::dialogue_split::Options>().side;
     let side=if current==crate::dialogue_split::Side::Left {"Speaker right"}else{"Speaker left"};
     assert!(crate::settings::pick(saved.world_mut(),row,side));
+    let tint=index(&saved,TINT_KEY);assert!(crate::settings::pick(saved.world_mut(),tint,"Warm amber"));
     let expected=*saved.world().resource::<Appearance>();let expected_text=*saved.world().resource::<TouchDialogue>();let expected_side=*saved.world().resource::<crate::dialogue_split::Options>();
     let (mut restored,window)=layout_scene(true,Vec2::new(792.,363.),1.);
     restored.insert_resource(crate::settings::SettingsFile(Some(path.clone())));crate::settings::apply_stored(restored.world_mut());settle(&mut restored);

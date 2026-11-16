@@ -100,6 +100,10 @@ fn palette(rgb: [u8;3], brightness: f32, alpha: f32) -> Color {
     crate::interface::tint(rgb,brightness).with_alpha(opacity(alpha))
 }
 impl Appearance {
+    pub(super) fn response_colors(self,short:bool,selected:bool)->(Color,Color) {
+        let (_,fill,line)=self.colors(Paint::Choice{index:0,short},if selected {0}else{1},crate::interface::hud_rgb());
+        (line.unwrap_or(Color::NONE),fill.unwrap_or(Color::NONE))
+    }
     fn line(self, rgb:[u8;3], factor:f32) -> Color { palette(rgb,255.0,self.frame*factor) }
     fn fill(self, rgb:[u8;3], brightness:f32, factor:f32) -> Color { palette(match self.tint {Tint::Hud=>rgb,Tint::Neutral=>[255,255,255],Tint::Amber=>[255,181,74]},brightness,backing(self.background)*factor) }
     fn colors(self, kind:Paint, selected:usize, rgb:[u8;3]) -> (Option<Color>,Option<Color>,Option<Color>) {

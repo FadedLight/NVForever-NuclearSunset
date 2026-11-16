@@ -153,7 +153,8 @@ fn framed_rotation(position: Vec3, point: Vec3, fov: f32, aspect: f32, screen_x:
         || !aspect.is_finite() || aspect<=0.0 || !screen_x.is_finite() { return None; }
     let center=Transform::from_translation(position).looking_at(point,Vec3::Y).rotation;
     let yaw=((2.0*screen_x-1.0)*(fov*0.5).tan()*aspect).atan();
-    Some(center*Quat::from_rotation_y(yaw))
+    let rotation=center*Quat::from_rotation_y(yaw);
+    rotation.is_finite().then_some(rotation)
 }
 type OverlayCameras<'w,'s> = Query<'w,'s,(Entity,&'static mut Camera),(With<OverlayCamera>,Without<PlayerCamera>)>;
 fn apply(frame: Res<Frame>, target: Res<Target>, windows: Query<&Window,With<PrimaryWindow>>,

@@ -591,9 +591,7 @@ struct DrawKey {
     ui_scale: f32,
 }
 fn row_colors(short: bool, selected: bool, appearance: &appearance::Appearance) -> (Color, Color) {
-    let rgb=crate::interface::hud_rgb();
-    (if selected && short {appearance::check_line().with_alpha(appearance.frame)}else{crate::interface::tint(rgb,255.).with_alpha(appearance.frame * if selected {1.}else if short {0.65}else{0.25})},
-     crate::interface::tint(rgb,if selected {48.}else{16.}).with_alpha(appearance.background * if selected {1.}else{0.35}))
+    appearance.response_colors(short,selected)
 }
 fn text(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, paint: appearance::Paint, appearance: &appearance::Appearance) {
     p.spawn((

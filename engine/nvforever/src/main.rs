@@ -40,6 +40,7 @@ mod mobile_performance;
 mod fos_start;
 mod reports;
 mod native_crash;
+mod exit_watch;
 #[cfg(target_os = "linux")]
 mod native_crash_unix;
 mod nif_mirror;
@@ -168,6 +169,7 @@ mod head_bob;
 mod view_sway;
 mod weapon_lower;
 mod setup;
+mod shadow_anchor;
 mod shadow_probe;
 mod shadow_rate;
 mod shadow_thin;
@@ -194,6 +196,8 @@ mod perf_overlay;
 mod occlusion;
 mod rooms;
 mod terrain;
+mod terrain_lod;
+mod terrain_wireframe;
 mod texture_swap;
 mod effect_particles;
 mod effect_shaders;
@@ -411,6 +415,16 @@ struct Args {
     /// docs/spec-notes/world.md §3 "Texture repeat"]).
     #[arg(long, default_value_t = 256.0)]
     terrain_tile: f32,
+    /// Draw and collide the landscape on its stored triangles, not smoothed (#2149,
+    /// `nvf_play::smooth_terrain`; the settings page's Smooth terrain row); the same as
+    /// `--smooth-terrain off`, and wins over it.
+    #[arg(long)]
+    no_smooth_terrain: bool,
+    /// How the landscape is smoothed: `off`, `2x2`, `4x4` (the default) or `4x4-near` (4 x 4
+    /// near the camera, 2 x 2 further; #2676, `nvf_play::smooth_terrain`). Once any setting is
+    /// saved, NVForever.ini's Smooth terrain row wins over this flag, as for every row.
+    #[arg(long, value_name = "off|2x2|4x4|4x4-near", value_parser = parse_smoothing)]
+    smooth_terrain: Option<nvf_play::smooth_terrain::Smoothing>,
     /// Do not draw models whose path contains any of these texts (diagnostics).
     #[arg(long, value_delimiter = ',')]
     hide: Vec<String>,
@@ -541,6 +555,12 @@ struct Args {
     /// the display's refresh (no vsync).
     #[arg(long)]
     log_frame_times: Option<f32>,
+    /// Test aid with --log-frame-times: frames a second at most for this run (0: none), the
+    /// settings page's Frame rate limit, which --log-frame-times otherwise leaves off with
+    /// the page's row (frame_pace.rs). For checking a cap on purpose, e.g. DLSS Frame
+    /// Generation's Reflex limit (#2731, #2732: set before the window's swapchain exists).
+    #[arg(long, requires = "log_frame_times")]
+    frame_cap: Option<u32>,
     /// Test aid with --log-frame-times: after each logged period switch to the next of
     /// these sets of improvements, in a loop, starting with the first: `;`-separated,
     /// each `vanilla`, `enhanced` or keys as for --graphics-only; `no-sun-shadows` among
@@ -664,6 +684,10 @@ struct Args {
     /// Draw the navmesh near the camera and the travellers' paths.
     #[arg(long)]
     show_navmesh: bool,
+    /// Draw the loaded landscape's triangle edges over it (terrain_wireframe.rs; the
+    /// settings page's Debug row Terrain wireframe).
+    #[arg(long)]
+    terrain_wireframe: bool,
     /// With --play: draw the developer markers of shots: a cross at each impact and a
     /// line from the muzzle along each hitscan shot (settings page: Developer).
     #[arg(long)]
@@ -750,14 +774,58 @@ struct Args {
     /// alone as the original does; a switch of the settings page (player_body.rs).
     #[arg(long, requires = "play")]
     first_person_body: bool,
+    /// Weapon Inertia: the first-person arms and weapon lag behind turns and steps, bob,
+    /// breathe and recoil (view_sway.rs); off unless given (the owner, 2026-11-16: Advanced
+    /// Movement's parts off by default but Advanced Recoil); a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_weapon_sway")]
+    weapon_sway: bool,
     /// Keep the first-person arms and weapon still while turning and moving: no sway or
-    /// bob (view_sway.rs); a switch of the settings page.
+    /// bob (view_sway.rs), the default; a switch of the settings page.
     #[arg(long, requires = "play")]
     no_weapon_sway: bool,
+    /// Camera Motion: in first person the view bobs with each step, breathes and jolts when
+    /// hit (head_bob.rs); off unless given; a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_head_bob")]
+    head_bob: bool,
     /// No head bob in first person: the camera stays still while walking and running
-    /// (head_bob.rs); a switch of the settings page.
+    /// (head_bob.rs), the default; a switch of the settings page.
     #[arg(long, requires = "play")]
     no_head_bob: bool,
+    /// No advanced movement: none of the settings page's Advanced movement switches acts
+    /// (inertia, eased crouch, smooth weapon animations, weapon sway, head bob, the breath,
+    /// soft recoil, landing weight, hit jolt; nvf_play::inertia::MovementInertia::advanced),
+    /// as in the original; the main switch of that section.
+    #[arg(long, requires = "play")]
+    no_advanced_movement: bool,
+    /// Movement Inertia: speeding up, gliding to a stop, an eased crouch, landings that dip
+    /// (nvf_play::inertia); off unless given; a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_movement_inertia")]
+    movement_inertia: bool,
+    /// No movement inertia: full speed at once and an instant stop (nvf_play::inertia), the
+    /// default; a switch of the settings page.
+    #[arg(long, requires = "play")]
+    no_movement_inertia: bool,
+    /// Weapon Handling: drawing, putting away and aiming take longer by the weapon's weight
+    /// and the attributes (nvf_play::inertia); off unless given; a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_weapon_handling")]
+    weapon_handling: bool,
+    /// No Weapon Handling: drawing, putting away and aiming keep the game's own timing,
+    /// whatever the weapon weighs (nvf_play::inertia), the default; a switch of the settings
+    /// page.
+    #[arg(long, requires = "play")]
+    no_weapon_handling: bool,
+    /// Animation Smoothing: the first-person clips ease in and settle softly
+    /// (nvf_play::inertia); off unless given; a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_animation_smoothing")]
+    animation_smoothing: bool,
+    /// No Animation Smoothing: the original's clips (nvf_play::inertia), the default; a
+    /// switch of the settings page.
+    #[arg(long, requires = "play")]
+    no_animation_smoothing: bool,
+    /// No Advanced Recoil: the whole kick of a shot stays, as in the original
+    /// (nvf_play::inertia); a switch of the settings page (on by default).
+    #[arg(long, requires = "play")]
+    no_advanced_recoil: bool,
     /// Keep the first-person weapon up against walls and friendly actors close ahead
     /// (weapon_lower.rs); a switch of the settings page.
     #[arg(long, requires = "play")]
@@ -957,8 +1025,20 @@ fn parse_frame_generation(value: &str) -> Result<frame_gen::FrameGenKind, String
     frame_gen::FrameGenKind::parse(value).ok_or_else(|| format!("{value:?} is none of fsr, dlss, off"))
 }
 
+fn parse_smoothing(value: &str) -> Result<nvf_play::smooth_terrain::Smoothing, String> {
+    nvf_play::smooth_terrain::Smoothing::parse(value).ok_or_else(|| format!("{value:?} is none of off, 2x2, 4x4, 4x4-near"))
+}
+
+/// Every allocation goes through crash.rs's allocator, which logs a failed one (#2755).
+#[global_allocator]
+static ALLOCATOR: crash::SaysWhenEmpty = crash::SaysWhenEmpty;
+
 /// Start the engine from the desktop command line.
 pub fn run() -> AppExit {
+    // A desktop exit watcher waits for its parent without starting a game.
+    if exit_watch::run_if_watcher() {
+        return AppExit::Success;
+    }
     run_with_args(std::env::args().collect())
 }
 
@@ -1197,6 +1277,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
                     None => return fail(format!("no exterior cell {}", args.cell)),
                 },
             };
+            // A provisional camera seed 400 units over the stored centre vertex: the
+            // player is grounded later on the run's surface (`nvf_play::smooth_terrain`,
+            // fixed after the settings are read), at most its bound from this [design, #2149].
             let ground = world
                 .grid_cell(grid)
                 .and_then(|c| c.land)
@@ -1458,6 +1541,11 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // PostStartup (settings.rs `upscaler_after_ini`). The DLSS loader runs for a DLSS choice or
     // when NVIDIA's four files are in the DLSS folder, so every later switch is live; the test
     // aid NVF_DLSS_PRELOAD=1 runs it always, =0 only for DLSS (upscaler.rs, "Start").
+    // Whether the landscape is smoothed (#2149): the command line's state, before any cell
+    // loads; with --play the INI may change it at PostStartup (nvf_play::settings
+    // `fix_smooth_terrain`), still before the first cell.
+    nvf_play::smooth_terrain::set_setting(if args.no_smooth_terrain { nvf_play::smooth_terrain::Smoothing::Off } else { args.smooth_terrain.unwrap_or(nvf_play::smooth_terrain::Smoothing::DEFAULT) });
+    nvf_play::smooth_terrain::fix();
     let start_upscaler = {
         let given = play.is_some().then(|| settings::given_switches(&args, &command_line()));
         let ini = given.as_ref().and_then(|_| settings::settings_text_at_start()).map(|text| settings::UpscalerIni::read(&text));
@@ -1549,8 +1637,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // The switches the settings page weighs against the INI (`--play` only), for the
     // frame split's start-time decision (perf_overlay/split.rs).
     .add_plugins(perf_overlay::PerfOverlayPlugin(args.fps, play.is_some().then(|| settings::given_switches(&args, &command_line()))))
-    // Vsync as Bevy's default, off while frame times are measured; no frame-rate cap.
-    .add_plugins(frame_pace::FramePacePlugin(frame_pace::FramePace { sync: if args.log_frame_times.is_none() { frame_pace::DisplaySync::Vsync } else { frame_pace::DisplaySync::Off }, cap: 0 }))
+    // Vsync as Bevy's default, off while frame times are measured; no frame-rate cap unless
+    // --frame-cap asks for one (a measuring run only: the page's row decides otherwise).
+    .add_plugins(frame_pace::FramePacePlugin(frame_pace::FramePace { sync: if args.log_frame_times.is_none() { frame_pace::DisplaySync::Vsync } else { frame_pace::DisplaySync::Off }, cap: args.frame_cap.unwrap_or(0) }))
     .add_plugins(anti_lag::AntiLagPlugin(args.latency_reduction))
     // Defaults snapshots this command-line/default choice before apply_stored reads the INI.
     .add_plugins(frame_gen::FrameGenPlugin(args.frame_generation.unwrap_or_default()))
@@ -1574,6 +1663,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // Small objects far away cast no sun shadows (shadow_thin.rs).
     .add_plugins(shadow_thin::ShadowThinPlugin(args.shadow_thin))
     .add_plugins(shadow_rate::ShadowRatePlugin { performance: performance_shadows })
+    // The sun's cascades snapped to a grid anchored near the camera, then reached toward the sun
+    // behind the player's body (sky::SUN_REACH_BACK) and held, in that order (shadow_anchor.rs).
+    .add_plugins(shadow_anchor::ShadowAnchorPlugin)
     // Interiors draw the rooms seen through portals only (rooms.rs).
     .add_plugins(rooms::RoomsPlugin { off: args.no_room_culling, planes_off: args.no_occlusion_planes, planes_outdoors: args.occlusion_planes_outdoors })
     .insert_resource(ClearColor(Color::srgb(0.62, 0.72, 0.85)))
@@ -1583,6 +1675,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .insert_resource(fly::AutoFly(args.auto_fly))
     .insert_resource(lod::LodState::new(&world, lod_settings(&args), !args.no_lod && interior.is_none(), lodgen).with_origin(lod_origin))
     .insert_resource(TerrainSettings { tile: args.terrain_tile })
+    // The terrain wireframe (#2149), off unless asked for: it builds nothing while off.
+    .add_plugins(terrain_wireframe::TerrainWireframePlugin { on: args.terrain_wireframe })
+    .insert_resource(terrain_wireframe::WireSource::of_records(world.lo, world.schema, world.index))
     .init_resource::<TerrainCache>()
     .init_resource::<imposters::Imposters>()
     .insert_resource(Streamer {
@@ -1635,6 +1730,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_systems(Update, sky::tell_sky_colors.after(sky::update_sky))
     .add_systems(Update, (fly::fly.run_if(move || play.is_none()), sky::sky_keys.run_if(move || play.is_none()), sky::weather_region.after(nvf_play::PlaySet::Physics), sky::update_sky, sky::interior_clip, sky::update_clouds, sky::update_night_sky, world::stream.run_if(world::world_not_held), imposters::update, fade::fade_cells, world::face_billboards, lod::update_lod, treelod::update_distant_trees, overlay, keys).chain())
     .add_systems(Update, world::note_other_cameras.after(world::stream))
+    // 4 x 4 near's redraws by distance (#2676): after streaming spawned this frame's cells.
+    .add_plugins(terrain_lod::TerrainLodPlugin)
     .add_systems(Update, (cell_buffer::remember, cell_buffer::tell_game).chain().after(world::stream))
     .add_systems(Update, world::script_markers.before(world::stream))
     .add_systems(Update, world::draw_waiting_actors.after(world::stream))
@@ -1644,8 +1741,11 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_systems(Last, readahead::report)
     .init_resource::<AnimCost>()
     .add_systems(Update, advance_animations)
+    .add_systems(Update, particles::sync_idle_materials.after(anim_objects::hold).before(nvf_assets::material_anim::bind_rig_materials))
     // Vertex morphs (waving flags, sagging wires): docs/spec-notes/vertex-morphs.md.
     .add_systems(Update, nvf_assets::morph::play_vertex_morphs.after(world::stream))
+    // [design, #2685] Manager morphs follow the active rig, including restored groups.
+    .add_systems(Update, nvf_assets::morph::play_sequence_morphs.after(advance_animations))
     .init_resource::<activators::ActivatorStats>()
     .add_systems(
         Update,
@@ -1669,12 +1769,10 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .init_resource::<actor_materials::PlayerRigMaterials>()
     .add_systems(Update, actor_materials::pose_player.after(nvf_play::player::BodySet))
     .add_systems(Update, timelapse.after(sky::update_sky))
-    // The sun's cascades reach behind the player's body (sky::SUN_REACH_BACK).
     // Only the sun's casters that can shade the view's slice of each cascade (#1378).
     // Placed models' and effect models' billboard nodes face the camera (#2549).
     .add_systems(PostUpdate, world::face_camera.before(bevy::transform::TransformSystems::Propagate))
     .add_systems(PostUpdate, sky::sun_casters_over_slice.after(bevy::light::SimulationLightSystems::CheckLightVisibility))
-    .add_systems(PostUpdate, sky::reach_toward_sun.after(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades).before(bevy::light::SimulationLightSystems::UpdateLightFrusta))
     .add_systems(Startup, (crash::report_start, report_archives))
     .add_systems(Startup, move || cpu_placed.report())
     .add_plugins(start_times::StartTimesPlugin)
@@ -1779,8 +1877,17 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             app.add_plugins(creator_view::CreatorViewPlugin { light_scale: args.light_scale });
             // The Vigor Tester's machine: its camera and lights, the room behind it.
             app.add_plugins(vigor_view::VigorViewPlugin);
-            app.add_plugins((player_body::PlayerBodyPlugin { first_person_body: args.first_person_body, weapon_sway: !args.no_weapon_sway, head_bob: !args.no_head_bob, weapon_lower: !args.no_weapon_lower, true_iron_sights: !args.no_true_iron_sights }, stealth_field::StealthFieldPlugin, pipboy_arm::PipBoyArmPlugin, deaths::DeathsPlugin, limbs::LimbsPlugin, ragdoll::RagdollPlugin, swing_traps::SwingTrapsPlugin, wrecks::WrecksPlugin, shot_fx::ShotFxPlugin, particles::ParticlesPlugin, dismember::DismemberPlugin, grass_fire_fx::GrassFireFxPlugin));
+            app.add_plugins((player_body::PlayerBodyPlugin { first_person_body: args.first_person_body, weapon_sway: args.weapon_sway, head_bob: args.head_bob, weapon_lower: !args.no_weapon_lower, true_iron_sights: !args.no_true_iron_sights }, stealth_field::StealthFieldPlugin, pipboy_arm::PipBoyArmPlugin, deaths::DeathsPlugin, limbs::LimbsPlugin, ragdoll::RagdollPlugin, swing_traps::SwingTrapsPlugin, wrecks::WrecksPlugin, shot_fx::ShotFxPlugin, particles::ParticlesPlugin, dismember::DismemberPlugin, grass_fire_fx::GrassFireFxPlugin));
             app.insert_resource(nvf_play::aim_zoom::Scope3d { on: args.scope_3d, lens: false });
+            // Advanced Movement's parts are off unless switched on, Advanced Recoil on under
+            // the Global Toggle [design: the owner, 2026-11-16, "make sure all advanced
+            // movement features are off by default except the improved/advanced recoil"].
+            let mut inertia = nvf_play::inertia::MovementInertia::switched(args.movement_inertia);
+            inertia.weapon_handling = args.weapon_handling;
+            inertia.smooth = args.animation_smoothing;
+            inertia.recoil = !args.no_advanced_recoil;
+            inertia.advanced = !args.no_advanced_movement;
+            app.insert_resource(inertia);
             app.add_plugins(decals::DecalsPlugin);
             app.add_plugins(knockouts::KnockoutsPlugin);
             // The stress tests' samples (NVF_PLAY_TEST_SAMPLE; nothing without it).
@@ -1872,7 +1979,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         // The props idles hold (anim_objects.rs): after the idles started and ended.
         app.init_resource::<anim_objects::AnimObjects>()
             .add_systems(Startup, anim_objects::read)
-            .add_systems(Update, anim_objects::hold.after(idles::drive))
+            .add_systems(Update, anim_objects::hold.after(idles::drive).before(advance_animations))
             .add_systems(Update, idles::play_npc_sequences.after(idles::drive))
             .add_systems(Last, anim_objects::report);
     }
@@ -2018,6 +2125,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             }
         };
         app.add_systems(Update, summary);
+    }
+    if play.is_none() {
+        app.add_systems(Startup, || info!("{}", nvf_play::smooth_terrain::describe()));
     }
     if play.is_some() {
         settings::register(&mut app);
@@ -2255,7 +2365,7 @@ fn keys(
     input: nvf_play::pad::ActionButtons<KeyCode>,
     play_state: Option<Res<State<nvf_play::PlayState>>>,
     mut commands: Commands,
-    tweaks: Option<Res<nvf_play::tweaks::TweakSettings>>,
+    (tweaks, bindings): (Option<Res<nvf_play::tweaks::TweakSettings>>, Option<Res<nvf_play::bindings::Bindings>>),
     mut hidden: Option<ResMut<nvf_play::free_cam::MenusHidden>>,
     mut held: Local<Option<(u8, bool, std::path::PathBuf)>>,
 ) {
@@ -2280,11 +2390,16 @@ fn keys(
     if input.just_pressed(KeyCode::Escape) && play_state.is_none() {
         commands.write_message(AppExit::Success);
     }
-    // The screenshot key (F12, or the player's Screenshot Key tweak, docs/design/tweaks.md):
+    // The Screenshot binding (F12 unless the player rebinds it, Controls > Additional Features):
     // a shot in the home's screenshots folder at the first free number, through the write
     // guard. It went to the working folder unguarded, and the count restarted at 1 each
     // run, over the last run's shots [#1987].
-    if input.just_pressed(nvf_play::tweaks::screenshot_key(tweaks.as_deref())) {
+    // Without the game's bindings (the viewer), F12.
+    let shot = match bindings.as_deref() {
+        Some(b) => nvf_play::bindings::binding_just_pressed(Some(b), nvf_play::bindings::Control::Screenshot, |k| input.just_pressed(k), |_| false),
+        None => input.just_pressed(KeyCode::F12),
+    };
+    if shot {
         let dir = fnv_install::EngineHome::user().map_or_else(|| std::path::PathBuf::from("."), |h| h.screenshots());
         let path = fnv_install::first_unused(&dir, "nvforever-", "png");
         let ready = fnv_install::guard_write(&path, None)

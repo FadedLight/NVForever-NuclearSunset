@@ -76,6 +76,7 @@ gpu-allocator = { path = "vendor/gpu-allocator" }
 bevy_pbr = { path = "vendor/bevy_pbr" }
 bevy_render = { path = "vendor/bevy_render" }
 wgpu-hal = { path = "vendor/wgpu-hal" }
+naga = { path = "vendor/naga" }
 
 # Developer APKs use a small, independent profile; release builds stay unchanged.
 [profile.android-dev]

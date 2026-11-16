@@ -184,25 +184,54 @@ fn pick_rendering(world: &mut World, name: &str) -> bool {
     }
     world.resource::<Graphics>().upscaler == rendering.request()
 }
+/// A synchronous request to the canonical row, not another persisted cap.
+struct FrameLimit {
+    row: usize,
+    name: Option<String>,
+    part: f32,
+}
+impl FrameLimit {
+    fn for_cap(world: &World, cap: u32) -> Option<Self> {
+        let index = frame_pace::CAPS.iter().position(|&value| value == cap)?;
+        let settings = world.get_resource::<Settings>()?;
+        let row = settings.index("frame-cap")?;
+        if settings.disabled_status(world, row).is_some() { return None; }
+        let name = if let Some(choices) = settings.choices(row) {
+            let name = if cap == 0 { "Off".to_string() } else { cap.to_string() };
+            if !(choices.names)(world).contains(&name)
+                || settings.choice_unavailable(world, row, &name).is_some() { return None; }
+            Some(name)
+        } else {
+            settings.list()[row].slider?;
+            None
+        };
+        Some(Self { row, name, part: choice_part(index, frame_pace::CAPS.len()) })
+    }
+    fn take(self, world: &mut World) -> bool {
+        if let Some(name) = self.name {
+            // pick reports an unchanged choice as false; the old slider request
+            // succeeded without writing in that case, and the aliases still do.
+            if world.resource::<Settings>().choices(self.row)
+                .is_some_and(|c| (c.chosen)(world) == name) { return true; }
+            settings::pick(world, self.row, &name)
+        } else {
+            settings::set_slider(world, self.row, self.part).is_some()
+        }
+    }
+}
+
 fn pick_preset(world: &mut World, name: &str) -> bool {
     let Some(preset) = Preset::named(name) else {
         return false;
     };
-    let Some(cap) = row(world, "frame-cap") else {
-        return false;
-    };
-    let settings = world.resource::<Settings>();
-    if settings.disabled_status(world, cap).is_some() || settings.list()[cap].slider.is_none() {
-        return false;
-    }
-    let Some(index) = frame_pace::CAPS.iter().position(|&c| c == preset.cap()) else {
+    let Some(cap) = FrameLimit::for_cap(world, preset.cap()) else {
         return false;
     };
     // Refuse unsupported rendering before changing either part of the preset.
     if !pick_rendering(world, preset.rendering().name()) {
         return false;
     }
-    settings::set_slider(world, cap, choice_part(index, frame_pace::CAPS.len())).is_some()
+    cap.take(world)
 }
 fn rendering_unavailable(world: &World, name: &str) -> Option<String> {
     Rendering::named(name)?.unavailable(world)
@@ -253,7 +282,7 @@ pub fn register(app: &mut App) {
         setting(
             PRESET_KEY,
             "Mobile preset",
-            "Battery: 30 FPS and 50% world resolution. Balanced: 60 FPS and 67%. Quality: 60 FPS and native resolution. Reduced resolutions need FSR support. Menus stay sharp; other graphics choices stay unchanged.",
+            "Battery: 30 FPS/50% world; Balanced: 60 FPS/67%; Quality: 60 FPS/native. Reduced resolutions need FSR; menus stay sharp and other graphics choices stay unchanged.",
         ),
         ChoiceList {
             names: |w| {
@@ -320,7 +349,7 @@ pub fn register(app: &mut App) {
             key: "mobile-thermal-auto",
             group: "Display",
             label: "Automatic thermal adjustment",
-            note: "Off by default. When enabled, temporarily reduce the frame limit and an already-selected FSR resolution as the phone heats up. Recover gradually after cooling. Your chosen settings stay saved. Unavailable feedback uses manual settings.",
+            note: "Off by default; while hot, lower the frame limit and selected FSR resolution, then recover gradually after cooling. Saved choices stay; native stays native and missing feedback uses manual settings.",
             switches: "",
             get: |w| w.resource::<ThermalSettings>().automatic,
             set: |w, automatic| w.resource_mut::<ThermalSettings>().automatic = automatic,
@@ -482,13 +511,7 @@ fn pick_fps(world: &mut World, value: &str) -> bool {
         "60" => 60,
         _ => return false,
     };
-    let Some(row) = row(world, "frame-cap") else {
-        return false;
-    };
-    let Some(index) = frame_pace::CAPS.iter().position(|&c| c == cap) else {
-        return false;
-    };
-    settings::set_slider(world, row, choice_part(index, frame_pace::CAPS.len())).is_some()
+    FrameLimit::for_cap(world, cap).is_some_and(|request| request.take(world))
 }
 fn thermal_status(world: &World) -> String {
     let runtime = world.resource::<ThermalRuntime>();
@@ -549,11 +572,19 @@ mod tests {
     }
     fn set_cap(app: &mut App, cap: u32) {
         let row = row(app.world(), "frame-cap").unwrap();
-        let i = frame_pace::CAPS.iter().position(|&v| v == cap).unwrap();
-        assert!(
-            settings::set_slider(app.world_mut(), row, choice_part(i, frame_pace::CAPS.len()))
-                .is_some()
-        );
+        if let Some(choices) = app.world().resource::<Settings>().choices(row) {
+            let name = if cap == 0 { "Off".to_string() } else { cap.to_string() };
+            assert!((choices.names)(app.world()).contains(&name));
+            if (choices.chosen)(app.world()) != name {
+                assert!(settings::pick(app.world_mut(), row, &name));
+            }
+        } else {
+            let i = frame_pace::CAPS.iter().position(|&v| v == cap).unwrap();
+            assert!(
+                settings::set_slider(app.world_mut(), row, choice_part(i, frame_pace::CAPS.len()))
+                    .is_some()
+            );
+        }
     }
     #[test]
     fn mobile_presets_use_real_rows_and_individual_edits_become_custom() {
@@ -919,5 +950,88 @@ mod tests {
         );
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_frame_limit_positive_precedes_mobile_list_aliases_and_same_cap_noop() {
+        let mut app = app(true);
+        let cap = row(app.world(), "frame-cap").unwrap();
+        let choices = app.world().resource::<Settings>().choices(cap)
+            .expect("the integrated Main provider is the actual named frame-limit list");
+        assert_eq!((choices.names)(app.world()), ["Off", "30", "60", "90", "120", "144"]);
+        assert!(settings::pick(app.world_mut(), cap, "30"), "canonical provider positive first");
+        assert_eq!(app.world().resource::<FramePace>().cap, 30);
+        assert!(pick(&mut app, "mobile-fps", "60"));
+        assert_eq!(app.world().resource::<FramePace>().cap, 60);
+        assert!(pick_fps(app.world_mut(), "60"), "an unchanged canonical cap succeeds without another write");
+        assert!(pick_preset(app.world_mut(), "Quality"), "native preset also accepts the unchanged named cap");
+        assert_eq!(preset_chosen(app.world()), "Quality");
+        assert_eq!(app.world().resource::<Graphics>().upscaler, UpscalerChoice::Off);
+        assert_eq!(app.world().resource::<FramePace>().sync, DisplaySync::Off);
+        assert_eq!(app.world().resource::<MsaaSetting>().0, Msaa::Sample8);
+    }
+
+    #[test]
+    fn canonical_frame_limit_disabled_and_unavailable_refuse_before_preset_render_changes() {
+        let mut app = app(true);
+        settings::set_disabled_status(&mut app, "frame-cap", |_| Some("Managed for this test"));
+        assert!(!pick_preset(app.world_mut(), "Battery"));
+        assert!(!pick_fps(app.world_mut(), "60"));
+        assert_eq!(app.world().resource::<FramePace>().cap, 0);
+        assert_eq!(app.world().resource::<Graphics>().upscaler, UpscalerChoice::Off);
+        let mut app = self::app(true);
+        settings::set_choice_unavailable(&mut app, "frame-cap", |_, name| (name == "30").then(|| "Managed for this test".into()));
+        assert!(!pick_preset(app.world_mut(), "Battery"));
+        assert!(!pick_fps(app.world_mut(), "30"));
+        assert_eq!(app.world().resource::<FramePace>().cap, 0);
+        assert_eq!(app.world().resource::<Graphics>().upscaler, UpscalerChoice::Off);
+        assert!(pick_fps(app.world_mut(), "60"));
+        assert_eq!(app.world().resource::<FramePace>().cap, 60);
+        assert!(!pick_fps(app.world_mut(), "Custom"));
+        assert!(!pick_fps(app.world_mut(), "not a limit"));
+        assert_eq!(app.world().resource::<FramePace>().cap, 60);
+    }
+
+    #[test]
+    fn canonical_old_numeric_limit_loads_and_named_limit_saves_beside_stale_mobile_aliases() {
+        struct File(PathBuf);
+        impl Drop for File {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+                let _ = std::fs::remove_dir(self.0.parent().unwrap());
+            }
+        }
+        use std::path::PathBuf;
+        let dir = std::env::temp_dir().join(format!("nvf-mobile-list-limit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let file = File(dir.join("NVForever.ini"));
+        let input = "[Settings]\nframe-cap=0.2\nmobile-performance=Battery\nmobile-resolution=50% (FSR)\n[Unrelated]\nkeep=yes\n";
+        std::fs::write(&file.0, input).unwrap();
+        let mut loaded = app(false);
+        loaded.insert_resource(SettingsFile(Some(file.0.clone())));
+        settings::apply_stored(loaded.world_mut());
+        assert_eq!(loaded.world().resource::<FramePace>().cap, 30);
+        assert_eq!(loaded.world().resource::<Graphics>().upscaler, UpscalerChoice::Off,
+            "stale mobile aggregate names are metadata, not commands during restore");
+        assert_eq!(std::fs::read_to_string(&file.0).unwrap(), input, "reading never rewrites the old profile");
+        assert!(pick(&mut loaded, "mobile-fps", "60"));
+        let text = std::fs::read_to_string(&file.0).unwrap();
+        assert_eq!(fnv_install::ini_get(&text, "Settings", "frame-cap").as_deref(), Some("60"));
+        assert_eq!(fnv_install::ini_get(&text, "Unrelated", "keep").as_deref(), Some("yes"));
+        let mut fresh = app(false);
+        fresh.insert_resource(SettingsFile(Some(file.0.clone())));
+        settings::apply_stored(fresh.world_mut());
+        assert_eq!(fresh.world().resource::<FramePace>().cap, 60);
+        assert_eq!(fresh.world().resource::<Graphics>().upscaler, UpscalerChoice::Off);
+    }
+
+    #[test]
+    fn mobile_registered_notes_stay_within_the_two_hundred_character_budget() {
+        let app = app(true);
+        let settings = app.world().resource::<Settings>();
+        for key in [PRESET_KEY, RESOLUTION_KEY, "mobile-fps", "mobile-thermal-auto", "mobile-thermal-status"] {
+            let setting = &settings.list()[settings.index(key).unwrap()];
+            assert!(setting.note.chars().count() <= 200, "{key}: {}", setting.note.chars().count());
+        }
     }
 }

@@ -32,6 +32,9 @@ fn observe_applied_clip(body: Res<PlayerBody>, transforms: Query<&Transform>, mu
 }
 
 fn coupled_scene() -> Coupled {
+    coupled_scene_with_inertia(false)
+}
+fn coupled_scene_with_inertia(inertia: bool) -> Coupled {
     let (mut app, files) = crate::outfits::tests::asset_fixture();
     app.add_plugins((MinimalPlugins, InputPlugin, StatesPlugin, bevy::transform::TransformPlugin))
         .init_state::<PlayState>()
@@ -80,6 +83,10 @@ fn coupled_scene() -> Coupled {
     })).insert_resource(nvf_play::Location { world: 0, interior: None })
         .insert_resource(Player { heading: 0., pitch: 0., eye_height: 0., feet: [0.; 3],
             body_eye: None, body_view: None, placed: None });
+    if inertia {
+        app.insert_resource(nvf_play::inertia::MovementInertia::all_on());
+        assert!(app.world().resource::<nvf_play::inertia::MovementInertia>().smooth_hands());
+    }
     install_wearable(&mut app);
     let window = app.world_mut().spawn((Window {
         resolution: WindowResolution::new(1000, 1000), ..default()
@@ -269,4 +276,84 @@ fn raw_outside_display_end_settles_real_clip_then_native_inventory_closes() {
     assert!(f.app.world().resource::<nvf_play::pad::PlatformInputGate>().allows_actions());
     assert!(f.app.world().resource::<LastAppliedClip>().1,
         "the actual body pass must consume the settled zero-time clip and apply its bind transform before native close");
+}
+
+#[test]
+fn raw_owned_arm_clip_keeps_exact_pose_with_main_animation_smoothing_on() {
+    for cancel in [true, false] {
+        let mut f = coupled_scene_with_inertia(true);
+        let screen = f.app.world().resource::<crate::touch::pipboy_model::Geometry>().screen.unwrap();
+        let p = Vec2::new(screen.max.x + 36., screen.center().y);
+        raw(&mut f, 813, TouchPhase::Started, p);
+        assert!(f.app.world().resource::<ArmGesture>().captures());
+        raw(&mut f, 813, TouchPhase::Moved, p + Vec2::new(40., 60.));
+        let lower = f.app.world().resource::<PipBoy>().clip_time;
+        assert!(lower > 0. && lower < HOLD_SECONDS);
+        assert!(f.app.world().resource::<PipBoy>().manual_pose());
+        actual_pose(&mut f, lower);
+        raw(&mut f, 813, TouchPhase::Moved, p + Vec2::new(40., 28.));
+        let reversed = f.app.world().resource::<PipBoy>().clip_time;
+        assert!(reversed > lower && reversed < HOLD_SECONDS);
+        actual_pose(&mut f, reversed);
+        let rig = f.app.world().resource::<PlayerBody>().body.as_ref().unwrap().first.as_ref().unwrap();
+        assert!(!rig.animator.layers.iter().find(|l| l.tag == TAG_PIPBOY).unwrap().smooth,
+            "finger ownership retains its original blend law as well as exact sample time");
+        if cancel {
+            raw(&mut f, 813, TouchPhase::Canceled, p + Vec2::new(40., 28.));
+            for _ in 0..24 { if !f.app.world().resource::<ArmGesture>().captures() { break; } f.app.update(); }
+            assert!(!f.app.world().resource::<ArmGesture>().captures());
+            assert!(!f.app.world().resource::<PipBoy>().manual_pose());
+            assert_eq!(f.app.world().resource::<PipBoy>().phase, Phase::Up);
+            actual_pose(&mut f, HOLD_SECONDS);
+        } else {
+            raw(&mut f, 813, TouchPhase::Moved, p + Vec2::new(40., 96.));
+            let close = f.app.world().resource::<PipBoy>().clip_time;
+            assert!(close < HOLD_SECONDS * 0.5);
+            actual_pose(&mut f, close);
+            raw(&mut f, 813, TouchPhase::Ended, p + Vec2::new(40., 96.));
+            for _ in 0..24 { f.app.update(); if !f.app.world().resource::<ArmGesture>().captures()
+                && *f.app.world().resource::<State<PlayState>>().get() == PlayState::Playing { break; } }
+            assert!(!f.app.world().resource::<ArmGesture>().captures());
+            assert!(!f.app.world().resource::<PipBoy>().manual_pose());
+            assert_eq!(f.app.world().resource::<PipBoy>().phase, Phase::Down);
+            assert_eq!(f.app.world().resource::<PipBoy>().clip_time, 0.);
+            assert!(f.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_none());
+            assert!(f.app.world().resource::<LastAppliedClip>().1);
+        }
+        assert!(f.app.world().resource::<nvf_play::inertia::MovementInertia>().smooth_hands(),
+            "the test never disables Main smoothing globally");
+    }
+}
+
+#[test]
+fn ordinary_native_raise_keeps_main_inertial_sampling_without_manual_ownership() {
+    let mut f = coupled_scene_with_inertia(true);
+    f.app.world_mut().write_message(nvf_play::menu::MenuInput(nvf_play::menu::model::Command::Close));
+    for _ in 0..40 {
+        f.app.update();
+        if f.app.world().resource::<PipBoy>().phase == Phase::Down
+            && *f.app.world().resource::<State<PlayState>>().get() == PlayState::Playing { break; }
+    }
+    assert_eq!(f.app.world().resource::<PipBoy>().phase, Phase::Down);
+    assert!(f.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_none());
+    f.app.world_mut().write_message(nvf_play::menu::OpenInventory);
+    let mut observed = false;
+    for _ in 0..24 {
+        let pip = f.app.world().resource::<PipBoy>();
+        let clock = pip.clip_time;
+        let sample = pip.phase == Phase::Raising && clock > 0. && clock < HOLD_SECONDS && !pip.manual_pose();
+        let expected = pipboy_clip_time(clock);
+        f.app.update();
+        if sample {
+            let seen = f.app.world().resource::<LastAppliedClip>().0.expect("actual body observer sampled the ordinary raise");
+            assert!((seen.0 - expected).abs() < 0.0001);
+            assert!((expected - clock).abs() > 0.0001,"interior automatic clock distinguishes the Main warp from raw time");
+            assert!(!f.app.world().resource::<PipBoy>().manual_pose());
+            assert!(!f.app.world().resource::<ArmGesture>().captures());
+            observed = true;
+            break;
+        }
+    }
+    assert!(observed,"real native close/open must reach an interior ordinary raise sample");
+    assert!(f.app.world().resource::<nvf_play::inertia::MovementInertia>().smooth_hands());
 }

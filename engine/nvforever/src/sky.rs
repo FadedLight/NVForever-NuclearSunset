@@ -523,6 +523,32 @@ impl SkyState {
         })
     }
 
+    /// [documented: GECK wiki ForceWeather / SetWeather / ReleaseWeatherOverride]
+    /// An override lasts until released. [hypothesis, #1997; observer check 209 in
+    /// docs/handoff/observer-checks.md] This also holds across worldspace doors.
+    /// [design: worldspace.rs::carry_sky] Keep override visuals and their adapters,
+    /// including an unfinished fade, without importing the old climate's roll lists.
+    pub(crate) fn carry_weather_from(&mut self, from: &SkyState) {
+        if from.script.is_none() && !from.pinned {
+            return;
+        }
+        self.pinned = from.pinned;
+        self.resume = from.resume;
+        self.script = from.script.map(|sw| ScriptWeather { roll: self.rolls, ..sw });
+        self.weather = from.weather.clone();
+        self.prev = from.prev.clone();
+        self.fade = from.fade;
+        for w in std::iter::once(&self.weather).chain(self.prev.iter()) {
+            if let Some(a) = from.adapters.get(&w.form_id) {
+                self.adapters.insert(w.form_id, *a);
+            }
+        }
+        self.changed = true;
+        if self.script.is_some_and(|sw| sw.hold) {
+            info!("weather: {} ({:08X}) held after sky replacement", self.weather.edid.as_deref().unwrap_or("?"), self.weather.form_id);
+        }
+    }
+
     /// Preserve the sampled cell and region across a climate-only rebuild [design,
     /// #2531; `worldspace::script_sky`]. Rebind the source by FormID into the new list.
     /// An invalidated travel placement stays invalidated (`Self::set_interior`).
@@ -1521,7 +1547,9 @@ pub fn reach_toward_light(cascade: &mut bevy::light::cascade::Cascade, extra: f3
 }
 
 /// Stretch the sun's shadow cascades [`SUN_REACH_BACK`] toward the sun (PostUpdate, after
-/// Bevy builds them each frame and before their frusta and shadow views are made).
+/// Bevy builds them each frame and before their frusta and shadow views are made; after
+/// they are anchored and before the held ones are given back: shadow_anchor.rs
+/// `cascade_edits` says why).
 pub fn reach_toward_sun(mut suns: Query<&mut bevy::light::Cascades, With<Sun>>) {
     for mut cascades in &mut suns {
         for view in cascades.cascades.values_mut() {
@@ -1602,9 +1630,15 @@ fn overlaps(outline: &[Vec2], centre: Vec2, reach: Vec2) -> bool {
     })
 }
 
+/// The least shadow distance the cascades are made for: the first cascade's least bound
+/// (200) with room [design].
+const MIN_CASCADE_DISTANCE: f32 = 400.0;
+
 /// The sun's shadow cascades, in game units: the first covers the area right around the
 /// camera (a twelfth of `distance`), the last ends at `distance` × `reach`.
 pub(crate) fn shadow_cascades(distance: f32, reach: f32, count: usize) -> CascadeShadowConfig {
+    // Never a last cascade inside the first one's bound (a very short shadow distance).
+    let distance = distance.max(MIN_CASCADE_DISTANCE);
     CascadeShadowConfigBuilder {
         num_cascades: count.max(1),
         minimum_distance: 5.0,
@@ -1631,6 +1665,8 @@ pub fn set_shadows(world: &mut World, on: bool) {
         sky.shadows = on;
         (sky.shadow_distance, sky.shadow_reach, sky.shadow_cascades)
     };
+    // A shadow distance of 0% (the menu overhaul) casts none.
+    let on = on && distance.0 > 0.0;
     let mut suns = world.query_filtered::<(Entity, &mut DirectionalLight), With<Sun>>();
     let lit: Vec<Entity> = suns
         .iter_mut(world)
@@ -2125,6 +2161,11 @@ mod weather_percent_tests;
 mod session_lighting_tests;
 
 #[cfg(test)]
+pub(crate) fn authored_session_sky() -> SkyState {
+    session_lighting_tests::sky()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2561,6 +2602,122 @@ mod tests {
 
     fn saved_held() -> serde_json::Value {
         serde_json::json!({"weather": format!("W{HELD}"), "held": true, "rng": "123"})
+    }
+
+    #[test]
+    fn held_weather_survives_sky_replacement_and_releases_to_the_new_climate() {
+        let mut from = sky_started_on_held();
+        from.place(Some(None), false);
+        from.rolls = 41;
+        from.script_weather(Weather { form_id: HELD, ..Default::default() }, [None; 6], true, true);
+        let mut to = sky_started_on_held();
+        to.climate.form_id = 100;
+        to.resume = None;
+        to.weather = to.choices[0].weather.clone();
+
+        to.carry_weather_from(&from);
+        assert_eq!((to.weather.form_id, to.climate.form_id), (HELD, 100));
+        assert_eq!(to.script.unwrap().roll, to.rolls);
+        assert!(to.script.unwrap().hold);
+        assert!(!to.pinned);
+        to.place(Some(None), false);
+        assert_eq!((to.weather.form_id, to.pick), (HELD, LISTED));
+        to.release_script_weather();
+        assert_eq!(to.weather.form_id, HELD);
+        to.set_live_global(GATE, 1.0);
+        assert_eq!(to.weather.form_id, GATED);
+        assert!(to.script.is_none());
+    }
+
+    #[test]
+    fn held_weather_carries_its_fade_and_both_weathers_adapters() {
+        let mut from = sky_started_on_held();
+        from.place(Some(None), false);
+        let old_adapters = [Some(Adapter { tint: Some(([0.1, 0.2, 0.3], 0.4)), ..Default::default() }); 6];
+        let held_adapters = [Some(Adapter { tint: Some(([0.5, 0.6, 0.7], 0.8)), ..Default::default() }); 6];
+        from.adapters.insert(LISTED, old_adapters);
+        from.script_weather(Weather { form_id: HELD, ..Default::default() }, held_adapters, false, true);
+        from.fade = 0.375;
+        let mut to = sky_started_on_held();
+        to.adapters.clear();
+
+        to.carry_weather_from(&from);
+        to.place(Some(None), false);
+        assert_eq!((to.weather.form_id, to.prev.as_ref().unwrap().form_id, to.fade), (HELD, LISTED, 0.375));
+        assert_eq!(to.adapters.get(&HELD), Some(&held_adapters));
+        assert_eq!(to.adapters.get(&LISTED), Some(&old_adapters));
+        to.script_weather(Weather { form_id: GATED, ..Default::default() }, [None; 6], true, false);
+        assert_eq!(to.weather.form_id, GATED);
+        assert!(!to.script.unwrap().hold);
+        assert!(to.prev.is_none());
+    }
+
+    #[test]
+    fn natural_weather_does_not_gain_an_override_on_sky_replacement() {
+        let mut from = sky_started_on_held();
+        from.place(Some(None), false);
+        let mut to = sky_started_on_held();
+        to.weather = to.choices[1].weather.clone();
+        to.resume = None;
+        to.carry_weather_from(&from);
+        assert_eq!(to.weather.form_id, GATED);
+        assert!(to.script.is_none());
+        assert!(!to.pinned);
+        assert!(to.resume.is_none());
+        to.place(Some(None), false);
+        assert_eq!(to.weather.form_id, LISTED);
+
+        // [design: worldspace.rs::script_sky] A climate rebuild's own start weather
+        // remains resumable when there is no override to carry.
+        let mut climate = sky_started_on_held();
+        climate.weather = climate.choices[0].weather.clone();
+        climate.resume = Some(LISTED);
+        climate.carry_weather_from(&from);
+        assert_eq!(climate.resume, Some(LISTED));
+        climate.place(Some(None), false);
+        assert_eq!((climate.weather.form_id, climate.rolls), (LISTED, 0));
+    }
+
+    #[test]
+    fn a_command_line_pin_and_resume_survive_sky_replacement() {
+        let mut from = sky_started_on_held();
+        from.pinned = true;
+        let mut to = sky_started_on_held();
+        to.weather = to.choices[0].weather.clone();
+        to.resume = None;
+        to.carry_weather_from(&from);
+        assert!(to.pinned);
+        assert_eq!(to.resume, Some(HELD));
+        assert!(to.script.is_none());
+        to.place(Some(None), false);
+        assert_eq!(to.weather.form_id, HELD);
+    }
+
+    #[test]
+    fn a_held_weather_saved_after_sky_replacement_loads_held() {
+        let mut from = sky_started_on_held();
+        from.script_weather(from.weather.clone(), [None; 6], true, true);
+        let mut to = sky_started_on_held();
+        to.resume = None;
+        to.weather = to.choices[0].weather.clone();
+        to.carry_weather_from(&from);
+        to.place(Some(None), false);
+
+        let mut world = World::new();
+        world.insert_resource(to);
+        let saved = (SAVE_HOOK.save)(&world).unwrap();
+        assert_eq!(saved["held"], true);
+        assert_eq!(saved["weather"], format!("W{HELD}"));
+        let saved: serde_json::Value = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        let mut loaded = sky_started_on_held();
+        loaded.restore_saved(&saved);
+        loaded.place(Some(None), false);
+        loaded.set_live_global(GATE, 1.0);
+        assert_eq!(loaded.weather.form_id, HELD);
+        assert!(loaded.script.unwrap().hold);
+        loaded.release_script_weather();
+        loaded.set_live_global(GATE, 0.0);
+        assert_eq!(loaded.weather.form_id, LISTED);
     }
 
     #[test]

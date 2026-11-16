@@ -112,6 +112,25 @@ Editor ID names its form. In an enum position (actor values, animation groups) a
 spelling from encodings.json `enums`. `Head.var` is variable `var` of the script that
 `Head` runs: a quest's script, or a reference's base form's script.
 
+[observed: original installed plugin records, inspected through SCVR declarations
+and each plugin's master table] A master script can declare a variable which a later
+override omits, while a third plugin depends on the master and does not list that
+override as a master.
+
+[design] The running engine indexes every standalone script record's variable
+metadata for this lookup, including overridden master versions. Execution still
+uses the winning script. An empty script override supplies an empty variable list,
+so it cannot expose declarations from an older version when that override is visible.
+
+Implementation validation: four synthetic `source_metadata::` integration tests run
+through ordinary Auto selection and `GameData::build`. The identical-fixture baseline
+had one passing control and three assertion failures; source commit `9948cf526` passed
+all four, with zero ignored and 917 other integration tests filtered out. The controls
+check quest and placed-reference indices/types, visible replacement variables,
+nonvisible and missing names, empty overrides, unchanged execution winners and retained
+compiled bytes on source failure. These are compiler tests, not original-game gameplay
+or complete mod compatibility evidence.
+
 - **Seeded** (the default for `fnvtool script compile`, and what a running engine should
   use for a unit that has lists): the unit's own variable and reference lists start the
   compiler, so every index stays the same. This matters because other scripts' bytes

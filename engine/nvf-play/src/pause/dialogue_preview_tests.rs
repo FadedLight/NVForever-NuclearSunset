@@ -69,7 +69,7 @@ fn selected_appearance_note_and_real_unavailable_reason_keep_the_visible_uncut_w
         app.init_resource::<crate::dialogue_menu::DialogueMenu>().init_resource::<crate::pad::PadGlyphs>();
         crate::dialogue_touch::appearance::register_theme_note(&mut app,if required_reason {"Actual theme note"}else{word});
         crate::dialogue_touch::install(&mut app);
-        for key in ["preview-extra-a","preview-extra-b","preview-extra-c"] {
+        for key in ["preview-extra-a","preview-extra-b"] {
             add_setting(&mut app,Setting{key,group:GROUP_MENUS,label:key,note:"",switches:"",get:|_|false,set:|_,_|{},slider:None});
         }
         app.insert_resource(RequiredWord(word.into()));
@@ -80,14 +80,14 @@ fn selected_appearance_note_and_real_unavailable_reason_keep_the_visible_uncut_w
         assert_eq!(chosen,"Minimal");
         let looks=ListLooks{labels:names.clone(),reasons:names.iter().map(|name|settings.choice_unavailable(app.world(),row,name)).collect(),chosen:(chosen.clone(),settings.choice_unavailable(app.world(),row,&chosen))};
         let mut entries:Vec<_>=(0..settings.list().len()).filter(|i|*i!=row).map(|i|ViewEntry::Row(RowId::Setting(i))).collect();entries.push(ViewEntry::Row(RowId::Setting(row)));
-        assert_eq!(entries.len(),13);
-        let d=Drawn{page:Page::Settings{selected:Some(RowId::Setting(row))},entries,lines:13,lists:vec![(row,names,chosen)],looks:vec![(row,looks)],dropdown:required_reason.then_some(Dropdown{row,at:0,first:0}),..default()};
-        let note_top=OPTIONS_TOP+13.*OPTION_ROW+NOTE_GAP;
-        assert!(NOTE_BOTTOM-note_top>=crate::dialogue_touch::appearance::MIN_PREVIEW_UNITS);
+        assert_eq!(entries.len(),12);
+        let d=Drawn{page:Page::Settings{selected:Some(RowId::Setting(row))},entries,lines:12,lists:vec![(row,names,chosen)],looks:vec![(row,looks)],dropdown:required_reason.then_some(Dropdown{row,at:0,first:0}),..default()};
+        let note_top=OPTIONS_TOP+12.*OPTION_ROW+NOTE_GAP;
+        assert!(note_bottom()-note_top>=crate::dialogue_touch::appearance::MIN_PREVIEW_UNITS);
         assert_eq!(note_fit(font.lines(word,Some(full)).len(),note_top),1);
         if required_reason {
             assert_eq!(d.choice_reason(row,0),Some(word),"real registered unavailable callback supplies the reason");
-            let row_top=OPTIONS_TOP+12.*OPTION_ROW;let popup_h=5.*DROP_ITEM+2.*LINE;
+            let row_top=OPTIONS_TOP+11.*OPTION_ROW;let popup_h=5.*DROP_ITEM+2.*LINE;
             assert!(row_top+OPTION_ROW+popup_h>950. && note_top>row_top,"real dropdown opens above, clear of the note witness");
         }
         app.world_mut().run_system_once_with(move |In(d):In<Drawn>,mut commands:Commands,settings:Res<Settings>,glyphs:Res<crate::pad::PadGlyphs>| {

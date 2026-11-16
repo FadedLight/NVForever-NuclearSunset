@@ -94,6 +94,10 @@ pub(super) fn install(app: &mut App) {
     switch!("touch-pipboy-dismiss-left","Pip-Boy left dismissal handle","Drag down or diagonally down from the safe left handle to dismiss. The flat menu reserves its space. Reverse before release to keep it open.",left);
     switch!("touch-pipboy-dismiss-right","Pip-Boy right dismissal handle","Drag down or diagonally down from the safe right handle to dismiss. The flat menu reserves its space. Reverse before release to keep it open.",right);
     settings::add_ini_migration(app,SIDE_KEY,migrate_sides);
+    // The saved chooser replaces these two legacy rows on the page, not in the INI.
+    for key in [LEFT_KEY, RIGHT_KEY] {
+        settings::set_shown_when(app, key, SIDE_KEY, |_| false);
+    }
     settings::add_choice_list(app,Setting {key:SIDE_KEY,group:"Controls",label:"Pip-Boy downward dismissal",
         note:"Choose where downward drags beside the display lower the arm. Display lists, maps and controls keep their input. Graphics are optional.",
         switches:"",get:|_|false,set:|_,_|{},slider:None},ChoiceList {

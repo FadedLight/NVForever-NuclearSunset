@@ -96,14 +96,14 @@ fn malformed_or_absent_new_choice_preserves_ordinary_legacy_and_nondefault_curre
 
 #[test]
 fn legacy_setters_remain_operational_but_real_settings_navigation_uses_the_single_side_chooser() {
-    use nvf_play::{bindings::InputDevice,settings_view::{parent_of,RowId,Visibility}};
+    use nvf_play::settings_view::{parent_of,RowId,Visibility};
     let mut app=App::new();install(&mut app);app.insert_resource(settings::SettingsFile(None));
     let registry=app.world().resource::<settings::Settings>();let chooser=registry.index(TEST_SIDE_KEY).unwrap();let left=registry.index(TEST_LEFT_KEY).unwrap();let right=registry.index(TEST_RIGHT_KEY).unwrap();
-    let visibility=Visibility::of(InputDevice::KeyboardMouse,None);
-    assert!(!visibility.shows(&registry.list()[left]) && !visibility.shows(&registry.list()[right]));
-    assert!(visibility.shows(&registry.list()[chooser]));
-    assert_eq!(parent_of(registry.list(),left,visibility),Some(RowId::Setting(chooser)));
-    assert_eq!(parent_of(registry.list(),right,visibility),Some(RowId::Setting(chooser)));
+    let visibility=Visibility::of_world(app.world());
+    assert!(!visibility.shows(left,&registry.list()[left]) && !visibility.shows(right,&registry.list()[right]));
+    assert!(visibility.shows(chooser,&registry.list()[chooser]));
+    assert_eq!(parent_of(registry.list(),left,&visibility),Some(RowId::Setting(chooser)));
+    assert_eq!(parent_of(registry.list(),right,&visibility),Some(RowId::Setting(chooser)));
     assert_eq!(settings::flip(app.world_mut(),left),Some(true));assert_eq!(chosen(&app),"Left only");
     assert_eq!(settings::flip(app.world_mut(),right),Some(true));assert_eq!(chosen(&app),"Both");
     assert!(settings::pick(app.world_mut(),chooser,"Disabled"));

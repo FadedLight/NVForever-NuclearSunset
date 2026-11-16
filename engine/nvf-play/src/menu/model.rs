@@ -1913,3 +1913,87 @@ impl BarterKindMults {
 
 #[cfg(test)]
 mod tests;
+/// [design, #2403] Synthetic list/quantity/confirmation states for detector regressions.
+#[cfg(feature = "report-test-support")]
+#[doc(hidden)]
+pub fn report_progress_fixture(mode: Mode, step: usize) -> MenuModel {
+    let mut m = MenuModel::empty(mode, "Synthetic menu".into());
+    let rows: Vec<_> = (0..20)
+        .map(|i| Row {
+            item: FormId(100 + i),
+            at: None,
+            name: format!("Synthetic item {i}"),
+            count: 10,
+            weight: Some(1.0),
+            value: Some(1),
+            kind: Some(ItemKind::Weapon),
+            equipped: false,
+            quest: false,
+            condition: Some(1.0),
+            icon: None,
+            price: None,
+            bartered: false,
+            loaded: false,
+            mods: 0,
+            mods_value: 0,
+            folder: None,
+            reference: None,
+            live: false,
+        })
+        .collect();
+    m.lists = [Listing { rows: rows.clone(), ..Default::default() }, Listing { rows, ..Default::default() }];
+    if step >= 1 {
+        m.selected[0] = 1;
+    }
+    if step >= 2 {
+        m.scroll[0] = 1;
+    }
+    if step >= 3 {
+        m.category[0] = Category::Weapons;
+    }
+    if step >= 4 {
+        m.quantity = Some(Quantity { cmd: Command::One, side: Side::Player, row: 0, max: 3, amount: 1 });
+    }
+    if step >= 5 {
+        m.quantity.as_mut().unwrap().amount = 2;
+    }
+    if step >= 6 {
+        m.lists[0].value = 42;
+    }
+    if step >= 7 {
+        m.confirming_take_all = true;
+    }
+    if step >= 8 {
+        m.status = Some("Synthetic result".into());
+    }
+    m.navigated = step as u32;
+    m.pointer_pick = step >= 9;
+    m
+}
+
+/// [design, #2403] A zero-balance barter still changes when another item is offered.
+#[cfg(feature = "report-test-support")]
+#[doc(hidden)]
+pub fn report_trade_progress_fixture(step: usize) -> MenuModel {
+    let mut m = report_progress_fixture(Mode::Barter(FormId(42)), 0);
+    let mut t = Trade {
+        merchant: FormId(42),
+        stock: FormId(43),
+        caps: FormId(44),
+        discount: 0,
+        skill: 50.0,
+        prices: Prices::from_settings(&FormStore::default()),
+        offered: Default::default(),
+        purse: [100; 2],
+        balance: 0,
+        sells: None,
+        withheld: vec![],
+        mult_set: [None; 2],
+    };
+    if step >= 1 {
+        t.offered[0].insert((FormId(100), None, 0), 1);
+    }
+    m.trade = Some(t);
+    m.navigated = step as u32;
+    m
+}

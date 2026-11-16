@@ -697,4 +697,5 @@ mod tests {
             assert_eq!(sneak(&app), requested);
         }
     }
+    include!("controller_aim/main_aim_union_tests.rs");
 }

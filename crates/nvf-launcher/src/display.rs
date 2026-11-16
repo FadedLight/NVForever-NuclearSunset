@@ -137,11 +137,12 @@ pub fn frame_gen_choices() -> Vec<Choice> {
     vec![choice("Off", "off"), choice("FSR 3.1", "fsr"), choice("DLSS", "dlss")]
 }
 
-/// Rows whose value the game works out from the rows under them (quality.rs): Quality preset
-/// and Enhanced effects. Choosing one in the game rewrites those rows (a preset from the game
-/// folder's preset files); the INI's word alone does nothing, so the launcher shows it only.
+/// Rows whose value the game works out from the rows under them (quality.rs): the Quality
+/// preset (the Enhanced effects row went with the settings menu overhaul, #2803). Choosing one
+/// in the game rewrites those rows (a preset from the game folder's preset files); the INI's
+/// word alone does nothing, so the launcher shows it only.
 pub fn read_only(key: &str) -> bool {
-    matches!(key, "quality" | "enhanced")
+    key == "quality"
 }
 
 /// A key the game reads only while the INI lacks the key that took over from it
@@ -404,7 +405,7 @@ mod tests {
         assert!(st.contains("pub(crate) const LEGACY_KEY: &str = \"fsr-upscaling\";") && st.contains("set_older_key(app, UPSCALER_KEY, LEGACY_KEY)"));
         assert!(st.contains("if fnv_install::ini_get(&text, section, \"display-sync\").is_some() {") && st.contains("let Some(old) = fnv_install::ini_get(&text, section, \"vsync\")"), "the old vsync key is read only without display-sync");
         let q = engine("quality.rs");
-        assert!(q.contains("fn load_quality(_world: &mut World, text: &str) -> bool") && q.contains("fn load_enhanced(_world: &mut World, text: &str) -> bool"), "the presets' INI word is read only to check it");
+        assert!(q.contains("fn load_quality(_world: &mut World, text: &str) -> bool") && !q.contains("fn load_enhanced("), "the preset's INI word is read only to check it; no Enhanced row (#2803)");
     }
 
     #[test]

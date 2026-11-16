@@ -714,6 +714,9 @@ impl<'a> Game<'a> {
         }
         self.dialogue_serial = self.dialogue_serial.wrapping_add(1);
         self.dialogue = Some(Conversation { actor, through, line: None, choices: Vec::new(), topic_list: false, lines: 0, then: None, ending: false });
+        // [design, #2724] Opening by any route fulfils this actor's pending walk-up;
+        // consume it before the first line's scripts can run (`Game::speak`).
+        self.walk_up_greets.remove(&actor);
         self.extra.entry(actor).or_default().talked_to_pc = true;
         self.emit(EventKind::DialogueStarted { actor, topic });
         self.speak(actor, topic, info);
@@ -1571,11 +1574,12 @@ impl<'a> Game<'a> {
             self.talking_through = None;
             if let Some(f) = follow {
                 let topic = dv.info(&f).and_then(|d| d.topic).unwrap_or(FormId(0));
-                self.say_line(talker, Some(to), topic, f, next);
+                // Said through the activator from the start, so it cuts a line the
+                // activator is saying (`Game::say_line_through`, #2768).
+                self.say_line_through(talker, Some(to), topic, f, next, via);
                 self.set_line_look(talker, said.look);
                 if let Some(s) = self.speech.iter_mut().find(|s| s.speaker == talker && s.info == f) {
                     s.earlier_topics = earlier;
-                    s.through = via;
                 }
                 return;
             }
@@ -1599,11 +1603,10 @@ impl<'a> Game<'a> {
                 1 => linked[0],
                 n => linked[self.rng.next_u32() as usize % n],
             };
-            self.say_line(who, Some(to), topic, info, next);
+            self.say_line_through(who, Some(to), topic, info, next, through);
             self.set_line_look(who, said.look);
             if let Some(s) = self.speech.iter_mut().find(|s| s.speaker == who && s.info == info) {
                 s.earlier_topics = earlier;
-                s.through = through;
             }
             return;
         }

@@ -1,9 +1,10 @@
-//! Paint-only dialogue themes and an independent explanatory-caption switch.
+//! Borderless dialogue treatments over the live world, with independent accents and tint.
 use bevy::prelude::*;
 use crate::settings::{add_choice_list, add_setting, ChoiceList, Setting, Slider};
 
 pub(crate) const THEME_KEY: &str = "dialogue-theme-v1";
 pub(crate) const BACKGROUND_KEY: &str = "dialogue-background-opacity-v1";
+pub(crate) const TINT_KEY: &str = "dialogue-background-tint-v1";
 pub(crate) const FRAME_KEY: &str = "dialogue-frame-opacity-v1";
 /// Conservative room for two16-unit lines at1.2line height plus padding/borders.
 pub(crate) const MIN_PREVIEW_UNITS: f32 = 78.0;
@@ -16,7 +17,7 @@ pub(crate) enum Theme {
 impl Theme {
     const ALL: [Self; 5] = [Self::Minimal, Self::ClassicGlass, Self::SplitPanel, Self::RetroConsole, Self::WristTerminal];
     fn name(self) -> &'static str {
-        match self { Self::Minimal => "Minimal", Self::ClassicGlass => "Classic Glass", Self::SplitPanel => "Split Panel", Self::RetroConsole => "Retro Console", Self::WristTerminal => "Wrist Terminal" }
+        match self { Self::Minimal => "Minimal", Self::ClassicGlass => "Classic Glass", Self::SplitPanel => "Field Notes", Self::RetroConsole => "Retro Console", Self::WristTerminal => "Wrist Terminal" }
     }
 }
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -25,9 +26,17 @@ pub(crate) struct Appearance {
     pub background: f32,
     pub frame: f32,
     pub hints: bool,
+    pub tint: Tint,
 }
 impl Default for Appearance {
-    fn default() -> Self { Self { theme: Theme::Minimal, background: 0.18, frame: 0.60, hints: true } }
+    fn default() -> Self { Self { theme: Theme::Minimal, background: 0.18, frame: 0.60, hints: false, tint: Tint::Hud } }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Tint { #[default] Hud, Neutral, Amber }
+fn tint_name(w:&World)->String {match w.resource::<Appearance>().tint {Tint::Hud=>"HUD colour",Tint::Neutral=>"Neutral",Tint::Amber=>"Warm amber"}.into()}
+fn pick_tint(w:&mut World,name:&str)->bool {
+    let tint=match name {"HUD colour"=>Tint::Hud,"Neutral"=>Tint::Neutral,"Warm amber"=>Tint::Amber,_=>return false};
+    w.resource_mut::<Appearance>().tint=tint;true
 }
 fn opacity(value: f32) -> f32 { if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 } }
 fn backing(value: f32) -> f32 { opacity(value).min(0.80) }
@@ -35,11 +44,12 @@ fn shown(value: f32) -> String { format!("{:.0}%", opacity(value) * 100.0) }
 fn shown_backing(value: f32) -> String { shown(opacity(value)*0.80) }
 fn chosen(world: &World) -> String { world.resource::<Appearance>().theme.name().into() }
 fn pick(world: &mut World, name: &str) -> bool {
+    let name=if name=="Split Panel" {"Field Notes"}else{name};
     let Some(theme) = Theme::ALL.into_iter().find(|t| t.name() == name) else { return false; };
     world.resource_mut::<Appearance>().theme = theme;
     true
 }
-const THEME_NOTE: &str = "Thin dialogue frames using your HUD colour. The live sample changes here; themes keep choices, targets, text sizes and speaker-side framing.";
+const THEME_NOTE: &str = "Unframed choices over the world: quiet underline, classic highlight, editorial rule, terminal cursor or wrist-computer ticks. Uses your HUD colour.";
 fn theme_setting(note: &'static str) -> Setting {
     Setting { key: THEME_KEY, group: crate::pause::GROUP_MENUS, label: "Dialogue theme",
         note, switches: "", get: |_|false, set: |_,_|{}, slider: None }
@@ -55,9 +65,12 @@ pub(crate) fn register_theme_note(app: &mut App, note: &'static str) {
     add_choice_list(app, theme_setting(note), theme_choices());
 }
 pub(super) fn install(app: &mut App) {
-    app.init_resource::<Appearance>().add_systems(Update, paint.after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync));
+    app.init_resource::<Appearance>().add_systems(Update, (paint, markers, instrument).chain().after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync));
     add_choice_list(app, theme_setting(THEME_NOTE), theme_choices());
-    for (key,label,frame) in [(BACKGROUND_KEY,"Dialogue background opacity",false),(FRAME_KEY,"Dialogue frame opacity",true)] {
+    add_choice_list(app, Setting {key:TINT_KEY,group:crate::pause::GROUP_MENUS,label:"Dialogue background tint",
+        note:"Tint the translucent choice backing. Text and selection still use your preferred HUD colour.",switches:"",get:|_|false,set:|_,_|{},slider:None},
+        ChoiceList {names:|_|["HUD colour","Neutral","Warm amber"].map(str::to_owned).to_vec(),chosen:tint_name,pick:pick_tint,save:tint_name,load:pick_tint,ask_keep:false});
+    for (key,label,frame) in [(BACKGROUND_KEY,"Dialogue background opacity",false),(FRAME_KEY,"Dialogue accent opacity",true)] {
         let slider = if frame {
             Slider { get: |w|w.resource::<Appearance>().frame, set: |w,v|w.resource_mut::<Appearance>().frame=opacity(v), min:0.0, step:0.01, shown:Some(shown) }
         } else {
@@ -74,7 +87,7 @@ pub(super) fn install(app: &mut App) {
 /// All theme decoration is paint-only: never Button, Action or an input owner.
 #[derive(Component, Clone, Copy)]
 pub(super) enum Paint {
-    Panel, Speaker, Speech, Hint, ChoiceText { darkened: bool },
+    ResponseDetail {index:usize,part:u8}, ResponseMark(usize), Panel, Speaker, Speech, Hint, ChoiceText { darkened: bool },
     Choice { index: usize, short: bool }, Focus { index: usize, short: bool }, Confirm, Caption, PreviewSelected, PreviewFocus, Trim(u8),
 }
 #[derive(Component)]
@@ -86,27 +99,37 @@ fn palette(rgb: [u8;3], brightness: f32, alpha: f32) -> Color {
 }
 impl Appearance {
     fn line(self, rgb:[u8;3], factor:f32) -> Color { palette(rgb,255.0,self.frame*factor) }
-    fn fill(self, rgb:[u8;3], brightness:f32, factor:f32) -> Color { palette(rgb,brightness,backing(self.background)*factor) }
+    fn fill(self, rgb:[u8;3], brightness:f32, factor:f32) -> Color { palette(match self.tint {Tint::Hud=>rgb,Tint::Neutral=>[255,255,255],Tint::Amber=>[255,181,74]},brightness,backing(self.background)*factor) }
     fn colors(self, kind:Paint, selected:usize, rgb:[u8;3]) -> (Option<Color>,Option<Color>,Option<Color>) {
         match kind {
-            Paint::Panel => (None,Some(self.fill(rgb,match self.theme {Theme::Minimal=>12.0,Theme::ClassicGlass=>20.0,Theme::SplitPanel=>12.0,Theme::RetroConsole=>8.0,Theme::WristTerminal=>16.0},1.0)),Some(self.line(rgb,1.0))),
-            Paint::Speaker | Paint::Speech | Paint::Caption => (Some(palette(rgb,255.,1.)),None,None),
+            Paint::ResponseDetail{index,part:_} => {
+                let alpha=match self.theme {Theme::RetroConsole=>0.08,Theme::WristTerminal=>if index==selected {0.65}else{0.18},_=>0.0};
+                (None,Some(self.line(rgb,alpha)),None)
+            }
+            Paint::Panel => (None,Some(Color::NONE),Some(Color::NONE)),
+            Paint::ResponseMark(_) | Paint::Speaker | Paint::Speech | Paint::Caption => (Some(palette(rgb,255.,1.)),None,None),
             Paint::ChoiceText{darkened} => (Some(palette(rgb,if darkened {160.}else{255.},1.)),None,None),
             Paint::Hint => (Some(palette(rgb,190.,1.)),None,None),
-            Paint::Choice{index,short} => {
+            Paint::Choice{index,short:_} => {
                 let on=index==selected;
-                (None,Some(self.fill(rgb,if on {48.}else{16.},if on {1.0}else{0.35})),Some(if on && short {check_line().with_alpha(opacity(self.frame))}else{self.line(rgb,if on {1.0}else if short {0.65}else{0.25})}))
+                let (brightness,factor)=match self.theme {
+                    Theme::Minimal=>(8.,if on {0.55}else{0.0}),
+                    Theme::ClassicGlass=>(48.,if on {1.0}else{0.0}),
+                    Theme::SplitPanel=>(12.,if on {0.65}else{0.0}),
+                    Theme::RetroConsole=>(24.,if on {0.8}else{0.15}),
+                    Theme::WristTerminal=>(36.,if on {1.0}else{0.2}),
+                };
+                (None,Some(self.fill(rgb,brightness,factor)),Some(Color::NONE))
             }
             Paint::Focus{index,short} => (None,Some(if index==selected && short {check_line()}else{palette(rgb,255.,if index==selected {1.}else{0.})}),None),
             Paint::PreviewFocus => (None,Some(palette(rgb,255.,1.)),None),
-            Paint::Confirm | Paint::PreviewSelected => (None,Some(self.fill(rgb,48.,1.0)),Some(self.line(rgb,1.0))),
+            Paint::Confirm | Paint::PreviewSelected => (None,Some(self.fill(rgb,48.,1.0)),Some(Color::NONE)),
             Paint::Trim(n) => {
                 let visible=match self.theme {
-                    Theme::Minimal => false,
-                    Theme::ClassicGlass => n<4,
-                    Theme::SplitPanel => n==4 || n==5,
-                    Theme::RetroConsole => n<4 || n==6,
-                    Theme::WristTerminal => n==0 || n==3 || n>=6,
+                    Theme::Minimal | Theme::ClassicGlass => false,
+                    Theme::SplitPanel => n==4,
+                    Theme::RetroConsole => n==6,
+                    Theme::WristTerminal => n>=6,
                 };
                 (None,Some(self.line(rgb,if visible {1.0}else{0.0})),None)
             }
@@ -124,12 +147,81 @@ fn paint(
         if let (Some(mut value),Some(color))=(text,t) { if value.0!=color {value.0=color;} }
         if let (Some(mut value),Some(color))=(back,b) { if value.0!=color {value.0=color;} }
         if let (Some(mut value),Some(color))=(border,line) { let next=BorderColor::all(color);if *value!=next {*value=next;} }
-        if let (Paint::Hint,Some(mut node))=(kind,node) {
+        if let Some(mut node)=node {
+            if let Paint::ResponseDetail{part,..}=kind {
+                let next=if appearance.theme==Theme::WristTerminal {(px(2.),Val::Auto,px(5.),px(10.+f32::from(*part)*7.))}
+                    else {(px(30.),px(4.),Val::Auto,percent(25.+f32::from(*part)*25.))};
+                if (node.left,node.right,node.width,node.top)!=next {node.left=next.0;node.right=next.1;node.width=next.2;node.top=next.3;}
+            }
+            // Accents change the visual vocabulary without changing the response hit box.
+            if matches!(kind,Paint::Focus{..}|Paint::PreviewFocus) {
+                let (left,top,bottom,width,height)=match appearance.theme {
+                    Theme::Minimal=>(px(8.),Val::Auto,px(2.),percent(35.),px(1.)),
+                    Theme::ClassicGlass=>(px(2.),px(8.),px(8.),px(2.),Val::Auto),
+                    Theme::SplitPanel=>(px(8.),Val::Auto,px(3.),px(16.),px(1.)),
+                    Theme::RetroConsole=>(px(9.),Val::Auto,px(7.),px(7.),px(2.)),
+                    Theme::WristTerminal=>(px(2.),px(8.),px(8.),px(3.),Val::Auto),
+                };
+                if (node.left,node.top,node.bottom,node.width,node.height)!=(left,top,bottom,width,height) {
+                    node.left=left;node.top=top;node.bottom=bottom;node.width=width;node.height=height;
+                }
+            }
+            if matches!(kind,Paint::Panel|Paint::Choice{..}|Paint::Confirm|Paint::PreviewSelected) && node.border!=UiRect::ZERO {node.border=UiRect::ZERO;}
+            if matches!(kind,Paint::Hint) {
             let display=if appearance.hints {Display::Flex}else{Display::None};
             if node.display!=display {node.display=display;}
+            }
         }
     }
 }
+fn markers(appearance:Res<Appearance>,menu:Res<super::DialogueMenu>,mut marks:Query<(&Paint,&mut Text,&mut Node)>) {
+    for (kind,mut text,mut node) in &mut marks {
+        let Paint::ResponseMark(index)=kind else {continue};
+        if !appearance.is_changed() && !menu.is_changed() && !text.is_added() {continue;}
+        let next=match appearance.theme {
+            Theme::Minimal|Theme::ClassicGlass=>String::new(),
+            Theme::SplitPanel=>format!("{:02}",index+1),
+            Theme::RetroConsole=>if *index==menu.selected {">"}else{"·"}.into(),
+            Theme::WristTerminal=>if *index==menu.selected {"•"}else{"·"}.into(),
+        };
+        let display=if next.is_empty(){Display::None}else{Display::Flex};
+        if node.display!=display {node.display=display;}
+        if text.0!=next {text.0=next;}
+    }
+}
+pub(super) fn response_mark(parent:&mut ChildSpawnerCommands,index:usize) {
+    for part in 0..3 {
+        parent.spawn((Paint::ResponseDetail{index,part},bevy::picking::Pickable::IGNORE,BackgroundColor(Color::NONE),
+            Node{position_type:PositionType::Absolute,height:px(1.),..default()}));
+    }
+    parent.spawn((Paint::ResponseMark(index),Text::new(""),TextShadow {offset:Vec2::splat(1.5),color:Color::srgba(0.,0.,0.,0.85)},TextFont{font_size:FontSize::Px(11.),..default()},TextColor(Color::NONE),
+        bevy::picking::Pickable::IGNORE,Node{position_type:PositionType::Absolute,left:px(8.),top:px(14.),..default()}));
+}
+
+/// Reuse the installed game's scrollbar marker for the wrist-computer cursor.
+/// Missing game data/texture keeps the procedural focus cue. No asset is bundled.
+fn instrument(
+    mut commands:Commands, appearance:Res<Appearance>,
+    data:Option<Res<nvf_assets::GameData>>, images:Option<ResMut<Assets<Image>>>,
+    formats:Option<Res<bevy::image::CompressedImageFormatSupport>>,
+    mut loaded:Local<Option<Option<crate::interface::Picture>>>,
+    mut cursors:Query<(Entity,&Paint,&BackgroundColor,Option<&mut ImageNode>)>,
+) {
+    if appearance.theme==Theme::WristTerminal && loaded.is_none() {
+        if let (Some(data),Some(mut images))=(data,images) {
+            let mut pictures=crate::interface::Pictures::load(Some(&data));
+            *loaded=Some(pictures.picture("interface\\shared\\scrollbar\\vert_marker.dds",Some(&data),&mut images,crate::interface::bc_supported(formats.as_deref())));
+        }
+    }
+    for (entity,kind,background,image) in &mut cursors {
+        if !matches!(kind,Paint::Focus{..}|Paint::PreviewFocus) {continue;}
+        if let Some(Some((handle,rect)))=loaded.as_ref().filter(|_|appearance.theme==Theme::WristTerminal) {
+            if let Some(mut image)=image {if image.color!=background.0 {image.color=background.0;}}
+            else {commands.entity(entity).insert(ImageNode {rect:*rect,color:background.0,..ImageNode::new(handle.clone())});}
+        } else if image.is_some() {commands.entity(entity).remove::<ImageNode>();}
+    }
+}
+
 pub(super) fn decoration(parent:&mut ChildSpawnerCommands) {
     // One-pixel insets/rails, original procedural trim; all share unchanged hit geometry.
     for (n,node) in [
@@ -146,7 +238,7 @@ pub(super) fn decoration(parent:&mut ChildSpawnerCommands) {
     }
 }
 
-pub(crate) fn is_row(key:&str)->bool { [THEME_KEY,BACKGROUND_KEY,FRAME_KEY,HINTS_KEY].contains(&key) }
+pub(crate) fn is_row(key:&str)->bool { [THEME_KEY,BACKGROUND_KEY,FRAME_KEY,HINTS_KEY,TINT_KEY].contains(&key) }
 /// The pause owner supplies its actual clipped note-region Node; never a gameplay panel.
 pub(crate) fn preview(parent:&mut ChildSpawnerCommands,node:Node) {
     parent.spawn((Preview,Paint::Panel,node,bevy::picking::Pickable::IGNORE,BackgroundColor(Color::NONE),BorderColor::all(Color::NONE)))

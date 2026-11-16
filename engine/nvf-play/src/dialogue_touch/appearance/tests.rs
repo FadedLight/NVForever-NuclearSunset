@@ -44,7 +44,7 @@ fn all_five_themes_repaint_existing_real_rows_without_changing_scroll_selection_
             assert!(rows(&mut app).iter().all(|(_,r)|r.height()>=48.));
             let mut q=app.world_mut().query::<(&Paint,&BackgroundColor)>();
             let trim=q.iter(app.world()).filter(|(p,c)|matches!(p,Paint::Trim(_))&&c.0.alpha()>0.).count();
-            assert_eq!(trim,match t {Theme::Minimal=>0,Theme::ClassicGlass=>4,Theme::SplitPanel=>2,Theme::RetroConsole=>5,Theme::WristTerminal=>4});
+            assert_eq!(trim,match t {Theme::Minimal=>0,Theme::ClassicGlass=>0,Theme::SplitPanel=>1,Theme::RetroConsole=>1,Theme::WristTerminal=>2});
         }
     }
 }
@@ -74,6 +74,7 @@ fn hiding_only_hints_keeps_speech_choices_and_required_confirm_caption() {
     let (mut app,window)=layout_scene(true,Vec2::new(792.,363.),1.);
     app.world_mut().resource_mut::<crate::dialogue_menu::DialogueMenu>().view.as_mut().unwrap().line=Some("An authored speaking line remains visible.".into());
     settle(&mut app);
+    app.world_mut().resource_mut::<Appearance>().hints=true;
     let row=index(&app,HINTS_KEY);assert_eq!(crate::settings::flip(app.world_mut(),row),Some(false));settle(&mut app);
     assert!(app.world().resource::<TouchDialogue>().enabled);
     let mut q=app.world_mut().query::<(&Paint,&Node,&ComputedNode)>();
@@ -89,9 +90,10 @@ fn hiding_only_hints_keeps_speech_choices_and_required_confirm_caption() {
 #[test]
 fn hints_geometry_change_retires_old_release_then_fresh_real_hit_answers() {
     let (mut app,window)=layout_scene(true,Vec2::new(640.,360.),1.);
-    app.world_mut().resource_mut::<TouchDialogue>().confirm=false;settle(&mut app);
+    app.world_mut().resource_mut::<TouchDialogue>().confirm=false;app.world_mut().resource_mut::<Appearance>().hints=true;settle(&mut app);
     let before=point(&mut app,Kind::Choice(0));
     send(&mut app,window,3005,TouchPhase::Started,before);app.update();
+    app.world_mut().resource_mut::<Appearance>().hints=true;
     let row=index(&app,HINTS_KEY);assert_eq!(crate::settings::flip(app.world_mut(),row),Some(false));
     send(&mut app,window,3005,TouchPhase::Ended,before);app.update();
     assert_eq!(app.world().resource::<TouchFrame>().asked.pick,None);
@@ -104,6 +106,7 @@ fn appearance_ini_restores_independently_of_enabled_sizes_confirmation_and_side(
     let (mut saved,_)=layout_scene(true,Vec2::new(792.,363.),1.);
     saved.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
     theme(&mut saved,Theme::WristTerminal);slider(&mut saved,BACKGROUND_KEY,0.37);slider(&mut saved,FRAME_KEY,0.28);
+    saved.world_mut().resource_mut::<Appearance>().hints=true;
     let row=index(&saved,HINTS_KEY);assert_eq!(crate::settings::flip(saved.world_mut(),row),Some(false));
     let row=index(&saved,"touch-dialogue");assert_eq!(crate::settings::flip(saved.world_mut(),row),Some(false));
     slider(&mut saved,"dialogue-choice-text-size",0.6);slider(&mut saved,"dialogue-subtitle-text-size",0.4);
@@ -147,7 +150,7 @@ fn long_choice_text_order_short_and_darkened_flags_are_unchanged_for_every_theme
         assert!(app.world().resource::<TouchDialogue>().confirm);
         let mut q=app.world_mut().query::<(&Paint,&BorderColor)>();
         let (_,border)=q.iter(app.world()).find(|(p,_)|matches!(p,Paint::Choice{index:1,..})).unwrap();
-        assert_eq!(border.top,check_line().with_alpha(app.world().resource::<Appearance>().frame),"unmet-check feedback is retained, independent of theme");
+        assert_eq!(border.top,Color::NONE,"responses have no box border; unmet check uses the persistent focus cue");
     }
 }
 
@@ -190,7 +193,7 @@ fn actual_live_hud_palette_is_applied_once_after_generic_recolour() {
         assert!(text(&mut app,|p|matches!(p,Paint::Speaker|Paint::ChoiceText{darkened:false}|Paint::Caption)).iter().all(|(_,c)|*c==expected));
         let mut q=app.world_mut().query::<(&Paint,&BorderColor)>();
         let (_,border)=q.iter(app.world()).find(|(p,_)|matches!(p,Paint::Choice{index:0,..})).unwrap();
-        assert_eq!(border.top,expected.with_alpha(app.world().resource::<Appearance>().frame));
+        assert_eq!(border.top,Color::NONE);
     }
 }
 #[test]
@@ -212,7 +215,7 @@ fn every_theme_keeps_real_speaker_side_camera_and_safe_area_at_both_sides() {
         settle(&mut app);
         let before_root=root(&mut app);
         let before=app.world().get::<Camera>(world).unwrap().viewport.clone();
-        assert!(before.is_some());
+        assert!(before.is_none());
         for t in Theme::ALL {
             theme(&mut app,t);app.update();
             assert_eq!(root(&mut app),before_root);
@@ -221,9 +224,10 @@ fn every_theme_keeps_real_speaker_side_camera_and_safe_area_at_both_sides() {
             let panel=frame.panel.expect("real split source supplies panel");
             assert!(panel.min.x>=24. && panel.min.y>=12. && panel.max.x<=782. && panel.max.y<=345.);
             assert_eq!(app.world().get::<UiTargetCamera>(before_root).unwrap().0,frame.ui_camera.unwrap());
-            let now=app.world().get::<Camera>(world).unwrap().viewport.as_ref().unwrap();
-            let original=before.as_ref().unwrap();
-            assert_eq!((now.physical_position,now.physical_size),(original.physical_position,original.physical_size));
+            assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
+            let camera=app.world().get::<Transform>(world).unwrap();
+            let view=camera.rotation.inverse()*(crate::space::to_bevy([35.,180.,130.])-camera.translation);
+            assert!(if side==crate::dialogue_split::Side::Left {view.x<0.}else{view.x>0.});
             assert!(rows(&mut app).iter().all(|(_,r)|r.height()>=48.));
         }
     }
@@ -237,7 +241,7 @@ fn maximum_background_setting_remains_translucent_while_frame_and_text_are_indep
         assert_eq!(app.world().resource::<Appearance>().background,0.80);
         assert_eq!(app.world().resource::<Appearance>().frame,1.0);
         let mut q=app.world_mut().query::<(&Paint,&BackgroundColor)>();
-        for (kind,back) in q.iter(app.world()) {if matches!(kind,Paint::Panel|Paint::Choice{..}|Paint::Confirm) {assert!(back.0.alpha()<=0.80 && back.0.alpha()>0.);}}
+        for (kind,back) in q.iter(app.world()) {if matches!(kind,Paint::Panel|Paint::Choice{..}|Paint::Confirm) {assert!(back.0.alpha()<=0.80);if matches!(kind,Paint::Panel){assert_eq!(back.0.alpha(),0.);}}}
         assert!(text(&mut app,|p|matches!(p,Paint::Speaker|Paint::ChoiceText{..}|Paint::Caption)).iter().all(|(_,c)|c.alpha()==1.));
     }
 }
@@ -250,6 +254,7 @@ fn every_theme_keeps_selected_unmet_check_cue_and_requirement_at_zero_frame_opac
         let row=&mut menu.view.as_mut().unwrap().choices[0];row.short=true;row.label=label.into();
     }
     let row=index(&app,"dialogue-touch-choice");assert!(crate::settings::pick(app.world_mut(),row,"Direct tap"));
+    app.world_mut().resource_mut::<Appearance>().hints=true;
     let row=index(&app,HINTS_KEY);assert_eq!(crate::settings::flip(app.world_mut(),row),Some(false));
     slider(&mut app,BACKGROUND_KEY,0.);slider(&mut app,FRAME_KEY,0.);settle(&mut app);
     let before=rows(&mut app);
@@ -311,5 +316,35 @@ fn minimum_admitted_preview_height_contains_real_taffy_text_at_all_ui_scales() {
             count+=1;
         }
         assert_eq!(count,2,"both actual preview labels must be measured and contained");
+    }
+}
+
+#[test]
+fn borderless_defaults_tints_and_distinct_cursors_use_actual_draw_nodes() {
+    assert!(!Appearance::default().hints);
+    let (mut app,_)=layout_scene(true,Vec2::new(792.,363.),1.);
+    let mut shapes=Vec::new();
+    for theme_value in Theme::ALL {
+        theme(&mut app,theme_value);settle(&mut app);
+        if theme_value==Theme::WristTerminal {
+            let mut q=app.world_mut().query::<(&Paint,Option<&ImageNode>)>();
+            assert!(q.iter(app.world()).filter(|(p,_)|matches!(p,Paint::Focus{..})).all(|(_,image)|image.is_none()),"missing game assets keep the procedural cursor");
+        }
+        let mut q=app.world_mut().query::<(&Paint,&Node,Option<&BackgroundColor>,Option<&BorderColor>)>();
+        for (kind,node,back,border) in q.iter(app.world()) {
+            if matches!(kind,Paint::Panel|Paint::Choice{..}|Paint::Confirm) {
+                assert_eq!(node.border,UiRect::ZERO);
+                if let Some(border)=border {assert_eq!(border.top.alpha(),0.);}
+            }
+            if matches!(kind,Paint::Panel) {assert_eq!(back.unwrap().0.alpha(),0.);}
+            if matches!(kind,Paint::Focus{index:0,..}) {shapes.push((node.left,node.top,node.bottom,node.width,node.height));}
+        }
+    }
+    for i in 0..shapes.len() {for j in i+1..shapes.len() {assert_ne!(shapes[i],shapes[j]);}}
+    let setting=index(&app,TINT_KEY);
+    for name in ["Neutral","Warm amber","HUD colour"] {
+        assert!(crate::settings::pick(app.world_mut(),setting,name));settle(&mut app);
+        assert_eq!(tint_name(app.world()),name);
+        assert!(text(&mut app,|p|matches!(p,Paint::ChoiceText{darkened:false})).iter().all(|(_,color)|*color==crate::interface::tint(crate::interface::hud_rgb(),255.)));
     }
 }

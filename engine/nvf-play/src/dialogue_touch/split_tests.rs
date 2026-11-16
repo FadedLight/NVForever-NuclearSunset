@@ -40,22 +40,21 @@ fn default_camera(app:&mut App)->Option<Entity> {
     state.get(app.world()).expect("default UI camera query must be valid").get()
 }
 #[test]
-fn split_draws_real_speaker_viewport_opposite_measured_choices_at_both_densities() {
+fn full_world_projects_speaker_opposite_measured_choices_at_both_densities() {
     for side in [Side::Left,Side::Right] {
         for density in [1.0,2.0] {
             let (mut app,_,world)=scene(side,density);
-            let viewport=app.world().get::<Camera>(world).unwrap().viewport.as_ref().unwrap();
-            let screen=Rect::from_corners(viewport.physical_position.as_vec2(),(viewport.physical_position+viewport.physical_size).as_vec2());
+            assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none(),"normal world viewport remains full-size");
             let choices=panel(&mut app);
-            if side==Side::Left { assert!(screen.max.x<choices.min.x); }else{assert!(choices.max.x<screen.min.x);}
-            assert!(screen.min.x>=24.0*density && choices.min.x>=24.0*density);
-            assert!(screen.min.y>=12.0*density && choices.min.y>=12.0*density);
-            assert!(screen.max.x<=782.0*density && choices.max.x<=782.0*density);
-            assert!(screen.max.y<=345.0*density && choices.max.y<=345.0*density);
+            assert!(choices.min.x>=24.0*density && choices.min.y>=12.0*density);
+            assert!(choices.max.x<=782.0*density && choices.max.y<=345.0*density);
             let camera=app.world().get::<Transform>(world).unwrap();
             let face=crate::space::to_bevy([35.0,180.0,130.0]);
             let view=camera.rotation.inverse()*(face-camera.translation);
-            assert!(view.x.abs()<0.0001 && view.y.abs()<0.0001 && view.z<0.0,"actual NPC must be centered in actual viewport");
+            let Projection::Perspective(projection)=app.world().get::<Projection>(world).unwrap() else {panic!("perspective")};
+            let x=(0.5+0.5*view.x/(-view.z*(projection.fov*0.5).tan()*(792.0/363.0)))*792.0*density;
+            assert!(view.z<0.0);
+            if side==Side::Left {assert!(x<choices.min.x && x>24.0*density);}else{assert!(x>choices.max.x && x<782.0*density);}
             let root=app.world_mut().query_filtered::<(Entity,&UiTargetCamera),With<Root>>().single(app.world()).unwrap().1.0;
             assert_ne!(root,world);
             assert!(app.world().get::<Camera>(root).unwrap().order>app.world().get::<Camera>(world).unwrap().order);
@@ -77,19 +76,22 @@ fn split_draws_real_speaker_viewport_opposite_measured_choices_at_both_densities
 }
 #[test]
 fn current_speaker_changes_reframe_and_menu_pause_free_camera_restore_prior_camera() {
-    for cause in 0..4 {
+    for cause in 0..7 {
         let (mut app,_,world)=scene(Side::Left,1.0);
         app.world_mut().resource_mut::<crate::dialogue_look::SpeakerFace>().0=Some((42,[-60.0,200.0,155.0]));
         app.update();
         let transform=app.world().get::<Transform>(world).unwrap();
         let face=crate::space::to_bevy([-60.0,200.0,155.0]);
         let view=transform.rotation.inverse()*(face-transform.translation);
-        assert!(view.x.abs()<0.0001 && view.y.abs()<0.0001);
+        assert!(view.x<0.0 && view.z<0.0,"changed speaker remains on requested left side");
         match cause {
             0=>{app.insert_resource(State::new(crate::PlayState::Menu));},
             1=>{app.insert_resource(crate::pause::Paused(true));},
             2=>{app.world_mut().resource_mut::<crate::script::ScriptState>().rt.as_mut().unwrap().game.dialogue=None;},
-            _=>{app.insert_resource(crate::player::ViewDriven(true));},
+            3=>{app.insert_resource(crate::player::ViewDriven(true));},
+            4=>{app.world_mut().resource_mut::<TouchDialogue>().enabled=false;},
+            5=>{app.world_mut().resource_mut::<Options>().side=Side::Standard;},
+            _=>{app.world_mut().resource_mut::<crate::dialogue_look::SpeakerFace>().0=None;},
         }
         app.update();
         assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
@@ -159,4 +161,31 @@ fn camera_owner_handoff_keeps_foreign_viewport_rotation_and_default_ui_marker() 
     let actual=app.world().get::<Camera>(world).unwrap().viewport.as_ref().unwrap();
     assert_eq!((actual.physical_position,actual.physical_size),(viewport.physical_position,viewport.physical_size));
     assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,rotation);
+}
+
+#[test]
+fn ordinary_view_is_untouched_and_framing_follows_aspect_and_current_fov() {
+    let (mut app,window,world)=scene(Side::Standard,1.0);
+    assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
+    assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,Quat::IDENTITY);
+    for (width,height) in [(640.0,360.0),(1920.0,1080.0),(2400.0,1080.0),(800.0,1200.0)] {
+        app.world_mut().get_mut::<Window>(window).unwrap().resolution.set(width,height);
+        for fov in [0.15,0.65,1.1] {
+            if let Projection::Perspective(p)=&mut *app.world_mut().get_mut::<Projection>(world).unwrap() {p.fov=fov;}
+            for side in [Side::Left,Side::Right] {
+                app.world_mut().resource_mut::<Options>().side=side;
+                settle(&mut app);
+                let t=app.world().get::<Transform>(world).unwrap();
+                let view=t.rotation.inverse()*(crate::space::to_bevy([35.0,180.0,130.0])-t.translation);
+                let screen_x=(0.5+0.5*view.x/(-view.z*(fov*0.5).tan()*(width/height)))*width;
+                let panel=app.world().resource::<crate::dialogue_split::Frame>().panel.unwrap();
+                assert!(if side==Side::Left {screen_x<panel.min.x}else{screen_x>panel.max.x});
+                assert!(screen_x>0.0 && screen_x<width);
+                assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
+            }
+        }
+    }
+    app.world_mut().resource_mut::<Options>().side=Side::Standard;
+    app.update();
+    assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,Quat::IDENTITY);
 }

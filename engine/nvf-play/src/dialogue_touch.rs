@@ -599,6 +599,7 @@ fn text(p: &mut ChildSpawnerCommands, value: impl Into<String>, size: f32, paint
     p.spawn((
         paint,
         Text::new(value.into()),
+        TextShadow {offset:Vec2::splat(1.5),color:Color::srgba(0.,0.,0.,0.85)},
         TextFont {
             font_size: FontSize::Px(size),
             ..default()
@@ -684,7 +685,7 @@ fn draw(
             let mut root = commands.spawn((
                     Root,
                     appearance::Paint::Panel,
-                    Node { border: UiRect::all(px(1.)), ..panel },
+                    panel,
                     GlobalZIndex(2400),
                     BackgroundColor(Color::NONE),
                     BorderColor::all(Color::NONE),
@@ -767,8 +768,8 @@ fn draw(
                                     Node {
                                         width: percent(100.0),
                                         min_height: px(layout.row_min),
-                                        padding: UiRect::all(px(layout.row_padding)),
-                                        border: UiRect::all(px(1.0)),
+                                        padding: UiRect {left:px(30.),right:px(layout.row_padding),top:px(layout.row_padding),bottom:px(layout.row_padding)},
+                                        border: UiRect::ZERO,
                                         flex_shrink: 0.0,
                                         ..default()
                                     },
@@ -780,6 +781,7 @@ fn draw(
                                     ),
                                 ))
                                 .with_children(|p| {
+                                    appearance::response_mark(p,index);
                                     p.spawn((appearance::Paint::Focus{index,short:row.short},bevy::picking::Pickable::IGNORE,
                                         Node{position_type:PositionType::Absolute,left:px(3.),top:percent(50.),width:px(2.),height:px(8.),..default()},BackgroundColor(Color::NONE)));
                                     text(
@@ -804,7 +806,7 @@ fn draw(
                                 width: percent(100.0),
                                 min_height: px(layout.row_min),
                                 padding: UiRect::all(px(layout.confirm_padding)),
-                                border: UiRect::all(px(1.0)),
+                                border: UiRect::ZERO,
                                 flex_shrink: 0.0,
                                 ..default()
                             },
@@ -817,6 +819,7 @@ fn draw(
                                 ConfirmCaption,
                                 appearance::Paint::Caption,
                                 Text::new(confirm_label),
+                                TextShadow {offset:Vec2::splat(1.5),color:Color::srgba(0.,0.,0.,0.85)},
                                 TextFont {
                                     font_size: FontSize::Px(layout.confirm_text),
                                     ..default()

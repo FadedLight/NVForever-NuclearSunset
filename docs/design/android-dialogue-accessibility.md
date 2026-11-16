@@ -70,26 +70,40 @@ filter is a separate integration change. Native/device rendering remains unquali
 ## Dialogue appearance [design]
 
 Enhanced dialogue keeps its own on/off switch, text scales, confirmation and
-speaker-side framing. Appearance adds independently saved Minimal, Classic Glass,
-Split Panel, Retro Console and Wrist Terminal choices, background/frame opacity,
-and Show dialogue hints. These are original thin node/vector trims inspired by
-interface styles; no reference pixels, game artwork or fonts are imported.
+speaker-side framing. Minimal uses a quiet underline; Classic Glass a soft selected
+row and vertical accent; Field Notes uses numbered responses and a short rule;
+Retro Console uses prompt characters, a terminal cursor and faint scanlines;
+Wrist Terminal uses instrument ticks and a selection rail. The enclosing panel
+and all response borders are transparent. These treatments share the same wrapped
+text, scrolling and minimum 48-pixel Android targets.
 
-The HUD/interface palette is authoritative at full text brightness. Surfaces use
-a dark tint and restrained alpha (default18% background/60% frame), with backing
-capped at80% and thin frame opacity independent. A functional selection mark
-keeps full HUD contrast even when both cosmetic opacities are zero. Text, required
-feedback, NPC speech, choices and selected-action captions never inherit those
-opacity sliders. The existing selected unmet-check red is semantic feedback, not
-a theme override. Cosmetic borders follow frame opacity, while the existing
-functional selection mark stays opaque red for a selected unmet check, even at
-zero frame/backing opacity. Other selected marks use full HUD contrast. The
-original requirement text remains at every opacity. Theme and opacity changes repaint existing entities without
-changing targets, selection, scrolling, ownership or camera framing. Decorative
-nodes ignore picking. Show dialogue hints affects only the explanatory gesture
-caption; it cannot hide speech/choices/requirements/Confirm selection. Its layout
-change invalidates a pending touch release through the existing guard. Fresh
-neutral contacts remain usable with the independently enabled view.
+Text and functional selection cues use the preferred HUD palette. A subtle text
+shadow keeps lettering readable over the world without an enclosing panel. Background
+opacity (default 18%, capped at 80%) and accent opacity (default 60%, persisted
+under the existing frame-opacity key) remain independent. Background tint is saved
+as HUD colour, Neutral or Warm amber. Semantic unmet-check feedback stays red.
+The wrist cursor optionally uses the installed game's scrollbar marker through
+`interface::Pictures`, including its normal atlas/loose-file lookup; absent data
+or texture keeps the procedural cue. No game assets are distributed.
+
+Hints default off. The switch affects only explanatory gesture captions, never
+speech, choices, requirements or confirmation. Existing saved hint preferences
+remain authoritative. Theme/tint/opacity changes repaint the existing entities
+without changing target geometry, selection or scroll position. Decorations ignore
+picking. Changing hint geometry invalidates an old contact before a fresh release.
+
+Speaker left/right now rotates the actual perspective camera using the current
+vertical FOV and full-window aspect so the face projects into the open half beside
+the choices. The world retains its ordinary full viewport, projection and camera
+position. There is no separate portrait render or black strip. Speaker changes
+recompute framing; Standard, disable, exit, pause and competing camera ownership
+release only the rotation this feature still owns. A foreign viewport is preserved
+and suspends this layout.
+
+[qualification] Updated full-world projection, aspect/FOV, restoration and appearance
+consumer regressions are authored but not yet executed against this source. Earlier
+R9/R37 results do not qualify these changed camera and appearance paths. Native
+rendering, installed-asset appearance and phone usability remain unverified.
 
 A noninteractive live sample sits beside the selected appearance row's existing
 settings note, only when the actual note region has at least78interface units

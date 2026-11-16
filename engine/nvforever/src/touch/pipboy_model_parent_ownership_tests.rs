@@ -49,6 +49,9 @@ fn scene() -> Fixture {
         .init_asset::<Mesh>().init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>().init_asset::<Image>()
         .add_plugins((VisibilityPlugin,UiPointerPlugin,
             HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(PostUpdate),HierarchyPropagatePlugin::<ComputedUiRenderTargetInfo>::new(PostUpdate)))
+        // Production PipBoyPlugin installs this consumer of projected raw points.
+        .init_resource::<nvf_play::pipboy::PointerMoved>()
+        .add_plugins(nvf_play::pipboy::touch_scroll::TouchPointerPlugin)
         .init_resource::<UiSurface>().init_resource::<UiScale>().init_resource::<UiStack>()
         .add_systems(PostUpdate,(propagate_ui_target_cameras,bevy::ui::ui_layout_system).chain())
         .configure_sets(PostUpdate,PropagateSet::<ComputedUiTargetCamera>::default().after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system))
@@ -148,7 +151,14 @@ fn actual_parent_replacement_primary_same_id_does_not_inherit_old_model_mask_or_
     edge(&mut f.app,f.window,1120,TouchPhase::Started,free);
     assert_eq!(f.app.world().resource::<PipBoy>().page,Page::Items);assert_eq!(f.app.world().resource::<Seen>().presses,1);
     assert!(f.app.world().resource::<TouchUiCapture>().allows(1120),"only actual current-primary ownership masks this window");
+    assert!(f.app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().pending_contact(),
+        "the unrelated raw contact must enter the actual projected-pointer route");
     edge(&mut f.app,f.window,1120,TouchPhase::Ended,free);idle(&mut f.app,3);
+    assert!(!f.app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().pending_contact(),
+        "the real pointer driver must retire the unrelated contact before fresh model admission");
+    assert!(f.app.world().resource::<pipboy_model::Geometry>().buttons.iter()
+        .any(|button| button.page != Page::Items && button.bounds.contains(p)),
+        "replacement primary must publish an actual fresh model target");
     edge(&mut f.app,f.window,1121,TouchPhase::Started,p);edge(&mut f.app,f.window,1121,TouchPhase::Ended,p);
     assert_ne!(f.app.world().resource::<PipBoy>().page,Page::Items,"fresh real model tap remains usable on replacement window");
 }

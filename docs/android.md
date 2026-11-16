@@ -140,7 +140,8 @@ mirrored practice control failed its full-layout equality: the implicit tray's
 normal migration changed its centre after the fixture took its snapshot. The
 fixture correction settles that provider before the snapshot and adds a second
 ordinary-frame stability check; all original practice gestures and final equality
-remain. Corrected execution is pending, and no new APK is qualified.
+remain. The exact mirrored practice case later passed in the `8bf93fe5` cycle
+recorded below; no new APK is qualified.
 
 ## Touch inventory menus
 
@@ -382,8 +383,42 @@ bounded retired-scene persistence. Touch marks retain the shared AP authority.
 All 1,568 Main scenario objects, order and top-level metadata remain exact, plus
 Android startup options for 1,569. All 1,154 graph inputs and 178 fixed settings
 with 68 Android overrides remain exact the published Android parent. These are
-static preservation checks. The new union and fixture correction are uncompiled
-and unrun, with no new APK or phone result; R9 remains the qualified test build.
+static preservation checks. The subsequent `8bf93fe5` results are recorded below;
+no new APK is qualified and R9 remains the qualified test build.
+
+[qualification] The published `8bf93fe5` cycle tested actual checkout
+`5945230d`, with Main `38a16610` and tree `e74b9d0a`, different from its PR
+source tree `3a84cc2a`. Seven real checkout outputs and Git commit metadata
+confirm that identity. All eight jobs finished: six passed; engine and aggregate
+failed. Core passed 3,279 with five existing ignored. Strict locked release
+all-target checking passed. Assets passed 207/one ignored, play passed 2,202/one
+ignored, and the wrapper passed 1,445/failed four/one ignored. All ten VATS cases,
+including the six earlier failures, passed. All three preview cases, all 56
+selected menu cases, the three earlier map cases and the practice case passed. Isolated
+child passes are separate from parent totals. The native job passed nine shader
+controls and eleven loading-reveal cases/169 checks plus 41/49 handoff/window
+checks; its failed-cycle artifact remains permanently unqualified and unused.
+
+Four different wrapper assertions remain: editor entry releases touch attack,
+latched aim clears at editor entry, a fresh model tap works after primary-window
+replacement, and hidden flat Pip-Boy Close retains UI-focus exclusion. The
+correction changes only their test fixtures and qualification notes. Ordinary
+editor tests now use the registered Settings action and real state-transition
+schedule, with old holds still asserted before the ordinary cleanup frame. The
+model fixture installs the pointer consumer used by production. The flat fixture
+witnesses its queued End, advances one natural consumer frame and witnesses the
+drain before starting Close. Existing outcomes, negative controls and all 439
+old assertion macros across the three affected files remain; fourteen
+precondition macros are added. No production input or eligibility gate changes.
+These are source-supported fixture diagnoses; corrected execution is unrun.
+
+The actual tested Main composition adds twelve desktop-launcher/root-lock/doc
+paths to the PR head. Its graph still has 1,154 paths, but root Cargo.lock and the
+launcher manifest differ, with root packages 470 to 477. All 791 engine graph
+inputs and local Rapier policy remain exact the PR head. These are source facts,
+not final metadata, ABI, notices or APK qualification. Future packages must use
+their actual tested checkout. The separate Controls/Move editor and dialogue
+overflow proposals remain uncompiled/unrun and excluded from this correction.
 
 ## Loading recovery qualification
 

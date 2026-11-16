@@ -40,12 +40,14 @@ that checkpoint's scenario-file verifier passed all 1,517 entries and merge-pare
 integrity without executing game scenarios. R31 later passed the dead-zone and
 Pad backup controls, but practice's full-layout assertion exposed an unsettled
 implicit-tray baseline in its fixture. The normal-provider baseline correction
-retains the original final equality and still awaits execution.
+retains the original final equality; the exact mirrored practice case passed in
+the later `8bf93fe5` cycle. Phone acceptance remains open.
 The [Mobile entrypoint follow-up](design/android-mobile-entrypoints.md) removes
 persistent settings/help HUD shortcuts and opens the existing layout editor and
 practice through actionable Settings rows. Editor entry/return, Save/Cancel,
-Escape and touch ownership controls are authored; this follow-up is uncompiled
-and unexecuted, with phone acceptance pending.
+Escape and touch ownership controls are authored. The later `8bf93fe5` execution
+and four remaining wrapper assertions are recorded below; phone acceptance is
+pending.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule
@@ -54,8 +56,8 @@ build option are implemented. R31 hosted execution passed the former native-map
 failure and all eight root routing cases. The wrapper executed 1,308 passes and
 four failures (three map-parent fixtures plus practice); the map fixture now
 registers its actual DATA consumer's missing `MenuInput` provider. Its logs lack
-panic payloads, so that diagnosis is source-derived. Both fixture corrections
-await execution. Native build success does not qualify the new APK: final packaging and device acceptance remain
+panic payloads, so that diagnosis is source-derived. The later `8bf93fe5` cycle passed all three corrected map cases and the practice
+case. Native build success does not qualify the new APK: final packaging and device acceptance remain
 open. The qualified R9 development APK remains the test baseline; these new features
 are not yet claimed in that APK. [Packaging policy](spec-notes/android-packaging.md).
 
@@ -75,8 +77,9 @@ terminal/companion switches, dialogue themes and opacity, separate dialogue and
 lockpicking hints, live interface/Pip-Boy palettes, optional dismissal/wheel controls
 and VATS tap/hold queueing are composed in source. Required choice/status feedback
 and ordinary hardware routes remain part of the contract. Actual-plugin palette
-and shared input-ownership regressions are authored; compilation, corrected
-runtime, native packaging and phone acceptance remain pending. This work is
+and shared input-ownership regressions are authored; actual later execution and
+remaining failures are recorded below. Final packaging and phone acceptance
+remain pending. This work is
 separate from the R31 fixture correction and does not change the qualified R9 APK.
 
 The later Main `ed684e8` integration is **In progress**. It combines Main's
@@ -88,8 +91,9 @@ it is not game execution. All current integrated compiler/runtime/native/device
 qualification is pending, and the R9 download remains unchanged. This does not
 establish original Stewie plugin execution or universal mod compatibility.
 The lean map fixtures also need Main's new companion-summon message provider;
-that source setup correction retains their existing map oracles and remains
-unexecuted, separate from the earlier R31 failure diagnosis.
+that source setup correction retains their existing map oracles. Both core and
+wrapper map controls passed in `8bf93fe5`; this is not an observed explanation
+for the earlier R31 failures whose logs lack panic payloads.
 
 The subsequent normal Main `7e638d4e` integration is **In progress**. It retains
 Main's terrain anti-tiling, actor/projectile providers and changes to loading/doors
@@ -145,9 +149,9 @@ artifact is unqualified and was not downloaded, installed or served.
 The eight-diagnostic source correction is **In progress**: explicit borrow scopes,
 named system parameter groups, assignment spacing and the existing one-shot
 preview execution API retain the real effects, test bodies and assertions.
-Corrected strict checking, code generation, engine tests and final packaging/
-phone acceptance remain pending. Neither the native pass nor earlier historical
-tests qualify this corrective source or establish a phone recovery/crash cure.
+The later `ef8a9d49` and `8bf93fe5` cycles cleared strict/code-generation
+boundaries; their actual engine results are recorded below. Final packaging and
+phone acceptance remain pending, without a phone recovery/crash cure claim.
 
 The subsequent normal Main `ac8f1d6d` integration is **In progress**. A real
 model-loader conflict after Main's attachment merge requires retaining both its
@@ -184,16 +188,38 @@ wrapper tests were unrun. Selected menu cases are 44 passes/no failures/twelve
 unrun. Native and Java/shader controls passed, but the artifact is permanently
 unqualified and was not downloaded, installed or served.
 
-The shared VATS fixture correction is **In progress**: publish pending capsule
-poses before projecting touches, then assert authored centers and real ray hits.
-All ten old bodies and 91 assertions remain; two precondition macros are added,
-with no production policy change. Closure of all six failures is unproven,
-including the AP case's second-tap caveat. New fixed Main `95fd3197` needs one
-combat-test union across sixteen commits/34 paths; both parents' tests and Main
-god-mode AP, AI, House, weather and save consumers remain. Static preservation
-retains 1,568 Main scenarios plus Android for 1,569, graph 1,154 and fixed
-settings 178 with 68 Android overrides. This next source is uncompiled/unrun;
-phone menu/resume/Doc exit/controller acceptance and final packaging remain open.
+At the earlier `ef8a9d49`/Main `95fd3197` checkpoint, the shared VATS fixture
+correction was **In progress**: publish pending capsule poses before projecting
+touches, then assert authored centers and real ray hits. All ten old bodies and
+91 assertions remain, with two preconditions and no production policy change.
+Closure of the six failures was then unproven, including the AP second-tap caveat;
+the later `8bf93fe5` cycle below passed all ten VATS cases. The fixed-Main union
+retained both parents' tests and Main god-mode AP, AI, House, weather and save
+consumers across sixteen commits/34 paths. Its static inventory is 1,568 Main
+scenarios plus Android for 1,569, graph 1,154 and fixed settings 178 with 68
+Android overrides. That prior source was uncompiled at preparation; its actual
+later execution is recorded below. Phone and final packaging acceptance stay open.
+
+The published `8bf93fe5` cycle remains **In progress** for Android qualification
+after six hosted job passes and engine/aggregate failures. Actual checkout
+`5945230d` used Main `38a16610` and tree `e74b9d0a`, different from source
+tree `3a84cc2a`. Core passed 3,279/five ignored and strict checking passed.
+Assets passed 207/one ignored; play passed 2,202/one ignored; wrapper passed
+1,445/failed four/one ignored. All ten VATS tests, all three preview cases,
+all 56 selected menu cases, the three earlier map cases and the practice case passed.
+Owned child counts remain separate. Native/Java/shader controls passed, but
+artifact `14199010528` is permanently unqualified and unused; R9 is unchanged.
+
+The four wrapper corrections are **In progress** and uncompiled/unrun. Two editor
+fixtures use the registered Settings entry and real state schedule instead of
+direct internal construction; old held-input assertions remain before cleanup.
+Pip-Boy fixtures gain the actual pointer consumer and an explicit natural
+terminal-End drain before a new Close gesture. All old 439 assertion macros in
+the three affected files remain, with fourteen added preconditions and no
+production gate change. These source-supported diagnoses are not corrected
+runtime or phone results. Actual tested composition has two changed graph
+inputs/root packages 470 to 477 for desktop launcher updates; future native/legal
+checks must bind actual source. Optional editor/dialogue proposals stay separate.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate

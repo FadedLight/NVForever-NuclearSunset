@@ -1483,6 +1483,22 @@ mod tests {
         app.update();
         (app, window)
     }
+    // Stage the actual Settings context without running the touch/action stages:
+    // old touch ownership must remain until the registered editor entry's frame.
+    fn open_registered_editor_from_settings(app: &mut App, window: Entity) {
+        use nvf_play::{pause::{FormOver, Page, Paused}, settings};
+        app.insert_resource(Paused(true)).insert_resource(Page::Settings { selected: None });
+        app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>()
+            .set(nvf_play::PlayState::Menu);
+        app.world_mut().run_schedule(bevy::state::state::StateTransition);
+        assert_eq!(*app.world().resource::<State<nvf_play::PlayState>>().get(), nvf_play::PlayState::Menu);
+        let row = app.world().resource::<settings::Settings>().index(entrypoints::KEY).unwrap();
+        assert!(settings::pick(app.world_mut(), row, "Customize layout"));
+        assert!(app.world().resource::<Layout>().editor.is_some());
+        assert!(app.world().resource::<entrypoints::Session>().blocking());
+        assert_eq!(app.world().resource::<entrypoints::Session>().window(), Some(window));
+        assert!(app.world().resource::<FormOver>().0);
+    }
     #[test]
     fn menu_hardware_intent_uses_raw_window_activity_and_not_virtual_touch_look() {
         let (mut app, window) = scene();
@@ -1976,7 +1992,11 @@ mod tests {
                 3 => {
                     app.world_mut().write_message(AppLifecycle::Suspended);
                 }
-                4 => app.world_mut().resource_mut::<Layout>().open(true),
+                4 => {
+                    open_registered_editor_from_settings(&mut app, w);
+                    assert!(aim_requested(&app), "Settings setup must leave the actual held aim for the ordinary reader to cancel");
+                    assert!(app.world().resource::<TouchState>().aim_latched);
+                }
                 _ => {
                     app.world_mut().write_message(KeyboardFocusLost);
                 }
@@ -2291,7 +2311,9 @@ mod tests {
             .world()
             .resource::<ButtonInput<MouseButton>>()
             .pressed(MouseButton::Left));
-        app.world_mut().resource_mut::<Layout>().open(true);
+        open_registered_editor_from_settings(&mut app, w);
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left),
+            "Settings setup must leave the actual touch attack held until the ordinary entry frame");
         app.update();
         assert!(app.world().resource::<Layout>().editor.is_some());
         assert!(!app

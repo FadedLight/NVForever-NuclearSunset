@@ -23,6 +23,11 @@ fn optional_close_button_works_in_actual_flat_pipboy_when_graphics_are_hidden_wi
     touch(&mut app,window,850,TouchPhase::Moved,body.x,body.y+80.);
     touch(&mut app,window,850,TouchPhase::Ended,body.x,body.y+80.);
     for _ in 0..3 {app.update();}
+    assert!(app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().pending_contact(),
+        "the batched canvas End is projected in Last and still awaits the next pointer-consumer frame");
+    app.update();
+    assert!(!app.world().resource::<nvf_play::pipboy::touch_items::TouchItems>().pending_contact(),
+        "the actual projected End must be consumed before a fresh close contact");
     assert!(app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some(),"normal list/canvas scrolling never closes");
     for phase in [TouchPhase::Started,TouchPhase::Ended] {touch(&mut app,window,851,phase,point.x,point.y);app.update();assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(851),"hidden close retains actual UI-focus exclusion");}
     for _ in 0..3 {app.update();}

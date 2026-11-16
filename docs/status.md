@@ -221,7 +221,7 @@ runtime or phone results. Actual tested composition has two changed graph
 inputs/root packages 470 to 477 for desktop launcher updates; future native/legal
 checks must bind actual source. Optional editor/dialogue proposals stay separate.
 
-The required Main `cfa60c0f` integration is **In progress** after an actual
+At the preceding Main `cfa60c0f` checkpoint, integration was **In progress** after an actual
 root Cargo conflict: 26 incoming commits/52 paths retain the shared DLSS-file
 crate, launcher updates and license/notice moves together with Android's local
 Rapier workspace policy. The shared crate's unchanged HTTP dependency is moved
@@ -236,6 +236,19 @@ shared crate, so old graph/build results do not qualify this merge. New full
 runtime/strict/native/metadata/notices and final packaging checks are unrun;
 physical resume/input/save/Doc Mitchell/controller acceptance stays open. R9
 remains the qualified test baseline; optional editor/dialogue work is separate.
+
+The required Main `be6db094` integration is **In progress** after two actual
+test/scenario insertion conflicts. Sixteen incoming commits/thirty paths retain
+Main's diagnostic CLI, conditional AddSpell guard, fresh pocket rolls, death
+shove and NPC gun-cycle work. The menu-model union keeps the whole common prefix
+and both complete tails: 45 tests/342 assertion macros. All current Main scenario
+objects/order/top metadata remain, with 1,570 plus the unchanged Android record
+for 1,571. Main's two new records and five changed cases retain their own updated
+controls. Graph 1,155, Windows TLS scope, settings 178/68, Java31 and the four
+wrapper fixes remain exact the preceding merge. This combined source and its
+corrected runtime outcomes are uncompiled/unrun; imported Main results do not
+qualify Android, installed mods, final packaging or physical acceptance. R9 and
+the separate optional UI proposals retain their previous scope.
 
 Qualified private CPU host: [explicitly cleared cloned form-list JIP
 wildcards](spec-notes/jip-cloned-list-wildcard.md). Exact f30 original/candidate
@@ -382,6 +395,15 @@ INI sibling paths within Data are being qualified for existing Config-relative r
 | Crafting | Partly, awaiting owner | ShowRecipeMenu opens the recipe menu (workbench, campfire, reloading bench) from the RCPE/RCCT records: list by name, subcategory filter, skill and ingredient counts, the output's picture and effects line, making once or several at once (How many?, 2026-10-19) | [crafting](spec-notes/crafting.md) |
 | Repair, Caravan, casino games | Partly, awaiting owner | Blackjack, roulette, the slot machines and a vendor's repair services are built; Texas Hold'em poker at a casino table is NVForever's own addition (the original has none; #402). Roulette: the casinos' roulette tables open it (ShowRouletteMenuParams), the game's table, wheel spin sequences (the spun pocket brought under the ball), bet points, marker and chips; payouts and limits are guesses ([roulette](spec-notes/roulette.md)). Blackjack: the casinos' tables open it (ShowBlackJackMenuParams), the casino's own decks, payout, soft-17 rule and max winnings, the game's table and card models and sounds, earnings and bans per casino. Repair services: ShowRepairMenu opens the vendor's menu from the game's file (worn weapons and armour, cost from the item's value, up to the vendor's skill; items at full condition not listed, owner's rule; the cost formula and the skill limit are fitted guesses, [repair](spec-notes/repair.md)); repair from the Pip-Boy: R on the ITEMS page uses a like item or one on the item's repair list, by the GECK wiki's formula. Caravan: ShowCaravanMenu opens it against the speaker (the bet, the deck builder, the game, the results; the game's rules from its help messages and the owner's rulings; an opponent of NVForever's own whose skill follows the face cards in its deck; bets in caps, NCR dollars and Legion coins; drawn flat from the game's textures, [caravan](spec-notes/caravan.md)); AddCardToPlayer keeps the player's cards. Slot machines (2026-10-21): the casinos' machines open it (ShowSlotMachineMenuParams), three reels laid out from the casino record's reel stops, the payouts of the machine model's payout screen (how they are read is a guess), bet, Bet Max, the payout list, earnings and bans per casino, the game's slot sounds; drawn flat from the record's symbol pictures, the machine's model not drawn ([slots](spec-notes/slots.md)) | [blackjack](spec-notes/blackjack.md), [slots](spec-notes/slots.md), [repair](spec-notes/repair.md), [caravan](spec-notes/caravan.md), [script-stubs](design/script-stubs.md) §4 |
 
+### Conditional AddSpell admission
+
+The conditional-ability admission correction prevents recursive actor-value conditions
+from adding the same effect twice, preserving the existing spell list and removal path.
+Three authored core controls cover admission, condition rechecks and guard restoration.
+The adopted public graph is not yet compiled or executed; the earlier private coherent
+15-control run is a separate source-qualified context. See
+[aid items and abilities](spec-notes/aid-items.md#13-authored-abilities-and-worn-enchantments).
+
 ### Built-in luck setting getter fallback
 
 Implemented the focused behavior correction and authored synthetic regression coverage;
@@ -403,6 +425,7 @@ contract and limits: [Built-in luck setting getter fallback](spec-notes/builtin-
 | Tool | State | Specifics | Notes |
 |---|---|---|---|
 | `fnvtool` | Done | JSON command-line tool over every crate: `bsa`, `esm`, `nif`, `dds`, `spt`, `world`, `phys`, `collide`, `sim`, `script`, `dialogue`, `actor`, `combat`, `nav`, `ai`, `voice`, `setup`, `paths` | [cli-contract](cli-contract.md) |
+| Mod diagnostic CLI | In progress | Static compiled-call/registration coverage, bounded played-log digest/diff and actual Script Runner trace accounting. Named calls remain unchecked; private words require explicit detail. Existing report, scan and MO2 inputs remain supported; effects, native behavior and full mod profiles are separate acceptance. | [mod diagnostics](handoff/mod-diagnostic-cli.md) |
 | Parity lab | Done | Oracle-vs-candidate tests per layer with holdouts and baselines (rules in `parity-lab/AGENT.md`) | [parity-lab/README](../parity-lab/README.md) |
 | Capture tools | Done | Independent Python readers (`oracle_*.py`), `nvf_capture` (xNVSE plugin running unattended jobs in the original game), reference frames, AI observer (plugin version 9: game events, timed scene actions, screenshots on a condition, more fields; ai-observer.md §12); an opt-in JIP tier (processing level, packages, detection, the arrays of targets and detecting actors, hit details) with an A/B compare tool and the JIP audit (#754, #772, [ai-observer-jip](spec-notes/ai-observer-jip.md), [observer-jip-audit](handoff/observer-jip-audit-2026-10-25.md)) | [tools/capture/README](../tools/capture/README.md), [xnvse-capture](spec-notes/xnvse-capture.md) |
 | In-game plugin editor | Partly built | Locked behind `editor=1` in `[Settings]` of NVForever.ini; `editor` in the console opens and closes it: select, move (mouse drag, set-down), place from a record picker (`editor find`, `editor place`), delete (saved as Initially Disabled) and undo references, save into an ESP through the schema encoder (`fnvtool esm encode-check`), under MO2 into the owning mod or overwrite; plugins in NVForever's mods folder load beside `Data`'s; the dialogue debugger `editor why [topic] [all]` explains an actor's lines from the game's own verdicts (`Game::line_verdict`). Not yet: terrain, navmeshes, record forms, the quest view | [editor](design/editor.md) |

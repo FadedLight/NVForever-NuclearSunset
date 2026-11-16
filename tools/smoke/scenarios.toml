@@ -9837,10 +9837,10 @@ expect = [
 [[scenario]]
 name = "grenade-launcher-arc"
 source = "#1471: the Grenade Launcher's round on the Searchlight Airport runway, first person, along the runway (heading 75), aimed level, 15 and 30 degrees up; the original's (o26_gl, combat-rules.md §5) left 110-140 units above the ground at 1,750 units/s and first hit the ground 793 / 1,944 / 2,815 units out after 0.45 / 1.16 / 1.86 s, going off there"
-note = "the radscorpions about are killed first (killall, as the original's save had them); no spread (NVF_PLAY_TEST_NO_SPREAD), so each round leaves along the aim; the view is set again before each shot (the kick lifts it); each `fire` press is let go 0.1 s later"
+note = "the radscorpions about are killed first (killall, as the original's save had them), and the giant one (0x00162975) is then disabled: its corpse lies about 1,650 units out with its trunk 160 units off the line, and the 15 degree round, 75 units over the ground there on its way down, struck its raised stinger (hit 0x00162975 on Stinger) instead of the ground (#2762); no spread (NVF_PLAY_TEST_NO_SPREAD), so each round leaves along the aim; the view is set again before each shot (the kick lifts it); each `fire` press is let go 0.1 s later"
 areas = ["combat"]
 paths = ["crates/fnv-combat/src/projectile.rs", "crates/fnv-combat/src/shot.rs", "engine/nvf-play/src/combat.rs"]
-env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_NO_SPREAD = "1", NVF_PLAY_TEST_EQUIP = "0007EA25", NVF_PLAY_TEST_GIVE = "0007EA26:8", NVF_PLAY_TEST_CONSOLE = "1:killall;1.3:close", NVF_PLAY_TEST_LOOK = "2:75:0,10:75:15,15:75:30", NVF_PLAY_TEST_CONTROL = "3:weapon,6:fire,6.1:fire,11:fire,11.1:fire,16:fire,16.1:fire" }
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_NO_SPREAD = "1", NVF_PLAY_TEST_EQUIP = "0007EA25", NVF_PLAY_TEST_GIVE = "0007EA26:8", NVF_PLAY_TEST_CONSOLE = "1:killall;1.3:close;1.6:00162975.disable;1.9:close", NVF_PLAY_TEST_LOOK = "2:75:0,10:75:15,15:75:30", NVF_PLAY_TEST_CONTROL = "3:weapon,6:fire,6.1:fire,11:fire,11.1:fire,16:fire,16.1:fire" }
 args = ["--cell", "Goodsprings", "--pos=37000,-117160,6180", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 22
 expect = [
@@ -14114,6 +14114,23 @@ expect = [
 ]
 
 [[scenario]]
+name = "knockdown-push-then-kill"
+source = "issue #2749 (engine/nvforever/src/deaths.rs; crates/fnv-game/src/unconscious.rs DEAD_SHOVE_KEPT): Kimball's visit, the Legion route. The end script of the Legion sniper's package 0x00164F88 is PushActorAway on the Ranger and then KillActor on him. The Ranger was dead before he was ever shown knocked down, so the push's shove was never taken and his body dropped where it stood instead of going off the tower"
+note = "knockdown-push's placement (Easy Pete 300 units north of the player at 14 s); at 16 s one console line pushes him with force 10 from the player and kills him. He dies thrown as a ragdoll: the shove is taken by the death, not lost"
+areas = ["combat", "knockouts", "scripts"]
+paths = ["crates/fnv-game/src/unconscious.rs", "engine/nvforever/src/deaths.rs", "engine/nvforever/src/knockouts.rs", "engine/nvforever/src/ragdoll.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "14:moveto:EasyPeteRef:player:0:300:0", NVF_PLAY_TEST_CONSOLE = "16:player.pushactoraway EasyPeteRef 10;EasyPeteRef.killactor;16.6:close" }
+args = ["--play", "--cell", "Goodsprings", "--pos=-68375,4800,8700", "--heading", "0", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 30
+expect = [
+  { re = 'knockout: Easy Pete \S+ knocked down \(pushed\)', label = "the push knocks him down in the rules" },
+  { re = 'knockout: [0-9A-F]{8} thrown at \(-?\d+, (?P<n>-?\d+), \d+\) units/s as it dies$', range = [250, 350], label = "killed by the same line, his body is thrown north at the push's 300 units/s as it dies" },
+  { re = 'ragdoll: actor [0-9A-F]{8} at rest at', label = "the thrown body comes to rest as a ragdoll" },
+  { re = 'knockout: Easy Pete \S+ gets up', count = 0, label = "dead, he does not get up" },
+  { re = 'the shove is lost', count = 0, label = "the shove reaches the ragdoll" },
+]
+
+[[scenario]]
 name = "film-opening"
 source = "PlayBink (docs/spec-notes/bink-films.md): the opening's own call for the intro film (VCG00 stage 0, PlayBink \"fnvintro.bik\" 1 1 0 1) plays it full screen over the held game when no main menu showed it, then the opening goes on; test aid NVF_PLAY_TEST_FILMS=1 lets the unattended run play it"
 areas = ["film", "scripts"]
@@ -16187,10 +16204,10 @@ order = [[
 [[scenario]]
 name = "pickpocket-plant-dynamite"
 source = "#1640 (docs/spec-notes/pickpocket.md §5): a stick of dynamite placed in a pocket while sneaking goes live; the victim panics (the idle tree's root naming GetPlantedExplosive) and stands; after fProjectileInventoryGrenadeTimer it goes off and kills him (its 75 points hurt anyone); the kill is the player's and no faction turns on the player"
-note = "Chet in the general store is held where he stands (SetRestrained 1 at 0.5 s, as in pickpocket-steal); the console sets the player's Sneak to 100 at 2 s (the placement's chance at its cap); the inventory is emptied at 6 s, after the pre-order packs' items have come, and given one stick of Dynamite at 6.5 s (value 25: a chance of 78% against Chet's Sneak 15; a Frag Grenade's value of 150 leaves 16%, and the seeded first roll, 64, would catch it); the player stands at him (NEAR), sneaks at 4 s, is put in front of him at 7 s (FACE), presses E at 8 s, moves to the player's side at 9.5 s (left), places the dynamite at 10 s (Enter; the roll is seeded by the victim, so it repeats) and closes the menu at 11 s (E); the fuse's 2 s run after. Chet, in front of the player, detects him, so the kill is seen by its victim (Goodsprings infamy, observed 2026-11-06); nobody else is in the store to turn"
+note = "the pocket's rolls are seeded by the victim (NVF_PLAY_TEST_PICKPOCKET_SEED, as every opening was before #2751), so the placement goes the same way each run; Chet in the general store is held where he stands (SetRestrained 1 at 0.5 s, as in pickpocket-steal); the console sets the player's Sneak to 100 at 2 s (the placement's chance at its cap); the inventory is emptied at 6 s, after the pre-order packs' items have come, and given one stick of Dynamite at 6.5 s (value 25: a chance of 78% against Chet's Sneak 15; a Frag Grenade's value of 150 leaves 16%, and the seeded first roll, 64, would catch it); the player stands at him (NEAR), sneaks at 4 s, is put in front of him at 7 s (FACE), presses E at 8 s, moves to the player's side at 9.5 s (left), places the dynamite at 10 s (Enter; the roll is seeded by the victim, so it repeats) and closes the menu at 11 s (E); the fuse's 2 s run after. Chet, in front of the player, detects him, so the kill is seen by its victim (Goodsprings infamy, observed 2026-11-06); nobody else is in the store to turn"
 areas = ["activate", "menus", "crime", "idles"]
 paths = ["engine/nvf-play/src/pickpocket.rs", "crates/fnv-game/src/pickpocket.rs", "engine/nvforever/src/idles.rs", "crates/fnv-game/src/idles.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
+env = { NVF_PLAY_TEST_PICKPOCKET_SEED = "0x5EED", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
 args = ["--cell", "GSGeneralStore", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 20
 order = [[
@@ -16205,10 +16222,10 @@ forbid = [{ text = "crime: the player is now an enemy of", label = "no faction t
 [[scenario]]
 name = "pickpocket-live-item"
 source = "#1640 item 5, first part (docs/spec-notes/pickpocket.md §5): a planted explosive reserves its unit in the pocket (Extra::live); the victim cannot equip, drop or lose it to RemoveItem; its blast takes exactly that unit"
-note = "[design] pickpocket-plant-dynamite's placement (Chet restrained, Sneak 100, one Dynamite placed at 10 s, the menu closed at 11 s). The console then tries Chet's EquipItem, Drop and RemoveItem on the Dynamite during the fuse and counts it (still 1), closes, and counts again after the blast (0). The live check line reads the row from the open pocket menu, listed again as the dynamite is armed (pickpocket::arm_given); the refusal of a take is the unit tests an_explosive_armed_in_the_open_pocket_is_listed_and_refused_at_once and a_live_explosive_is_a_row_of_its_own_that_stays."
+note = "the pocket's rolls are seeded by the victim (NVF_PLAY_TEST_PICKPOCKET_SEED, as every opening was before #2751), so the placement goes the same way each run; [design] pickpocket-plant-dynamite's placement (Chet restrained, Sneak 100, one Dynamite placed at 10 s, the menu closed at 11 s). The console then tries Chet's EquipItem, Drop and RemoveItem on the Dynamite during the fuse and counts it (still 1), closes, and counts again after the blast (0). The live check line reads the row from the open pocket menu, listed again as the dynamite is armed (pickpocket::arm_given); the refusal of a take is the unit tests an_explosive_armed_in_the_open_pocket_is_listed_and_refused_at_once and a_live_explosive_is_a_row_of_its_own_that_stays."
 areas = ["activate", "menus", "crime"]
 paths = ["engine/nvf-play/src/pickpocket.rs", "crates/fnv-game/src/pickpocket.rs", "crates/fnv-sim/src/inventory.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close;11.3:GSChetRef.EquipItem WeapNVDynamite;11.4:GSChetRef.Drop WeapNVDynamite 1;11.5:GSChetRef.RemoveItem WeapNVDynamite 1;11.7:GSChetRef.GetItemCount WeapNVDynamite;12:close;15:GSChetRef.GetItemCount WeapNVDynamite;15.3:close", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
+env = { NVF_PLAY_TEST_PICKPOCKET_SEED = "0x5EED", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close;11.3:GSChetRef.EquipItem WeapNVDynamite;11.4:GSChetRef.Drop WeapNVDynamite 1;11.5:GSChetRef.RemoveItem WeapNVDynamite 1;11.7:GSChetRef.GetItemCount WeapNVDynamite;12:close;15:GSChetRef.GetItemCount WeapNVDynamite;15.3:close", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
 args = ["--cell", "GSGeneralStore", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 18
 expect = [
@@ -27670,10 +27687,10 @@ expect = [
 [[scenario]]
 name = "pickpocket-save-write"
 source = "[design] issue #1592 finding 3; docs/spec-notes/pickpocket.md section 5: an active inventory fuse is saved on Game::time; run with pickpocket-save-load"
-note = "[design] Uses pickpocket-plant-dynamite's placement, then opens the console half a second after the pocket closes. Queries the live plant and saves; the console stays open until exit. The isolated fixture home supplies only an authored load hook. The fuse runs on through the console, so the save is taken inside it; the live query checks that."
+note = "the pocket's rolls are seeded by the victim (NVF_PLAY_TEST_PICKPOCKET_SEED, as every opening was before #2751), so the placement goes the same way each run; [design] Uses pickpocket-plant-dynamite's placement, then opens the console half a second after the pocket closes. Queries the live plant and saves; the console stays open until exit. The isolated fixture home supplies only an authored load hook. The fuse runs on through the console, so the save is taken inside it; the live query checks that."
 areas = ["save", "crime", "menus"]
 paths = ["crates/fnv-game/src/game.rs", "crates/fnv-game/src/pickpocket.rs", "crates/fnv-game/tests/factions.rs", "crates/fnv-game/tests/synthetic.rs", "engine/nvf-play/src/pickpocket.rs", "engine/nvf-play/src/save.rs", "tools/smoke/fixtures/pickpocket-save-home/"]
-env = { NVFOREVER_HOME = "{repo}/tools/smoke/fixtures/pickpocket-save-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close;11.5:GSChetRef.GetPlantedExplosive;11.6:GSChetRef.GetDead;11.7:GSChetRef.GetItemCount WeapNVDynamite;12:save nvf-planted", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
+env = { NVF_PLAY_TEST_PICKPOCKET_SEED = "0x5EED", NVFOREVER_HOME = "{repo}/tools/smoke/fixtures/pickpocket-save-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_NEAR = "00104C79", NVF_PLAY_TEST_FACE = "7:00104C79", NVF_PLAY_TEST_CONSOLE = "2:player.setav sneak 100;2.3:close;11.5:GSChetRef.GetPlantedExplosive;11.6:GSChetRef.GetDead;11.7:GSChetRef.GetItemCount WeapNVDynamite;12:save nvf-planted", NVF_PLAY_TEST_SCRIPT = "0.5:call:GSChetRef:SetRestrained:1,6:call:player:RemoveAllItems,6.5:call:player:AddItem:WeapNVDynamite:1", NVF_PLAY_TEST_CONTROL = "4:sneak", NVF_PLAY_TEST_KEYS = "8:e,9.5:left,10:enter,11:e" }
 args = ["--cell", "GSGeneralStore", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 17
 expect = [
@@ -29407,6 +29424,22 @@ expect = [
 forbid = [{ text = "explore: the free-camera explorer", label = "the port defaults do not select the explorer" }]
 
 [[scenario]]
+name = "mod-diagnostic-log-tool"
+kind = "tool"
+source = "docs/handoff/mod-diagnostic-cli.md: actual bounded mod-log CLI over two authored log files; log records differ from reported exit totals, and private words are opt-in"
+areas = ["scripts", "extender", "mods"]
+paths = ["crates/fnvtool/src/mod_log_digest.rs", "crates/fnvtool/src/ext_cmd.rs", "tools/smoke/fixtures/mod-diagnostics/"]
+commands = [["ext", "mod-log", "{repo}/tools/smoke/fixtures/mod-diagnostics/run.txt", "--previous", "{repo}/tools/smoke/fixtures/mod-diagnostics/before.txt"]]
+expect = [
+  { json = "detail", schema = "fnv.ext.mod_log/1", equals = false },
+  { json = "run.sessions.#", schema = "fnv.ext.mod_log/1", equals = 1 },
+  { json = "run.sessions.0.exit_rows_present", schema = "fnv.ext.mod_log/1", equals = true },
+  { json = "run.sessions.0.log_records.script_failure", schema = "fnv.ext.mod_log/1", equals = 1 },
+  { json = "run.sessions.0.reported_exit_counts.skipped_statements", schema = "fnv.ext.mod_log/1", equals = 47 },
+  { json = "changes.session", schema = "fnv.ext.mod_log/1", equals = 0 },
+]
+
+[[scenario]]
 name = "mccarran-boyd-one-body"
 source = "issue #2461 (owner): after the Silus interrogation Lt. Carrie Boyd (LieutenantBoydREF 0x000F0678, CampMCTermInt02) was drawn twice, one body in the room and one outside the door, and the one in the room talked as the other. The scene's records: Silus's GREETING (INFO 0x000F1873) MoveTo's her to BoydExitREF 0x000FA73E (325, 719); the assassin trick's line (INFO 0x000F2DDE) MoveTo's her to XMarker 0x000FB4E1 (467, 1386) by the room's door and its end script sets bBoydEnter, so VFreeformMcCarran2BoydPatrolReturn walks her to her linked ref 0x000FA73D (296, 1665) in the room; the trigger 0x000FA742 there starts the POW2Int exchange with Silus, whose last line sets bBoydExit, and VFreeformMcCarran2BoydPatrolExit walks her back to BoydExitREF. One body per reference throughout (engine/nvforever/src/residents.rs drawn_twice, nav.rs show_actor)"
 note = "the player stands in the interrogation room; Silus's greeting is said at 3 s and the trick's line at 8 s (as the dialogue would, conditions not required). The census is taken at exit; the warnings name a body spawned and lost before it was found"
@@ -29609,6 +29642,11 @@ order = [[
   { text = "VFSOrrisREF: package VFSOrrisDetour03Package", label = "its end script sends him on to the south gate" },
   { text = "script: VFSOrrisREF says 0x00118A71", label = "where he ends the escort (his line's end script)" },
 ]]
+expect = [
+  { re = 'use weapon: .* 0x00115C60 fires its WeapNVHuntingRevolver (?P<n>[0-9.]+) s after its last shot', range = [0.66, 30], all = true, label = "#2763: no two of his shots, in one package or from one to the next, are closer than the hunting revolver's 0.67 s (1.5 shots a second)" },
+  { re = 'use weapon: .* 0x00115C60 goes on with its WeapNVHuntingRevolver from its last use', min = 2, label = "#2763: his second and third packages go on with the same revolver's cycle" },
+  { re = 'use weapon summary: (?P<n>\d+) uses went on with the gun.s cycle from the actor.s last use; the shortest time between two shots of a semi-automatic gun: [0-9.]+ s \(WeapNVHuntingRevolver', range = [2, 9], label = "#2763: the summary names it" },
+]
 
 [[scenario]]
 name = "chauncey-steam-room"

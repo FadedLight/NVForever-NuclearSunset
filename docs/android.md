@@ -444,6 +444,28 @@ must run on the new tested checkout. The four corrected outcomes remain unrun,
 optional editor/dialogue proposals stay separate, and R9 remains the qualified
 test/rollback pending a new qualifying cycle and physical acceptance.
 
+[qualification] Actual Main `be6db094` then introduced two insertion conflicts
+before publication: menu-model tests and the scenario list. The normal merge
+accepts sixteen commits in thirty paths after `cfa60c0f`. The menu test file
+retains its entire common prefix, all three Android assignment/ownership tests
+and Main's fresh-pickpocket-roll test: 45 tests and 342 assertion macros, with
+neither side's bodies changed. The ordinary menu uses Main's new seed provider;
+its test checks the pure seed/roll path, not launcher environment or clock
+integration. No mandatory menu resource or alternate touch policy is added.
+
+Every current Main scenario object, order and top-level field remains exact:
+1,570 Main records plus Android's unchanged startup record for 1,571. Main adds
+two records and updates five existing cases for its own seed/corpse-clear/cycle
+controls; these are retained as Main changes rather than labelled unchanged old
+expectations. Its diagnostic CLI, conditional ability admission, death shove and
+NPC gun-cycle consumers remain alongside Android's existing consumers. Main's
+separate qualification does not execute this combined source or establish mod
+or phone compatibility. All 1,155 graph inputs, Windows-only TLS scope, settings,
+Java and the four wrapper fixture corrections remain exact the previous merge.
+The new source is uncompiled/unrun; fresh current checks, packaging and physical
+acceptance remain required. Optional editor/dialogue proposals are separate and
+R9 remains the sole qualified test/rollback.
+
 ## Loading recovery qualification
 
 [design] Loading completes only after checking that the current loading cover was

@@ -106,8 +106,9 @@ pub fn pipboy_amber(brightness: f32) -> Color {
     tint(pipboy_rgb(), brightness)
 }
 
-/// The UI scale the settings page shows and `NVForever.ini` keeps (`ui-scale`), as a
-/// factor (1 the original's size). It takes effect at the next start ([`ui_scale`]).
+/// The HUD scale the settings page shows and `NVForever.ini` keeps (`hud-scale-v2`),
+/// as a factor (1 the original's size). Legacy `ui-scale` is migrated separately.
+/// It takes effect at the next start ([`ui_scale`]).
 /// Stored as the bits of an `f32`.
 static UI_SCALE_SETTING: AtomicU32 = AtomicU32::new(0x3f80_0000);
 /// The UI scale this run draws with, fixed once the INI is read ([`fix_ui_scale`]).
@@ -127,7 +128,7 @@ pub fn fit_ui_scale(s: f32) -> f32 {
 /// The settings page's UI scale choices: [`UI_SCALE_RANGE`] in steps of 5% [design].
 pub const UI_SCALE_CHOICES: usize = 21;
 
-/// The settings page's UI scale row, `ui-scale` in `NVForever.ini` (kept as the slider's
+/// The legacy UI scale row, retained for the old `ui-scale` codec (kept as the slider's
 /// part, [`ui_scale_part`]: `ui-scale=0.25` is 75%), under `group` (the renderer lists it
 /// with the Display rows) [design: #1631].
 pub fn ui_scale_row(group: &'static str) -> crate::settings::Setting {

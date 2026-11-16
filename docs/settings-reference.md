@@ -397,13 +397,19 @@ current-head compiler/runtime and real Bluetooth-controller acceptance are pendi
 - Command-line switches: `--physics-hz`
 - Registered in `engine/nvf-play/src/phys_rate.rs`
 
-### `ui-scale`: HUD scale
+### `hud-scale-v2`: HUD scale
 
-- On the page: Size of the in-game HUD, independent of menu scale. Takes effect at the next start.
-- In full: The in-game HUD keeps each piece at its screen edge, from 50% to 150%.
-  The existing `ui-scale` INI key is retained. Menu scale is independent. Loading a
-  save starts the game again and applies the next-start settings.
-- Registered in `engine/nvf-play/src/interface.rs`
+- On the page: Size of the in-game HUD, from 25% to 250%. Menus have separate sizes. Takes effect at the next start.
+- A slider with 46 choices, in 5% steps. The stored value is the slider part, rather than the percentage shown on the page.
+- A missing new key reads the older `ui-scale` value with its original 50–150% interpretation, preserving the player's size. An explicit new key wins. The independent `menu-scale` key retains its original units and precedence.
+
+### Existing-menu sizes
+
+- `barter-menu-size-v1`: Buying and selling size.
+- `repair-menu-size-v1`: Repair menu size.
+- `workbench-menu-size-v1`: Workbench menu size, including campfires and reloading benches.
+- Each slider has 21 choices from 50% to 150%, in 5% steps, saved independently. Missing values use 100%. These sizes are for the ordinary menus; their text, row layout, scrolling and hit geometry must remain aligned.
+- [qualification] Settings/migration controls are authored but unexecuted. Actual menu rendering/drag integration is pending its owning consumer qualification; these settings alone do not establish working menu sizing.
 
 ### `menu-scale`: Menu scale
 

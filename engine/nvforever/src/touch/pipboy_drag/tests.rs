@@ -282,3 +282,5 @@ include!("tests/closing_parent.rs");
 include!("tests/optional_controls.rs");
 
 include!("tests/palette_tests.rs");
+
+include!("tests/diagonal_gestures.rs");

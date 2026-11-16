@@ -45,3 +45,5 @@ fn configured_regions_stay_inside_all_system_edges_and_reject_invalid_geometry()
     assert_eq!(Options::default().dismissal(),(false,false,false));
     assert!(Options::default().graphics && Options::default().wheel);
 }
+
+include!("display_dismissal_tests.rs");

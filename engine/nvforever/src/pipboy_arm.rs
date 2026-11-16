@@ -845,6 +845,13 @@ fn follow_pointer(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    /// Real CPU projection/show-screen ordering, excluding render warm-up proof.
+    pub(crate) fn install_coupled_clip_projection(app: &mut App) {
+        app.add_systems(Update, follow_pointer.in_set(nvf_play::pipboy::PointerSet)
+            .before(nvf_play::pipboy::flat_pointer))
+            .add_systems(Update, show_screen.after(follow_pointer)
+                .after(nvf_play::player::BodySet).before(nvf_play::PlaySet::Ui));
+    }
     use super::*;
 
     fn capped_warm_app(covered: bool, device: bool) -> App {

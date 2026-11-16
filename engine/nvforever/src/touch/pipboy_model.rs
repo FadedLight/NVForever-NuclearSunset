@@ -178,37 +178,47 @@ impl Bridge<'_, '_> {
                     || self.geometry.entities.contains(&entity)
             })
     }
-    /// Missing/stale geometry never becomes an unclaimed closing-handle region.
-    pub fn closing_unclaimed(&self, position: Vec2) -> bool {
-        let (Some(pip),Some(screen),Ok((primary,window)))=(self.pip.as_deref(),self.screen.as_deref(),self.windows.single()) else {return false};
-        if !position.is_finite() || pip.phase!=Phase::Up || !window.focused {return false;}
+    /// Current display bounds in logical window coordinates. This is the screen,
+    /// not a whole-arm/model AABB; noninteractive wrist art remains outside it.
+    pub(super) fn dismissal_display(&self) -> Option<Rect> {
+        let (pip,screen,(primary,window))=(self.pip.as_deref()?,self.screen.as_deref()?,self.windows.single().ok()?);
+        if pip.phase!=Phase::Up || !window.focused {return None;}
         if pip.frame==Frame::Screen || !screen.on_model {
-            let Ok((node,at))=self.flat.single() else {return false};
-            if !node.size().is_finite() || node.size().min_element()<=0.0 || !at.translation.is_finite() || !window.scale_factor().is_finite() || window.scale_factor()<=0.0 {return false;}
-            return !Rect::from_center_size(at.translation,node.size()).contains(position*window.scale_factor());
+            let (node,at)=self.flat.single().ok()?;
+            if !node.size().is_finite() || node.size().min_element()<=0.0 || !at.translation.is_finite() || !window.scale_factor().is_finite() || window.scale_factor()<=0.0 {return None;}
+            return Some(Rect::from_center_size(at.translation/window.scale_factor(),node.size()/window.scale_factor()));
         }
         if !current(&self.geometry,Some(pip),Some(screen),window.resolution.size())
             || self.geometry.screen.is_none()
             || !self.geometry.camera.is_some_and(|e|self.cameras.get(e).is_ok_and(|(c,t)|Geometry::camera_presented(c,t,primary)))
-            || !self.geometry.entities.iter().all(|e|self.parts.get(*e).is_ok_and(|(v,i)|*v!=Visibility::Hidden && i.get())) {return false;}
+            || !self.geometry.entities.iter().all(|e|self.parts.get(*e).is_ok_and(|(v,i)|*v!=Visibility::Hidden && i.get())) {return None;}
         if self.recognised.iter().any(|(entity,part,visible,inherited)| {
             matches!(part,crate::pipboy_arm::PipBoyPart::Screen|crate::pipboy_arm::PipBoyPart::Button(_)|crate::pipboy_arm::PipBoyPart::ScrollKnob)
                 && visible.is_none_or(|v|*v!=Visibility::Hidden) && inherited.is_none_or(|i|i.get()) && !self.geometry.entities.contains(&entity)
-        }) {return false;}
-        !self.geometry.screen.is_some_and(|r|r.contains(position))
+        }) {return None;}
+        self.geometry.screen
+    }
+    /// Exclude actual projected SCREEN triangles and existing interactive controls.
+    /// A missing triangle publication conservatively keeps the prior bounds refusal.
+    pub fn closing_unclaimed(&self, position: Vec2) -> bool {
+        if !position.is_finite() {return false;}
+        let Some(display)=self.dismissal_display() else {return false;};
+        if self.pip.as_deref().zip(self.screen.as_deref()).is_some_and(|(p,s)|p.frame==Frame::Screen || !s.on_model) {
+            return !display.contains(position);
+        }
+        !(if self.geometry.screen_triangles.is_empty() {display.contains(position)} else {self.geometry.on_screen(position)})
             && !self.geometry.buttons.iter().any(|b|b.bounds.contains(position))
             && !self.geometry.knob.is_some_and(|r|r.contains(position))
     }
+    /// Cue/Close graphics must fit wholly outside the display and controls. Side
+    /// gesture starts use closing_unclaimed per point, beyond these small cues.
     pub(super) fn closing_region_unclaimed(&self, rect:Rect)->bool {
         if !rect.min.is_finite() || !rect.max.is_finite() || rect.size().min_element()<=0.0 || !self.closing_unclaimed(rect.center()) {return false;}
+        let Some(display)=self.dismissal_display() else {return false;};
         let overlaps=|r:Rect| {let i=r.intersect(rect);i.width()>0.0 && i.height()>0.0};
-        if self.pip.as_deref().zip(self.screen.as_deref()).is_some_and(|(p,s)|p.frame==Frame::Screen || !s.on_model) {
-            let Ok((node,at))=self.flat.single() else {return false;};
-            let Ok((_,window))=self.windows.single() else {return false;};
-            return !overlaps(Rect::from_center_size(at.translation/window.scale_factor(),node.size()/window.scale_factor()));
-        }
-        !self.geometry.screen.is_some_and(overlaps) && !self.geometry.knob.is_some_and(overlaps)
-            && !self.geometry.buttons.iter().any(|b|overlaps(b.bounds))
+        if overlaps(display) {return false;}
+        if self.pip.as_deref().zip(self.screen.as_deref()).is_some_and(|(p,s)|p.frame==Frame::Screen || !s.on_model) {return true;}
+        !self.geometry.knob.is_some_and(overlaps) && !self.geometry.buttons.iter().any(|b|overlaps(b.bounds))
     }
     pub fn event(&mut self, event: &TouchInput, unclaimed: bool) -> bool {
         let Some(window) = self.windows.single().ok().filter(|(_,w)|w.focused)

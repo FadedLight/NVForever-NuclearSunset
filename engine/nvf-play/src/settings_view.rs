@@ -249,6 +249,12 @@ pub struct Visibility {
     pub colours: [bool; 2],
 }
 
+fn replacement_row(key:&str)->Option<&'static str> {
+    match key {
+        "touch-pipboy-dismiss-left"|"touch-pipboy-dismiss-right"=>Some("touch-pipboy-dismiss-side-v2"),
+        _=>None,
+    }
+}
 impl Visibility {
     /// As the world has it now.
     pub fn of_world(world: &World) -> Visibility {
@@ -263,6 +269,7 @@ impl Visibility {
 
     /// Whether registered row `s` is shown.
     pub fn shows(&self, s: &Setting) -> bool {
+        if replacement_row(s.key).is_some() {return false;}
         if let Some((which, _)) = crate::ui_colour::channel_of(s.key) {
             return self.colours[which];
         }
@@ -276,6 +283,9 @@ pub fn parent_of(list: &[Setting], i: usize, vis: Visibility) -> Option<RowId> {
     let s = list.get(i)?;
     if vis.shows(s) {
         return None;
+    }
+    if let Some(key)=replacement_row(s.key) {
+        return list.iter().position(|row|row.key==key).map(RowId::Setting);
     }
     if let Some((_, colour)) = crate::ui_colour::channel_of(s.key) {
         return list.iter().position(|r| r.key == colour).map(RowId::Setting);

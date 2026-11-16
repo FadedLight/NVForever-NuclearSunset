@@ -11,6 +11,16 @@ fn optional_scene() -> ClosingScene {
 fn optional_point(scene:&ClosingScene,target:crate::touch::pipboy_options::Target)->Vec2 {
     scene.app.world().resource::<State>().regions.iter().find(|(t,_)|*t==target).expect("real painted footprint must leave this configured handle unclaimed").1.center()
 }
+// Side travel is now independently saved (default120), rather than the entire
+// space below a cue. Calibrate the input, retaining every original effect,
+// reversal, cancel, hardware, fresh-owner and native-close assertion.
+fn optional_down(scene:&ClosingScene,p:Vec2,fraction:f32)->Vec2 {
+    let safe=scene.app.world().resource::<nvf_play::touch_safe_area::SafeInsets>().bottom.max(closing_safe_bottom(scene));
+    let travel=120.0_f32.min(closing_travel(closing_size(scene),safe,p).unwrap());
+    let deadzone=8.0_f32.min(travel*0.25);
+    p+Vec2::Y*(deadzone+(travel-deadzone)*fraction)
+}
+
 #[test]
 fn real_parent_left_and_right_dismissal_reverses_the_same_arm_and_cancel_preserves_hardware() {
     for target in [crate::touch::pipboy_options::Target::Left,crate::touch::pipboy_options::Target::Right] {
@@ -18,13 +28,11 @@ fn real_parent_left_and_right_dismissal_reverses_the_same_arm_and_cancel_preserv
             let mut scene=optional_scene();scene.app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics=graphics;
             scene.app.world_mut().write_message(bevy::input::keyboard::KeyboardInput {window:scene.window,key_code:KeyCode::F12,logical_key:bevy::input::keyboard::Key::F12,state:bevy::input::ButtonState::Pressed,text:None,repeat:false});
             scene.app.update();
-            let p=optional_point(&scene,target);let size=closing_size(&scene);
-            let safe=scene.app.world().resource::<nvf_play::touch_safe_area::SafeInsets>().bottom.max(closing_safe_bottom(&scene));
-            let travel=closing_travel(size,safe,p).unwrap();
+            let p=optional_point(&scene,target);
             closing_edge(&mut scene,810,TouchPhase::Started,p);scene.app.update();
             assert_eq!(scene.app.world().resource::<ArmGesture>().progress(),Some(1.));
             for (fraction,want) in [(0.6,0.4),(0.2,0.8)] {
-                closing_edge(&mut scene,810,TouchPhase::Moved,p+Vec2::Y*travel*fraction);scene.app.update();
+                let moved=optional_down(&scene,p,fraction);closing_edge(&mut scene,810,TouchPhase::Moved,moved);scene.app.update();
                 assert!((scene.app.world().resource::<ArmGesture>().progress().unwrap()-want).abs()<1e-5);
             }
             let mut nodes=scene.app.world_mut().query_filtered::<Entity,With<OptionalVisual>>();
@@ -35,7 +43,7 @@ fn real_parent_left_and_right_dismissal_reverses_the_same_arm_and_cancel_preserv
             let mut nodes=scene.app.world_mut().query_filtered::<Entity,With<OptionalVisual>>();
             assert_eq!(nodes.iter(scene.app.world()).collect::<Vec<_>>(),before);
 
-            closing_edge(&mut scene,810,TouchPhase::Canceled,p+Vec2::Y*travel*0.2);scene.app.update();
+            let reversed=optional_down(&scene,p,0.2);closing_edge(&mut scene,810,TouchPhase::Canceled,reversed);scene.app.update();
             assert!(scene.app.world().resource::<State>().drag.is_none());
             assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some(),"cancel cannot issue native Close");
             assert!(scene.app.world().resource::<ArmGesture>().captures(),"actual core owns cancellation settlement");
@@ -93,11 +101,11 @@ fn real_parent_configured_close_and_down_swipes_reach_actual_native_menu_close_w
         for graphics in [true,false] {
             let mut scene=optional_scene();install_native_close_consumer(&mut scene.app);closing_idle(&mut scene,3);
             scene.app.world_mut().resource_mut::<crate::touch::pipboy_options::Options>().graphics=graphics;
-            let p=optional_point(&scene,target);let travel=closing_travel(closing_size(&scene),26.,p).unwrap();
+            let p=optional_point(&scene,target);
             closing_edge(&mut scene,830,TouchPhase::Started,p);scene.app.update();
             assert!(scene.app.world().resource::<State>().drag.is_some());
             assert!(!scene.app.world().resource::<ArmGesture>().captures(),"unavailable/disabled real arm is not fabricated");
-            let end=if target==crate::touch::pipboy_options::Target::Close {p} else {p+Vec2::Y*travel*0.75};
+            let end=if target==crate::touch::pipboy_options::Target::Close {p} else {optional_down(&scene,p,0.75)};
             closing_edge(&mut scene,830,TouchPhase::Moved,end);scene.app.update();
             assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some(),"moving alone cannot close");
             closing_edge(&mut scene,830,TouchPhase::Ended,end);closing_idle(&mut scene,3);
@@ -112,10 +120,9 @@ fn fallback_dismissal_cancel_reverse_and_late_owner_change_do_not_close_or_repla
     for cause in ["cancel","reverse","late_controller","late_hidden_screen"] {
         let mut scene=optional_scene();install_native_close_consumer(&mut scene.app);closing_idle(&mut scene,3);
         let p=optional_point(&scene,crate::touch::pipboy_options::Target::Right);
-        let travel=closing_travel(closing_size(&scene),26.,p).unwrap();
         closing_edge(&mut scene,840,TouchPhase::Started,p);scene.app.update();
-        closing_edge(&mut scene,840,TouchPhase::Moved,p+Vec2::Y*travel*0.8);scene.app.update();
-        let end=if cause=="reverse" {p+Vec2::Y*travel*0.2} else {p+Vec2::Y*travel*0.8};
+        let down=optional_down(&scene,p,0.8);closing_edge(&mut scene,840,TouchPhase::Moved,down);scene.app.update();
+        let end=optional_down(&scene,p,if cause=="reverse" {0.2} else {0.8});
         if cause=="late_controller" {
             #[derive(Resource)]struct Once(bool);
             fn change(mut once:ResMut<Once>,mut b:ResMut<nvf_play::bindings::Bindings>) {if std::mem::take(&mut once.0) {b.device=nvf_play::bindings::InputDevice::Controller;}}
@@ -134,7 +141,7 @@ fn fallback_dismissal_cancel_reverse_and_late_owner_change_do_not_close_or_repla
         scene.app.world_mut().entity_mut(scene.screen).insert(Visibility::Visible);
         closing_idle(&mut scene,3);assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_some(),"denied close never replays");
         closing_edge(&mut scene,841,TouchPhase::Started,p);scene.app.update();
-        closing_edge(&mut scene,841,TouchPhase::Ended,p+Vec2::Y*travel*0.75);closing_idle(&mut scene,3);
+        let fresh=optional_down(&scene,p,0.75);closing_edge(&mut scene,841,TouchPhase::Ended,fresh);closing_idle(&mut scene,3);
         assert!(scene.app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_none(),"a fresh deliberate dismissal still works");
     }
 }

@@ -40,3 +40,43 @@ adapters also need the central modal capture bridge before combined qualificatio
 Java `onCreate`/`onResume` additions must be combined with controller metadata lifecycle
 hooks; neither listener nor reset generation may be lost. This source work stays out of
 the corrective R4 APK.
+
+## Diagonal opening refinement
+
+[design: requested Android touch follow-on, 2026-11-16] The ordinary opening
+start region is a 48-logical-unit band above the safe bottom, clipped to safe
+side insets and a 16-unit outer margin. The existing centered closing handle
+and dedicated utility tray layout keep their geometry. Actual gameplay buttons,
+hotbar cells, modal/editor/practice owners and system edges retain priority.
+The same sole reader supplies both the real arm and fallback recognizer.
+
+[design] Vertical travel may include a diagonal component. After the existing
+32-unit initial slop, horizontal-dominant intent permanently cancels the gesture;
+it cannot become an opening by returning vertically later. Successful fallback
+opening retains its saved upward threshold and a latched vertical-first intent;
+sideways drift after that win does not reclassify release. Cancellation/reversal,
+ownership, focus and native script/menu
+admission keep their original meanings. No saved layout or preference changes.
+The band's actual Node geometry and font use absolute logical/UI-scale conversion.
+
+[hypothesis: qualification] New authored cases drive actual parent raw input and
+Taffy geometry, plus actual flat native menu close and late map refusal. They are
+uncompiled/unrun. Arm progress is real gesture state, but that parent fixture
+does not run the full visible clip/settlement graph. Existing core arm settlement
+controls remain separate; no coupled visible-arm or phone pass is claimed.
+
+[design] The fallback recognizer compares all four common insets during a held
+start. The actual parent route and native menu opener are exercised by additive
+Direct Pip-Boy Off fallback controls. The actual open Pins tray case verifies
+whole-window parent priority. It does not discriminate the fallback hook because
+the tray captures earlier in the parent route; the former minus-hook prediction
+is withdrawn. These controls remain authored, not retained actual runs.
+
+[design: 2026-11-16 follow-on] The opening and dismissal recognizers retain the
+first decisive axis. Vertical-first diagonal travel stays owned while reversing
+with a persistent sideways offset; horizontal-first travel is permanently
+retired. Real-arm motion is continuous through the existing ArmGesture producer.
+The screen-only Drawer still waits for upward release past its saved threshold,
+then uses the existing OpenInventory consumer exactly once. Its contact stamp
+includes all four safe insets. This is authored source behavior, not a phone
+observation; full clip/pose and native runtime qualification remain separate.

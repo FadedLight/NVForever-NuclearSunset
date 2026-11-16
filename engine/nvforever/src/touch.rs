@@ -636,7 +636,7 @@ fn input(
     model.prepare(interactive && !controller && !sheet_menu && layout.editor.is_none() && !modal_captures
         && platform.as_ref().is_none_or(|gate|gate.allows_actions())
         && !bar.captures_actions() && state.physical_mouse.is_empty() && state.physical_keys.is_empty(), size, touches.is_empty());
-    arm.prepare_regions(size, |rect| model.closing_region_unclaimed(rect)
+    arm.prepare_regions(size, model.dismissal_display(), |rect| model.closing_region_unclaimed(rect)
         && !bar.items_pending() && !bar.blocks(rect));
     state.ui_capture = bar.captures_actions();
     if state.ui_capture {
@@ -792,7 +792,7 @@ fn input(
                 sync_touch(&mut state,bindings.as_deref(),false);
                 continue;
             }
-            let (consumed, opened) = drawer.event(t, size, unclaimed);
+            let (consumed, opened) = drawer.event(t, size, arm_unclaimed);
             if consumed {
                 vats.cancel();
                 if opened {
@@ -3798,6 +3798,8 @@ mod tests {
     include!("touch/optional_ui_tests.rs");
     include!("touch/optional_ui_router_tests.rs");
     include!("touch/pipboy_optional_parent_tests.rs");
+    include!("touch/pipboy_diagonal_parent_tests.rs");
+    include!("touch/pipboy_display_parent_tests.rs");
 }
 
 #[cfg(test)]

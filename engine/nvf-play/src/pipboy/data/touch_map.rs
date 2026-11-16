@@ -172,6 +172,7 @@ pub struct Gate<'w,'s> {
     windows:Query<'w,'s,(Entity,&'static Window),With<PrimaryWindow>>,
     safe:Option<Res<'w,crate::touch_safe_area::SafeInsets>>, ui:Option<Res<'w,UiScale>>,
     sizing:Option<Res<'w,super::super::touch_presentation::PipBoySize>>,
+    dismissal:Option<Res<'w,super::super::touch_presentation::DismissalSpace>>,
     creator:Option<Res<'w,crate::creator::CreatorMenu>>,
     paused:Option<Res<'w,crate::pause::Paused>>, location:Option<Res<'w,crate::Location>>,
     touches:Option<Res<'w,bevy::input::touch::Touches>>,
@@ -185,12 +186,14 @@ impl Gate<'_,'_> {
             || self.paused.as_ref().is_some_and(|p|p.0) || !self.admission.allows()
             || self.creator.as_ref().is_some_and(|c|c.is_open())
             || self.physical.as_ref().is_some_and(|p|p.active) {return None;}
+        let device=pip.frame==super::super::Frame::Device && screen.on_model;
+        let safe=self.safe.as_deref().copied().unwrap_or_default();
+        let safe=if device {safe} else {self.dismissal.as_deref().copied().unwrap_or_default().padding(safe,Some(window.resolution.size()))};
         let presentation=Presentation {
-            safe:self.safe.as_deref().copied().unwrap_or_default(), menu:crate::interface::unit_scale(),
+            safe, menu:crate::interface::unit_scale(),
             ui:self.ui.as_deref().map_or(1.0,|v|v.0),
             size:self.sizing.as_deref().map_or(1.0,super::super::touch_presentation::PipBoySize::ratio),
         };
-        let device=pip.frame==super::super::Frame::Device && screen.on_model;
         let stamp=ProjectionStamp::new(window_id,window,screen,device,presentation);
         let stamp=if device {
             let (entity,camera,target)=self.cameras.single().ok()?;stamp.with_camera(entity,camera,target)?

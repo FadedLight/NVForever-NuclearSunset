@@ -199,6 +199,7 @@ pub const SECTIONS: &[Section] = &[
             "hud-health-size-v1",
             "hud-action-points-size-v1",
             "hud-compass-size-v1",
+            "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1",
         ],
     ),
     section(
@@ -245,7 +246,7 @@ pub const SECTIONS: &[Section] = &[
             "touch-bottom-swipe-target-v1",
             "touch-pipboy-swipe-v1",
             "touch-pipboy-distance-v1",
-            "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+            "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button",
             "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
             "touch-direct-pipboy-v1", "touch-world-activation-v1",
             "touch-icon-family",
@@ -346,7 +347,7 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     section(MOBILE_TAB, Some("Inventory and quick access"), &[
         "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
         "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1", "touch-pipboy-size-v1", "touch-pipboy-tab-swipes", "touch-direct-pipboy-v1",
-        "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+        "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button",
         "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
         "touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1",
     ]),
@@ -606,9 +607,10 @@ mod tests {
     /// the terrain height blending row from main af16a793f and terrain anti-tiling
     /// from main 7e638d4e2, plus main 5a9414585's sound-cover row (#2688).
     /// Dynamic Tweaks and unbound controls are separate.
-    const KNOWN: [(&str, &str); 183] = [
+    const KNOWN: [(&str, &str); 185] = [
         ("lockpick-touch-hints", "Touch"),
         ("touch-pipboy-dismiss-left", "Controls"), ("touch-pipboy-dismiss-right", "Controls"),
+        ("touch-pipboy-dismiss-side-v2", "Controls"), ("touch-pipboy-dismiss-travel-v1", "Controls"),
         ("touch-pipboy-close-button", "Controls"), ("touch-pipboy-button-graphics", "Controls"), ("touch-pipboy-model-wheel", "Controls"),
         ("touch-terminal-v1", "Gameplay"), ("touch-companion-v1", "Gameplay"),
         ("touch-layout-editor-v1", "Controls"),
@@ -877,7 +879,7 @@ mod tests {
                     "touch-bottom-swipe-target-v1",
                     "touch-pipboy-swipe-v1",
                     "touch-pipboy-distance-v1",
-                    "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-close-button",
+                    "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button",
                     "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
             "touch-direct-pipboy-v1", "touch-world-activation-v1",
                     "touch-icon-family",
@@ -925,6 +927,7 @@ mod tests {
             "hud-health-size-v1",
             "hud-action-points-size-v1",
             "hud-compass-size-v1",
+            "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1",
         ] {
             assert_eq!(at(key), "Display > Interface");
         }
@@ -1073,8 +1076,8 @@ mod tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 73);
-        let added = ["hud-scale-v2", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1", "dialogue-background-tint-v1"];
+        assert_eq!(mobile_keys.len(), 75);
+        let added = ["hud-scale-v2", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1", "dialogue-background-tint-v1", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1"];
         assert!(added.iter().all(|key| mobile_keys.contains(key)));
         assert_eq!(mobile_keys.iter().filter(|key| !added.contains(key)).count(), 68, "every original mobile placement retained");
         assert!(!mobile_keys.contains("physics-rate"), "upstream screen setting is shared, not mobile-only");
@@ -1127,6 +1130,18 @@ mod tests {
         ] {
             assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at(key)))));
             assert_eq!(mobile.placement_of(at(key)).unwrap().heading, Some(heading));
+        }
+        let chooser = RowId::Setting(at("touch-pipboy-dismiss-side-v2"));
+        assert!(touch.contains(&ViewEntry::Row(chooser)));
+        assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at("touch-pipboy-dismiss-travel-v1")))));
+        for key in ["touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right"] {
+            let legacy = RowId::Setting(at(key));
+            assert!(!touch.contains(&ViewEntry::Row(legacy)));
+            assert_eq!(view::parent_of(&list, at(key), Visibility::default()), Some(chooser));
+            let found = Found { search: view::search(&mobile, &list, key, |r| r.name()), changed: Vec::new() };
+            let result = view::project(&mobile, &list, SettingsScope::Search, Visibility::default(), &found);
+            assert!(result.contains(&ViewEntry::Row(chooser)));
+            assert!(!result.contains(&ViewEntry::Row(legacy)));
         }
         assert!(view::rail(&mobile).contains(&view::RailItem::Tab(MOBILE_TAB)));
         assert_eq!(view::step_selectable(&touch, Some(RowId::Setting(at("touch-practice-v1"))), 1),

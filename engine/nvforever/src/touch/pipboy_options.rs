@@ -1,6 +1,6 @@
 //! Independent saved policy; visual suppression never changes input ownership.
 use bevy::prelude::*;
-use nvf_play::{settings::{self, Setting}, touch_safe_area::SafeInsets};
+use nvf_play::{settings::{self, ChoiceList, Setting, Slider}, touch_safe_area::SafeInsets};
 
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Options {
@@ -9,10 +9,45 @@ pub(super) struct Options {
     pub close: bool,
     pub graphics: bool,
     pub wheel: bool,
+    pub travel: u16,
 }
 impl Default for Options {
-    fn default() -> Self { Self { left: false, right: false, close: false, graphics: true, wheel: true } }
+    fn default() -> Self { Self { left: false, right: false, close: false, graphics: true, wheel: true, travel: 120 } }
 }
+pub(super) const SIDE_KEY:&str="touch-pipboy-dismiss-side-v2";
+pub(super) const TRAVEL_KEY:&str="touch-pipboy-dismiss-travel-v1";
+const LEFT_KEY:&str="touch-pipboy-dismiss-left";
+const RIGHT_KEY:&str="touch-pipboy-dismiss-right";
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum Sides { Disabled, Left, Right, Both }
+impl Sides {
+    fn of(left:bool,right:bool)->Self {match(left,right) {(false,false)=>Self::Disabled,(true,false)=>Self::Left,(false,true)=>Self::Right,(true,true)=>Self::Both}}
+    fn name(self)->&'static str {match self {Self::Disabled=>"Disabled",Self::Left=>"Left only",Self::Right=>"Right only",Self::Both=>"Both"}}
+    fn parse(s:&str)->Option<Self> {match s.trim().to_ascii_lowercase().as_str() {"disabled"=>Some(Self::Disabled),"left only"=>Some(Self::Left),"right only"=>Some(Self::Right),"both"=>Some(Self::Both),_=>None}}
+    fn pair(self)->(bool,bool) {match self {Self::Disabled=>(false,false),Self::Left=>(true,false),Self::Right=>(false,true),Self::Both=>(true,true)}}
+}
+/// Normalize old and new side rows only in the virtual INI used by the existing
+/// parser. Explicit new Disabled beats stale old true values even when the
+/// choice loader skips a value equal to its default.
+fn migrate_sides(text:&str)->String {
+    use fnv_install::{ini_get,ini_set};
+    let Some(side)=ini_get(text,settings::SECTION,SIDE_KEY).as_deref().and_then(Sides::parse) else {
+        // Absent/malformed choices leave both ordinary boolean loaders alone.
+        // Missing or malformed legacy rows retain their existing skip semantics.
+        return text.to_owned();
+    };
+    let (left,right)=side.pair();
+    let text=ini_set(text,settings::SECTION,LEFT_KEY,if left {"1"} else {"0"});
+    ini_set(&text,settings::SECTION,RIGHT_KEY,if right {"1"} else {"0"})
+}
+
+fn choose_sides(world:&mut World,name:&str)->bool {
+    let Some(side)=Sides::parse(name) else {return false;};
+    let before=*world.resource::<Options>();let (left,right)=side.pair();
+    {let mut options=world.resource_mut::<Options>();options.left=left;options.right=right;}
+    changed(world,before);true
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Target { Left, Right, Close }
 impl Options {
@@ -31,24 +66,46 @@ impl Options {
     }
     /// The graphics bit is intentionally absent: paint changes cannot retire input.
     pub fn dismissal(self) -> (bool,bool,bool) { (self.left,self.right,self.close) }
+    pub fn policy(self) -> (bool,bool,bool,u16) { (self.left,self.right,self.close,self.travel) }
+    pub fn travel(self)->f32 {f32::from(self.travel.clamp(48,240))}
+    fn space(self) -> nvf_play::pipboy::touch_presentation::DismissalSpace { nvf_play::pipboy::touch_presentation::DismissalSpace::new(self.left,self.right,self.close) }
 }
 fn changed(world:&mut World,before:Options) {
     let after=*world.resource::<Options>();
-    if before.dismissal()!=after.dismissal() {
+    *world.resource_mut::<nvf_play::pipboy::touch_presentation::DismissalSpace>()=after.space();
+    if before.policy()!=after.policy() {
         if let Some(mut arm)=world.get_resource_mut::<nvf_play::pipboy::gesture::ArmGesture>() {arm.abort();}
     }
     if before.wheel && !after.wheel {super::pipboy_model::cancel_wheel(world);}
 }
+fn publish_space(options:Res<Options>,mut space:ResMut<nvf_play::pipboy::touch_presentation::DismissalSpace>) {
+    let next=options.space(); if *space!=next {*space=next;}
+}
 pub(super) fn install(app: &mut App) {
-    app.init_resource::<Options>();
+    app.init_resource::<Options>()
+        .init_resource::<nvf_play::pipboy::touch_presentation::DismissalSpace>()
+        .add_systems(PreUpdate, publish_space.before(nvf_play::touch_safe_area::Publish).before(super::TouchInputSystems));
     macro_rules! switch {
         ($key:literal,$label:literal,$note:literal,$field:ident) => {
             settings::add_setting(app,Setting { key:$key,group:"Controls",label:$label,note:$note,switches:"",
                 get:|w|w.resource::<Options>().$field,set:|w,v| {let before=*w.resource::<Options>();w.resource_mut::<Options>().$field=v;changed(w,before);},slider:None });
         };
     }
-    switch!("touch-pipboy-dismiss-left","Pip-Boy left dismissal handle","Drag down from the safe left handle to dismiss. Reverse before release to keep it open.",left);
-    switch!("touch-pipboy-dismiss-right","Pip-Boy right dismissal handle","Drag down from the safe right handle to dismiss. Reverse before release to keep it open.",right);
+    switch!("touch-pipboy-dismiss-left","Pip-Boy left dismissal handle","Drag down or diagonally down from the safe left handle to dismiss. The flat menu reserves its space. Reverse before release to keep it open.",left);
+    switch!("touch-pipboy-dismiss-right","Pip-Boy right dismissal handle","Drag down or diagonally down from the safe right handle to dismiss. The flat menu reserves its space. Reverse before release to keep it open.",right);
+    settings::add_ini_migration(app,SIDE_KEY,migrate_sides);
+    settings::add_choice_list(app,Setting {key:SIDE_KEY,group:"Controls",label:"Pip-Boy downward dismissal",
+        note:"Choose where downward drags beside the display lower the arm. Display lists, maps and controls keep their input. Graphics are optional.",
+        switches:"",get:|_|false,set:|_,_|{},slider:None},ChoiceList {
+        names:|_|[Sides::Disabled,Sides::Left,Sides::Right,Sides::Both].iter().map(|side|side.name().to_owned()).collect(),
+        chosen:|w|{let o=w.resource::<Options>();Sides::of(o.left,o.right).name().to_owned()},
+        pick:choose_sides,save:|w|{let o=w.resource::<Options>();Sides::of(o.left,o.right).name().to_owned()},load:choose_sides,ask_keep:false,
+    });
+    settings::add_setting(app,Setting::slider(TRAVEL_KEY,"Controls","Pip-Boy dismissal travel",
+        "Drag distance to lower the arm; shorter is more sensitive. Safe remaining screen travel caps it near the bottom. Reverse while held to raise it again.",
+        Slider::choice(25,|w|(f32::from(w.resource::<Options>().travel)-48.)/192.,|w,v| {
+            let before=*w.resource::<Options>();w.resource_mut::<Options>().travel=(48.+(v.clamp(0.,1.)*24.).round()*8.) as u16;changed(w,before);
+        },|v|format!("{:.0} dp",48.+(v*24.).round()*8.))));
     switch!("touch-pipboy-close-button","Pip-Boy close button","Adds an explicit close target. Its touch region stays active when button graphics are hidden.",close);
     switch!("touch-pipboy-button-graphics","Show Pip-Boy button graphics","Shows added button and handle graphics. Hiding them retains identical active touch regions and actions.",graphics);
     switch!("touch-pipboy-model-wheel","Touch Pip-Boy model wheel","Drag the physical wheel on the rendered Pip-Boy to scroll the active list. Mouse, controller and scrollbars stay available.",wheel);

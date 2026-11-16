@@ -44,15 +44,17 @@ Gameplay > Dialogue/Inventory menus and Controls > Touch.
 |---|---|---|
 | Inventory and quick access | `touch-terminal-v1` | Enhanced terminal view; Off retains the standard menu/input path. |
 | Inventory and quick access | `touch-companion-v1` | Enhanced companion wheel; independent of drag-release preference. |
-| Inventory and quick access | `touch-pipboy-dismiss-left`, `touch-pipboy-dismiss-right` | Optional downward dismissal handles; both off by default. |
+| Inventory and quick access | `touch-pipboy-dismiss-side-v2` | Downward drags outside the display: Disabled (default), Left only, Right only or Both. Legacy side switches still load and save; the chooser replaces their visible rows. |
+| Inventory and quick access | `touch-pipboy-dismiss-travel-v1` | Arm-lowering drag distance, 48–240 logical units, default 120; capped by remaining safe space. Reverse while held to raise it again. |
 | Inventory and quick access | `touch-pipboy-close-button` | Optional explicit Close target; off by default. |
 | Inventory and quick access | `touch-pipboy-button-graphics` | Show overlay paint; Off keeps the same active targets and dispatch. DefaultOn. |
 | Inventory and quick access | `touch-pipboy-model-wheel` | Touch the physical model wheel to scroll; on by default, independent of mouse/pad scrolling. |
 | Movement and gestures | `touch-vats-targeting-v1` | Off (default), Tap or Hold; body selection queues, separate Fire confirms. |
-| Dialogue | `dialogue-theme-v1` | Minimal (default), Classic Glass, Split Panel, Retro Console or Wrist Terminal. |
+| Dialogue | `dialogue-theme-v1` | Minimal (default), Classic Glass, Field Notes, Retro Console or Wrist Terminal. The older Split Panel value still loads. |
+| Dialogue | `dialogue-background-tint-v1` | HUD colour (default), Neutral or Warm amber backing; text and selection retain the chosen HUD colour. |
 | Dialogue | `dialogue-background-opacity-v1` | Backing opacity, default 18%, maximum 80%; the stored slider is normalized. |
-| Dialogue | `dialogue-frame-opacity-v1` | Frame opacity, default 60%; independent of backing and full-contrast text/feedback. |
-| Dialogue | `dialogue-hints-v1` | Show explanatory dialogue hints, on by default; choices, speech and requirements stay. |
+| Dialogue | `dialogue-frame-opacity-v1` | Accent opacity, default 60%; independent of backing and full-contrast text/feedback. |
+| Dialogue | `dialogue-hints-v1` | Show explanatory dialogue hints, off by default; choices, speech and requirements stay. |
 | Lockpicking | `lockpick-touch-hints` | Show lockpicking hints, on by default; scheme, Turn, status and errors stay. |
 
 Appearance updates existing UI; it does not change choice words/order, semantic

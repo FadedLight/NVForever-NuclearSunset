@@ -1,5 +1,5 @@
 //! Optional, owned bottom handle -> Inventory or the existing utility tray request.
-//! [design] Only the handle starts a gesture. System edges, look, controls and item
+//! [design] Only the safe, unclaimed bottom band starts a gesture. System edges, look, controls and item
 //! taps are never global swipe listeners. Both destinations share this recognizer.
 use bevy::{
     ecs::system::SystemParam,
@@ -62,13 +62,14 @@ struct Drag {
     position: Vec2,
     size: Vec2,
     canceled: bool,
+    vertical: bool,
 }
 #[derive(Resource, Default)]
 pub(super) struct Drawer {
     drag: Option<Drag>,
     swallowed: HashSet<u64>,
     focused: Option<bool>,
-    stamp: Option<(u32, u32, Destination)>,
+    stamp: Option<(u32, u32, Destination, nvf_play::touch_safe_area::SafeInsets)>,
 }
 
 pub(super) fn handle(size: Vec2, bottom: f32) -> Rect {
@@ -77,6 +78,21 @@ pub(super) fn handle(size: Vec2, bottom: f32) -> Rect {
         Vec2::new(size.x * 0.5, size.y - bottom.max(0.0) - 36.0),
         Vec2::new(width, 48.0),
     )
+}
+/// Horizontal intent is retired once it leaves the initial slop. A diagonal
+/// vertical drag can travel farther sideways without hitting an absolute cap.
+pub(super) fn horizontal_intent(delta:Vec2) -> bool {
+    delta.x.abs()>32.0 && delta.x.abs()>delta.y.abs()
+}
+pub(super) fn vertical_intent(delta:Vec2)->bool {
+    delta.y.abs()>32.0 && delta.y.abs()>=delta.x.abs()
+}
+pub(super) fn opening_area(size:Vec2,bottom:f32,safe:nvf_play::touch_safe_area::SafeInsets)->Rect {
+    if !size.is_finite() || size.min_element()<64.0 || !bottom.is_finite()
+        || [safe.left,safe.top,safe.right,safe.bottom].iter().any(|v|!v.is_finite() || *v<0.0) {return Rect::EMPTY;}
+    let h=handle(size,bottom);
+    Rect::from_corners(Vec2::new(16.,h.min.y),Vec2::new(size.x-16.,h.max.y))
+        .intersect(Rect::from_corners(Vec2::new(safe.left,safe.top),size-Vec2::new(safe.right,safe.bottom.max(bottom))))
 }
 impl Drawer {
     pub fn set_focus(&mut self, focused: bool) {
@@ -115,7 +131,7 @@ impl Drawer {
                     origin: event.position,
                     position: event.position,
                     size,
-                    canceled: false,
+                    canceled: false,vertical:false,
                 });
             }
             return (true, false);
@@ -125,14 +141,17 @@ impl Drawer {
         };
         drag.position = event.position;
         let delta = drag.position - drag.origin;
+        if !drag.vertical {
+            drag.canceled |= horizontal_intent(delta);
+            drag.vertical=vertical_intent(delta);
+        }
         drag.canceled |= drag.size != size
-            || delta.x.abs() > 32.0
             || delta.y > 24.0
             || !event.position.is_finite();
         let opens = event.phase == TouchPhase::Ended
             && !drag.canceled
             && -delta.y >= threshold
-            && -delta.y > delta.x.abs() * 1.5;
+            && drag.vertical;
         self.drag = if matches!(event.phase, TouchPhase::Ended | TouchPhase::Canceled) {
             None
         } else {
@@ -147,6 +166,7 @@ pub(super) struct Bridge<'w> {
     pub drawer: ResMut<'w, Drawer>,
     pub options: Res<'w, Options>,
     pub safe: Res<'w, SafeBottom>,
+    insets: Option<Res<'w,nvf_play::touch_safe_area::SafeInsets>>,
     pub capture: Option<Res<'w, nvf_play::bindings::KeyboardCapture>>,
     open: MessageWriter<'w, nvf_play::menu::OpenInventory>,
     hotbar: Option<Res<'w, super::hotbar::Preferences>>,
@@ -167,6 +187,7 @@ impl Bridge<'_> {
             self.options.threshold.to_bits(),
             self.safe.0.to_bits(),
             self.options.destination,
+            self.insets.as_deref().copied().unwrap_or_default(),
         );
         if self.drawer.stamp != Some(stamp) {
             self.drawer.cancel();
@@ -179,7 +200,7 @@ impl Bridge<'_> {
         let result = self.drawer.event(
             event,
             size,
-            handle(size, self.safe.0),
+            opening_area(size, self.safe.0, self.insets.as_deref().copied().unwrap_or_default()),
             self.options.threshold,
             unclaimed,
         );
@@ -248,26 +269,31 @@ type VisualState<'w> = (
     Option<Res<'w, super::hotbar::Preferences>>,
     Option<Res<'w, nvf_play::pad::PlatformInputGate>>,
     Res<'w, super::practice::Practice>,
+    Option<Res<'w,nvf_play::touch_safe_area::SafeInsets>>,
+    Option<Res<'w,UiScale>>,
 );
 
 type HintFilter = (With<Hint>, Without<Handle>);
 
 fn visual(
-    (options, drawer, safe, state, layout, modal, hotbar, platform, practice): VisualState<'_>,
+    (options, drawer, safe, state, layout, modal, hotbar, platform, practice, insets, ui): VisualState<'_>,
     capture: Option<Res<nvf_play::bindings::KeyboardCapture>>,
     bindings: Option<Res<nvf_play::bindings::Bindings>>,
     pads: Query<&Gamepad>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut handle_nodes: Query<(&mut Node, &mut Visibility), HandleFilter>,
-    mut hints: Query<(&mut Text, &mut Visibility), HintFilter>,
+    mut hints: Query<(&mut Text, &mut Visibility, &mut TextFont), HintFilter>,
 ) {
     let Ok(window) = windows.single() else { return };
     let size = Vec2::new(window.width(), window.height());
-    let rect = handle(size, safe.0);
+    let rect = opening_area(size, safe.0, insets.as_deref().copied().unwrap_or_default());
+    let scale=ui.as_deref().map_or(1.0,|s|s.0);
+    let valid_scale=scale.is_finite() && scale>0.0 && (size/scale).is_finite();
+    let scale=if valid_scale {scale} else {1.0};
     let controller = bindings
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller)
         && !pads.is_empty();
-    let show = options.enabled
+    let show = valid_scale && options.enabled
         && (options.destination == Destination::Inventory
             || hotbar.as_ref().is_some_and(|p| p.tray_available()))
         // A consumed controller-return touch restores visible controls immediately.
@@ -283,19 +309,20 @@ fn visual(
         && !state.suspended
         && layout.editor.is_none()
         && !capture.is_some_and(|c| c.0)
-        && rect.min.y >= 0.0;
+        && rect.min.y >= 0.0 && rect.min.is_finite() && rect.max.is_finite() && rect.size().min_element()>0.0;
     for (mut node, mut visible) in &mut handle_nodes {
         *visible = if show {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
-        node.left = px(rect.min.x);
-        node.top = px(rect.min.y - drawer.progress().min(options.threshold * 1.25));
-        node.width = px(rect.width());
-        node.height = px(rect.height());
+        node.left = px(rect.min.x/scale);
+        node.top = px((rect.min.y - drawer.progress().min(options.threshold * 1.25))/scale);
+        node.width = px(rect.width()/scale);
+        node.height = px(rect.height()/scale);
     }
-    for (mut text, mut visible) in &mut hints {
+    for (mut text, mut visible, mut font) in &mut hints {
+        font.font_size=FontSize::Px(12.0/scale);
         text.0 = match options.destination {
             Destination::Inventory => "Pip-Boy",
             Destination::UtilityTray => "Utility tray",
@@ -391,7 +418,7 @@ pub(super) fn install(app: &mut App) {
     install_insets(app);
     settings::add_setting(app, Setting {
         key: "touch-pipboy-swipe-v1", group: "Controller", label: "Bottom swipe handle",
-        note: "Show a bottom handle. Drag upward and release to open the chosen destination. Android system navigation stays available.",
+        note: "Show a safe bottom swipe band. Drag upward or diagonally up and release to open the chosen destination. Controls keep priority; Android system navigation stays available.",
         switches: "",
         get: |w| w.resource::<Options>().enabled, set: |w,v| w.resource_mut::<Options>().enabled = v, slider: None,
     });

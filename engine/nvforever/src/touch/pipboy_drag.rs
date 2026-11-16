@@ -25,12 +25,19 @@ struct Drag {
     size: Vec2,
     start: f32,
     canceled: bool,
+    vertical: bool,
     closing_travel: Option<f32>,
+    distance: Option<f32>,
+    deadzone: f32,
+    frame: Frame,
+    camera: Option<CameraStamp>,
+    display: Option<Rect>,
+    ui_scale: u32,
     target: Option<super::pipboy_options::Target>,
     region: Option<Rect>,
     real_arm: bool,
     safe: nvf_play::touch_safe_area::SafeInsets,
-    preferences: (bool,bool,bool),
+    preferences: (bool,bool,bool,u16),
     context: Option<CloseContext>,
     window: WindowStamp,
 }
@@ -54,14 +61,29 @@ fn closing_travel(size: Vec2, safe_bottom: f32, origin: Vec2) -> Option<f32> {
 struct CloseContext {
     frame: Frame, page: nvf_play::pipboy::Page, tab: usize,
     image: bevy::asset::AssetId<Image>,
-    scale:u32,on_model:bool,
+    scale:u32,on_model:bool, phase:Phase,
 }
 impl CloseContext {
     fn capture(pip: &PipBoy, screen: &nvf_play::pipboy::PipBoyScreen) -> Self {
-        Self { frame:pip.frame,page:pip.page,tab:pip.tab(),image:screen.image.id(),scale:screen.scale.to_bits(),on_model:screen.on_model }
+        Self { frame:pip.frame,page:pip.page,tab:pip.tab(),image:screen.image.id(),scale:screen.scale.to_bits(),on_model:screen.on_model,phase:pip.phase }
     }
-    fn matches(self, pip: &PipBoy, screen: &nvf_play::pipboy::PipBoyScreen) -> bool {
-        pip.phase==Phase::Up && pip.open() && pip.frame==self.frame && pip.page==self.page && pip.tab()==self.tab && screen.image.id()==self.image && screen.scale.to_bits()==self.scale && screen.on_model==self.on_model
+    fn matches(self, pip: &PipBoy, screen: &nvf_play::pipboy::PipBoyScreen, owned_arm:bool) -> bool {
+        ((pip.phase==self.phase && (owned_arm || pip.open())) || (owned_arm && pip.phase==Phase::Raising)) && pip.frame==self.frame && pip.page==self.page && pip.tab()==self.tab && screen.image.id()==self.image && screen.scale.to_bits()==self.scale && screen.on_model==self.on_model
+    }
+}
+// Camera identity/target/lens are stable while the normal arm animation moves
+// the lens/rig. Do not compare projected screen bounds or camera translation:
+// those are expected to move under this contact's own pose.
+#[derive(Clone,Copy,PartialEq)]
+struct CameraStamp { entity:Entity, viewport:URect, projection:Mat4 }
+impl CameraStamp {
+    fn of(entity:Entity,camera:&Camera,target:&bevy::camera::RenderTarget,window:WindowStamp)->Option<Self> {
+        let viewport=camera.physical_viewport_rect()?;
+        let projection=camera.clip_from_view();
+        (camera.is_active && projection.is_finite()
+            && camera.physical_target_size()==Some(window.physical)
+            && matches!(target.normalize(Some(window.entity)),Some(bevy::camera::NormalizedRenderTarget::Window(w)) if w.entity()==window.entity))
+            .then_some(Self {entity,viewport,projection})
     }
 }
 #[derive(Clone,Copy,PartialEq)]
@@ -74,7 +96,7 @@ impl WindowStamp {
     }
 }
 struct PendingClose {
-    id:u64,context:CloseContext,preferences:(bool,bool,bool),safe:nvf_play::touch_safe_area::SafeInsets,size:Vec2,region:Rect,window:WindowStamp,
+    id:u64,start:Vec2,display:Option<Rect>,ui_scale:u32,context:CloseContext,preferences:(bool,bool,bool,u16),safe:nvf_play::touch_safe_area::SafeInsets,size:Vec2,region:Rect,window:WindowStamp,
 }
 type Regions=Vec<(super::pipboy_options::Target,Rect)>;
 type PaintState=(Regions,bool,Option<super::pipboy_options::PaintFrame>);
@@ -85,6 +107,7 @@ pub(super) struct State {
     drag: Option<Drag>,
     pending: Option<PendingClose>,
     regions: Regions,
+    display: Option<Rect>,
     admitted: bool,
 }
 
@@ -123,14 +146,30 @@ pub(super) struct Bridge<'w, 's> {
     locks: Option<Res<'w, nvf_play::control::ControlLocks>>,
     commands: Commands<'w, 's>,
     windows: Query<'w,'s,(Entity,&'static Window),With<bevy::window::PrimaryWindow>>,
+    cameras: Query<'w,'s,(Entity,&'static Camera,&'static bevy::camera::RenderTarget),With<nvf_play::PlayerCamera>>,
+    ui_scale: Option<Res<'w,UiScale>>,
 }
 impl Bridge<'_, '_> {
+    fn ui_scale(&self)->Option<u32> {
+        let scale=self.ui_scale.as_ref().map_or(1.0,|s|s.0);
+        (scale.is_finite() && scale>0.0 && (48.0/scale).is_finite()).then_some(scale.to_bits())
+    }
+    fn camera(&self,window:WindowStamp)->Option<CameraStamp> {
+        let (entity,camera,target)=self.cameras.single().ok()?;
+        CameraStamp::of(entity,camera,target,window)
+    }
+
     /// Parent filters whole rectangles against the actual current painted model/flat canvas and tray.
-    pub(super) fn prepare_regions(&mut self,size:Vec2,mut unclaimed:impl FnMut(Rect)->bool) {
-        self.state.regions.clear();
+    pub(super) fn prepare_regions(&mut self,size:Vec2,display:Option<Rect>,mut unclaimed:impl FnMut(Rect)->bool) {
+        self.state.regions.clear();self.state.display=None;
         if !self.state.admitted || !self.inventory() {return;}
+        let Some(display)=display.filter(|r|r.min.is_finite() && r.max.is_finite() && r.size().min_element()>0.0) else {return;};
+        self.state.display=Some(display);
         let safe=self.insets.as_deref().copied().unwrap_or_default();
-        self.state.regions=self.optional.regions(size,safe).into_iter().filter(|(_,r)|unclaimed(*r)).collect();
+        self.state.regions=self.optional.regions(size,safe).into_iter().filter(|(target,r)| {
+            let matching_side=match target {super::pipboy_options::Target::Left=>r.center().x<display.center().x,super::pipboy_options::Target::Right=>r.center().x>=display.center().x,super::pipboy_options::Target::Close=>true};
+            matching_side && unclaimed(*r)
+        }).collect();
     }
     pub(super) fn captures(&self) -> bool {
         self.gesture.captures() || self.state.drag.is_some() || self.state.pending.is_some() || self.state.overflow
@@ -155,7 +194,7 @@ impl Bridge<'_, '_> {
         self.state.drag = None;
         self.state.pending = None;
         self.state.admitted = false;
-        self.state.regions.clear();
+        self.state.regions.clear();self.state.display=None;
         self.gesture.abort();
         if self.captures() {
             self.block();
@@ -171,11 +210,15 @@ impl Bridge<'_, '_> {
         if !self.captures() { self.state.drag=None; return; }
         let safe=self.insets.as_deref().copied().unwrap_or_default();
         let invalid_contact=self.state.drag.is_some_and(|d| {
-            d.safe!=safe || d.preferences!=self.optional.dismissal()
+            d.safe!=safe || d.preferences!=self.optional.policy()
                 || self.windows.single().ok().and_then(|(e,w)|WindowStamp::of(e,w))!=Some(d.window)
                 || (d.target.is_none() && (!self.options.direct || !self.drawer.enabled || self.drawer.destination!=super::drawer::Destination::Inventory))
                 || d.closing_travel.is_some_and(|travel| closing_travel(d.size,self.safe.0.max(d.safe.bottom),d.origin)!=Some(travel))
-                || d.context.is_some_and(|c|self.pip.as_deref().zip(self.screen.as_deref()).is_none_or(|(p,s)|!c.matches(p,s)))
+                || self.ui_scale()!=Some(d.ui_scale)
+                || (!d.real_arm && d.display!=self.state.display)
+                || self.pip.as_deref().is_none_or(|p|p.frame!=d.frame)
+                || d.camera.is_some_and(|c|self.camera(d.window)!=Some(c))
+                || d.context.is_some_and(|c|self.pip.as_deref().zip(self.screen.as_deref()).is_none_or(|(p,s)|!c.matches(p,s,d.real_arm)))
         });
         let real=self.gesture.captures();
         let invalid_rig=real && (self.body.as_deref().and_then(crate::player_body::PlayerBody::first_person_root)!=self.gesture.model()
@@ -196,15 +239,21 @@ impl Bridge<'_, '_> {
         if self.captures() || !unclaimed || self.locks.as_ref().is_some_and(|l|l.pipboy)
             || event.phase!=TouchPhase::Started || !event.position.is_finite()
             || gate.is_none_or(|g|!g.allows_touch(event.id)) {return false;}
+        let Some(ui_scale)=self.ui_scale() else {return false;};
         let Some(window)=self.windows.single().ok().filter(|(_,w)|w.focused).and_then(|(e,w)|WindowStamp::of(e,w)).filter(|w|w.logical==size && w.entity==event.window) else {return false;};
         let Some(pip)=self.pip.as_deref().filter(|p|p.warming.is_none() && matches!(p.phase,Phase::Down|Phase::Up)) else {return false;};
         let open=pip.phase==Phase::Up;
         let safe=self.insets.as_deref().copied().unwrap_or_default();
         if [safe.left,safe.top,safe.right,safe.bottom].iter().any(|v|!v.is_finite() || *v<0.0) {return false;}
-        let region=open.then(||self.state.regions.iter().find(|(_,r)|r.contains(event.position)).copied()).flatten();
-        let target=region.map(|(t,_)|t);
+        if event.position.x<safe.left || event.position.x>size.x-safe.right || event.position.y<safe.top || event.position.y>size.y-safe.bottom.max(self.safe.0) {return false;}
+        let region=open.then(||self.state.regions.iter().find(|(t,r)|*t==super::pipboy_options::Target::Close && r.contains(event.position)).copied()).flatten();
+        let target=region.map(|(t,_)|t).or_else(|| {
+            let display=self.state.display.filter(|_|open)?;
+            if event.position.x<display.center().x {self.optional.left.then_some(super::pipboy_options::Target::Left)}
+            else {self.optional.right.then_some(super::pipboy_options::Target::Right)}
+        });
         if target.is_none() && (!self.options.direct || !self.drawer.enabled || self.drawer.destination!=super::drawer::Destination::Inventory
-            || !super::drawer::handle(size,self.safe.0).contains(event.position)) {return false;}
+            || !(if open {super::drawer::handle(size,self.safe.0)} else {super::drawer::opening_area(size,self.safe.0,safe)}).contains(event.position)) {return false;}
         let model=self.body.as_deref().and_then(crate::player_body::PlayerBody::first_person_root);
         let real_arm=pip.frame==Frame::Device && self.options.direct && model.is_some()
             && !self.body.as_deref().is_some_and(crate::player_body::PlayerBody::pipboy_clip_missing)
@@ -232,6 +281,10 @@ impl Bridge<'_, '_> {
         } else {
             None
         };
+        let side=matches!(target,Some(super::pipboy_options::Target::Left|super::pipboy_options::Target::Right));
+        let distance=closing_travel.map(|available|if side {self.optional.travel().min(available)} else {available});
+        let deadzone=if side {distance.map_or(0.0,|distance|8.0_f32.min(distance*0.25))} else {0.0};
+        let camera=if real_arm {let Some(camera)=self.camera(window) else {return false;};Some(camera)} else {None};
         if real_arm && !self.gesture.begin(open, model.expect("real arm has a model")) {
             return false;
         }
@@ -240,10 +293,13 @@ impl Bridge<'_, '_> {
             origin: event.position,
             size,
             start: if open { 1.0 } else { 0.0 },
-            canceled: false,
-            closing_travel,
-            target, region:region.map(|(_,r)|r),real_arm, safe, preferences:self.optional.dismissal(),window,
-            context:if !real_arm { self.screen.as_deref().map(|s|CloseContext::capture(pip,s)) } else {None},
+            canceled: false,vertical:false,
+            closing_travel,distance,deadzone,frame:pip.frame,camera,display:self.state.display,ui_scale,
+            target, region:region.map(|(_,r)|r).or_else(|| {
+                let display=self.state.display?;
+                match target {Some(super::pipboy_options::Target::Left)=>Some(Rect::from_corners(Vec2::new(safe.left,safe.top),Vec2::new(display.center().x,size.y-safe.bottom.max(self.safe.0)))),Some(super::pipboy_options::Target::Right)=>Some(Rect::from_corners(Vec2::new(display.center().x,safe.top),size-Vec2::new(safe.right,safe.bottom.max(self.safe.0)))),_=>None}
+            }),real_arm, safe, preferences:self.optional.policy(),window,
+            context:if open { self.screen.as_deref().map(|s|CloseContext::capture(pip,s)) } else {None},
         });
         if !real_arm && self.state.drag.is_some_and(|d|d.context.is_none()) {self.state.drag=None;return false;}
         self.state.block_id(event.id);
@@ -257,27 +313,42 @@ impl Bridge<'_, '_> {
         };
         let delta = event.position - drag.origin;
         drag.canceled |= self.windows.single().ok().and_then(|(e,w)|WindowStamp::of(e,w))!=Some(drag.window);
-        drag.canceled |= drag.safe!=self.insets.as_deref().copied().unwrap_or_default() || drag.preferences!=self.optional.dismissal();
-        drag.canceled |= drag.size != size || !event.position.is_finite() || delta.x.abs() > 32.0
+        drag.canceled |= drag.safe!=self.insets.as_deref().copied().unwrap_or_default() || drag.preferences!=self.optional.policy();
+        if !drag.vertical {
+            drag.canceled |= super::drawer::horizontal_intent(delta);
+            drag.vertical=super::drawer::vertical_intent(delta);
+        }
+        drag.canceled |= drag.size != size || !event.position.is_finite()
             || event.position.x<drag.safe.left || event.position.x>size.x-drag.safe.right
             || event.position.y<drag.safe.top || event.position.y>size.y-drag.safe.bottom.max(self.safe.0);
         // A changing inset invalidates the captured safe range, just as resize
         // already invalidates its window. Opening keeps its original policy.
         drag.canceled |= drag.closing_travel.is_some()
             && closing_travel(size, self.safe.0.max(drag.safe.bottom), drag.origin) != drag.closing_travel;
+        drag.canceled |= self.ui_scale()!=Some(drag.ui_scale) || (!drag.real_arm && drag.display!=self.state.display)
+            || self.pip.as_deref().is_none_or(|p|p.frame!=drag.frame)
+            || drag.camera.is_some_and(|c|self.camera(drag.window)!=Some(c))
+            || drag.context.is_some_and(|c|self.pip.as_deref().zip(self.screen.as_deref()).is_none_or(|(p,s)|!c.matches(p,s,drag.real_arm)));
         let close_tap=drag.target==Some(super::pipboy_options::Target::Close);
         drag.canceled|=close_tap && delta.length()>12.0;
         if drag.real_arm {
             if drag.canceled {self.gesture.cancel();}
-            else if !close_tap {self.gesture.drag(drag.start-delta.y/drag.closing_travel.unwrap_or(self.drawer.threshold.max(48.0)));}
+            else if !close_tap {
+                let travel=drag.distance.unwrap_or(self.drawer.threshold.max(48.0));
+                let down=if drag.deadzone>0.0 {(delta.y-drag.deadzone).max(0.0)/(travel-drag.deadzone)} else {delta.y/travel};
+                self.gesture.drag(drag.start-down);
+            }
         }
         if matches!(event.phase,TouchPhase::Ended|TouchPhase::Canceled) {
             let canceled=event.phase==TouchPhase::Canceled || drag.canceled;
             if drag.real_arm {
                 if canceled {self.gesture.cancel();}
                 else {if close_tap {self.gesture.drag(0.0);} self.gesture.release();}
-            } else if !canceled && (close_tap || delta.y>=drag.closing_travel.unwrap_or(96.0)*0.5) {
-                self.state.pending=drag.context.zip(drag.region).map(|(context,region)|PendingClose {id:event.id,context,preferences:drag.preferences,safe:drag.safe,size:drag.size,region,window:drag.window});
+            } else if !canceled && (close_tap || {
+                let travel=drag.distance.unwrap_or(96.0);
+                delta.y>=drag.deadzone+(travel-drag.deadzone)*0.5
+            }) {
+                self.state.pending=drag.context.zip(drag.region).map(|(context,region)|PendingClose {id:event.id,start:drag.origin,display:drag.display,ui_scale:drag.ui_scale,context,preferences:drag.preferences,safe:drag.safe,size:drag.size,region,window:drag.window});
             }
             self.state.drag=None;
         } else {self.state.drag=Some(drag);}
@@ -347,9 +418,10 @@ struct CloseAdmission<'w,'s> {
     modding: Option<Res<'w,nvf_play::pipboy::item_mod::PipItemMod>>,
     data: Option<Res<'w,nvf_play::pipboy::data::DataState>>,
     model: super::pipboy_model::Bridge<'w,'s>,
+    ui_scale: Option<Res<'w,UiScale>>,
 }
 fn dispatch_close(mut state:ResMut<State>, admission:CloseAdmission, optional:Res<super::pipboy_options::Options>, mut out:MessageWriter<nvf_play::menu::MenuInput>) {
-    let Some(PendingClose {id,context,preferences,safe,size,region,window})=state.pending.take() else {return;};
+    let Some(PendingClose {id,start,display,ui_scale,context,preferences,safe,size,region,window})=state.pending.take() else {return;};
     if !state.admitted || !admission.input.allows_contact(Some(id))
         || admission.paused.as_ref().is_some_and(|p|p.0)
         || admission.physical.as_ref().is_some_and(|p|p.active)
@@ -363,8 +435,10 @@ fn dispatch_close(mut state:ResMut<State>, admission:CloseAdmission, optional:Re
         || admission.data.as_ref().is_some_and(|d|d.has_popup())
         || admission.script.as_ref().is_some_and(|s|s.loading() || s.rt.as_ref().is_some_and(|rt|rt.game.loading || matches!(rt.game.side_menu(),Some(fnv_game::game::menus::LOADING|fnv_game::game::menus::VATS)) || rt.game.top_menu().is_some_and(|code|code!=fnv_game::game::menus::INVENTORY)))
         || !admission.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|m.mode==nvf_play::menu::model::Mode::Inventory && m.quantity.is_none())
-        || admission.pip.as_deref().zip(admission.screen.as_deref()).is_none_or(|(p,s)|!context.matches(p,s))
-        || optional.dismissal()!=preferences || !admission.model.closing_region_unclaimed(region) {return;}
+        || admission.pip.as_deref().zip(admission.screen.as_deref()).is_none_or(|(p,s)|!context.matches(p,s,false))
+        || admission.ui_scale.as_ref().map_or(1.0,|s|s.0).to_bits()!=ui_scale
+        || display!=admission.model.dismissal_display()
+        || optional.policy()!=preferences || !region.contains(start) || !admission.model.closing_unclaimed(start) {return;}
     out.write(nvf_play::menu::MenuInput(nvf_play::menu::model::Command::Close));
 }
 

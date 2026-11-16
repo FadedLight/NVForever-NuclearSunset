@@ -977,8 +977,9 @@ struct FlatCrop {
     menu_scale: f32,
 }
 impl FlatCrop {
-    fn desired(scale: f32, zoom: f32, safe: crate::touch_safe_area::SafeInsets, window: Option<&Window>, ui_scale: f32) -> Self {
+    fn desired(scale: f32, zoom: f32, safe: crate::touch_safe_area::SafeInsets, window: Option<&Window>, ui_scale: f32, dismissal: touch_presentation::DismissalSpace) -> Self {
         let logical = window.map(|w| w.resolution.size());
+        let safe = dismissal.padding(safe,logical);
         Self { scale, dimensions: touch_presentation::flat_dimensions(zoom, logical, safe), safe, window: logical,
             physical: window.map(|w| (UVec2::new(w.physical_width(), w.physical_height()), w.scale_factor())),
             ui_scale, menu_scale: crate::interface::unit_scale() }
@@ -1002,6 +1003,7 @@ pub struct FlatPresentation<'w, 's> {
     crops: Query<'w, 's, &'static FlatCrop, With<FlatScreen>>,
     nodes: FlatNodes<'w, 's>,
     shades: Query<'w, 's, Entity, With<ScreenShade>>,
+    dismissal: Option<Res<'w, touch_presentation::DismissalSpace>>,
 }
 
 /// The scale of the image for the frame in use: 1 on the device; in the screen menu as
@@ -1054,9 +1056,10 @@ pub fn flat_screen(
     // A change of the image's scale needs the image node's crop made again.
     let zoom = sizing.as_deref().map_or(1.0, touch_presentation::PipBoySize::ratio);
     let safe = safe.as_deref().copied().unwrap_or_default();
-    let wanted = FlatCrop::desired(screen.scale, zoom, safe, windows.single().ok(), ui_scale.as_deref().map_or(1.0, |s| s.0));
+    let wanted = FlatCrop::desired(screen.scale, zoom, safe, windows.single().ok(), ui_scale.as_deref().map_or(1.0, |s| s.0), flat.dismissal.as_deref().copied().unwrap_or_default());
     let window = wanted.window;
     let dimensions = wanted.dimensions;
+    let safe = wanted.safe;
     let padding = window.map_or(UiRect::ZERO, |s| UiRect { left: Val::Vw(100.0 * safe.left / s.x), right: Val::Vw(100.0 * safe.right / s.x), top: Val::Vh(100.0 * safe.top / s.y), bottom: Val::Vh(100.0 * safe.bottom / s.y) });
     let stale = flat.crops.iter().next().is_some_and(|crop| *crop != wanted);
     match (want && wanted.valid() && !stale, flat.crops.iter().next()) {
@@ -1140,7 +1143,7 @@ pub fn flat_pointer(
     let zoom=sizing.as_deref().map_or(1.0,touch_presentation::PipBoySize::ratio);
     let safe=safe.as_deref().copied().unwrap_or_default();
     let ui=ui_scale.as_deref().map_or(1.0,|s|s.0);
-    let wanted=FlatCrop::desired(screen.scale,zoom,safe,window,ui);
+    let wanted=FlatCrop::desired(screen.scale,zoom,safe,window,ui,flat.dismissal.as_deref().copied().unwrap_or_default());
     let valid=wanted.valid() && crop==Some(&wanted) && computed.size().is_finite()
         && computed.size().min_element()>0.0 && at.translation.is_finite();
     if let Some(touch) = touch.as_deref_mut() {
@@ -1157,7 +1160,7 @@ pub fn flat_pointer(
             if !valid || pip.phase!=Phase::Up || pip.page!=Page::Data || pip.tab()>data::WORLD {return None;}
             let window=window?;
             let stamp=ProjectionStamp::new(window_ids.single().ok()?,window,&screen,false,
-                Presentation{safe,menu:crate::interface::unit_scale(),ui,size:zoom})
+                Presentation{safe:wanted.safe,menu:crate::interface::unit_scale(),ui,size:zoom})
                 .with_flat(flat_ids.single().ok()?,computed.size(),at.translation)?;
             let (centre,size,scale)=(at.translation,computed.size(),window.scale_factor());
             Projection::new(stamp,move|point|crop_point(point*scale,centre,size))

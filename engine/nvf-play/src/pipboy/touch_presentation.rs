@@ -1,6 +1,23 @@
 //! Independent device/flat presentation size; input follows the actual geometry.
 use bevy::prelude::*;
 
+/// Optional wrapper presentation request. No resource means the unchanged fit.
+/// This reserves real flat-screen space, not an overlay over selectable content.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DismissalSpace { left: bool, right: bool, close: bool }
+impl DismissalSpace {
+    pub fn new(left: bool, right: bool, close: bool) -> Self { Self {left,right,close} }
+    pub(super) fn padding(self, safe: crate::touch_safe_area::SafeInsets, window:Option<Vec2>) -> crate::touch_safe_area::SafeInsets {
+        // 8 outer + 48 target + 8 inner; actual system insets remain additive.
+        let mut padded=safe;
+        if self.left { padded.left += 64.; }
+        if self.right { padded.right += 64.; }
+        if self.close { padded.bottom += 64.; }
+        // A tiny window must retain its standard canvas rather than go blank.
+        if window.is_some_and(|size|(size-Vec2::new(padded.left+padded.right,padded.top+padded.bottom)).min_element()>=96.) {padded} else {safe}
+    }
+}
+
 const MIN: f32 = 0.85;
 const MAX: f32 = 1.35;
 pub const KEY: &str = "touch-pipboy-size-v1";
@@ -87,6 +104,7 @@ fn cancel_changed(
     safe: Option<Res<crate::touch_safe_area::SafeInsets>>,
     ui: Option<Res<UiScale>>,
     touch: Option<ResMut<super::touch_items::TouchItems>>,
+    dismissal: Option<Res<DismissalSpace>>,
     mut old: Local<Option<Option<PresentationStamp>>>,
 ) {
     let next = windows.single().ok().and_then(|window| {
@@ -94,6 +112,7 @@ fn cancel_changed(
         let physical = UVec2::new(window.physical_width(), window.physical_height());
         let density = window.scale_factor();
         let safe = safe.as_deref().copied().unwrap_or_default();
+        let safe = dismissal.as_deref().copied().unwrap_or_default().padding(safe,Some(logical));
         let menu_scale = crate::interface::unit_scale();
         let ui_scale = ui.as_deref().map_or(1.0, |scale| scale.0);
         if !logical.is_finite() || logical.min_element() <= 0.0 || physical.min_element() == 0

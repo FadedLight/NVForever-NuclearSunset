@@ -96,3 +96,6 @@ fn direct_arm_times_really_pose_forward_reverse_and_settled_model_variants() {
         }
     }
 }
+
+#[path = "arm_gesture_coupled_tests.rs"]
+mod coupled;

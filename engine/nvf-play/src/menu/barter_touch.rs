@@ -1,4 +1,6 @@
-//! Alternate mobile barter presentation; ordinary MenuInput remains the effect authority.
+//! Historical alternate barter presentation and the shared late admission policy.
+//! Production touch routing uses menu::normal_touch over the ordinary presentation;
+//! this module's original alternate-presentation tests remain historical coverage.
 use super::{model::{self, Category, Command, MenuModel, Mode, RowGuard, RowKey, Side, Units}, ActiveMenu, MenuInput};
 use bevy::{camera::RenderTarget, ecs::{entity::ContainsEntity, system::SystemParam}, input::touch::{TouchInput, TouchPhase}, prelude::*, window::PrimaryWindow};
 use fnv_sim::FormId;
@@ -262,7 +264,7 @@ fn action(target: Target, m: &MenuModel, quote: Option<Quote>, selection: Option
 }
 
 #[derive(SystemParam)]
-struct LiveAdmission<'w, 's> {
+pub(super) struct LiveAdmission<'w, 's> {
     bindings: Option<Res<'w, crate::bindings::Bindings>>,
     switch: Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     platform: Option<Res<'w, crate::pad::PlatformInputGate>>,
@@ -277,9 +279,15 @@ struct LiveAdmission<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static RenderTarget)>,
 }
 impl LiveAdmission<'_, '_> {
-    fn allows(&self, frame: Frame, id: u64) -> bool {
+    pub(super) fn allows(&self, frame: Frame, id: u64) -> bool {
+        self.allows_with_switch(frame,id,false)
+    }
+    pub(super) fn allows_consumed_return(&self,frame:Frame,id:u64)->bool {
+        self.allows_with_switch(frame,id,true)
+    }
+    fn allows_with_switch(&self,frame:Frame,id:u64,consumed_return:bool)->bool {
         self.bindings.as_ref().is_none_or(|b| b.device == crate::bindings::InputDevice::KeyboardMouse)
-            && self.switch.as_ref().is_none_or(|s| s.allows_actions())
+            && (consumed_return || self.switch.as_ref().is_none_or(|s| s.allows_actions()))
             && self.platform.as_ref().is_none_or(|g| g.allows_actions() && g.allows_touch(id))
             && !self.paused.as_ref().is_some_and(|p| p.0)
             && !self.fresh.as_ref().is_some_and(|f| f.0)
@@ -298,16 +306,19 @@ impl LiveAdmission<'_, '_> {
                     && camera.physical_target_size() == Some(UVec2::new(w.physical_width(), w.physical_height()))))
     }
 }
-fn menu_allows(script: Option<&crate::script::ScriptState>, creator: Option<&crate::creator::CreatorMenu>, m: &MenuModel) -> bool {
+pub(super) fn menu_allows(script: Option<&crate::script::ScriptState>, creator: Option<&crate::creator::CreatorMenu>, m: &MenuModel) -> bool {
+    game_allows(script.and_then(|s|s.rt.as_ref()).map(|rt|&rt.game),creator,m)
+}
+pub(super) fn game_allows(game:Option<&fnv_game::Game<'_>>,creator:Option<&crate::creator::CreatorMenu>,m:&MenuModel)->bool {
     if creator.is_some_and(crate::creator::CreatorMenu::is_open) { return false; }
-    script.and_then(|s| s.rt.as_ref()).is_none_or(|rt| {
+    game.is_none_or(|game| {
         use fnv_game::game::menus;
-        !rt.game.loading && !matches!(rt.game.side_menu(), Some(menus::LOADING | menus::VATS))
-            && rt.game.top_menu().is_none_or(|code| code == menus::BARTER
+        !game.loading && !matches!(game.side_menu(), Some(menus::LOADING | menus::VATS))
+            && game.top_menu().is_none_or(|code| code == menus::BARTER
                 || (code == menus::QUANTITY && m.quantity.is_some()))
             // ui_prompt is the engine's own Quantity publication, not a top
             // menu. Its clearing can trail apply_input by one frame.
-            && rt.game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)
+            && game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)
     })
 }
 #[derive(SystemParam)]
@@ -414,9 +425,20 @@ pub fn install(app: &mut App) {
         .add_systems(Update, dispatch.in_set(Dispatch).before(super::MenuSystems).run_if(resource_exists::<crate::sim::SimState>))
         .add_systems(Update, view::draw.after(super::MenuSystems));
     crate::settings::add_setting(app, crate::settings::Setting {
-        key: KEY, group: crate::pause::GROUP_MENUS, label: "Touch barter controls",
-        note: "Use two readable inventories and explicit trade confirmation. Drag to browse; tapping a row only selects it. Hardware input keeps the ordinary menus.",
+        key: KEY, group: crate::pause::GROUP_MENUS, label: "Touch in barter menus",
+        note: "Use finger taps and list dragging in the ordinary buying and selling menus. Dragging browses without choosing an item. Mouse, keyboard and controller controls stay available.",
         switches: "", get: |w| w.resource::<Options>().enabled,
-        set: |w, on| w.resource_mut::<Options>().enabled = on, slider: None,
+        set: |w, on| {
+            let changed = {
+                let mut options = w.resource_mut::<Options>();
+                let changed = options.enabled != on;
+                options.enabled = on;
+                changed
+            };
+            if changed {
+                w.resource_mut::<TouchBarter>().cancel();
+                if let Some(mut normal) = w.get_resource_mut::<super::normal_touch::NormalBarter>() { normal.cancel(); }
+            }
+        }, slider: None,
     });
 }

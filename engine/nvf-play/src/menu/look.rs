@@ -525,7 +525,9 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side, x0
             let row_h = heights[i];
             let row_y = y;
             y += row_h;
-            l.spawn((Button, RowButton(side, i), at(BAR_W, row_y, row_w, row_h))).with_children(|row| {
+            let mut entity=l.spawn((Button, RowButton(side, i), at(BAR_W, row_y, row_w, row_h)));
+            if let Some(identity)=super::normal_touch::RenderedRow::of(m,side,i) {entity.insert(identity);}
+            entity.with_children(|row| {
                 // [documented] The highlight box of the list that has the focus, one
                 // unit short of the row.
                 if m.focus == side && m.selected[side as usize] == i {

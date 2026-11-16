@@ -62,6 +62,7 @@
 
 pub mod barter;
 pub mod barter_touch;
+pub mod normal_touch;
 pub(crate) mod look;
 pub mod model;
 mod test_aid;
@@ -183,6 +184,7 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         barter_touch::install(app);
+        normal_touch::install(app);
         app.configure_sets(Update, WheelHoldSet.before(MenuSystems)).add_systems(Update, wheel_hold.in_set(WheelHoldSet));
         app.init_resource::<ActiveMenu>()
             .insert_resource(DevKeys::from_env())
@@ -881,7 +883,7 @@ fn apply_input(
     mut held: ResMut<PromptKeys>,
     after: Option<Res<crate::after_combat::AfterCombat>>,
     combat: Option<Res<crate::combat::Combat>>,
-    mut mobile_barter: barter_touch::Commits,
+    (mut mobile_barter, mut normal_barter): (barter_touch::Commits, normal_touch::Commits),
 ) {
     let mut script = script.map(|s| s.into_inner());
     let fighting = after.is_some_and(|a| a.fighting);
@@ -899,10 +901,14 @@ fn apply_input(
         if dropping > 0 {
             dropping -= 1;
             if let Command::CommitBarter(token) = cmd { mobile_barter.discard(token); }
+            if let Command::CommitNormalBarter(token) = cmd { normal_barter.discard(token); }
             continue;
         }
         let commands = if let Command::CommitBarter(token) = cmd {
             let Some(commands) = mobile_barter.resolve(token, m, &mut sim.world, script.as_deref()) else { continue };
+            commands
+        } else if let Command::CommitNormalBarter(token) = cmd {
+            let Some(commands) = normal_barter.resolve(token, m, &mut sim.world, script.as_deref()) else { continue };
             commands
         } else { [Some(cmd), None] };
         for cmd in commands.into_iter().flatten() {
@@ -1123,7 +1129,7 @@ fn draw(
         ..default()
     };
     if item_tiled {
-        commands.spawn((MenuRoot, screen.clone(), GlobalZIndex(100))).with_children(|root| {
+        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen.clone(), GlobalZIndex(100))).with_children(|root| {
             root.spawn(crate::tiles::menus::modal_sheet());
             // [design] Barter has no subtitle tile; keep the model's own refusal words.
             if matches!(m.mode, Mode::Barter(_)) {
@@ -1140,7 +1146,7 @@ fn draw(
             *forms = play.as_ref().map(|p| crate::pipboy::stats::read::Forms::new(p.lo, p.schema));
         }
         let info = m.selected_row(m.focus).map(|r| crate::pipboy::items::info_of(r, combat.as_deref(), sim.bypass_change_detection(), forms.as_mut(), script.as_mut().map(|s| s.bypass_change_detection())));
-        commands.spawn((MenuRoot, screen.clone(), GlobalZIndex(100))).with_children(|root| {
+        commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen.clone(), GlobalZIndex(100))).with_children(|root| {
             look::spawn(root, m, note.as_deref(), info.as_ref(), kit, data.as_deref(), &mut images, bc, &glyphs);
         });
     }
@@ -1158,12 +1164,12 @@ fn draw(
                 _ => (None, None),
             };
             let extra = look::quantity_line(price, weight, q.amount);
-            commands.spawn((MenuRoot, screen, GlobalZIndex(101))).with_children(|root| {
+            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen, GlobalZIndex(101))).with_children(|root| {
                 look::spawn_quantity(root, q, &words, kit, data.as_deref(), &mut images, bc, &glyphs, extra.as_deref());
             });
         }
         (crate::tiles::menus::Modal::Sheet, _) => {
-            commands.spawn((MenuRoot, screen, GlobalZIndex(101))).with_children(|root| {
+            commands.spawn((MenuRoot, normal_touch::RenderedMenu::of(m), screen, GlobalZIndex(101))).with_children(|root| {
                 root.spawn(crate::tiles::menus::modal_sheet());
             });
         }

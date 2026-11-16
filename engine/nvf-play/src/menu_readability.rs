@@ -34,7 +34,15 @@ pub fn register(app: &mut App, group: &'static str) {
     settings::add_setting(app, Setting::slider("barter-menu-size-v1", group, "Buying and selling size",
         "Text and row size in the normal buying and selling menus. Other menus keep their own sizes.",
         Slider::choice(21, |w| part(w.resource::<MenuReadability>().barter),
-            |w,v| w.resource_mut::<MenuReadability>().barter = of_part(v), show)));
+            |w,v| {
+                let next = of_part(v);
+                let previous = w.resource::<MenuReadability>().size(MenuKind::Barter);
+                w.resource_mut::<MenuReadability>().barter = next;
+                if previous != next
+                    && let Some(mut touch) = w.get_resource_mut::<crate::menu::normal_touch::NormalBarter>() {
+                    touch.cancel();
+                }
+            }, show)));
     settings::add_setting(app, Setting::slider("repair-menu-size-v1", group, "Repair menu size",
         "Text and row size in repair menus. Buying, selling and workbenches keep their own sizes.",
         Slider::choice(21, |w| part(w.resource::<MenuReadability>().repair),

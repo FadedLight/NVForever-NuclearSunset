@@ -149,16 +149,19 @@ The current development source adds direct dragging and two-finger pinch on the
 Pip-Boy's world and local maps. Fast travel keeps its usual eligibility checks and
 confirmation.
 
-Android's Mobile > Inventory and quick access section offers **Touch barter controls**
+Android's Mobile > Inventory and quick access section offers **Touch in barter menus**
 and **Touch repair and weapon mods**. On desktop, they appear under Gameplay >
-Inventory menus. In barter, tap a row to select it, choose a quantity for the
-basket, review the prices and caps, then Accept. Cancel preserves carried items and
-caps. Repair and weapon-mod lists also separate selection from confirmation;
+Inventory menus. Barter keeps its ordinary native or hand-built presentation.
+Drag either inventory list to browse without choosing an item; a stationary tap
+uses its usual row and quantity actions. Review the prices and caps before Accept.
+Cancel preserves carried items and caps. Repair and weapon-mod lists retain their
+separate touch presentation while their ordinary-menu adapters are in development;
 the existing eligibility rules decide which actions can be confirmed.
 
-Hardware input restores the ordinary menu presentation. A first return touch can
-restore the touch sheet without activating an item. These presentations still need
-phone acceptance for readability, reach and native-menu coexistence.
+Mouse, keyboard and controller input keep their existing menu actions. A first
+return touch restores touch ownership without activating an item. The corrected
+ordinary-barter source and its new regression controls remain uncompiled and unrun.
+Phone acceptance for readability, reach and native-menu coexistence remains open.
 
 [qualification] R31 tested merge `86e010a5` of source `79891b03` with main
 `6692d2da`, with a tree identical to that source. It passed 178 asset and 2,067 play

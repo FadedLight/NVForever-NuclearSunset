@@ -213,6 +213,10 @@ pub(crate) struct MenuInputs<'w, 's> {
     click: ResMut<'w, MessageClick>,
     active: Option<Res<'w, crate::menu::ActiveMenu>>,
     commands: MessageWriter<'w, crate::menu::MenuInput>,
+    normal: Option<ResMut<'w, crate::menu::normal_touch::NormalBarter>>,
+    normal_event: Local<'s, Option<crate::menu::normal_touch::NativeTap>>,
+    normal_emitted: Local<'s, bool>,
+    normal_gate: crate::menu::normal_touch::NativeAdmission<'w,'s>,
     /// A press on the prompt's meter, held: the amount follows the pointer.
     dragging: Local<'s, bool>,
     /// T15b: the Wait / Sleep menu, and its commands.
@@ -261,6 +265,21 @@ pub(crate) struct MenuInputs<'w, 's> {
 }
 
 impl MenuInputs<'_, '_> {
+    /// Only the actual pointer click belonging to this owned native End may
+    /// resolve its token. Script/key clicks keep their original command path.
+    fn normal_pointer_commands(&mut self, ui:&fnv_ui::Ui, click:&fnv_ui::input::Click, commands:&[crate::menu::model::Command])->bool {
+        use crate::menu::{model::Command,MenuInput};
+        let Some(n)=*self.normal_event else{return false};
+        if !matches!(click.by,fnv_ui::input::By::Pointer){return false}
+        let crate::menu::normal_touch::Source::Tile(menu,_) = n.source else{return false};
+        if *self.normal_emitted || ui.root_of(click.tile)!=menu {return true}
+        if let Some(token)=self.normal.as_ref().and_then(|state|state.native_commands(n,commands)) {
+            self.commands.write(MenuInput(Command::CommitNormalBarter(token)));
+            *self.normal_emitted=true;
+        }
+        true
+    }
+
     fn quantity(&self) -> Option<crate::menu::model::Quantity> {
         self.active.as_ref().and_then(|a| a.0.as_ref()).and_then(|m| m.quantity)
     }
@@ -502,6 +521,7 @@ impl MenuInputs<'_, '_> {
             }
             ContainerTile::Focus(_) | ContainerTile::Other => return Some(()),
         };
+        if self.normal_pointer_commands(ui,c,&commands){return Some(())}
         if let Some(guard) = guard {
             self.commands.write(MenuInput(Command::Expect(guard)));
         }
@@ -701,7 +721,9 @@ impl MenuInputs<'_, '_> {
             };
             clicked = true;
             info!("tiles: {} {cmd:?} on its tiles", super::menus::QUANTITY_MENU);
-            self.commands.write(MenuInput(cmd));
+            if !self.normal_pointer_commands(ui,c,&[cmd]) {
+                self.commands.write(MenuInput(cmd));
+            }
         }
         // A drag: the amount under the pointer while the press holds.
         if let (true, false, Some(q)) = (*self.dragging, clicked, q) {
@@ -859,6 +881,8 @@ pub(crate) fn feed(
     others: Others,
 ) {
     let Others { paused, page, mut stats, mut inventory, mut map, repair, modding, mut item_mod, pip } = others;
+    *inputs.normal_event=None;
+    *inputs.normal_emitted=false;
     let Some(rt) = script.rt.as_mut() else { return };
     if rt.game.ui_files.is_none() {
         return;
@@ -1028,11 +1052,23 @@ pub(crate) fn feed(
         return;
     }
     // The aid's pointer, else the cursor in the window.
-    let at = cursor();
+    let native=inputs.normal.as_mut().and_then(|state|state.take_native());
+    if let Some(n)=native {
+        let valid=aid_at.is_none() && !aid_click
+            && inputs.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|
+            inputs.normal_gate.allows(n,m,&rt.game)
+                && inputs.barter.as_ref().is_some_and(|tiles|
+                    tiles.normal_touch_hit(&rt.game.ui_tree,m,n.point,n.frame.size)
+                        .is_some_and(|h|h.source==n.source && crate::menu::normal_touch::same_target(h.target,n.target))))
+            && matches!(n.source,crate::menu::normal_touch::Source::Tile(menu,_) if taking.contains(&menu));
+        if valid {*inputs.normal_event=Some(n);}
+        else if let Some(state)=inputs.normal.as_mut(){state.finish_native(n.token,false);}
+    }
+    let at = (*inputs.normal_event).map(|n|to_menu_units(n.point,n.frame.size,anchor)).or_else(cursor);
     let mut input = Input {
         at,
-        press: aid_click || devices.mouse.just_pressed(MouseButton::Left),
-        shift: devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight),
+        press: inputs.normal_event.is_some() || aid_click || devices.mouse.just_pressed(MouseButton::Left),
+        shift: inputs.normal_event.is_none() && (devices.keys.pressed(KeyCode::ShiftLeft) || devices.keys.pressed(KeyCode::ShiftRight)),
         ..Input::default()
     };
     // The tutorial menu's triggers stand for its own keys (`crate::pad::menu_buttons`), which
@@ -1061,6 +1097,10 @@ pub(crate) fn feed(
     let over = rt.game.ui_pointer.active(&rt.game.ui_tree);
     let ui = &rt.game.ui_tree;
     let slider = inputs.follow(ui, &report, at, over, held, input.shift, &physical, tutorial);
+    if let Some(n)=*inputs.normal_event
+        && let Some(state)=inputs.normal.as_mut() {
+        state.finish_native(n.token,*inputs.normal_emitted);
+    }
     if let (Some(menu), Some(v)) = (dialog_menu, inputs.view_input.as_deref_mut()) {
         let mut steps = 0;
         super::dialog_menu::follow(ui, &report, &physical, menu, inputs.dialog.as_ref().and_then(|d| d.list()), v, &mut steps);

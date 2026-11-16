@@ -2,7 +2,7 @@
 //! The leaf bridges never read a second raw stream or mutate physical input state.
 use super::*;
 use bevy::{camera::{NormalizedRenderTarget, RenderTarget}, ecs::{entity::ContainsEntity, system::SystemParam}, input::touch::Touches, ui::DefaultUiCamera};
-use nvf_play::{maintenance_touch, menu::{barter_touch, model::Mode}, pipboy::{Page, Phase}};
+use nvf_play::{maintenance_touch, menu::{barter_touch, normal_touch, model::Mode}, pipboy::{Page, Phase}};
 
 const MAX_EDGES: usize = 128;
 const MAX_IDS: usize = 32;
@@ -152,7 +152,7 @@ impl Cameras<'_, '_> {
 fn replay(
     mut batch: ResMut<Batch>, state: Res<TouchState>, sources: Sources, gates: Gates, cameras: Cameras,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>, touches: Res<Touches>,
-    mut barter: barter_touch::Bridge, mut maintenance: maintenance_touch::Bridge,
+    mut barter: normal_touch::Bridge, mut maintenance: maintenance_touch::Bridge,
     mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>, mut editor: ResMut<super::entrypoints::Session>,
     mut modal: ResMut<super::modal::Capture>,
     (mut vats, mut model): (super::vats_targeting::Bridge, super::pipboy_model::Bridge),
@@ -180,8 +180,9 @@ fn replay(
     editor.publish(&mut ownership);
     modal.publish(&mut ownership, neutral);
     maintenance.observe_neutral(neutral);
+    barter.observe_neutral(neutral);
     if let Some((stamp, window, camera)) = context {
-        barter.prepare(barter_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
+        barter.prepare(normal_touch::Frame { window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
             ui_scale: stamp.scale, density: stamp.density, admitted: allowed && current == Some(Kind::Barter), fresh, neutral });
         maintenance.prepare(Some(maintenance_touch::Context::from_window(stamp.window, camera, window, stamp.safe, stamp.scale)),
             allowed && !fresh && matches!(current, Some(Kind::Repair | Kind::Mod | Kind::Vendor)));
@@ -190,16 +191,20 @@ fn replay(
     else if consumed && gates.allows() { barter.restore_touch(); maintenance.restore_touch(); }
     let mut events = std::mem::take(&mut batch.events);
     for event in &events {
+        if consumed && allowed && !state.hardware_intent && current==Some(Kind::Barter) {
+            barter.consume_touch_return(event);
+            continue;
+        }
         // Physical hardware or the already-consumed selector edge wins this batch.
         if !allowed || fresh || state.hardware_intent { continue; }
-        if current == Some(Kind::Barter) || barter.captures_touch(event.id) { barter.event(event); }
+        if current == Some(Kind::Barter) || barter.captures_touch(event.window,event.id) { barter.event(event); }
         else { maintenance.event(event, gates.platform.as_ref().is_none_or(|g| g.allows_touch(event.id))); }
     }
     events.clear(); batch.events = events;
     for id in batch.ids.iter().flatten() { ownership.block(*id); }
     let primary = windows.single().ok().map(|(entity,_)|entity);
     for touch in touches.iter().chain(touches.iter_just_pressed()).chain(touches.iter_just_released()).chain(touches.iter_just_canceled()) {
-        if barter.captures_touch(touch.id()) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()
+        if primary.is_some_and(|w|barter.captures_touch(w,touch.id())) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()
             || vats.owns(touch.id()) || primary.is_some_and(|window|model.owns(window,touch.id())) { ownership.block(touch.id()); }
     }
     if batch.overflow { ownership.quarantine_overflow(); }
@@ -210,6 +215,7 @@ fn replay(
 pub(super) fn install(app: &mut App) {
     app.add_plugins(maintenance_touch::MaintenanceTouchPlugin)
         .init_resource::<barter_touch::Options>().init_resource::<barter_touch::TouchBarter>()
+        .init_resource::<normal_touch::NormalBarter>()
         .init_resource::<Batch>().init_resource::<nvf_play::ui_pointer::TouchUiCapture>()
         .add_systems(PreUpdate, replay.after(InputSystems).after(nvf_play::pad::InputSwitchSystems::Switch)
             .after(nvf_play::pad::PlatformInputSystems::Remember).after(super::TouchInputSystems)

@@ -586,6 +586,8 @@ pub enum Command {
     /// Internal one-shot touch envelope. Only menu::apply_input may resolve it
     /// against its exact live barter guard; the plain model treats it as a no-op.
     CommitBarter(u64),
+    /// One-shot normal-presentation touch, resolved only by menu::apply_input.
+    CommitNormalBarter(u64),
     Up,
     Down,
     PageUp,
@@ -1493,7 +1495,7 @@ impl MenuModel {
                     }
                 }
             }
-            Command::CommitBarter(_) | Command::Amount(_) | Command::AmountStep(_) | Command::AmountOk | Command::AmountCancel => {}
+            Command::CommitBarter(_) | Command::CommitNormalBarter(_) | Command::Amount(_) | Command::AmountStep(_) | Command::AmountOk | Command::AmountCancel => {}
             _ => {
                 // The player's Take All Confirmation tweak: the first Take All asks, the next
                 // does it; anything else takes the question back [design: docs/design/tweaks.md].

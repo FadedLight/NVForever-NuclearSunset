@@ -1,7 +1,7 @@
 // Actual parent reader and deferred menu-sheet replay. No second raw reader.
 mod menu_sheet_router_controls {
     use super::*;
-    use nvf_play::{menu::{self, barter_touch, model::{Command, MenuModel}}, ui_pointer::{self, PointerState}};
+    use nvf_play::{menu::{self, barter_touch, normal_touch, model::{Command, MenuModel}}, ui_pointer::{self, PointerState}};
 
     #[derive(Resource, Default)]
     struct Seen { envelopes: usize, underlay_presses: usize }
@@ -9,7 +9,7 @@ mod menu_sheet_router_controls {
     struct Underlay;
     fn observe(mut input: MessageReader<menu::MenuInput>,
         buttons: Query<&PointerState, (With<Underlay>, Changed<PointerState>)>, mut seen: ResMut<Seen>) {
-        seen.envelopes += input.read().filter(|input| matches!(input.0, Command::CommitBarter(_))).count();
+        seen.envelopes += input.read().filter(|input| matches!(input.0, Command::CommitNormalBarter(_))).count();
         seen.underlay_presses += buttons.iter().filter(|state| **state == PointerState::Pressed).count();
     }
     fn authored_barter() -> (nvf_play::sim::SimState, MenuModel) {
@@ -47,28 +47,46 @@ mod menu_sheet_router_controls {
         let (mut app,window)=default_menu_touch_scene(nvf_play::pipboy::Page::Items,false);
         let camera=app.world().resource::<nvf_play::pipboy::PipBoyScreen>().camera;
         app.world_mut().resource_mut::<nvf_play::pipboy::PipBoy>().phase=nvf_play::pipboy::Phase::Down;
+        // The ordinary menu opens over an existing dialogue. Do not install
+        // MenuPlugin, insert barter, then exit Menu and let close_menu remove it.
+        app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(if dialogue {nvf_play::PlayState::Dialogue}else{nvf_play::PlayState::Menu});
+        app.world_mut().run_schedule(bevy::state::state::StateTransition);
         let (sim,m)=authored_barter();app.insert_resource(sim).insert_resource(menu::ActiveMenu(Some(m)));
-        barter_touch::install(&mut app);
+        app.world_mut().entity_mut(camera).insert(bevy::ui::DefaultUiCamera);
+        app.insert_resource(nvf_play::Location {world:0,interior:None})
+            .init_resource::<nvf_play::pause::PlayClock>()
+            .init_resource::<nvf_play::pad::PadGlyphs>().init_resource::<Assets<Image>>()
+            .add_message::<nvf_play::OpenContainer>().add_message::<nvf_play::pickpocket::OpenPickpocket>()
+            .add_message::<nvf_play::RefChanged>().add_message::<nvf_play::ItemUsed>()
+            .add_message::<nvf_play::ui_sounds::UiSound>().add_message::<nvf_play::crime::ItemsTaken>()
+            .add_message::<nvf_play::pickpocket::Pickpocketed>()
+            .add_plugins(menu::MenuPlugin);
+        app.add_systems(PostUpdate,(bevy::ui::update::update_clipping_system,ApplyDeferred)
+            .chain().after(bevy::ui::ui_layout_system));
         let row=app.world().resource::<nvf_play::settings::Settings>().index(barter_touch::KEY).unwrap();
         if !(app.world().resource::<nvf_play::settings::Settings>().list()[row].get)(app.world()) {
             assert_eq!(nvf_play::settings::flip(app.world_mut(),row),Some(true));
         }
         app.insert_resource(nvf_play::dialogue_touch::TouchDialogue {enabled:true,..default()});
-        app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(if dialogue {nvf_play::PlayState::Dialogue}else{nvf_play::PlayState::Menu});
         app.init_resource::<Seen>().init_resource::<bevy::ui::UiStack>().add_plugins(ui_pointer::UiPointerPlugin)
-            .add_systems(Update,observe.after(barter_touch::Dispatch));
+            .add_systems(Update,observe.after(normal_touch::Dispatch));
         for _ in 0..5 {app.update();}
-        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(app.world().resource::<normal_touch::NormalBarter>().visible());
+        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible(),"historical replacement presentation is inactive");
         assert_eq!(*app.world().resource::<State<nvf_play::PlayState>>().get(),if dialogue {nvf_play::PlayState::Dialogue}else{nvf_play::PlayState::Menu});
         (app,window,camera)
     }
     fn painted_footer(app:&mut App)->Vec2 {
         let world=app.world_mut();
         let mut q=world.query::<(Entity,&Text)>();
-        let label=q.iter(world).find_map(|(entity,text)|(text.0=="Choose amount").then_some(entity)).expect("real alternate sheet label");
-        let tile=world.get::<ChildOf>(label).unwrap().parent();
+        let label=q.iter(world).find_map(|(entity,text)|text.0.starts_with("Authored supplies").then_some(entity))
+            .expect("real ordinary menu row label");
+        let mut tile=label;
+        while world.get::<ui_pointer::Button>(tile).is_none() {
+            tile=world.get::<ChildOf>(tile).expect("painted row has its actual button ancestor").parent();
+        }
         let node=world.get::<ComputedNode>(tile).unwrap();
-        assert!(node.size().min_element()>=48.,"actual laid-out footer has usable hit dimensions");
+        assert!(node.size().min_element()>=48.,"actual laid-out ordinary row has usable hit dimensions");
         let physical=world.get::<bevy::ui::UiGlobalTransform>(tile).unwrap().translation;
         let mut windows=world.query_filtered::<&Window,With<PrimaryWindow>>();
         physical/windows.single(world).unwrap().scale_factor()
@@ -78,10 +96,14 @@ mod menu_sheet_router_controls {
             Node {position_type:PositionType::Absolute,left:px(point.x-24.),top:px(point.y-24.),width:px(48.),height:px(48.),..default()})).id();
         for _ in 0..3 {app.update();}
         assert!(app.world().get::<ComputedNode>(button).unwrap().size().min_element()>=48.);
-        let mut stack=app.world_mut().resource_mut::<bevy::ui::UiStack>();
         // Deliberately leave the real underlay focus target in the real UI stack:
         // ownership must suppress its touch, not rely on an opaque sheet's z-order.
-        stack.uinodes=vec![button];stack.partition.clear();stack.partition.push(0..1);
+        let mut q=app.world_mut().query_filtered::<Entity,With<Node>>();
+        let mut nodes:Vec<_>=q.iter(app.world()).filter(|&e|e!=button).collect();
+        nodes.push(button);
+        let mut stack=app.world_mut().resource_mut::<bevy::ui::UiStack>();
+        stack.uinodes=nodes;stack.partition.clear();
+        let n=stack.uinodes.len();stack.partition.push(0..n);
         button
     }
     fn raw_tap(app:&mut App,window:Entity,id:u64,point:Vec2){
@@ -113,7 +135,7 @@ mod menu_sheet_router_controls {
         let (mut app,window,camera)=scene_with_sheet(false);let point=painted_footer(&mut app);
         app.world_mut().resource_mut::<menu::ActiveMenu>().0=None;
         for _ in 0..5 {app.update();}
-        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(!app.world().resource::<normal_touch::NormalBarter>().visible());
         let button=underlay(&mut app,camera,point);
         touch(&mut app,window,4101,TouchPhase::Started,point.x,point.y);app.update();
         assert!(app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4101));
@@ -134,7 +156,7 @@ mod menu_sheet_router_controls {
         assert_eq!(app.world().resource::<Seen>().envelopes,0);
         assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4102),"release frame remains quarantined");
         for _ in 0..6 {app.update();}
-        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(app.world().resource::<normal_touch::NormalBarter>().visible());
         let point=painted_footer(&mut app);raw_tap(&mut app,window,4103,point);
         assert_eq!(app.world().resource::<Seen>().envelopes,1,"fresh contact after actual neutral recovers");
         assert!(app.world().resource::<TouchState>().contacts.is_empty());
@@ -149,15 +171,15 @@ mod menu_sheet_router_controls {
         app.world_mut().write_message(MouseButtonInput {window,button:MouseButton::Left,state:ButtonState::Pressed});
         app.update();
         assert!(app.world().resource::<TouchState>().hardware_intent);
-        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(!app.world().resource::<normal_touch::NormalBarter>().visible());
         assert_eq!(*app.world().get::<PointerState>(button).unwrap(),PointerState::Pressed);
         assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
         app.world_mut().write_message(MouseButtonInput {window,button:MouseButton::Left,state:ButtonState::Released});
         app.update();app.update();
         assert_eq!(app.world().resource::<Seen>().underlay_presses,1);
-        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(!app.world().resource::<normal_touch::NormalBarter>().visible());
         raw_tap(&mut app,window,4110,point);
-        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(app.world().resource::<normal_touch::NormalBarter>().visible());
         assert_eq!(app.world().resource::<Seen>().envelopes,0,"return finger performs no barter action");
         assert_eq!(app.world().resource::<Seen>().underlay_presses,1,"return finger cannot click old underlay");
         for _ in 0..3 {app.update();}
@@ -174,7 +196,7 @@ mod menu_sheet_router_controls {
         app.world_mut().resource_mut::<Bindings>().automatic_input_switching=true;
         nvf_play::bindings::set_device(app.world_mut(),nvf_play::bindings::InputDevice::Controller);
         for _ in 0..3 {app.update();}
-        assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(!app.world().resource::<normal_touch::NormalBarter>().visible());
         touch(&mut app,window,4112,TouchPhase::Started,point.x,point.y);app.update();
         assert_eq!(app.world().resource::<Bindings>().device,nvf_play::bindings::InputDevice::KeyboardMouse);
         assert!(!app.world().resource::<nvf_play::pad::TouchDeviceSwitch>().allows_actions());
@@ -183,7 +205,7 @@ mod menu_sheet_router_controls {
         assert_eq!(app.world().resource::<Seen>().envelopes,0);
         touch(&mut app,window,4112,TouchPhase::Ended,point.x,point.y);app.update();
         for _ in 0..4 {app.update();}
-        assert!(app.world().resource::<barter_touch::TouchBarter>().visible());
+        assert!(app.world().resource::<normal_touch::NormalBarter>().visible());
         let point=painted_footer(&mut app);raw_tap(&mut app,window,4113,point);
         assert_eq!(app.world().resource::<Seen>().envelopes,1,"next fresh finger acts, with no second restore tap");
         assert_eq!(app.world().resource::<Seen>().underlay_presses,0);
@@ -198,7 +220,7 @@ mod menu_sheet_router_controls {
             else {app.insert_resource(nvf_play::pause::Paused(true));}
             touch(&mut app,window,4114,TouchPhase::Ended,point.x,point.y);app.update();
             assert_eq!(app.world().resource::<Seen>().envelopes,0);
-            assert!(!app.world().resource::<barter_touch::TouchBarter>().visible());
+            assert!(!app.world().resource::<normal_touch::NormalBarter>().visible());
             if editor {
                 assert!(app.world().resource::<Layout>().editor.is_some());
                 let cancel=layout::editor_rect(10,Vec2::splat(1000.)).center();

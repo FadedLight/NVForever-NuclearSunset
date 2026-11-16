@@ -86,8 +86,8 @@ impl State {
 pub(super) fn install(app: &mut App) {
     app.init_resource::<State>();
     crate::settings::add_choice_list(app, crate::settings::Setting {
-        key: SETTING_KEY, group: "Touch", label: "V.A.T.S. body selection",
-        note: "Off uses the existing controls. Tap or hold a body part to queue once. Hold fills in 0.45 seconds. Touch Fire then confirms queued attacks.",
+        key: SETTING_KEY, group: "Touch", label: "Classic V.A.T.S. body selection",
+        note: "Classic style only. Mark and Fire keeps its controls. Tap or hold a body part to queue once; hold takes 0.45 seconds. Off uses existing controls. Touch Fire confirms queued attacks.",
         switches: "", get: |_| false, set: |_, _| {}, slider: None,
     }, crate::settings::ChoiceList {
         names: |_| [Mode::Off, Mode::Tap, Mode::Hold].iter().map(|m| m.name().to_owned()).collect(),
@@ -282,14 +282,14 @@ pub(super) struct Consumer<'w, 's> {
 }
 #[derive(Clone, Copy)]
 pub(super) struct Selection { pub actor: u32, pub part: Option<u8>, pub queue: bool }
-pub(super) struct Applied { pub selection: Option<Selection>, pub fire: bool }
+pub(super) struct Applied { pub selection: Option<Selection>, pub fire: bool, pub hold_camera: bool }
 impl Consumer<'_, '_> {
     pub(super) fn refuse(&mut self) { if let Some(s) = self.state.as_mut() { s.cancel(); } }
     pub(super) fn queued(&mut self, success: bool) {
         if let Some(s) = self.state.as_mut() { s.queued = Some(success); }
     }
     pub(super) fn take(&mut self, v: &VatsMode, phys: &mut PhysState, keys: &Keys) -> Applied {
-        let empty = || Applied { selection: None, fire: false };
+        let empty = || Applied { selection: None, fire: false, hold_camera: false };
         let Some(s) = self.state.as_mut() else { return empty() };
         if !s.active() || v.phase != Phase::Marking || v.style != VatsStyle::Classic || v.pad
             || s.stay != Some(Stay::of(v)) || keys.mark || keys.accept || keys.toggle || keys.unmark || keys.special || keys.target_step != 0 || keys.part_step != 0 {
@@ -302,14 +302,14 @@ impl Consumer<'_, '_> {
         if let Some(r) = request {
             if r.geometry != g || r.stay != Stay::of(v) { s.cancel(); return empty(); }
             let c = r.contact;
-            if c.fire { return Applied { selection: None, fire: !v.queue.is_empty() }; }
+            if c.fire { return Applied { selection: None, fire: !v.queue.is_empty(), hold_camera: false }; }
             let body = c.body.or_else(|| self.projection.hit(g, c.points[0], phys, v));
             if let Some(body) = body.filter(|b| c.points[..c.len].iter().all(|at| self.projection.hit(g, *at, phys, v) == Some(*b))) {
                 if let Some(contact) = s.contact.as_mut().filter(|old| old.id == c.id) {
                     contact.body = Some(body); contact.points[0] = contact.at; contact.len = 1;
                     s.highlight = Some(body);
                 }
-                return Applied { selection: Some(Selection { actor: body.actor, part: body.part, queue: true }), fire: false };
+                return Applied { selection: Some(Selection { actor: body.actor, part: body.part, queue: true }), fire: false, hold_camera: s.contact.is_some() };
             }
             s.cancel(); return empty();
         }
@@ -318,7 +318,7 @@ impl Consumer<'_, '_> {
             if let Some(body) = body.filter(|b| c.points[..c.len].iter().all(|at| self.projection.hit(g, *at, phys, v) == Some(*b))) {
                 c.body = Some(body); c.points[0] = c.at; c.len = 1;
                 s.contact = Some(c); s.highlight = Some(body);
-                return Applied { selection: Some(Selection { actor: body.actor, part: body.part, queue: false }), fire: false };
+                return Applied { selection: Some(Selection { actor: body.actor, part: body.part, queue: false }), fire: false, hold_camera: true };
             }
             s.cancel();
         }

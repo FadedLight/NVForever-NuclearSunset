@@ -1521,7 +1521,7 @@ fn update(
             }
             if direct.fire { keys.accept = true; }
             let chosen = if v.style == VatsStyle::Classic {
-                classic_frame(v, &keys, &combat, script.as_deref_mut(), &mut sim, &mut phys, &mut player, &control, real.delta_secs(), &mut sounds)
+                classic_frame(v, &keys, &combat, script.as_deref_mut(), &mut sim, &mut phys, &mut player, &control, real.delta_secs(), !direct.hold_camera || direct_part.is_none(), &mut sounds)
             } else {
                 None
             };
@@ -2066,6 +2066,7 @@ fn classic_frame(
     player: &mut Player,
     control: &PlayerControl,
     real_dt: f32,
+    follow_target: bool,
     sounds: &mut Sounds,
 ) -> Option<(u32, usize)> {
     let eye = player.eye();
@@ -2149,8 +2150,9 @@ fn classic_frame(
         }
         v.classic.part = v.classic.part.min(parts - 1);
     }
-    // The view turns onto the target (vats-classic.md §5).
-    if let Some(p) = phys.world.actor_aim_point(actor) {
+    // Keep a validated body contact under its finger until the terminal edge.
+    // Ordinary selection resumes target follow (vats-classic.md §5).
+    if let Some(p) = phys.world.actor_aim_point(actor).filter(|_| follow_target) {
         let (heading, pitch) = Crosshair::aim_at(control.crosshair.as_ref(), eye, p);
         player.heading = classic::ease_angle(player.heading, heading, classic::TURN_RATE, real_dt);
         player.pitch = classic::ease_angle(player.pitch, pitch, classic::TURN_RATE, real_dt);

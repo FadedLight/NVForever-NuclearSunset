@@ -2,7 +2,7 @@
 
 [design] An independently saved `touch-vats-targeting-v1` choice offers Off (the
 existing controls), Tap, and Hold. Off is the compatibility default. This setting
-does not enable the separate double-tap gesture that enters VATS. Dead Eye,
+does not enable the separate double-tap gesture that enters VATS. Mark and Fire (the default style),
 physical mouse/keyboard and controller selection retain their existing behavior.
 
 [documented: engine/nvf-play/src/vats_mode.rs, tiles/vats_menu.rs, hitvol.rs]
@@ -55,3 +55,24 @@ existing post-selector restore policy. Only the existing menu-sheet publisher
 adds those owned IDs to the UI mask. A later fresh tap needs no extra idle frame.
 The progress caption updates from the user's live HUD colour; it introduces no
 separate colour preference or fixed amber palette.
+
+[design] During a validated live body contact, Classic target-follow does not turn
+the player camera onto the selected actor. That automatic turn would move the
+body away from a stationary finger before its Tap release or Hold deadline. The
+existing view follow resumes on release, cancel or refused current-ray validation.
+Actor movement, changed part/camera/projection and ordinary hardware gates still
+require the current ray to meet the same live body. This does not freeze actors or
+ignore camera movement from another source. Off remains the saved default; the
+setting label/note states Classic only. Mark and Fire retains its existing input
+policy and does not gain direct body targeting in this correction.
+
+[design] Five additional authored App cases pair the production place_camera and
+TransformPlugin with the existing posed-capsule fixture, real camera rays and VATS
+update. These are separate from the ten original static-camera cases. Baseline
+and candidate use identical case bytes. All new cases are uncompiled/unrun; no
+wrapper/phone pass or cause of the reported device failure is inferred.
+
+[design] A current-ray contact rejected by actual SimState present/barred admission
+releases camera follow in that same update. Preview-only rejection occurs after
+classic_frame in the existing update order; its refused contact releases follow
+on the next frame. No duplicated target/AP/preview legality rules are introduced.

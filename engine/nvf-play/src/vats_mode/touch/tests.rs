@@ -388,3 +388,5 @@ fn existing_feedback_updates_to_live_hud_palette_without_replacing_geometry() {
     assert_eq!(colour.0, crate::interface::amber(255.0));
     assert_eq!(colour.0, Color::srgb(41.0 / 255.0, 117.0 / 255.0, 233.0 / 255.0));
 }
+
+include!("live_camera_tests.rs");

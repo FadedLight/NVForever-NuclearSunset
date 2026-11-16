@@ -155,6 +155,16 @@ pub(crate) fn install(app: &mut App) {
         switches: "",
         get: |_|false,set:|_,_|{},slider:None }, ChoiceList { names: |_|vec!["Select then confirm".into(),"Direct tap".into()],
             chosen:mode,pick:set_mode,save:mode,load:set_mode,ask_keep:false });
+    // These rows configure the enhanced consumer only. Keep their stored requests
+    // and normal INI loaders while the page explains why they cannot apply now.
+    for key in ["dialogue-choice-text-size", "dialogue-subtitle-text-size",
+        "dialogue-touch-choice", crate::dialogue_split::KEY, appearance::THEME_KEY,
+        appearance::BACKGROUND_KEY, appearance::TINT_KEY, appearance::FRAME_KEY,
+        appearance::HINTS_KEY] {
+        crate::settings::set_disabled_status(app, key, |world| {
+            (!world.resource::<TouchDialogue>().enabled).then_some("Enable Touch dialogue.")
+        });
+    }
 }
 
 #[derive(Resource, Default)]
@@ -1331,6 +1341,10 @@ mod tests {
                 .index(key)
                 .unwrap()
         };
+        let enabled = index(&app, "touch-dialogue");
+        if !app.world().resource::<TouchDialogue>().enabled {
+            assert_eq!(crate::settings::flip(app.world_mut(), enabled), Some(true));
+        }
         let i = index(&app, "dialogue-choice-text-size");
         crate::settings::set_slider(app.world_mut(), i, 1.0);
         let i = index(&app, "dialogue-subtitle-text-size");
@@ -1440,6 +1454,7 @@ mod tests {
         }
     }
     include!("dialogue_touch_optional_tests.rs");
+    include!("dialogue_touch/availability_tests.rs");
 }
 
 #[cfg(test)]

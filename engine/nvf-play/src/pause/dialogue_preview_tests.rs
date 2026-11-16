@@ -5,6 +5,10 @@ fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_a
     let mut app=settings_app(&[("difficulty","Gameplay")],Page::Settings{selected:None});
     app.init_resource::<crate::dialogue_menu::DialogueMenu>();
     crate::dialogue_touch::install(&mut app);
+    let enabled=app.world().resource::<Settings>().index("touch-dialogue").unwrap();
+    if !app.world().resource::<crate::dialogue_touch::TouchDialogue>().enabled {
+        assert_eq!(crate::settings::flip(app.world_mut(),enabled),Some(true));
+    }
     let row=app.world().resource::<Settings>().index(crate::dialogue_touch::appearance::THEME_KEY).unwrap();
     *app.world_mut().resource_mut::<Page>()=Page::Settings{selected:Some(RowId::Setting(row))};
     app.update();app.update();

@@ -131,6 +131,10 @@ fn split_choice_persists_standard_and_both_sides_without_touching_text_preferenc
         install(&mut app);
         app.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
         let index=app.world().resource::<crate::settings::Settings>().index(crate::dialogue_split::KEY).unwrap();
+        let parent=app.world().resource::<crate::settings::Settings>().index("touch-dialogue").unwrap();
+        if !app.world().resource::<TouchDialogue>().enabled {
+            assert_eq!(crate::settings::flip(app.world_mut(),parent),Some(true));
+        }
         // pick intentionally refuses an already-selected choice. Start elsewhere
         // on both platforms so every named choice exercises a real persisted edit.
         app.world_mut().resource_mut::<Options>().side=if name=="Speaker left" {Side::Right}else{Side::Left};

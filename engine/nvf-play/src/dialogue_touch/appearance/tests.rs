@@ -108,7 +108,6 @@ fn appearance_ini_restores_independently_of_enabled_sizes_confirmation_and_side(
     theme(&mut saved,Theme::WristTerminal);slider(&mut saved,BACKGROUND_KEY,0.37);slider(&mut saved,FRAME_KEY,0.28);
     saved.world_mut().resource_mut::<Appearance>().hints=true;
     let row=index(&saved,HINTS_KEY);assert_eq!(crate::settings::flip(saved.world_mut(),row),Some(false));
-    let row=index(&saved,"touch-dialogue");assert_eq!(crate::settings::flip(saved.world_mut(),row),Some(false));
     slider(&mut saved,"dialogue-choice-text-size",0.6);slider(&mut saved,"dialogue-subtitle-text-size",0.4);
     let row=index(&saved,"dialogue-touch-choice");assert!(crate::settings::pick(saved.world_mut(),row,"Direct tap"));
     let row=index(&saved,crate::dialogue_split::KEY);
@@ -117,6 +116,7 @@ fn appearance_ini_restores_independently_of_enabled_sizes_confirmation_and_side(
     let side=if current==crate::dialogue_split::Side::Left {"Speaker right"}else{"Speaker left"};
     assert!(crate::settings::pick(saved.world_mut(),row,side));
     let tint=index(&saved,TINT_KEY);assert!(crate::settings::pick(saved.world_mut(),tint,"Warm amber"));
+    let row=index(&saved,"touch-dialogue");assert_eq!(crate::settings::flip(saved.world_mut(),row),Some(false));
     let expected=*saved.world().resource::<Appearance>();let expected_text=*saved.world().resource::<TouchDialogue>();let expected_side=*saved.world().resource::<crate::dialogue_split::Options>();
     let (mut restored,window)=layout_scene(true,Vec2::new(792.,363.),1.);
     restored.insert_resource(crate::settings::SettingsFile(Some(path.clone())));crate::settings::apply_stored(restored.world_mut());settle(&mut restored);

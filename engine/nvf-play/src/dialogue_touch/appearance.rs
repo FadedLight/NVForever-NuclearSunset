@@ -142,16 +142,21 @@ impl Appearance {
         }
     }
 }
-type Painted = (&'static Paint,Option<&'static mut TextColor>,Option<&'static mut BackgroundColor>,Option<&'static mut BorderColor>,Option<&'static mut Node>);
+type Painted = (&'static Paint,Option<&'static mut TextColor>,Option<&'static mut BackgroundColor>,Option<&'static mut BorderColor>,Option<&'static mut Node>,Option<&'static mut ImageNode>);
 fn paint(
     appearance: Res<Appearance>, menu: Res<super::DialogueMenu>,
     mut nodes: Query<Painted>,
 ) {
     let rgb=crate::interface::hud_rgb();
-    for (kind,text,back,border,node) in &mut nodes {
+    for (kind,text,back,border,node,image) in &mut nodes {
         let (t,b,line)=appearance.colors(*kind,menu.selected,rgb);
         if let (Some(mut value),Some(color))=(text,t) { if value.0!=color {value.0=color;} }
-        if let (Some(mut value),Some(color))=(back,b) { if value.0!=color {value.0=color;} }
+        let has_image=image.is_some();
+        if let (Some(mut value),Some(color))=(image,b) {if value.color!=color {value.color=color;}}
+        if let (Some(mut value),Some(color))=(back,b) {
+            let color=if has_image {Color::NONE}else{color};
+            if value.0!=color {value.0=color;}
+        }
         if let (Some(mut value),Some(color))=(border,line) { let next=BorderColor::all(color);if *value!=next {*value=next;} }
         if let Some(mut node)=node {
             if let Paint::ResponseDetail{part,..}=kind {
@@ -211,7 +216,7 @@ fn instrument(
     data:Option<Res<nvf_assets::GameData>>, images:Option<ResMut<Assets<Image>>>,
     formats:Option<Res<bevy::image::CompressedImageFormatSupport>>,
     mut loaded:Local<Option<Option<crate::interface::Picture>>>,
-    mut cursors:Query<(Entity,&Paint,&BackgroundColor,Option<&mut ImageNode>)>,
+    mut cursors:Query<(Entity,&Paint,&mut BackgroundColor,Option<&ImageNode>)>,
 ) {
     if appearance.theme==Theme::WristTerminal && loaded.is_none() {
         if let (Some(data),Some(mut images))=(data,images) {
@@ -219,12 +224,14 @@ fn instrument(
             *loaded=Some(pictures.picture("interface\\shared\\scrollbar\\vert_marker.dds",Some(&data),&mut images,crate::interface::bc_supported(formats.as_deref())));
         }
     }
-    for (entity,kind,background,image) in &mut cursors {
+    for (entity,kind,mut background,image) in &mut cursors {
         if !matches!(kind,Paint::Focus{..}|Paint::PreviewFocus) {continue;}
         if let Some(Some((handle,rect)))=loaded.as_ref().filter(|_|appearance.theme==Theme::WristTerminal) {
-            if let Some(mut image)=image {if image.color!=background.0 {image.color=background.0;}}
-            else {commands.entity(entity).insert(ImageNode {rect:*rect,color:background.0,..ImageNode::new(handle.clone())});}
-        } else if image.is_some() {commands.entity(entity).remove::<ImageNode>();}
+            if image.is_none() {commands.entity(entity).insert(ImageNode {rect:*rect,color:background.0,..ImageNode::new(handle.clone())});}
+        } else if let Some(image)=image {
+            background.0=image.color;
+            commands.entity(entity).remove::<ImageNode>();
+        }
     }
 }
 

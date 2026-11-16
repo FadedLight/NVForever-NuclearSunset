@@ -349,3 +349,15 @@ fn borderless_defaults_tints_and_distinct_cursors_use_actual_draw_nodes() {
         assert!(text(&mut app,|p|matches!(p,Paint::ChoiceText{darkened:false})).iter().all(|(_,color)|*color==crate::interface::tint(crate::interface::hud_rgb(),255.)));
     }
 }
+
+#[test]
+fn installed_cursor_uses_texture_alpha_instead_of_a_solid_procedural_backing() {
+    use bevy::ecs::system::RunSystemOnce;
+    let mut app=App::new();
+    app.insert_resource(Appearance{theme:Theme::WristTerminal,..default()});
+    app.init_resource::<crate::dialogue_menu::DialogueMenu>();
+    let cursor=app.world_mut().spawn((Paint::Focus{index:0,short:false},Node::default(),BackgroundColor(Color::WHITE),ImageNode::default())).id();
+    app.world_mut().run_system_once(paint).unwrap();
+    assert_eq!(app.world().get::<BackgroundColor>(cursor).unwrap().0,Color::NONE);
+    assert_eq!(app.world().get::<ImageNode>(cursor).unwrap().color,crate::interface::tint(crate::interface::hud_rgb(),255.));
+}

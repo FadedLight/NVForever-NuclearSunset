@@ -192,8 +192,7 @@ fn edge(app:&mut App,id:u64,phase:TouchPhase,at:Vec2) {
     let window=app.world().resource::<Owner>().frame.window;
     app.world_mut().write_message(TouchInput {window,id,phase,position:at,force:None});
 }
-#[track_caller]
-fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
+fn find_hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Option<Vec2> {
     let f=app.world().resource::<Owner>().frame;let g=guard(app);
     let native_points={
         let ui=&app.world().resource::<ScriptState>().rt.as_ref().unwrap().game.ui_tree;
@@ -207,7 +206,7 @@ fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
             let found=app.world_mut().run_system_once({let g=g.clone();move |geometry:Geometry,script:Res<ScriptState>| {
                 geometry.hit(Some(&script.rt.as_ref().unwrap().game),f,&g,p).map(|h|h.action)
             }}).unwrap();
-            if found.is_some_and(&wanted){return p}
+            if found.is_some_and(&wanted){return Some(p)}
     }
     let mut q=app.world_mut().query::<(&ComputedNode,&UiGlobalTransform)>();
     let points:Vec<_>=q.iter(app.world()).filter_map(|(n,t)|(n.size().min_element()>0.0).then_some(t.translation/f.density)).collect();
@@ -215,18 +214,35 @@ fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
         let found=app.world_mut().run_system_once({let g=g.clone();move |geometry:Geometry,script:Res<ScriptState>| {
             geometry.hit(Some(&script.rt.as_ref().unwrap().game),f,&g,p).map(|h|h.action)
         }}).unwrap();
-        if found.is_some_and(&wanted){return p}
+        if found.is_some_and(&wanted){return Some(p)}
     }
+    None
+}
+#[track_caller]
+fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
+    if let Some(point)=find_hit_point(app,wanted){return point}
+    let f=app.world().resource::<Owner>().frame;let g=guard(app);
     let native=match g.kind() {Kind::Vendor=>app.world().resource::<crate::tiles::repair_services_menu::RepairServicesTiles>().menu.is_some(),
         Kind::Workbench=>app.world().resource::<crate::tiles::recipe_menu::RecipeTiles>().menu.is_some()};
     panic!("actual painted service target missing: kind={:?} native={native} guard={g:?} frame_size={:?} density={} ui_scale={}",
         g.kind(),f.size,f.density,f.ui_scale);
+}
+// A current model refuses the previous native paint until its original writer runs.
+// Only the two explicit external-change/transaction boundaries below use this witness.
+fn publish_vendor_native(app:&mut App,wanted:impl Fn(Action)->bool) {
+    if app.world().resource::<crate::tiles::repair_services_menu::RepairServicesTiles>().menu.is_none(){return}
+    let before=guard(app);assert_eq!(before.kind(),Kind::Vendor);
+    assert!(find_hit_point(app,&wanted).is_none(),"changed vendor model refuses preceding native paint");
+    app.update();
+    assert!(before.same(&guard(app)),"native publication alone preserves the current vendor model");
+    assert!(find_hit_point(app,wanted).is_some(),"one original native writer publishes the current vendor target");
 }
 #[track_caller]
 fn tap(app:&mut App,id:u64,wanted:impl Fn(Action)->bool) {
     let p=hit_point(app,wanted);edge(app,id,TouchPhase::Started,p);app.update();
     edge(app,id,TouchPhase::Ended,p);app.update();
 }
+#[track_caller]
 fn row(app:&mut App,id:u64,index:usize) {
     let before=guard(app);let selected=|g:&Guard|match g {Guard::Vendor {view,..}=>view.selected,Guard::Workbench {view,..}=>view.selected};
     let native=match before.kind() {Kind::Vendor=>app.world().resource::<crate::tiles::repair_services_menu::RepairServicesTiles>().menu.is_some(),
@@ -291,6 +307,7 @@ fn normal_vendor_real_end_repair_charges_once_and_stale_quote_refuses_then_recov
         assert_eq!(app.world_mut().resource_mut::<SimState>().world.inventory_mut(PLAYER).unwrap().remove(CAPS,9_999),9_999);
         edge(&mut app,3,TouchPhase::Ended,p);app.update();app.update();assert_eq!(count(&app,PLAYER,CAPS),1);assert_eq!(count(&app,VENDOR,CAPS),0);
         app.world_mut().resource_mut::<SimState>().world.add_item(PLAYER,CAPS,9_999).unwrap();app.update();
+        publish_vendor_native(&mut app,|a|a==Action::Row(0));
         row(&mut app,4,0);assert!(count(&app,VENDOR,CAPS)>0,"fresh actual quote remains usable");
     }
 }
@@ -349,6 +366,7 @@ fn normal_vendor_repair_all_confirmation_and_done_keep_original_consumers() {
         tap(&mut app,31,|a|a==Action::Vendor(crate::repair::RepairServicesInput::All));
         assert_eq!(count(&app,PLAYER,CAPS),10_000-total as i32);assert_eq!(count(&app,VENDOR,CAPS),total as i32);
         let paid=count(&app,PLAYER,CAPS);
+        publish_vendor_native(&mut app,|a|a==Action::Vendor(crate::repair::RepairServicesInput::Done));
         tap(&mut app,32,|a|a==Action::Vendor(crate::repair::RepairServicesInput::Done));app.update();
         assert!(!app.world().resource::<crate::repair::RepairServices>().is_open());assert_eq!(count(&app,PLAYER,CAPS),paid);
         assert_eq!(*app.world().resource::<State<crate::PlayState>>().get(),crate::PlayState::Playing);
@@ -460,7 +478,27 @@ fn normal_vendor_actual_condition_bars_and_equipped_marker_fit_adjacent_rows_at_
             }}
         }
         assert!(bars>=rows.len()*2,"actual condition backing and filled bar per row");assert_eq!(markers,1,"actual World equip produces exactly one marker");
-        for pair in rows.windows(2) {assert!(actual_rect(app.world(),pair[0].1).max.y<=actual_rect(app.world(),pair[1].1).min.y+0.1);}
+        // Absolute siblings resolve fractional positions/sizes independently in Taffy.
+        // Preserve exact unrounded adjacency and reconcile only its actual pixel rounding.
+        for pair in rows.windows(2) {
+            let (a,b)=(actual_rect(app.world(),pair[0].1),actual_rect(app.world(),pair[1].1));
+            assert_eq!(app.world().get::<ChildOf>(pair[0].1).unwrap().parent(),
+                app.world().get::<ChildOf>(pair[1].1).unwrap().parent(),"adjacent repair rows share the same actual parent");
+            let (left,right,rounded_left,rounded_right)={
+                let mut surface=app.world_mut().resource_mut::<UiSurface>();
+                (surface.get_layout(pair[0].1,false).unwrap().0,surface.get_layout(pair[1].1,false).unwrap().0,
+                    surface.get_layout(pair[0].1,true).unwrap().0,surface.get_layout(pair[1].1,true).unwrap().0)
+            };
+            let intended_delta=left.location.y+left.size.height-right.location.y;
+            let rounded_delta=rounded_left.location.y+rounded_left.size.height-rounded_right.location.y;
+            let actual_delta=a.max.y-b.min.y;
+            assert!(intended_delta.abs()<=0.1,
+                "unrounded adjacent rows at size={size}, indices={:?}: rects={a:?}/{b:?}, layouts={left:?}/{right:?}", (pair[0].0,pair[1].0));
+            assert!((actual_delta-rounded_delta).abs()<=0.1,
+                "actual row edges reconcile to Taffy rounding at size={size}, indices={:?}: rects={a:?}/{b:?}, rounded={rounded_left:?}/{rounded_right:?}", (pair[0].0,pair[1].0));
+            assert!(actual_delta<=1.0,
+                "at most one physical pixel of independently rounded adjacency at size={size}, indices={:?}: rects={a:?}/{b:?}, unrounded={left:?}/{right:?}, rounded={rounded_left:?}/{rounded_right:?}", (pair[0].0,pair[1].0));
+        }
         assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
     }
 }

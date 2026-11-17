@@ -160,9 +160,10 @@ weapon mods retain their separate touch presentation. Existing eligibility rules
 decide which actions can be confirmed.
 
 Mouse, keyboard and controller input keep their existing menu actions. A first
-return touch restores touch ownership without activating an item. R41 compiled
-these adapters and passed the thirteen ordinary barter/typography controls, but
-the nine quantity-meter and fourteen ordinary service-menu cases failed.
+return touch restores touch ownership without activating an item. R43 passed
+all thirteen quantity-meter cases and eleven of fourteen ordinary service-menu
+cases. Three vendor-repair cases still failed; their fixture corrections below
+remain unexecuted.
 Phone acceptance for readability, reach and native-menu coexistence remains open.
 
 [qualification] R31 tested merge `86e010a5` of source `79891b03` with main
@@ -486,7 +487,53 @@ host checks and SDK signature compilation; see the
 touch recovery after backgrounding and leaving Doc Mitchell's still require a
 current qualified APK and device testing. This correction is absent from R9.
 
-## R42 touch menu validation
+## R43 touch menu validation
+
+[qualification] R43 tested source `1c1b96bb5fb553842012703fe0d55702bc300788`
+through checkout `a53b097817d3706b73af00352e654ad6ef7045a6`, with parents
+`[98fb59a91bc7ab1ee48604e320e7645f4360b35c, 1c1b96bb5fb553842012703fe0d55702bc300788]`.
+Its tree `2b48c50e30e7d8795c17a80212a0a5085b6f8c01` equals all 4,504 source entries.
+All eight jobs finished: changes, guard, Tools, core, strict engine Clippy and
+Android packaging passed; engine and aggregate failed. Core passed 3,472 tests
+with five ignored, including all 59 launcher tests. Strict root Clippy passed.
+The ten incoming Main UI controls and four retained title-start controls each
+have named passing records. Skipped and ignored cases remain unexecuted.
+
+Assets passed 221 with one ignored. Play passed 2,374, failed three and ignored
+one; the wrapper passed 1,559 with no failures and one ignored. All thirteen
+meter cases passed, including the earlier context-observation failure. Eleven
+of fourteen service cases passed, including native entry; the earlier startup
+panics did not recur. These are CPU test results, without device acceptance.
+
+Two remaining native vendor tests asked for a current touch target after the
+original consumer changed the model but before its native writer published that
+model. The next fixture explicitly checks refusal of the preceding paint, runs
+one original writer update, then requires the new target with the same current
+guard. This applies only after restoring test caps and after the paid Repair All
+transaction before Done; hand-built timing and original repair/confirmation,
+stale-quote, charge-once and close effects remain. The original row-hit diagnostic
+does not identify which row-helper invocation failed, so its precise old call
+site remains uncertain. This source-supported fixture correction is unexecuted.
+
+The third failure is adjacent row rectangles, after the strict decoration
+containment checks. The selected Bevy/Taffy layout rounds row locations and
+cumulative size endpoints separately. The next oracle requires the actual
+unrounded rows to remain adjacent under one parent, reconciles the actual painted
+edge difference with the actual rounded layout, and permits at most one physical
+pixel from that rounding. This explicitly adapts the adjacency oracle. Strict
+child containment, the 51-unit minimum, actual rounded and unrounded heights,
+bar/marker counts and no-charge checks remain. The earlier raw failure did not
+print the size or rectangles; a predicted minimum-size rounding example is
+source analysis, not an observed failing scene. No production geometry changes.
+
+Both corrections remain uncompiled and unrun. The successful native ARM/APK job
+does not qualify this failed cycle; its artifact was not downloaded, served or
+installed. R10 remains the last delivered TEST build. Main-menu touch, dialogue
+readability, editor comfort, background return, phone saves, Doc Mitchell's exit
+and Bluetooth input still require physical acceptance. No repair of the reported
+close-to-home or loading-cover hang is claimed.
+
+## Earlier R42 touch menu validation
 
 [qualification] R42 tested source `e5b00f0b440a3fc28120a141a0677fde151f58a6`
 through checkout `56793aa71260b77cc63dfb0beb8c816c4cb4bf6b`, with parents
@@ -514,7 +561,7 @@ manual test stack: its first empty frame published a `0..0` partition, while the
 actual Bevy focus consumer reads the first node of every partition. The fixture
 now leaves the partition list empty when there are no nodes. Original ordering
 for nonempty stacks, all fourteen case bodies and seven boot updates remain.
-This correction is unexecuted. The native-entry case has a named failure without
+At the R42 checkpoint this correction was unexecuted. The native-entry case had a named failure without
 an individual captured payload, so its observed cause remains unknown.
 
 The new meter context case failed its interactive-hit witness while observing a
@@ -523,7 +570,7 @@ That transient right edge hit the unchanged amount-step arrow. Its follow-up
 reads actual computed geometry for that change observation; every actual meter
 sample and fresh recovery retains the four interactive-hit checks. All thirteen
 context causes, stale-held refusal, hardware ownership and effect checks remain.
-This fixture observation adaptation is unexecuted and changes no quantity effect.
+At that checkpoint this fixture observation adaptation was unexecuted; R43 results are above. It changes no quantity effect.
 
 The native job passed the ARM cross-check, nine shader/layout controls, host Java
 loading/diagnostic controls, APK build, lint, signature and upload. Its failed-cycle

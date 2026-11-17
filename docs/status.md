@@ -30,19 +30,19 @@ with device confirmation pending. Full
 gameplay, lifecycle and performance acceptance remain open. This is not a qualified
 Android release. [Build and touch-control instructions](android.md).
 
-Latest Android validation is R42 at source `e5b00f0b`, actual checkout `56793aa7`
+Latest Android validation is R43 at source `1c1b96bb`, actual checkout `a53b0978`
 with Main `98fb59a9` and the same source tree. Core passed 3,472 tests with five
-ignored, Tools and strict root/engine Clippy passed. Engine play passed 2,362 and
-failed 15; the wrapper passed 1,559 with no failures, each with one ignored.
-All nine old quantity-meter cases, four trace cases and four prior wrapper failures
-passed. Fourteen service cases and one new meter-context witness still failed.
-Thirteen service payloads identify the second boot update and an empty-list index;
-source review found an invalid empty partition in the manual stack fixture. Its
-minimal producer correction and the meter observation adaptation remain unexecuted;
-the native-entry case has no individual captured payload. Successful ARM/APK
-packaging does not qualify this failed cycle, whose artifact was not downloaded
-or delivered. R10 remains the last delivered TEST build.
-[Current validation and remaining acceptance](android.md#r42-touch-menu-validation).
+ignored; Tools and strict root/engine Clippy passed. Play passed 2,374 and failed
+three; the wrapper passed 1,559 with no failures, each with one ignored. All
+thirteen quantity-meter cases and eleven of fourteen services cases passed,
+including native entry. The earlier service startup panics did not recur.
+Three vendor cases remain: two current targets sought before native publication
+and one adjacent-row rounding oracle. Their narrow fixture timeline and explicit
+rounded/unrounded adjacency-oracle adaptations remain uncompiled and unrun;
+strict child/minimum-size/effect checks remain. Successful ARM/APK packaging does
+not qualify this failed cycle, whose artifact was not downloaded or delivered.
+R10 remains the last delivered TEST build; phone acceptance remains open.
+[Current validation and remaining acceptance](android.md#r43-touch-menu-validation).
 
 Controller switching, independent look/ADS scales, dead zone and hold/toggle choices,
 four original SVG icon families, adaptive Aim/Block/Scope captions and individual HUD

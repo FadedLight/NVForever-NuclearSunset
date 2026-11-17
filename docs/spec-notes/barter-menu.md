@@ -705,8 +705,8 @@ not zoom the entire canvas or synthesize a mouse click. Quantity-meter dragging
 uses the composed original Amount consumer and preserves these size/source
 guards, including acknowledged same-geometry repaint. R41 compiled these adapters
 and passed all thirteen ordinary barter/typography controls. Its nine quantity-meter
-cases failed; R42 subsequently passed all nine original cases. The remaining new
-context-control boundary and follow-up source are distinguished below.
+cases failed; R42 subsequently passed all nine original cases. R43 passed all
+thirteen, including the adapted context observation distinguished below.
 
 
 ## Ordinary touch quantity meter
@@ -779,5 +779,7 @@ neighboring amount-step arrow. The follow-up reads computed geometry for only
 that transient change observation; the four hit witnesses remain at actual meter
 samples and fresh recovery, with all thirteen context causes and later refusal,
 hardware, amount and effect assertions retained. This explicit fixture-observation
-adaptation is unexecuted. No production input, quantity effect or successful
-thirteen-case outcome is inferred from it.
+adaptation was unexecuted at that checkpoint. R43 source `1c1b96bb`, actual
+checkout `a53b0978`, subsequently passed all thirteen cases. This is an actual CPU
+result for the combined source; production input and quantity effects are
+unchanged, and physical-phone acceptance remains open.

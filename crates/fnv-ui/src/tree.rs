@@ -264,6 +264,8 @@ pub struct Tile {
     pub name: String,
     pub parent: Option<TileId>,
     pub children: Vec<TileId>,
+    /// Value-generation dependency for an expression's structural childcount fallback.
+    children_changed: u64,
     pub traits: Vec<Trait>,
     pub templates: Vec<Template>,
     /// False once unloaded: [`Ui::tile`] answers such a tile for an id kept past its
@@ -282,6 +284,7 @@ impl Tile {
             name: String::new(),
             parent: None,
             children: Vec::new(),
+            children_changed: 0,
             traits: Vec::new(),
             templates: Vec::new(),
             live: false,
@@ -547,7 +550,11 @@ impl Ui {
             }
         };
         if let Some(p) = parent {
-            self.tile_mut(p).children.push(id);
+            self.gen += 1;
+            let changed = self.gen;
+            let parent = self.tile_mut(p);
+            parent.children.push(id);
+            parent.children_changed = changed;
         }
         if self.tile(id).origin.mod_added() {
             self.count_mod_tile(id, true);
@@ -839,7 +846,11 @@ impl Ui {
             gone.push(t);
         }
         if let Some(p) = self.tile(id).parent {
-            self.tile_mut(p).children.retain(|&c| c != id);
+            self.gen += 1;
+            let changed = self.gen;
+            let parent = self.tile_mut(p);
+            parent.children.retain(|&c| c != id);
+            parent.children_changed = changed;
         }
         self.roots.retain(|&r| r != id);
         self.dirty = true;
@@ -1492,6 +1503,13 @@ impl Ui {
                 *deps = (*deps).max(tr.changed);
                 sources.push((t, k as u32));
                 tr.value.clone()
+            }
+            // [design: menu-xml.md §6.1] Explicit list counts keep precedence.
+            // Do not insert a trait: absence also guards pause-column initialization.
+            None if name.eq_ignore_ascii_case("childcount") => {
+                let tile = self.tile(t);
+                *deps = (*deps).max(tile.children_changed);
+                Value::Num(tile.children.len() as f64)
             }
             // A trait not there reads 0 [hypothesis].
             None => Value::default(),

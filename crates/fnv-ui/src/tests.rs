@@ -726,6 +726,111 @@ fn uio_includes_apply_again_in_a_reopened_menu() {
 }
 
 #[test]
+fn structural_childcount_verification_reads_repeated_includes_and_real_uio_injection() {
+    let src = MemSource::default()
+        .with("menus/inspection.xml", r#"<menu name="Inspection">
+            <rect name="Composite">
+                <include src="pair.xml"/><include src="pair.xml"/>
+                <template name="Unused"><rect name="Uninstantiated"/></template>
+            </rect>
+            <_LayoutReady><copy src="child(Composite)" trait="childcount"/><eq>4</eq></_LayoutReady>
+            <_Ready><copy src="me" trait="_LayoutReady"/><and src="child(Addon)" trait="_Registered"/></_Ready>
+            <rect name="Banner"><visible><not src="parent" trait="_Ready"/></visible></rect>
+        </menu>"#)
+        .with("menus/prefabs/pair.xml", r#"<image name="Left"><text name="Nested"/></image><image name="Right"/>"#)
+        .with_loose("menus/prefabs/addon.xml", r#"<rect name="Addon"><_Registered>1.5</_Registered></rect>"#)
+        .with("uio/supported.txt", "addon.xml::Inspection\ntrue");
+    let mut ui = Ui::new();
+    ui.configure_uio(&src, |_| false);
+    ui.load_menu(&src, "menus/inspection.xml").unwrap();
+    ui.update();
+    assert_eq!(ui.uio.applied(), 1, "the configured include really applied");
+    assert_eq!(ui.get_float("Inspection/Addon/_Registered"), Some(1.5));
+    let composite = ui.find_tile("Inspection/Composite").unwrap();
+    assert_eq!(ui.tile(composite).children.len(), 4);
+    assert!(ui.tile(composite).get("childcount").is_none(), "no explicit trait was invented");
+    assert_eq!(ui.get_float("Inspection/_LayoutReady"), Some(1.0), "[childcount-includes] the real expression must see all four direct tiles");
+    assert_eq!(ui.get_float("Inspection/_Ready"), Some(1.0));
+    assert_eq!(ui.get_float("Inspection/Banner/visible"), Some(0.0));
+    // Breaking the structure must still expose the diagnostic. The repair may
+    // not force the registration trait or bypass the verification expression.
+    let removed = ui.find_tile("Inspection/Composite/Right").unwrap();
+    ui.unload_tile(removed);
+    ui.update();
+    assert_eq!(ui.get_float("Inspection/_LayoutReady"), Some(0.0));
+    assert_eq!(ui.get_float("Inspection/Banner/visible"), Some(1.0));
+    assert_eq!(ui.get_float("Inspection/Addon/_Registered"), Some(1.5));
+}
+
+#[test]
+fn structural_childcount_tracks_empty_insertions_removal_templates_and_menu_reload() {
+    let src = MemSource::default().with("menus/count.xml", r#"<menu name="Count">
+        <rect name="Target"><template name="Pair"><rect name="A"/><rect name="B"/></template></rect>
+        <rect name="Neighbor"><_Source>7</_Source></rect>
+        <_Count><copy src="child(Target)" trait="ChIlDcOuNt"/></_Count>
+        <_Twice><copy src="me" trait="_Count"/><mul>2</mul></_Twice>
+        <_Retained><copy src="child(Neighbor)" trait="_Source"/></_Retained>
+    </menu>"#);
+    let mut ui = Ui::new();
+    ui.load_menu(&src, "menus/count.xml").unwrap();
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(0.0));
+    assert!(ui.set_float("Count/_Retained", 99.0));
+    assert!(ui.inject_text(&src, "Count/Target", r#"<rect name="First"/>"#));
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(1.0), "[childcount-empty-insert] an empty child must invalidate its reader");
+    assert_eq!(ui.get_float("Count/_Twice"), Some(2.0));
+    assert_eq!(ui.get_float("Count/_Retained"), Some(99.0), "unrelated external value stays retained");
+    assert!(ui.inject_text(&src, "Count/Target/First", r#"<rect name="Grandchild"/>"#));
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(1.0), "grandchildren do not count twice");
+    let stale = ui.find_tile("Count/Target/First").unwrap();
+    ui.unload_tile(stale);
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(0.0));
+    assert_eq!(ui.get_float("Count/_Twice"), Some(0.0));
+    ui.add_from_template(&src, "Count/Target", "Pair", None).unwrap();
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(2.0));
+    assert_eq!(ui.get_float("Count/_Twice"), Some(4.0));
+    ui.unload_tile(stale);
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(2.0), "stale IDs cannot remove a replacement");
+    assert_eq!(ui.get_float("Count/_Retained"), Some(99.0));
+    ui.load_menu(&src, "menus/count.xml").unwrap();
+    ui.update();
+    assert_eq!(ui.get_float("Count/_Count"), Some(0.0), "reused menu slots start without old children");
+    assert_eq!(ui.get_float("Count/_Retained"), Some(7.0));
+}
+
+#[test]
+fn structural_childcount_preserves_explicit_zero_and_nonzero_overrides() {
+    let src = MemSource::default().with("menus/override.xml", r#"<menu name="Override">
+        <rect name="Target"><childcount>0</childcount><rect name="Initial"/></rect>
+        <_Count><copy src="child(Target)" trait="childcount"/></_Count>
+    </menu>"#);
+    let mut ui = Ui::new();
+    ui.load_menu(&src, "menus/override.xml").unwrap();
+    ui.update();
+    let target = ui.find_tile("Override/Target").unwrap();
+    assert_eq!(ui.get_float("Override/_Count"), Some(0.0), "explicit zero wins over structure");
+    assert!(ui.inject_text(&src, "Override/Target", r#"<rect name="Second"/>"#));
+    ui.update();
+    assert_eq!(ui.get_float("Override/_Count"), Some(0.0));
+    ui.set_trait(target, "childcount", Value::Num(8.0));
+    ui.update();
+    assert_eq!(ui.get_float("Override/_Count"), Some(8.0));
+    assert!(ui.inject_text(&src, "Override/Target", r#"<rect name="Third"/>"#));
+    ui.update();
+    assert_eq!(ui.get_float("Override/_Count"), Some(8.0), "existing list initialization keeps precedence");
+    assert!(ui.remove_trait(target, "childcount"));
+    ui.update();
+    assert!(ui.tile(target).get("childcount").is_none());
+    assert_eq!(ui.get_float("Override/_Count"), Some(3.0), "[childcount-override-release] removal restores the structural expression value");
+    assert!(ui.get_float("Override/Target/childcount").is_none(), "direct trait queries retain absence semantics");
+}
+
+#[test]
 fn stale_ids_name_no_tile_and_never_a_new_one() {
     let src = files();
     let mut ui = loaded();

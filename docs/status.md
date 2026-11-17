@@ -560,7 +560,8 @@ intendedFAIL, candidate120PASS, all120once/0ignored. Overallcontrollerfalse is
 retained for an unknown post-Cargo descendant terminated during boundedcleanup;
 this is not whole-run qualification. Engine callback/draw-piece,
 native/originalMCM/rendered acceptance remain open. Independent raw/source review
-confirmed those bounded case results and the false overall flag. The accepted-main
-060d union retains the tested fnv-ui Rust/fixtures; whole-graph qualification stays
-bound to its exact executed source, separately from the c264 comparison.
+confirmed those bounded case results and the false overall flag. Accepted Main
+`f5cb523f` contains the RGB fnv-ui Rust/fixtures alongside the named-source lookup
+index; the earlier `060d69dd` and `a0ebe1c5` checkpoints do not. Whole-graph
+qualification stays bound to its exact executed source, separately from the c264 comparison.
 Contract: [MCM integer RGB consumers](spec-notes/mcm-rgb-integer-consumers.md).

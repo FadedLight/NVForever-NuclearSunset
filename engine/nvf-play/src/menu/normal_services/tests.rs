@@ -78,6 +78,18 @@ fn authored_script(sim:&mut SimState,kind:Kind)->ScriptState {
     script
 }
 fn unsettled_scene(kind:Kind,native:bool)->App {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(||unsettled_scene_inner(kind,native))) {
+        Ok(app)=>app,
+        Err(payload)=>{
+            let text=payload.downcast_ref::<&str>().copied()
+                .or_else(||payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("<non-string panic payload>");
+            eprintln!("normal services setup panic: kind={kind:?} native={native} payload={text}");
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+fn unsettled_scene_inner(kind:Kind,native:bool)->App {
     let mut sim=authored_world();let mut script=authored_script(&mut sim,kind);
     if native {
         let ui=match kind {
@@ -151,7 +163,15 @@ fn unsettled_scene(kind:Kind,native:bool)->App {
 }
 fn scene(kind:Kind,native:bool)->App {
     let mut app=unsettled_scene(kind,native);
-    for _ in 0..7 {app.update();}
+    for boot_frame in 1..=7 {
+        if let Err(payload)=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||app.update())) {
+            let text=payload.downcast_ref::<&str>().copied()
+                .or_else(||payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("<non-string panic payload>");
+            eprintln!("normal services boot App.update panic: kind={kind:?} native={native} boot_frame={boot_frame} payload={text}");
+            std::panic::resume_unwind(payload);
+        }
+    }
     assert_eq!(*app.world().resource::<State<crate::PlayState>>().get(),crate::PlayState::Menu);
     assert!(!app.world().resource::<crate::maintenance_touch::State>().visible(),"ordinary service route never prepares replacement sheet");
     assert!(app.world().resource::<NormalServices>().visible());

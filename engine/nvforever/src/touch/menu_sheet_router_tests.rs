@@ -7,6 +7,26 @@ mod menu_sheet_router_controls {
     struct Seen { envelopes: usize, underlay_presses: usize }
     #[derive(Component)]
     struct Underlay;
+    type PaintedRoots<'w,'s> = Query<'w,'s,(Entity,Option<&'static GlobalZIndex>),(With<Node>,Without<ChildOf>)>;
+    fn painted_ui_stack(mut stack:ResMut<bevy::ui::UiStack>,roots:PaintedRoots<'_,'_>,
+        children:Query<&Children>,nodes:Query<Entity,With<Node>>) {
+        // The lean App uses the actual painter hierarchy after layout. Each root
+        // retains its own camera partition; this is not a renderer-stack test.
+        fn walk(entity:Entity,children:&Query<&Children>,nodes:&Query<Entity,With<Node>>,out:&mut Vec<Entity>) {
+            if nodes.get(entity).is_err(){return}
+            out.push(entity);
+            if let Ok(kids)=children.get(entity){for child in kids{walk(*child,children,nodes,out);}}
+        }
+        let mut ordered:Vec<_>=roots.iter().map(|(e,z)|(z.map_or(0,|z|z.0),e)).collect();
+        ordered.sort_by_key(|(z,e)|(*z,e.to_bits()));
+        stack.uinodes.clear();stack.partition.clear();
+        for (_,root) in ordered {
+            let start=stack.uinodes.len();
+            walk(root,&children,&nodes,&mut stack.uinodes);
+            let end=stack.uinodes.len();
+            stack.partition.push(start..end);
+        }
+    }
     fn observe(mut input: MessageReader<menu::MenuInput>,
         buttons: Query<&PointerState, (With<Underlay>, Changed<PointerState>)>, mut seen: ResMut<Seen>) {
         seen.envelopes += input.read().filter(|input| matches!(input.0, Command::CommitNormalBarter(_))).count();
@@ -61,7 +81,7 @@ mod menu_sheet_router_controls {
             .add_message::<nvf_play::ui_sounds::UiSound>().add_message::<nvf_play::crime::ItemsTaken>()
             .add_message::<nvf_play::pickpocket::Pickpocketed>()
             .add_plugins(menu::MenuPlugin);
-        app.add_systems(PostUpdate,(bevy::ui::update::update_clipping_system,ApplyDeferred)
+        app.add_systems(PostUpdate,(bevy::ui::update::update_clipping_system,ApplyDeferred,painted_ui_stack)
             .chain().after(bevy::ui::ui_layout_system));
         let row=app.world().resource::<nvf_play::settings::Settings>().index(barter_touch::KEY).unwrap();
         if !(app.world().resource::<nvf_play::settings::Settings>().list()[row].get)(app.world()) {
@@ -85,6 +105,8 @@ mod menu_sheet_router_controls {
         while world.get::<ui_pointer::Button>(tile).is_none() {
             tile=world.get::<ChildOf>(tile).expect("painted row has its actual button ancestor").parent();
         }
+        assert!(world.resource::<bevy::ui::UiStack>().uinodes.contains(&tile),
+            "the actual stack producer published this current painted row");
         let node=world.get::<ComputedNode>(tile).unwrap();
         assert!(node.size().min_element()>=48.,"actual laid-out ordinary row has usable hit dimensions");
         let physical=world.get::<bevy::ui::UiGlobalTransform>(tile).unwrap().translation;
@@ -92,18 +114,15 @@ mod menu_sheet_router_controls {
         physical/windows.single(world).unwrap().scale_factor()
     }
     fn underlay(app:&mut App,camera:Entity,point:Vec2)->Entity {
-        let button=app.world_mut().spawn((Underlay,ui_pointer::Button,UiTargetCamera(camera),
+        let button=app.world_mut().spawn((Underlay,ui_pointer::Button,UiTargetCamera(camera),GlobalZIndex(i32::MAX),
             Node {position_type:PositionType::Absolute,left:px(point.x-24.),top:px(point.y-24.),width:px(48.),height:px(48.),..default()})).id();
         for _ in 0..3 {app.update();}
         assert!(app.world().get::<ComputedNode>(button).unwrap().size().min_element()>=48.);
-        // Deliberately leave the real underlay focus target in the real UI stack:
-        // ownership must suppress its touch, not rely on an opaque sheet's z-order.
-        let mut q=app.world_mut().query_filtered::<Entity,With<Node>>();
-        let mut nodes:Vec<_>=q.iter(app.world()).filter(|&e|e!=button).collect();
-        nodes.push(button);
-        let mut stack=app.world_mut().resource_mut::<bevy::ui::UiStack>();
-        stack.uinodes=nodes;stack.partition.clear();
-        let n=stack.uinodes.len();stack.partition.push(0..n);
+        // The real stack producer keeps the deliberate focus probe above the sheet:
+        // ownership must suppress its touch, not rely on the sheet's z-order.
+        let stack=app.world().resource::<bevy::ui::UiStack>();
+        assert_eq!(stack.uinodes.last(),Some(&button));
+        assert!(stack.partition.iter().any(|range|stack.uinodes[range.clone()].contains(&button)));
         button
     }
     fn raw_tap(app:&mut App,window:Entity,id:u64,point:Vec2){

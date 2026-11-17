@@ -139,7 +139,10 @@ fn actual_arm_camera_frame_and_saved_side_changes_retire_the_same_contact_withou
 #[test]
 fn actual_arm_opening_keeps_vertical_winner_when_reversing_with_persistent_side_drift() {
     for horizontal_first in [false,true] {
-        let (mut app,window)=scene();install_control_layout(&mut app,1.);
+        let (mut app,window)=scene();
+        app.init_resource::<nvf_play::menu::ActiveMenu>();
+        assert!(app.world().resource::<nvf_play::menu::ActiveMenu>().0.is_none());
+        install_control_layout(&mut app,1.);
         for _ in 0..5 {app.update();}
         let size=app.world().get::<Window>(window).unwrap().resolution.size();
         let handle_rect={let world=app.world_mut();let mut q=world.query_filtered::<(&ComputedNode,&UiGlobalTransform),With<super::super::drawer::Handle>>();let (node,at)=q.single(world).unwrap();assert!(node.size().min_element()>0.);Rect::from_center_size(at.translation,node.size())};

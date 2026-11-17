@@ -65,6 +65,7 @@ impl Options {
         out
     }
     /// The graphics bit is intentionally absent: paint changes cannot retire input.
+    #[cfg(test)]
     pub fn dismissal(self) -> (bool,bool,bool) { (self.left,self.right,self.close) }
     pub fn policy(self) -> (bool,bool,bool,u16) { (self.left,self.right,self.close,self.travel) }
     pub fn travel(self)->f32 {f32::from(self.travel.clamp(48,240))}

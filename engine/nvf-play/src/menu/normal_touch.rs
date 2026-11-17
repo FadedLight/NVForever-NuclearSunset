@@ -56,8 +56,9 @@ impl Guard {
         Self { mode:m.mode,category:m.category,quantity:m.quantity,focus:m.focus,selected:m.selected,
             row,trade:m.trade.clone() }
     }
-    fn matches(&self,m:&MenuModel)->bool {
-        self.mode==m.mode && self.category==m.category && self.quantity==m.quantity
+    fn matches(&self,m:&MenuModel)->bool {self.matches_quantity(m,m.quantity)}
+    fn matches_quantity(&self,m:&MenuModel,quantity:Option<Quantity>)->bool {
+        self.mode==m.mode && self.category==m.category && self.quantity==quantity
             && self.focus==m.focus && self.selected==m.selected
             && self.row.as_ref().is_none_or(|r|r.matches(m))
             && self.trade==m.trade
@@ -65,10 +66,16 @@ impl Guard {
 }
 /// Source state attached by the ordinary painter, not reconstructed from the
 /// current model at a later touch. A stale frame cannot approve a new quote.
-#[derive(Component)]
-pub(crate) struct RenderedMenu {guard:Guard,text_size:f32}
+#[derive(Component,Clone)]
+pub(crate) struct RenderedMenu {guard:Guard,text_size:f32,status:Option<String>}
 impl RenderedMenu {
-    pub(crate) fn of(m:&MenuModel,text_size:f32)->Self {Self {guard:Guard::of(m,Target::Command(Command::Accept)),text_size}}
+    pub(crate) fn of(m:&MenuModel,text_size:f32)->Self {Self {guard:Guard::of(m,Target::Command(Command::Accept)),text_size,status:m.status.clone()}}
+    pub(super) fn quantity_current(&self,m:&MenuModel)->bool {self.status==m.status && self.guard.matches(m)}
+    pub(super) fn amount_repaint(&self,m:&MenuModel,text_size:f32)->bool {
+        let (Some(mut current),Some(before))=(m.quantity,self.guard.quantity) else{return false};
+        current.amount=before.amount;
+        self.text_size==text_size && self.status==m.status && self.guard.matches_quantity(m,Some(current))
+    }
 }
 #[derive(Clone,Copy,PartialEq)]
 enum MeterShape { Node([Vec2;3]), Tile([f64;4]) }

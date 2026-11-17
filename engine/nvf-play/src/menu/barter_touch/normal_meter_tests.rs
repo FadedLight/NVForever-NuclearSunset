@@ -3,7 +3,7 @@
 fn meter_load_native(ui:&mut fnv_ui::Ui) {
         crate::tiles::menus::load_quantity_fixture_for_touch_tests(ui,|xml|xml
             .replace("<rect name=\"QM_MainRect\">","<rect name=\"QM_MainRect\"><x>120</x><y>250</y><width>700</width><height>210</height>")
-            .replace("<rect name=\"QM_AmountMeter\"/>",r#"<hotrect name="QM_AmountMeter"><x>80</x><y>70</y><width>480</width><height>48</height><target>1</target><text name="QM_AmountText"><string><copy src="parent()" trait="user2"/></string><width>80</width><height>25</height></text></hotrect><image name="QM_OKButton"><x>570</x><y>60</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>OK</string><width>100</width><height>30</height></text></image><image name="QM_CancelButton"><x>570</x><y>120</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>Cancel</string><width>100</width><height>30</height></text></image>"#));
+            .replace("<rect name=\"QM_AmountMeter\"/>",r#"<rect name="QM_AmountMeter"><x>80</x><y>70</y><width>480</width><height>48</height><target>1</target><hotrect name="QM_MeterHit"><width>480</width><height>48</height><target>1</target></hotrect><text name="QM_AmountText"><string><copy src="parent()" trait="user2"/></string><width>80</width><height>25</height></text></rect><image name="QM_OKButton"><x>570</x><y>60</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>OK</string><width>100</width><height>30</height></text></image><image name="QM_CancelButton"><x>570</x><y>120</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>Cancel</string><width>100</width><height>30</height></text></image>"#));
         assert!(crate::tiles::menus::quantity_built(ui).yes());
 }
 fn meter_scene(native:bool,most:i32)->(App,FormId) {
@@ -273,4 +273,175 @@ fn ordinary_native_meter_same_geometry_new_prompt_source_refuses_old_id_then_fre
     let bounds=meter_bounds(&mut app,true);edge(&mut app,513,TouchPhase::Started,meter_at(bounds,0.75));app.update();
     assert_eq!(model(&app).quantity.unwrap().amount,6);
     edge(&mut app,513,TouchPhase::Ended,meter_at(bounds,0.75));app.update();assert_eq!(offered(&app),0);
+}
+
+#[test]
+fn ordinary_quantity_meter_other_native_intent_retires_physical_hold_then_fresh_press_recovers() {
+    for replacement in [false,true] {
+        let (mut app,_)=meter_scene(false,8);let bounds=meter_bounds(&mut app,false);
+        meter_hardware(&mut app,meter_at(bounds,0.25),true);
+        assert_eq!(model(&app).quantity.unwrap().amount,2);
+        let old={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+        if replacement {
+            app.world_mut().write_message(MenuInput(Command::AmountCancel));
+            app.world_mut().write_message(MenuInput(Command::One));
+        } else {app.world_mut().write_message(MenuInput(Command::AmountStep(1)));}
+        app.update();
+        let want=if replacement {8}else{3};assert_eq!(model(&app).quantity.unwrap().amount,want);
+        let current={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+        assert_ne!(old,current,"another real consumer intent replaces the physical source");
+        let bounds=meter_bounds(&mut app,false);let p=meter_at(bounds,0.75);
+        let window=app.world().resource::<Fixture>().0.window;
+        app.world_mut().get_mut::<Window>(window).unwrap().set_cursor_position(Some(p));app.update();
+        assert_eq!(model(&app).quantity.unwrap().amount,want,"a held mouse cannot restart on a replacement prompt");
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+        meter_hardware(&mut app,p,false);meter_hardware(&mut app,p,true);
+        assert_eq!(model(&app).quantity.unwrap().amount,6,"release and a real fresh press recover");
+        meter_hardware(&mut app,p,false);assert_eq!(offered(&app),0);assert_eq!(count(&mut app,PLAYER,CAPS),1000);
+    }
+}
+
+#[test]
+fn ordinary_physical_meter_context_changes_retire_hold_and_noop_size_keeps_live_drag() {
+    for cause in ["scale","density","camera","window","resize","layout","transform","size","roundtrip","new-max","status","focus","noop"] {
+        let (mut app,stock)=meter_scene(false,8);
+        crate::menu_readability::register(&mut app,crate::pause::GROUP_MENUS);
+        app.update();app.update();let bounds=meter_bounds(&mut app,false);
+        meter_hardware(&mut app,meter_at(bounds,0.25),true);
+        assert_eq!(model(&app).quantity.unwrap().amount,2,"actual physical Start before context change: {cause}");
+        let f=app.world().resource::<Fixture>().0;
+        match cause {
+            "scale"=>meter_display(&mut app,1.0,1.5),
+            "density"=>meter_display(&mut app,2.0,1.0),
+            "camera"=>{
+                app.world_mut().entity_mut(f.camera).remove::<bevy::ui::IsDefaultUiCamera>();
+                app.world_mut().get_mut::<Camera>(f.camera).unwrap().is_active=false;
+                let camera=app.world_mut().spawn((Camera2d,bevy::ui::IsDefaultUiCamera,Camera {
+                    computed:ComputedCameraValues {target_info:Some(RenderTargetInfo {
+                        physical_size:f.size.as_uvec2(),scale_factor:1.0}),..default()},..default()
+                },RenderTarget::Window(WindowRef::Entity(f.window)))).id();
+                app.world_mut().resource_mut::<Fixture>().0.camera=camera;
+            }
+            "window"=>{
+                app.world_mut().entity_mut(f.window).remove::<PrimaryWindow>();
+                let window=app.world_mut().spawn((Window {resolution:(640,360).into(),focused:true,..default()},PrimaryWindow)).id();
+                *app.world_mut().get_mut::<RenderTarget>(f.camera).unwrap()=RenderTarget::Window(WindowRef::Entity(window));
+                app.world_mut().resource_mut::<Fixture>().0.window=window;
+            }
+            "resize"=>{
+                app.world_mut().get_mut::<Window>(f.window).unwrap().resolution=(800,450).into();
+                app.world_mut().get_mut::<Camera>(f.camera).unwrap().computed.target_info=Some(RenderTargetInfo {
+                    physical_size:UVec2::new(800,450),scale_factor:1.0});
+                app.world_mut().resource_mut::<Fixture>().0.size=Vec2::new(800.0,450.0);
+            }
+            "layout"=>{
+                let entity={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+                let mut node=app.world_mut().get_mut::<Node>(entity).unwrap();
+                let Val::Vh(width)=node.width else{panic!("actual meter uses interface viewport units")};
+                node.width=Val::Vh(width+2.0);
+            }
+            "transform"=>{
+                let entity={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+                app.world_mut().get_mut::<bevy::ui::UiTransform>(entity).unwrap().translation=bevy::ui::Val2::px(12.0,0.0);
+                app.update();
+                let moved=meter_bounds(&mut app,false);
+                assert!((moved.center().x-bounds.center().x).abs()>5.0,"actual layout applied the changed transform before the next held sample");
+                app.world_mut().get_mut::<Window>(f.window).unwrap().set_cursor_position(Some(meter_at(bounds,0.75)));
+            }
+            "size"|"roundtrip"|"noop"=>{
+                let row=app.world().resource::<crate::settings::Settings>().index("barter-menu-size-v1").unwrap();
+                let part=if cause=="noop" {0.5}else{1.0};
+                assert_eq!(crate::settings::set_slider(app.world_mut(),row,part),Some(part));
+                if cause=="roundtrip" {assert_eq!(crate::settings::set_slider(app.world_mut(),row,0.5),Some(0.5));}
+            }
+            "new-max"=>{
+                let next={let mut sim=app.world_mut().resource_mut::<crate::sim::SimState>();
+                    sim.world.add_item(stock,GOODS,8).unwrap();
+                    MenuModel::open_barter(&mut sim.world,stock,stock,CAPS,100.0,0).unwrap()};
+                let index=next.list(Side::Container).rows.iter().position(|r|r.item==GOODS).unwrap();
+                app.world_mut().resource_mut::<ActiveMenu>().0=Some(next);
+                app.world_mut().write_message(MenuInput(Command::Hover(Side::Container,index)));
+                app.world_mut().write_message(MenuInput(Command::One));
+            }
+            "status"=>{
+                app.world_mut().resource_mut::<ActiveMenu>().0.as_mut().unwrap().status=Some("Review this changed quote".into());
+                app.world_mut().get_mut::<Window>(f.window).unwrap().set_cursor_position(Some(meter_at(bounds,0.75)));
+            }
+            "focus"=>{app.world_mut().get_mut::<Window>(f.window).unwrap().focused=false;}
+            _=>unreachable!(),
+        }
+        for _ in 0..3 {app.update();}
+        let want=if cause=="new-max" {16}else{2};
+        assert_eq!(model(&app).quantity.unwrap().amount,want,"context change cannot apply a stale held sample: {cause}");
+        assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left),"context retirement preserves real hardware: {cause}");
+        if cause=="focus" {app.world_mut().get_mut::<Window>(f.window).unwrap().focused=true;app.update();app.update();}
+        let bounds=meter_bounds(&mut app,false);let p=meter_at(bounds,0.75);
+        let window=app.world().resource::<Fixture>().0.window;
+        app.world_mut().get_mut::<Window>(window).unwrap().set_cursor_position(Some(p));app.update();
+        if cause=="noop" {
+            assert_eq!(model(&app).quantity.unwrap().amount,6,"same effective setting preserves the original held drag");
+        } else {
+            assert_eq!(model(&app).quantity.unwrap().amount,want,"held mouse cannot restart after context retirement: {cause}");
+            let world=app.world_mut();let mut q=world.query_filtered::<&crate::ui_pointer::PointerState,With<crate::menu::AmountMeter>>();
+            assert_ne!(*q.single(world).unwrap(),crate::ui_pointer::PointerState::Pressed);
+        }
+        meter_hardware(&mut app,p,false);meter_hardware(&mut app,p,true);
+        assert_eq!(model(&app).quantity.unwrap().amount,if cause=="new-max" {12}else{6},"real release/fresh press recovers in current painted geometry: {cause}");
+        meter_hardware(&mut app,p,false);assert_eq!(offered(&app),0);assert_eq!(count(&mut app,PLAYER,CAPS),1000);
+    }
+}
+
+#[test]
+fn ordinary_physical_meter_partial_viewport_keeps_original_fresh_click_without_retained_drag() {
+    let (mut app,_)=meter_scene(false,8);
+    let f=app.world().resource::<Fixture>().0;
+    app.world_mut().get_mut::<Camera>(f.camera).unwrap().viewport=Some(bevy::camera::Viewport {
+        physical_position:UVec2::ZERO,physical_size:UVec2::new(320,180),..default()
+    });
+    for _ in 0..3 {app.update();}
+    assert_eq!(app.world().get::<Camera>(f.camera).unwrap().logical_viewport_size(),Some(Vec2::new(320.0,180.0)));
+    let bounds=meter_bounds(&mut app,false);let p=meter_at(bounds,0.25);
+    meter_hardware(&mut app,p,true);
+    assert_eq!(model(&app).quantity.unwrap().amount,2,"an actual painted partial-viewport click retains the original consumer");
+    meter_hardware(&mut app,p,false);
+    let bounds=meter_bounds(&mut app,false);let p=meter_at(bounds,0.75);
+    meter_hardware(&mut app,p,true);
+    assert_eq!(model(&app).quantity.unwrap().amount,6,"fresh click works without a qualified full-window retention stamp");
+    meter_hardware(&mut app,p,false);
+    assert_eq!(offered(&app),0);assert_eq!(count(&mut app,PLAYER,CAPS),1000);
+}
+
+#[test]
+fn ordinary_container_meter_keeps_original_fresh_mouse_route_across_unrelated_barter_size_change() {
+    let (mut app,stock)=meter_scene(false,8);
+    crate::menu_readability::register(&mut app,crate::pause::GROUP_MENUS);
+    let next={let mut sim=app.world_mut().resource_mut::<crate::sim::SimState>();
+        MenuModel::open_container(&mut sim.world,stock).unwrap()};
+    let index=next.list(Side::Container).rows.iter().position(|r|r.item==GOODS).unwrap();
+    crate::script::engine_menu_opened(Some(&mut app.world_mut().resource_mut::<crate::script::ScriptState>()),next.mode);
+    app.world_mut().resource_mut::<ActiveMenu>().0=Some(next);
+    app.world_mut().write_message(MenuInput(Command::Hover(Side::Container,index)));
+    app.world_mut().write_message(MenuInput(Command::One));
+    for _ in 0..3 {app.update();}
+    assert!(matches!(model(&app).mode,Mode::Container(_)));
+    assert_eq!(model(&app).quantity.unwrap().max,8);
+    let bounds={let world=app.world_mut();
+        let mut q=world.query_filtered::<(&ComputedNode,&bevy::ui::UiGlobalTransform),With<crate::menu::AmountMeter>>();
+        let (node,at)=q.single(world).unwrap();Rect::from_center_size(at.translation,node.size())};
+    meter_hardware(&mut app,meter_at(bounds,0.25),true);
+    assert_eq!(model(&app).quantity.unwrap().amount,2);
+    app.update();
+    let source={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+    let row=app.world().resource::<crate::settings::Settings>().index("barter-menu-size-v1").unwrap();
+    assert_eq!(crate::settings::set_slider(app.world_mut(),row,1.0),Some(1.0));
+    assert_eq!(app.world().resource::<crate::menu_readability::MenuReadability>().size(crate::menu_readability::MenuKind::Barter),1.5);
+    app.update();
+    let current={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
+    assert_eq!(current,source,"unrelated Barter setting cannot replace an unchanged container source");
+    assert_eq!(model(&app).quantity.unwrap().amount,2);
+    assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left));
+    let p=meter_at(bounds,0.75);meter_hardware(&mut app,p,false);meter_hardware(&mut app,p,true);
+    assert_eq!(model(&app).quantity.unwrap().amount,6,"the original fresh physical admission stays available");
+    meter_hardware(&mut app,p,false);
+    assert_eq!(count(&mut app,stock,GOODS),8);assert_eq!(count(&mut app,PLAYER,CAPS),1000);
 }

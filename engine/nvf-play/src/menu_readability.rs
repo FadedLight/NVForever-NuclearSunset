@@ -44,6 +44,7 @@ fn set_size(world: &mut World, kind: MenuKind, value: f32) {
     if previous == next { return; }
     match kind {
         MenuKind::Barter => {
+            crate::menu::retire_physical_quantity_paint(world);
             if let Some(mut touch) = world.get_resource_mut::<crate::menu::normal_touch::NormalBarter>() {
                 touch.cancel();
             }

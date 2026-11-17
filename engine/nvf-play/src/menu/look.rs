@@ -724,6 +724,12 @@ pub fn quantity_words(game: Option<&fnv_game::Game<'_>>) -> [String; 2] {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_quantity(root: &mut ChildSpawnerCommands, q: &Quantity, words: &[String; 2], kit: &mut Kit, data: Option<&GameData>, images: &mut Assets<Image>, bc: bool, glyphs: &crate::pad::PadGlyphs, extra: Option<&str>) {
+    spawn_quantity_reusing(root,q,words,(kit,data,images,bc,glyphs,extra),(None,None));
+}
+pub(super) type QuantitySources<'a>=(&'a mut Kit,Option<&'a GameData>,&'a mut Assets<Image>,bool,&'a crate::pad::PadGlyphs,Option<&'a str>);
+pub(super) fn spawn_quantity_reusing(root:&mut ChildSpawnerCommands,q:&Quantity,words:&[String;2],
+    (kit,data,images,bc,glyphs,extra):QuantitySources,
+    (retained,paint):(Option<Entity>,Option<super::PhysicalMeterPaint>)) {
     let mut c = Ctx { kit, data, images, bc, glyphs };
     let bright = amber(255.0);
     let sheet = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
@@ -758,7 +764,19 @@ pub fn spawn_quantity(root: &mut ChildSpawnerCommands, q: &Quantity, words: &[St
                     None => p.spawn((at(x, my, (w - 3.0).max(1.0), mh), BackgroundColor(bright))),
                 };
             }
-            p.spawn((AmountMeter, Button, RelativeCursorPosition::default(), at(mx, my - 6.0, mw, mh + 12.0)));
+            let node=at(mx,my-6.0,mw,mh+12.0);
+            let mut paint=paint;
+            if let Some(paint)=paint.as_mut(){paint.style=Some(node.clone());}
+            if let Some(e)=retained {
+                let parent=p.target_entity();
+                let mut commands=p.commands();
+                let mut leaf=commands.entity(e);
+                leaf.insert((node,ChildOf(parent)));
+                if let Some(paint)=paint {leaf.insert(paint);}
+            } else {
+                let mut leaf=p.spawn((AmountMeter,Button,RelativeCursorPosition::default(),node));
+                if let Some(paint)=paint {leaf.insert(paint);}
+            }
             for (x, name, step) in [(Q_ARROWS[0], "main_arrow_left.dds", -1), (Q_ARROWS[1], "main_arrow_right.dds", 1)] {
                 let node = at(x, my - 5.5, ARROW.x, ARROW.y);
                 let button = (Button, CmdButton(Command::AmountStep(step)));

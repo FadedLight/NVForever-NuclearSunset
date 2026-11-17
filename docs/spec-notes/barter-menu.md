@@ -703,8 +703,9 @@ The touch adapter compares the actual painted size, interface-unit scale,
 window/camera, insets and live source before the original consumer acts. It does
 not zoom the entire canvas or synthesize a mouse click. Quantity-meter dragging
 uses the composed original Amount consumer and preserves these size/source
-guards, including acknowledged same-geometry repaint. The authored native/hand-built layout and outcome controls remain
-uncompiled and unexecuted at this source checkpoint.
+guards, including acknowledged same-geometry repaint. R41 compiled these adapters
+and passed all thirteen ordinary barter/typography controls. Its nine quantity-meter
+cases failed; the remaining boundary and follow-up source are distinguished below.
 
 
 ## Ordinary touch quantity meter
@@ -732,10 +733,43 @@ input synthesis or PointerState writes. A stationary native End retains its real
 native click pulse only when its endpoint still hits that same meter. A subslop
 End just outside it remains an amount clamp, never a click on a nearby button.
 
-[hypothesis: qualification] Authored Apps exercise actual hand-built Taffy/fill
+[design] Authored Apps exercise actual hand-built Taffy/fill
 geometry and the existing native QuantityMenu writer/amount text, actual raw
 input and original apply_input, including density/nonunit Bevy UiScale and a
-large-stack short edge crossing. They remain uncompiled/unrun. Native prompt XML
-is authored test data; it does not establish full game-file/class lifecycle,
-GPU pixels or physical-phone acceptance. Originalbc8's missing live Start can
-fail before later edge assertions; no edge-isolated baseline result is claimed.
+large-stack short edge crossing. Native prompt XML is authored test data; it does
+not establish full game-file/class lifecycle, GPU pixels or physical-phone acceptance.
+
+[qualification] R41 source `a18b10ae`, actual checkout `54f8997b`, compiled and
+executed all nine meter cases, which failed. Eight native cases reached missing
+drawn-meter geometry in their shared fixture; the physical hand-built control
+applied amount 2, then failed the next drag expectation of 6. The corrected native
+fixture retains a drawn meter parent with its original writer/text identity and a
+full-size hit-testable child. All nine complete case bodies and their effect
+assertions remain. This fixture correction and the physical repair below require
+actual owning execution; no claim that all nine failures are fixed is made.
+
+[design] Only a hand-built Barter meter participates in physical leaf retention.
+Its original Amount consumer must acknowledge the exact requested change before
+the painter can reuse the already-Pressed leaf across that amount-only redraw.
+The full painted prompt, row/trade/status, font size, window/camera, density,
+interface scale, insets, original Node style and first accepted geometry must
+still agree. Another command, prompt replacement or changed context retires that
+leaf; an equivalent saved size preserves it. The first accepted geometry is kept
+through the held chain rather than reconstructed after each redraw. This creates
+no new raw input reader, PointerState writer, quantity effect or input owner.
+
+[design] Ordinary meters retain their existing PointerState/RelativeCursorPosition
+admission without a retention component. Additional geometry is optional for that
+route and required only by known painted retention. Partial-window fresh clicks
+retain the original consumer without promising retained dragging. Container and
+Inventory meters keep their original route; changing only Barter size cannot
+retire their unchanged source. A separate Confirm and trade Accept still own the
+effects. One retained leaf and its paint snapshot are bounded; no FPS improvement
+or allocation reduction is claimed.
+
+[qualification] Four additional App cases cover competing commands, context and
+geometry retirement with fresh recovery, partial-viewport original clicks, and an
+unrelated Container control. The existing component-only Inventory switching and
+release case is unchanged. All thirteen proposed meter cases remain uncompiled
+and unrun on the corrected source. The current separate services diagnostic run
+does not include these meter changes and cannot qualify them.

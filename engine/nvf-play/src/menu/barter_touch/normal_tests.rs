@@ -128,16 +128,20 @@ fn normal_scene_with_setup(native:bool,pair:(crate::sim::SimState,FormId),setup:
     app.insert_resource(Fixture(Frame {window,camera,size:Vec2::new(640.0,360.0),safe:default(),
         ui_scale:1.0,density:1.0,admitted:true,fresh:false,neutral:true}));
     install(&mut app);normal::install(&mut app);
-    app.add_systems(PreUpdate,normal_raw_owner.after(InputSystems).before(bevy::ui::UiSystems::Focus));
+    app.add_systems(PreUpdate,(normal_raw_owner.after(InputSystems).before(bevy::ui::UiSystems::Focus),
+        bevy::ui::ui_focus_system.in_set(bevy::ui::UiSystems::Focus)));
     app.add_systems(Update,(input::feed,crate::menu::quantity_keys,crate::menu::menu_keys,
         crate::menu::menu_mouse,crate::menu::quantity_mouse,crate::menu::apply_input,
         crate::menu::draw).chain().in_set(crate::menu::MenuSystems));
-    app.add_systems(PostUpdate,(ApplyDeferred,propagate_ui_target_cameras,bevy::ui::ui_layout_system,
-        bevy::ui::update::update_clipping_system,ApplyDeferred,normal_ui_stack).chain());
+    app.add_systems(PostUpdate,(ApplyDeferred,propagate_ui_target_cameras,
+        bevy::ui::sync_font_size_to_em_size,bevy::ui::widget::measure_text_system,bevy::ui::ui_layout_system,
+        bevy::ui::update::update_clipping_system,ApplyDeferred,normal_ui_stack).chain()
+        .after(bevy::text::load_font_assets_into_font_collection)
+        .after(bevy::text::detect_text_needs_rerender));
     app.configure_sets(PostUpdate,PropagateSet::<ComputedUiTargetCamera>::default()
-        .after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        .after(propagate_ui_target_cameras).before(bevy::ui::widget::measure_text_system));
     app.configure_sets(PostUpdate,PropagateSet::<ComputedUiRenderTargetInfo>::default()
-        .after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        .after(propagate_ui_target_cameras).before(bevy::ui::widget::measure_text_system));
     if native {barter_menu::tests::install_normal_writer(&mut app);}
     setup(&mut app);
     for _ in 0..5{app.update();}

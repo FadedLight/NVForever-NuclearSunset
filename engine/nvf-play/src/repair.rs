@@ -559,7 +559,9 @@ fn keys(
         sounds.write(UiSound { menu: UiMenu::Repair, event: UiEvent::Focus });
         return;
     }
-    open.confirming = false;
+    // An idle frame between deliberate presses is not another repair intent.
+    // Selection, close and a single repair retain their existing cancellation paths.
+    if one || all {open.confirming = false;}
     if one {
         let Some(r) = v.rows.get(open.selected.min(n.saturating_sub(1))) else { return };
         let name = crate::menu::model::display_name(forms, r.item);

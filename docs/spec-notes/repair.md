@@ -487,6 +487,11 @@ quote checks, caps transfer, and the Repair All confirmation tweak. Done follows
 the same original close path. The alternate vendor sheet is not prepared by the
 new ordinary-menu route. Off retains ordinary physical controls.
 
+[design] When the optional Repair All confirmation is required, idle frames keep
+the pending question. A deliberate selection, single repair or close retains its
+existing cancellation behavior; another Repair All confirms through the original
+cost and inventory consumer. This applies to physical and touch input alike.
+
 Repair menu size changes font metrics/wrapping and measured rows in the existing
 clipped viewport, with a 51-unit minimum hand-built row and larger explicit XML
 row heights preserved. Paint, current native hit data and End admission use the
@@ -496,6 +501,8 @@ changes refuse a proposal before the original effect.
 
 This scope is vendor RepairServices. Pip-Boy item donor repair and weapon-mod
 selection retain their existing touch presentation and saved On/Off behavior;
-normal-menu conversion of those paths is separate work. Authored actual
-native/hand-built transaction and measured condition/marker controls are
-uncompiled and unexecuted; no phone outcome is established by this source.
+normal-menu conversion of those paths is separate work. At source `62e54d8`,
+R40 executed the thirteen ordinary service controls: nine passed and four failed.
+The failures cover confirmation, target publication and physical row geometry;
+they are retained as the correction baseline. The correction's owning input and
+geometry checks do not establish a phone outcome.

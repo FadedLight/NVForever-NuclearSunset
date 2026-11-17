@@ -3,7 +3,7 @@
 fn meter_load_native(ui:&mut fnv_ui::Ui) {
         crate::tiles::menus::load_quantity_fixture_for_touch_tests(ui,|xml|xml
             .replace("<rect name=\"QM_MainRect\">","<rect name=\"QM_MainRect\"><x>120</x><y>250</y><width>700</width><height>210</height>")
-            .replace("<rect name=\"QM_AmountMeter\"/>",r#"<rect name="QM_AmountMeter"><x>80</x><y>70</y><width>480</width><height>48</height><target>1</target><text name="QM_AmountText"><string><copy src="parent()" trait="user2"/></string><width>80</width><height>25</height></text></rect><image name="QM_OKButton"><x>570</x><y>60</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>OK</string><width>100</width><height>30</height></text></image><image name="QM_CancelButton"><x>570</x><y>120</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>Cancel</string><width>100</width><height>30</height></text></image>"#));
+            .replace("<rect name=\"QM_AmountMeter\"/>",r#"<hotrect name="QM_AmountMeter"><x>80</x><y>70</y><width>480</width><height>48</height><target>1</target><text name="QM_AmountText"><string><copy src="parent()" trait="user2"/></string><width>80</width><height>25</height></text></hotrect><image name="QM_OKButton"><x>570</x><y>60</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>OK</string><width>100</width><height>30</height></text></image><image name="QM_CancelButton"><x>570</x><y>120</y><width>100</width><height>40</height><target>1</target><text name="button_text"><string>Cancel</string><width>100</width><height>30</height></text></image>"#));
         assert!(crate::tiles::menus::quantity_built(ui).yes());
 }
 fn meter_scene(native:bool,most:i32)->(App,FormId) {
@@ -41,7 +41,7 @@ fn meter_display(app:&mut App,density:f32,scale:f32) {
 }
 fn meter_bounds(app:&mut App,native:bool)->Rect {
     let f=app.world().resource::<Fixture>().0;
-    if native {
+    let bounds=if native {
         let game=&app.world().resource::<crate::script::ScriptState>().rt.as_ref().unwrap().game;
         let b=crate::tiles::menus::meter_box(&game.ui_tree).unwrap();
         let to_window=|x:f64,y:f64|crate::interface::to_menu_frame(Vec2::new(x as f32,y as f32)*(f.size.y/960.0),f.size,Vec2::splat(0.5));
@@ -50,7 +50,23 @@ fn meter_bounds(app:&mut App,native:bool)->Rect {
         let world=app.world_mut();let mut q=world.query_filtered::<(&ComputedNode,&bevy::ui::UiGlobalTransform),With<crate::menu::AmountMeter>>();
         let (node,at)=q.single(world).unwrap();assert!(node.size().min_element()>0.0);
         Rect::from_center_size(at.translation/f.density,node.size()/f.density)
+    };
+    let viewport=Rect::from_corners(Vec2::ZERO,f.size);
+    assert!(bounds.min.is_finite() && bounds.max.is_finite() && bounds.width()>0.0 && bounds.height()>0.0,
+        "invalid actual meter bounds: native={native} density={} ui_scale={} bounds={bounds:?}",f.density,f.ui_scale);
+    // Witness each live sample region through the actual consumer, not merely
+    // through a ComputedNode or XML rectangle that might not be interactive.
+    for point in [meter_at(bounds,0.25),meter_at(bounds,0.5),meter_at(bounds,0.75),
+        Vec2::new(bounds.max.x-2.0,bounds.center().y)] {
+        let phase=TouchPhase::Started;
+        assert!(viewport.contains(point),
+            "meter sample outside actual viewport: native={native} density={} ui_scale={} phase={phase:?} point={point:?} bounds={bounds:?} viewport={viewport:?}",f.density,f.ui_scale);
+        let hit=normal::meter_fixture_hit(app.world_mut(),f,point);
+        assert!(hit.is_some_and(|h|matches!(h.target,normal::Target::Meter(_))
+            && matches!((native,h.source),(true,normal::Source::Tile(..))|(false,normal::Source::Node(_)))),
+            "actual top hit is not this meter: native={native} density={} ui_scale={} phase={phase:?} point={point:?} bounds={bounds:?} hit={hit:?}",f.density,f.ui_scale);
     }
+    bounds
 }
 fn meter_at(rect:Rect,part:f32)->Vec2 {Vec2::new(rect.min.x+rect.width()*part,rect.center().y)}
 fn meter_paint(app:&mut App,native:bool)->f32 {

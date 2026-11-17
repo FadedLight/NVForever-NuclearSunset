@@ -571,6 +571,17 @@ impl Commits<'_,'_> {
         Some(a.tap.commands)
     }
 }
+/// Read the real normal-menu hit consumer in its owning crate's fixture context.
+/// This installs no input reader and changes no pointer, amount or ownership state.
+#[cfg(test)]
+pub(super) fn meter_fixture_hit(world:&mut World,frame:Frame,point:Vec2)->Option<Hit> {
+    use bevy::ecs::system::RunSystemOnce;
+    world.run_system_once(move |geometry:Geometry,active:Res<ActiveMenu>,
+        script:Option<Res<crate::script::ScriptState>>| {
+        active.0.as_ref().and_then(|m|geometry.hit(script.as_deref(),frame,m,point))
+    }).expect("the actual meter hit consumer has its real fixture providers")
+}
+
 #[derive(SystemSet,Debug,Clone,Copy,PartialEq,Eq,Hash)]
 pub struct Dispatch;
 pub(super) fn install(app:&mut App){

@@ -129,20 +129,24 @@ fn unsettled_scene(kind:Kind,native:bool)->App {
     },RenderTarget::Window(WindowRef::Entity(window)))).id();
     app.insert_resource(Owner {kind,frame:Frame {window,camera,size:Vec2::new(1280.0,720.0),safe:default(),
         density:1.0,ui_scale:1.0,admitted:true,fresh:false,neutral:true}});
-    app.add_systems(PreUpdate,raw_owner.after(InputSystems).before(bevy::ui::UiSystems::Focus));
+    app.add_systems(PreUpdate,(raw_owner.after(InputSystems).before(bevy::ui::UiSystems::Focus),
+        bevy::ui::ui_focus_system.in_set(bevy::ui::UiSystems::Focus)));
     app.add_systems(Update,crate::tiles::input::feed.before(crate::PlaySet::Ui));
     if native {
         crate::tiles::recipe_menu::install_normal_fixture_writer(&mut app);
         crate::tiles::repair_services_menu::install_normal_fixture_writer(&mut app);
         app.add_systems(Update,crate::tiles::draw::draw.after(crate::PlaySet::Ui));
     }
-    app.add_systems(PostUpdate,(ApplyDeferred,propagate_ui_target_cameras,bevy::ui::ui_layout_system,
+    app.add_systems(PostUpdate,(ApplyDeferred,propagate_ui_target_cameras,
+        bevy::ui::sync_font_size_to_em_size,bevy::ui::widget::measure_text_system,bevy::ui::ui_layout_system,
         bevy::ui::update::update_clipping_system,ApplyDeferred,
-        crate::menu::barter_touch::tests::normal_ui_stack).chain());
+        crate::menu::barter_touch::tests::normal_ui_stack).chain()
+        .after(bevy::text::load_font_assets_into_font_collection)
+        .after(bevy::text::detect_text_needs_rerender));
     app.configure_sets(PostUpdate,PropagateSet::<ComputedUiTargetCamera>::default()
-        .after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        .after(propagate_ui_target_cameras).before(bevy::ui::widget::measure_text_system));
     app.configure_sets(PostUpdate,PropagateSet::<ComputedUiRenderTargetInfo>::default()
-        .after(propagate_ui_target_cameras).before(bevy::ui::ui_layout_system));
+        .after(propagate_ui_target_cameras).before(bevy::ui::widget::measure_text_system));
     app
 }
 fn scene(kind:Kind,native:bool)->App {
@@ -168,6 +172,7 @@ fn edge(app:&mut App,id:u64,phase:TouchPhase,at:Vec2) {
     let window=app.world().resource::<Owner>().frame.window;
     app.world_mut().write_message(TouchInput {window,id,phase,position:at,force:None});
 }
+#[track_caller]
 fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
     let f=app.world().resource::<Owner>().frame;let g=guard(app);
     let native_points={
@@ -192,13 +197,38 @@ fn hit_point(app:&mut App,wanted:impl Fn(Action)->bool)->Vec2 {
         }}).unwrap();
         if found.is_some_and(&wanted){return p}
     }
-    panic!("actual painted service target missing");
+    let native=match g.kind() {Kind::Vendor=>app.world().resource::<crate::tiles::repair_services_menu::RepairServicesTiles>().menu.is_some(),
+        Kind::Workbench=>app.world().resource::<crate::tiles::recipe_menu::RecipeTiles>().menu.is_some()};
+    panic!("actual painted service target missing: kind={:?} native={native} guard={g:?} frame_size={:?} density={} ui_scale={}",
+        g.kind(),f.size,f.density,f.ui_scale);
 }
+#[track_caller]
 fn tap(app:&mut App,id:u64,wanted:impl Fn(Action)->bool) {
     let p=hit_point(app,wanted);edge(app,id,TouchPhase::Started,p);app.update();
     edge(app,id,TouchPhase::Ended,p);app.update();
 }
-fn row(app:&mut App,id:u64,index:usize) {tap(app,id,|a|a==Action::Row(index));}
+fn row(app:&mut App,id:u64,index:usize) {
+    let before=guard(app);let selected=|g:&Guard|match g {Guard::Vendor {view,..}=>view.selected,Guard::Workbench {view,..}=>view.selected};
+    let native=match before.kind() {Kind::Vendor=>app.world().resource::<crate::tiles::repair_services_menu::RepairServicesTiles>().menu.is_some(),
+        Kind::Workbench=>app.world().resource::<crate::tiles::recipe_menu::RecipeTiles>().menu.is_some()};
+    let p=hit_point(app,|a|a==Action::Row(index));
+    edge(app,id,TouchPhase::Started,p);app.update();edge(app,id,TouchPhase::Ended,p);app.update();
+    if native && selected(&before)!=selected(&guard(app)) {
+        // The original native writer precedes input. Selection changes after it,
+        // so the new model cannot yet admit hits against the preceding paint.
+        let f=app.world().resource::<Owner>().frame;let current=guard(app);
+        let before=app.world_mut().run_system_once({let current=current.clone();move |geometry:Geometry,script:Res<ScriptState>| {
+            geometry.hit(Some(&script.rt.as_ref().unwrap().game),f,&current,p)
+        }}).unwrap();
+        assert!(before.is_none(),"new selected model refuses the preceding native paint before its actual writer");
+        app.update();
+        let current=guard(app);
+        let after=app.world_mut().run_system_once(move |geometry:Geometry,script:Res<ScriptState>| {
+            geometry.hit(Some(&script.rt.as_ref().unwrap().game),f,&current,p)
+        }).unwrap().expect("one actual native writer frame publishes the selected row");
+        assert!(matches!(after.source,Source::Tile(..)));assert_eq!(after.action,Action::Row(index));
+    }
+}
 fn quantity(app:&App)->Option<(i32,i32)> {let Guard::Workbench {view,..}=guard(app)else{panic!("workbench")};view.normal_quantity()}
 
 #[test]
@@ -293,6 +323,9 @@ fn normal_vendor_repair_all_confirmation_and_done_keep_original_consumers() {
         tap(&mut app,30,|a|a==Action::Vendor(crate::repair::RepairServicesInput::All));
         let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};assert!(view.confirming);
         assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
+        for _ in 0..3 {app.update();}
+        let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};assert!(view.confirming,"idle frames preserve the pending deliberate confirmation");
+        assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
         tap(&mut app,31,|a|a==Action::Vendor(crate::repair::RepairServicesInput::All));
         assert_eq!(count(&app,PLAYER,CAPS),10_000-total as i32);assert_eq!(count(&app,VENDOR,CAPS),total as i32);
         let paid=count(&app,PLAYER,CAPS);
@@ -386,7 +419,15 @@ fn normal_vendor_actual_condition_bars_and_equipped_marker_fit_adjacent_rows_at_
         rows.sort_by_key(|(i,_)|*i);assert!(rows.len()>1);
         let mut bars=0;let mut markers=0;
         for (_,e) in &rows {
-            let row=actual_rect(app.world(),*e);assert!(row.height()>=51.0*720.0/960.0-0.1);
+            let row=actual_rect(app.world(),*e);
+            let node=app.world().get::<Node>(*e).unwrap();let computed=app.world().get::<ComputedNode>(*e).unwrap();
+            let frame=app.world().resource::<Owner>().frame;let height=frame.size.y*frame.density;
+            let minimum=51.0*height/960.0;
+            let Val::Vh(declared)=node.height else{panic!("actual repair row must declare interface viewport units")};
+            assert!(declared*height/100.0>=minimum-0.1,"51-unit declaration at size={size}: {declared}vh minimum={minimum}");
+            assert!(computed.unrounded_size().y>=minimum-0.1,"51-unit unrounded layout at size={size}: {:?} minimum={minimum}",computed.unrounded_size());
+            assert!(row.height()>=minimum.floor(),"rounded physical row at size={size}: {row:?} minimum={minimum}");
+            assert!((row.height()-computed.unrounded_size().y).abs()<=1.0,"at most one physical pixel of actual Bevy rounding: {row:?}, {:?}",computed.unrounded_size());
             if let Some(children)=app.world().get::<Children>(*e) {for child in children {
                 let n=app.world().get::<Node>(*child).unwrap();
                 if let (Val::Vh(w),Val::Vh(h))=(n.width,n.height) {
@@ -517,5 +558,34 @@ fn normal_vendor_late_selection_before_native_feed_cannot_be_reset_by_owned_repa
         assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
         app.update();row(&mut app,91,1);
         assert!(count(&app,VENDOR,CAPS)>0,"fresh selected-row contact uses the original repair effect");
+    }
+}
+
+#[test]
+fn normal_vendor_original_keyboard_and_native_requests_keep_confirmation_until_real_other_intent() {
+    let _units=crate::interface::units_at(1.0);
+    for native in [false,true] {
+        let mut app=scene(Kind::Vendor,native);
+        app.insert_resource(crate::tweaks::TweakSettings {repair_all_confirm:true,repair_all_threshold:0.0,..default()});
+        let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};let total=view.total;
+        assert!(view.all_ready && total>0);
+        app.world_mut().write_message(crate::repair::RepairServicesInput::All);app.update();
+        for _ in 0..3 {app.update();}
+        let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};assert!(view.confirming);
+        assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
+        // The original native selection consumer is a genuine other intent.
+        app.world_mut().write_message(crate::repair::RepairServicesInput::Select(1));app.update();
+        let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};assert_eq!(view.selected,1);assert!(!view.confirming);
+        physical_key(&mut app,KeyCode::KeyA,bevy::input::keyboard::Key::Character("a".into()),true);
+        physical_key(&mut app,KeyCode::KeyA,bevy::input::keyboard::Key::Character("a".into()),false);
+        let Guard::Vendor {view,..}=guard(&app)else{panic!("vendor")};assert!(view.confirming,"the first actual keyboard All asks again after selection");
+        assert_eq!(count(&app,PLAYER,CAPS),10_000);assert_eq!(count(&app,VENDOR,CAPS),0);
+        app.world_mut().write_message(crate::repair::RepairServicesInput::All);app.update();
+        assert_eq!(count(&app,PLAYER,CAPS),10_000-total as i32);assert_eq!(count(&app,VENDOR,CAPS),total as i32);
+        let paid=count(&app,PLAYER,CAPS);for _ in 0..3 {app.update();}
+        assert_eq!(count(&app,PLAYER,CAPS),paid,"idle cannot repeat the completed repair");
+        app.world_mut().write_message(crate::repair::RepairServicesInput::Done);app.update();app.update();
+        assert!(!app.world().resource::<crate::repair::RepairServices>().is_open());
+        assert_eq!(count(&app,PLAYER,CAPS),paid);
     }
 }

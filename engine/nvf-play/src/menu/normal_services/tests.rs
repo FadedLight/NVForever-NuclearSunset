@@ -123,7 +123,7 @@ fn unsettled_scene(kind:Kind,native:bool)->App {
         assert_eq!(crate::settings::flip(app.world_mut(),setting),Some(true));
     }
     let window=app.world_mut().spawn((Window {resolution:(1280,720).into(),focused:true,..default()},PrimaryWindow)).id();
-    let camera=app.world_mut().spawn((Camera2d,bevy::ui::DefaultUiCamera,Camera {
+    let camera=app.world_mut().spawn((Camera2d,bevy::ui::IsDefaultUiCamera,Camera {
         computed:ComputedCameraValues {target_info:Some(RenderTargetInfo {physical_size:UVec2::new(1280,720),scale_factor:1.0}),..default()},..default()
     },RenderTarget::Window(WindowRef::Entity(window)))).id();
     app.insert_resource(Owner {kind,frame:Frame {window,camera,size:Vec2::new(1280.0,720.0),safe:default(),

@@ -119,7 +119,7 @@ fn normal_scene_with_setup(native:bool,pair:(crate::sim::SimState,FormId),setup:
         .add_message::<crate::crafting::RecipeInput>().add_message::<crate::repair::RepairServicesInput>()
         .add_message::<crate::tutorial_menu::TutorialInput>().add_message::<CursorMoved>();
     let window=app.world_mut().spawn((Window {resolution:(640,360).into(),focused:true,..default()},PrimaryWindow)).id();
-    let camera=app.world_mut().spawn((Camera2d,bevy::ui::DefaultUiCamera,Camera {
+    let camera=app.world_mut().spawn((Camera2d,bevy::ui::IsDefaultUiCamera,Camera {
         computed:ComputedCameraValues {target_info:Some(RenderTargetInfo {
             physical_size:UVec2::new(640,360),scale_factor:1.0}),..default()},..default()
     },RenderTarget::Window(WindowRef::Entity(window)))).id();

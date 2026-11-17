@@ -1502,9 +1502,25 @@ pub(crate) fn responses(play: &PlayWorld, info: FormId) -> Vec<String> {
 // ---- trace log -------------------------------------------------------------------------
 
 struct TraceLog {
-    out: std::io::BufWriter<std::fs::File>,
+    out: std::io::BufWriter<TraceFile>,
     path: PathBuf,
     lines: u64,
+}
+
+struct TraceFile(std::fs::File);
+
+impl std::io::Write for TraceFile {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> { self.0.write(bytes) }
+    fn flush(&mut self) -> std::io::Result<()> { self.0.flush() }
+    fn write_vectored(&mut self, bytes: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> { self.0.write_vectored(bytes) }
+}
+
+impl Drop for TraceFile {
+    fn drop(&mut self) {
+        // BufWriter flushes before dropping its inner writer. Release ownership
+        // explicitly: a concurrently forked child can still hold an inherited fd.
+        let _ = self.0.unlock();
+    }
 }
 
 impl TraceLog {
@@ -1514,7 +1530,7 @@ impl TraceLog {
             std::fs::create_dir_all(dir)?;
         }
         let (path, file) = Self::create_owned(path)?;
-        let mut out = std::io::BufWriter::new(file);
+        let mut out = std::io::BufWriter::new(TraceFile(file));
         let head = serde_json::json!({"format": "nvforever.play.script_log/1",
             "processId": std::process::id(),
             "events": "one fnv.script.trace/1 event per line (frame, kind, ...), with t = seconds since scripts started and gt = game time (Game::time); aid, menu_answer and controls lines; a final line at exit"});
@@ -1656,13 +1672,40 @@ mod trace_ownership_tests {
         assert!(parent_bytes.contains("parent-before-child") && parent_bytes.contains("parent-after-child"));
         assert!(!parent_bytes.contains("child-only"));
         assert!(child_bytes.contains("child-only") && !child_bytes.contains("parent-before-child"));
-        // OS close releases ownership without a sidecar lock or explicit unlock.
+        // Closing the writer releases ownership without a sidecar lock.
         let mut next = TraceLog::create(&path).unwrap();
         assert_eq!(next.path, path);
         next.write(&serde_json::json!({"kind":"next-run"}));
         drop(next);
         let next_bytes = std::fs::read_to_string(&path).unwrap();
         assert!(next_bytes.contains("next-run") && !next_bytes.contains("parent-before-child"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn finished_trace_releases_ownership_while_a_duplicated_handle_remains_open() {
+        let root = std::env::temp_dir().join(format!("nvf-duplicated-trace-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = root.join("script-trace.jsonl");
+        let mut parent = TraceLog::create(&path).unwrap();
+        parent.write(&serde_json::json!({"kind":"finished-owner"}));
+        let duplicate = parent.out.get_ref().0.try_clone().unwrap();
+        let overlap = TraceLog::create(&path).unwrap();
+        assert_ne!(overlap.path, path, "an active writer retains its lock despite duplication");
+        drop(overlap);
+        drop(parent);
+        let mut next = TraceLog::create(&path).unwrap();
+        assert_eq!(next.path, path, "a finished writer must not leave its lock with a duplicated handle");
+        next.write(&serde_json::json!({"kind":"next-owner"}));
+        drop(duplicate);
+        let overlap = TraceLog::create(&path).unwrap();
+        assert_ne!(overlap.path, path, "closing an old duplicate must not release the new writer's lock");
+        drop((overlap, next));
+        let bytes = std::fs::read_to_string(&path).unwrap();
+        let rows: Vec<serde_json::Value> = bytes.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["format"], "nvforever.play.script_log/1");
+        assert_eq!(rows[1]["kind"], "next-owner");
+        assert!(!bytes.contains("finished-owner") && !bytes.contains('\0'));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

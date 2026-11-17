@@ -8,12 +8,15 @@ writer violates this contract and leaves readers looking at a finished older run
 [documented] Rust1.89 introduced [File::try_lock](https://doc.rust-lang.org/std/fs/struct.File.html#method.try_lock)
 and [TryLockError](https://doc.rust-lang.org/std/fs/enum.TryLockError.html).
 `WouldBlock` means another handle/process holds the lock. The lock remains owned
-by the file handle; closing it releases ownership. Platform locking behavior differs;
+by the file handle, including duplicated or inherited handles until the lock is
+explicitly released. Platform locking behavior differs;
 this code does not promise live unlocked readers on Windows.
 
 [design] Open the requested file without truncating, acquire its exclusive OS lock,
 then truncate and write the header. Keep the locked File inside BufWriter through
-the writer's entire lifetime. Only WouldBlock selects a PID/attempt sibling; other
+the writer's entire lifetime. Its inner writer explicitly unlocks after BufWriter
+has flushed on close, so a handle inherited by a concurrent child does not retain
+ownership after the actual writer finishes. Only WouldBlock selects a PID/attempt sibling; other
 open, lock or truncate errors remain visible. Finished requested files are reused
 at the exact path rather than accumulating suffixes. Do not delete an old pathname
 as a cleanup trick: it could be another writer's identity. Retain the64-name bound,
@@ -21,7 +24,9 @@ format/processId header, immediate header flush and actual-path log.
 
 The authored controls cover overlapping same-process handles, a real independently
 opened child-process writer while the requested file is locked, and sequential
-reuse of a stale requested path. All content/JSONL/no-NUL/separation assertions
+reuse of a stale requested path. A duplicated-handle control additionally checks
+active overlap, exact-path reuse after writer close, and retention of the next
+writer's lock when the old duplicate closes. All content/JSONL/no-NUL/separation assertions
 remain; completed files are inspected after close because Windows locks may exclude
 other read handles. The child test is isolated through its own exact test entrypoint.
 At initial source preparation these controls were authored; subsequent source-bound

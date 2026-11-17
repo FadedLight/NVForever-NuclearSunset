@@ -768,7 +768,7 @@ fn draw(
                                         kind: Kind::Choice(index),
                                         list: menu.list.clone(),
                                     },
-                                    appearance::Paint::Choice {index,short:row.short},
+                                    appearance::Paint::Choice {index},
                                     Row {
                                         index,
                                         short: row.short,

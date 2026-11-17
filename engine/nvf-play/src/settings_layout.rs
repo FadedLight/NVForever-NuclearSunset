@@ -680,7 +680,11 @@ mod shared_table_tests {
     /// table places it in, and no row the game does not have [design: owner 2026-11-16].
     #[test]
     fn the_reference_has_every_row_where_the_page_shows_it() {
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference.md")).unwrap();
+        // Read Android rows before the shared reference's Controls terminator.
+        let text = [
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference-android.md")).unwrap(),
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference.md")).unwrap(),
+        ].join("\n");
         let mut listed: Vec<(String, String, Option<String>)> = Vec::new();
         let (mut tab, mut heading) = (String::new(), None);
         for line in text.lines() {

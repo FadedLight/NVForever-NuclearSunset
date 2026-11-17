@@ -52,7 +52,7 @@ mod menu_sheet_router_controls {
         app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(if dialogue {nvf_play::PlayState::Dialogue}else{nvf_play::PlayState::Menu});
         app.world_mut().run_schedule(bevy::state::state::StateTransition);
         let (sim,m)=authored_barter();app.insert_resource(sim).insert_resource(menu::ActiveMenu(Some(m)));
-        app.world_mut().entity_mut(camera).insert(bevy::ui::DefaultUiCamera);
+        app.world_mut().entity_mut(camera).insert(bevy::ui::IsDefaultUiCamera);
         app.insert_resource(nvf_play::Location {world:0,interior:None})
             .init_resource::<nvf_play::pause::PlayClock>()
             .init_resource::<nvf_play::pad::PadGlyphs>().init_resource::<Assets<Image>>()

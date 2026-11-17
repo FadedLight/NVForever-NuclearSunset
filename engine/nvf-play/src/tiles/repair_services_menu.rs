@@ -584,6 +584,14 @@ pub(super) fn after_update(mut script: ResMut<crate::script::ScriptState>, mut s
     st.check_drawn(&rt.game.ui_tree, &mut |line| info!("{line}"));
 }
 
+// Module-owned provider: the same writer/order used by TilesPlugin, without
+// installing unrelated menu consumers in this actual transaction fixture.
+#[cfg(test)]
+pub(crate) fn install_normal_fixture_writer(app:&mut App) {
+    app.init_resource::<super::draw::TileFonts>()
+        .add_systems(Update,write_system.before(super::input::feed));
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1014,10 +1022,3 @@ pub(crate) mod tests {
     }
 }
 
-// Module-owned provider: the same writer/order used by TilesPlugin, without
-// installing unrelated menu consumers in this actual transaction fixture.
-#[cfg(test)]
-pub(crate) fn install_normal_fixture_writer(app:&mut App) {
-    app.init_resource::<super::draw::TileFonts>()
-        .add_systems(Update,write_system.before(super::input::feed));
-}

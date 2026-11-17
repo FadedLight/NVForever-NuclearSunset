@@ -88,7 +88,7 @@ pub(super) fn install(app: &mut App) {
 #[derive(Component, Clone, Copy)]
 pub(super) enum Paint {
     ResponseDetail {index:usize,part:u8}, ResponseMark(usize), Panel, Speaker, Speech, Hint, ChoiceText { darkened: bool },
-    Choice { index: usize, short: bool }, Focus { index: usize, short: bool }, Confirm, Caption, PreviewSelected, PreviewFocus, Trim(u8),
+    Choice { index: usize }, Focus { index: usize, short: bool }, Confirm, Caption, PreviewSelected, PreviewFocus, Trim(u8),
 }
 #[derive(Component)]
 pub(crate) struct Preview;
@@ -100,8 +100,8 @@ fn palette(rgb: [u8;3], brightness: f32, alpha: f32) -> Color {
     crate::interface::tint(rgb,brightness).with_alpha(opacity(alpha))
 }
 impl Appearance {
-    pub(super) fn response_colors(self,short:bool,selected:bool)->(Color,Color) {
-        let (_,fill,line)=self.colors(Paint::Choice{index:0,short},if selected {0}else{1},crate::interface::hud_rgb());
+    pub(super) fn response_colors(self,_short:bool,selected:bool)->(Color,Color) {
+        let (_,fill,line)=self.colors(Paint::Choice{index:0},if selected {0}else{1},crate::interface::hud_rgb());
         (line.unwrap_or(Color::NONE),fill.unwrap_or(Color::NONE))
     }
     fn line(self, rgb:[u8;3], factor:f32) -> Color { palette(rgb,255.0,self.frame*factor) }
@@ -116,7 +116,7 @@ impl Appearance {
             Paint::ResponseMark(_) | Paint::Speaker | Paint::Speech | Paint::Caption => (Some(palette(rgb,255.,1.)),None,None),
             Paint::ChoiceText{darkened} => (Some(palette(rgb,if darkened {160.}else{255.},1.)),None,None),
             Paint::Hint => (Some(palette(rgb,190.,1.)),None,None),
-            Paint::Choice{index,short:_} => {
+            Paint::Choice{index} => {
                 let on=index==selected;
                 let (brightness,factor)=match self.theme {
                     Theme::Minimal=>(8.,if on {0.55}else{0.0}),

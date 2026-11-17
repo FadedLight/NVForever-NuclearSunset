@@ -1952,6 +1952,13 @@ pub(crate) fn scroll(hud: Option<Res<HudView>>, mut images: ResMut<Assets<Image>
 #[path = "draw_layout_tests.rs"]
 mod layout_tests;
 
+// Install only the production native painter in the authored CPU typography scene.
+#[cfg(test)]
+pub(crate) fn install_typography_fixture_painter(app: &mut App) {
+    app.init_resource::<TileFonts>().init_resource::<super::menus::TileMenuBlur>()
+        .add_systems(Update, draw.after(super::barter_menu::write_system).after(crate::menu::MenuSystems));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3003,9 +3010,3 @@ mod tests {
 
 }
 
-// Install only the production native painter in the authored CPU typography scene.
-#[cfg(test)]
-pub(crate) fn install_typography_fixture_painter(app: &mut App) {
-    app.init_resource::<TileFonts>().init_resource::<super::menus::TileMenuBlur>()
-        .add_systems(Update, draw.after(super::barter_menu::write_system).after(crate::menu::MenuSystems));
-}

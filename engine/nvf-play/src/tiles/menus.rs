@@ -685,6 +685,12 @@ pub fn describe_quantity(ui: &Ui) -> String {
     format!("tiles: {QUANTITY_MENU} drawn from tiles: amount {shown} of {}", Value::Num(most).text())
 }
 
+/// Module-owned authored prompt fixture, no production API or game file access.
+#[cfg(test)]
+pub(crate) fn load_quantity_fixture_for_touch_tests(ui:&mut Ui,change:impl FnOnce(&str)->String) {
+    tests::load_whole_prompt(ui,change);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1125,8 +1131,3 @@ mod tests {
     }
 }
 
-/// Module-owned authored prompt fixture, no production API or game file access.
-#[cfg(test)]
-pub(crate) fn load_quantity_fixture_for_touch_tests(ui:&mut Ui,change:impl FnOnce(&str)->String) {
-    tests::load_whole_prompt(ui,change);
-}

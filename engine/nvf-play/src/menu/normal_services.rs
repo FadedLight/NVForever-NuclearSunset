@@ -18,7 +18,7 @@ pub enum Kind {Vendor,Workbench}
 pub(crate) enum Guard {
     Vendor {vendor:fnv_sim::FormId,view:crate::repair::View},
     Workbench {category:fnv_sim::FormId,station:Option<fnv_sim::FormId>,filter:usize,
-        view:crate::crafting::View},
+        view:Box<crate::crafting::View>},
 }
 impl Guard {
     pub(crate) fn kind(&self)->Kind {match self {Self::Vendor {..}=>Kind::Vendor,Self::Workbench {..}=>Kind::Workbench}}

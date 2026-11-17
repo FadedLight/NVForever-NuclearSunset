@@ -8,7 +8,7 @@ fn typography_data()->(TypographyFiles,nvf_assets::GameData) {
     let root=std::env::temp_dir().join(format!("nvf-menu-typography-{}-{}",std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     let mut dds=crate::interface::tests::authored_rgba_dds(2,2);
-    for pixel in dds[128..].chunks_exact_mut(4) {pixel.copy_from_slice(&[255;4]);}
+    for pixel in dds[128..].as_chunks_mut::<4>().0 {pixel.copy_from_slice(&[255;4]);}
     for file in ["textures/square.dds","textures/square_filled.dds",
         "textures/interface/shared/marker/square.dds","textures/interface/shared/marker/square_filled.dds"] {
         let path=root.join(file);std::fs::create_dir_all(path.parent().unwrap()).unwrap();

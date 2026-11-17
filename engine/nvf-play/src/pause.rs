@@ -294,8 +294,8 @@ impl PlayClock {
     }
 
     /// A clock whose frame stood still for `secs` of real time (tests).
-    #[cfg(test)]
-    pub(crate) fn frozen_frame(secs: f32) -> PlayClock {
+    #[cfg(any(test, feature = "test-fixtures"))]
+    pub fn frozen_frame(secs: f32) -> PlayClock {
         PlayClock { stopped: 0.0, frame: Some(secs) }
     }
 }

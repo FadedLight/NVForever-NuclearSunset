@@ -1118,6 +1118,14 @@ impl Plugin for TilesPlugin {
     }
 }
 
+/// Lean authored-input Apps still use the real production writer, including its
+/// prompt lifecycle publication, native amount traits and text measurement.
+#[cfg(test)]
+pub(crate) fn install_quantity_writer_for_touch_tests(app:&mut App) {
+    app.init_resource::<draw::TileFonts>().init_resource::<crate::pause::ModsEntry>()
+        .add_systems(Update,write.before(crate::menu::normal_touch::Dispatch));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1266,10 +1274,3 @@ mod tests {
     }
 }
 
-/// Lean authored-input Apps still use the real production writer, including its
-/// prompt lifecycle publication, native amount traits and text measurement.
-#[cfg(test)]
-pub(crate) fn install_quantity_writer_for_touch_tests(app:&mut App) {
-    app.init_resource::<draw::TileFonts>().init_resource::<crate::pause::ModsEntry>()
-        .add_systems(Update,write.before(crate::menu::normal_touch::Dispatch));
-}

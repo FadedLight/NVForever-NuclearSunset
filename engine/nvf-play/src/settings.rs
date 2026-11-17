@@ -578,10 +578,12 @@ impl Settings {
     }
 }
 
+type IniMigration = fn(&str) -> String;
+
 /// A versioned row migration changes only the virtual text supplied to the
 /// existing INI parsers. Reading settings never writes the user's file.
 #[derive(Resource, Default)]
-struct IniMigrations(Vec<(&'static str, fn(&str) -> String)>);
+struct IniMigrations(Vec<(&'static str, IniMigration)>);
 
 /// Register one idempotent virtual-text migration before stored rows are parsed.
 /// Re-registering an owner key replaces its hook without duplicating application.

@@ -194,7 +194,7 @@ pub struct Open {
 impl Open {
     pub(crate) fn normal_guard(&self)->Option<crate::menu::normal_services::Guard> {
         Some(crate::menu::normal_services::Guard::Workbench {category:self.category,station:self.station,
-            filter:self.filter,view:self.drawn.as_ref()?.clone()})
+            filter:self.filter,view:Box::new(self.drawn.as_ref()?.clone())})
     }
     pub(crate) fn normal_native_guard(&self)->Option<crate::menu::normal_services::Guard> {
         let mut guard=self.normal_guard()?;
@@ -487,7 +487,7 @@ fn keys(
             if other_changed {normal.discard(token);continue}
             let live=view(rt,&mut sim,open);
             let current=crate::menu::normal_services::Guard::Workbench {category:open.category,
-                station:open.station,filter:open.filter,view:live};
+                station:open.station,filter:open.filter,view:Box::new(live)};
             if let Some(crate::menu::normal_services::Action::Amount(action))=
                 normal.resolve(token,&current,&rt.game,preferences.enabled()) {
                 match action {
@@ -576,7 +576,7 @@ fn keys(
     for token in normal_tokens {
         let live=view(rt,&mut sim,open);
         let current=crate::menu::normal_services::Guard::Workbench {category:open.category,
-            station:open.station,filter:open.filter,view:live};
+            station:open.station,filter:open.filter,view:Box::new(live)};
         let action=normal.resolve(token,&current,&rt.game,preferences.enabled());
         let crate::menu::normal_services::Guard::Workbench {view:live,..}=current else{continue};
         use crate::menu::normal_services::Action;
@@ -987,7 +987,7 @@ fn draw(
         kit.set_text_size(text_size);
         let words = crate::menu::look::quantity_words(Some(&rt.game));
         let full = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-        commands.spawn((RecipeRoot, crate::menu::normal_services::Rendered::new(crate::menu::normal_services::Guard::Workbench {category:open.category,station:open.station,filter:open.filter,view:shown.clone()},text_size), full, GlobalZIndex(crate::interface::TOP_MENU_Z))).with_children(|root| {
+        commands.spawn((RecipeRoot, crate::menu::normal_services::Rendered::new(crate::menu::normal_services::Guard::Workbench {category:open.category,station:open.station,filter:open.filter,view:Box::new(shown.clone())},text_size), full, GlobalZIndex(crate::interface::TOP_MENU_Z))).with_children(|root| {
             root.spawn(crate::tiles::menus::modal_sheet());
             if let Some(quantity) = open.quantity {
                 spawn_prompt(root, quantity, &words, kit, data.as_deref(), &mut images, bc, &glyphs);
@@ -1016,7 +1016,7 @@ fn draw(
     let kit = kit.get_or_insert_with(|| crate::menu::look::Kit::load(data.as_deref(), &mut images, bc));
         kit.set_text_size(text_size);
     let words = crate::menu::look::quantity_words(Some(&rt.game));
-    spawn(&mut commands, &look, (&v,crate::menu::normal_services::Guard::Workbench {category:open.category,station:open.station,filter:open.filter,view:v.clone()}), &words, kit, data.as_deref(), &mut images, bc, &glyphs);
+    spawn(&mut commands, &look, (&v,crate::menu::normal_services::Guard::Workbench {category:open.category,station:open.station,filter:open.filter,view:Box::new(v.clone())}), &words, kit, data.as_deref(), &mut images, bc, &glyphs);
     if v.effects.is_some() && open.drawn.as_ref().is_none_or(|d| d.selected != v.selected) {
         info!("recipe menu: {} effects: {}", v.rows.get(v.selected).map_or("", |r| r.label.as_str()), v.effects.as_deref().unwrap_or(""));
     }

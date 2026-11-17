@@ -15,8 +15,10 @@ fn normal_raw_owner(frame:Res<Fixture>,touches:Res<Touches>,mut events:MessageRe
     }
     capture.suppress_pointer(bridge.visible());
 }
+type NormalRootNodes<'w,'s>=Query<'w,'s,(Entity,Option<&'static GlobalZIndex>),(With<Node>,Without<ChildOf>)>;
+
 pub(crate) fn normal_ui_stack(mut stack:ResMut<bevy::ui::UiStack>,
-    roots:Query<(Entity,Option<&GlobalZIndex>),(With<Node>,Without<ChildOf>)>,
+    roots:NormalRootNodes<'_,'_>,
     children:Query<&Children>,nodes:Query<Entity,With<Node>>) {
     // Explicit CPU stack from the actual painter's root z order/child order,
     // after real layout. No authored ComputedNode, hit rect or PointerState.

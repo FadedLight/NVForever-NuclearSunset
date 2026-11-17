@@ -3,7 +3,7 @@
 The Tweaks tab shows one of Stewie's Tweaks' groups at a time, picked by its first row,
 Category; each group's rows stand in categories the player opens and closes, closed by
 default [design: owner 2026-11-15]. This note lists where every Tweaks row goes, as
-`engine/nvf-play/src/settings_layout.rs` `SECTIONS` places it (`group_section`), ahead of
+`crates/nvf-settings-layout/src/lib.rs` `SECTIONS` places it (`group_section`), ahead of
 #1892, so its rows fall into place when it lands (`resolve_layout` skips a key that is not
 registered).
 

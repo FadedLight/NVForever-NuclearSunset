@@ -11927,6 +11927,22 @@ expect = [
 forbid = [{ re = 'NVF_PLAY_TEST_(SETTINGS|PAUSE_MENU): ("|no switch|\S+ is a (list|slider):)', label = "every aid step is understood" }]
 
 [[scenario]]
+name = "settings-launcher-menu"
+source = "owner 2026-11-16: the launcher's Settings page is the game's menu; the game writes its page (every tab, category and row with its label, note and kind) beside NVForever.ini once every row is registered, for the launcher (engine/nvf-play/src/settings_menu.rs)"
+areas = ["settings"]
+paths = ["engine/nvf-play/src/settings_menu.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/", "crates/nvf-launcher/src/catalog.rs"]
+# Its own home: the run reads that home's INI and writes the menu file beside it, never the machine's.
+env = { NVFOREVER_HOME = "settings-launcher-menu-home" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 10
+expect = [
+  { re = 'settings: menu for the launcher (written|unchanged): \S.*settings-menu\.json \(8 tabs, \d{3,} rows\)', count = 1, label = "the page written beside the INI: the eight tabs, every row" },
+]
+forbid = [
+  { re = 'settings: menu for the launcher not written', label = "the file can be written" },
+]
+
+[[scenario]]
 name = "settings-note-budget"
 source = "#2377: every settings note within the budget (200 characters, no command-line switch) once every row is registered, and two lines at the page's width in a 16:9 view once the pause menu's fonts are loaded; the rows' labels and values laid out at that width, a row whose text had to be cut logged"
 note = "`cut to fit` is reported, not failed: a row cut there is drawn with \"...\" and logs `settings: text of `<key>` cut to fit: ...`"

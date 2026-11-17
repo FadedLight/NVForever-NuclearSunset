@@ -8,7 +8,10 @@ the note had before #2377 where it said more, and the command-line switches whos
 row replaces (a test run that gives one keeps the command line's state over the INI's,
 docs/design/settings-page.md §1). Rows are listed in the page's order, tab by tab and
 heading by heading, as the menu overhaul placed them
-(`engine/nvf-play/src/settings_layout.rs`, `SECTIONS`). The words are NVForever's own; the
+(`crates/nvf-settings-layout/src/lib.rs`, `SECTIONS`; a test in
+`engine/nvf-play/src/settings_layout.rs` fails while a row is missing here or under another
+tab or category). The launcher shows these labels and notes until the game has written its
+own menu (docs/design/launcher.md). The words are NVForever's own; the
 facts are the rows' (each row's module, named under its key).
 
 The labels here are as the rows register them. The page shows them in Title Case in English
@@ -21,7 +24,7 @@ hidden while they cannot apply: the upscaler's own rows (Upscaling mode shows on
 upscaler on, DLSS model only with DLSS, FSR library only with FSR, Anti-aliasing only with
 the upscaler off) and Generated frames (only with DLSS frame generation). Others stay on the
 page greyed out while the row they need is off, their value kept and the reason in the note
-(`engine/nvf-play/src/settings_layout.rs`, `NEEDS`; Shadow distance needs Sun shadows, for
+(`crates/nvf-settings-layout/src/lib.rs`, `NEEDS`; Shadow distance needs Sun shadows, for
 one).
 
 The Controls tab's own rows (Input Device, Automatic Input Switching, Rumble, Invert Y, the

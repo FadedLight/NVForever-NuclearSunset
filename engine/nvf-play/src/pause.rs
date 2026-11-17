@@ -878,7 +878,7 @@ const MINOR_WORDS: [&str; 20] = ["a", "an", "the", "and", "but", "or", "nor", "f
 /// keep their words as registered (the INI, the log, the search and the translations go by
 /// them); only the page shows them so, so a new row is in Title Case without anyone writing
 /// it so.
-fn on_page(en: &str) -> String {
+pub(crate) fn on_page(en: &str) -> String {
     let t = tr_str(en);
     if std::ptr::eq(t, en) {
         title_case(en)

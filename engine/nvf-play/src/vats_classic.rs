@@ -309,13 +309,23 @@ pub fn register(app: &mut App) {
             ask_keep: false,
         },
     );
-    // Only the classic style slows the world [design: the menu overhaul, greyed otherwise].
-    crate::settings::set_disabled_status(app, "vats-slowdown", |w| (*w.resource::<VatsStyle>() != VatsStyle::Classic).then_some("Classic V.A.T.S. only."));
+    // Only the classic style slows the world [design: the menu overhaul, greyed otherwise]:
+    // `settings_layout::NEEDS_CHOICE`, shared with the launcher.
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shared rule that greys Time Slowdown (`settings_layout::NEEDS_CHOICE`) names a
+    /// style this list has.
+    #[test]
+    fn the_shared_rule_names_a_style() {
+        let names: Vec<&str> = VatsStyle::ALL.iter().map(|s| s.name()).collect();
+        let (_, parent, choices, _) = crate::settings_layout::NEEDS_CHOICE.iter().find(|(k, ..)| *k == "vats-slowdown").unwrap();
+        assert_eq!(*parent, "vats-style");
+        assert!(choices.iter().all(|c| names.contains(c)), "{choices:?}");
+    }
 
     #[test]
     fn a_refusal_names_what_was_passed_over() {

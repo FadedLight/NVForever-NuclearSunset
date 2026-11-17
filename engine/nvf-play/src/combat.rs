@@ -5198,6 +5198,23 @@ fn retire_deleted_shots(c: &mut Combat, game: &mut fnv_game::game::Game<'_>) {
     }
 }
 
+/// Apply explicit source edits before the next physical publication/outcome.
+/// Position never comes back from ordinary engine world writes, avoiding a
+/// flight -> World -> flight feedback loop. Attribution does not change the
+/// physical shooter used for collision/remote-detonation admission.
+fn sync_live_projectile_edits(c: &mut Combat, game: &mut fnv_game::game::Game<'_>) {
+    let positions = std::mem::take(&mut game.gaps.projs.position_sets);
+    for f in &mut c.flying {
+        let Some(r) = f.rref else { continue };
+        if let Some(source) = game.gaps.projs.shots.get(&r).map(|s| s.source) {
+            f.by.actor = source;
+        }
+        if let Some(at) = positions.get(&r).filter(|at| at.iter().all(|v| v.is_finite())) {
+            f.p.pos = *at;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fly(
     time: Res<Time>,
@@ -5221,7 +5238,10 @@ fn fly(
     let dt = time.delta_secs();
     let c = &mut *c;
     if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) {
-        with_world(rt, &mut sim, |rt| retire_deleted_shots(c, &mut rt.game));
+        with_world(rt, &mut sim, |rt| {
+            retire_deleted_shots(c, &mut rt.game);
+            sync_live_projectile_edits(c, &mut rt.game);
+        });
     }
     // What scripts asked (DetonatePlacedExplosives, a placed explosion, DamageObject's
     // stage changes) and what burns down (self-damage).

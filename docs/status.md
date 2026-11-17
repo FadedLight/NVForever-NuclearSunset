@@ -514,3 +514,14 @@ Core Clippy was skipped. The earlier five target-specific passes remain scoped
 to integration/file consumers. A test-only self-crate alias addresses that
 compilation context without changing runtime or fixture bodies; its compilation,
 execution and hosted core results are pending.
+
+### Live projectile position and source consumers
+
+[design] Canonical SetPos requests on active shots reach actual flight position
+before engine publication. Canonical Shot.source reaches blast causes, settled
+World ownership and visual attribution. Existing velocity, age, travelled distance,
+fuse, collision shooter and resolved-hit policy remain intact. Six authored
+source-to-physical-consumer controls and one internal queue/restore control remain
+UNRUN. Native behavior and original B42 Quickthrow3.1b initialization, input, bones,
+animation, throw/inventory/detonation and full lifecycle acceptance remain open.
+Contract: [Projectile launch/session traits](spec-notes/projectile-launch-session-traits.md).

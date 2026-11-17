@@ -136,6 +136,16 @@ Not in it: save names, character name, screenshots, typed console text (console
 
 ### 3.2 Crash report (automatic when opted in)
 
+[documented: `engine/nvforever/src/crash.rs`] Local panic reports keep the established
+`crash-<UTC second>-<pid>.txt` name. Concurrent or successive panics using that same
+name preserve the first report and its recorder/snapshot sidecars. Each later panic
+still logs its own thread, message and location, and says that the earlier report was
+preserved. A later second can produce another report; the collector's existing latest
+report selection is unchanged. This preserves same-name panic evidence only: earlier
+GPU errors remain in the run log and structured events, and the panic report does not
+establish a GPU failure's cause. Report write errors are still logged, and sidecar
+collection is still attempted when writing the text fails.
+
 [design] When a session ends `panic` or `native`, the next start sends with its summary:
 
 - the panic report that `crash.rs` already writes (already redacted), now with the

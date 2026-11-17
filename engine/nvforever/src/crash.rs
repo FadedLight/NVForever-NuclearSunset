@@ -18,7 +18,8 @@
 //! where the camera was (worldspace or interior, cell, position; [`note_place`], kept
 //! every frame) and the name of the run log; the panic is logged too, and the console gets
 //! the words Rust's default hook prints, redacted (the default hook is not called: it would
-//! print the home folder).
+//! print the home folder). If several panics share a second and process id, the first
+//! report and its optional sidecars keep that name; later panics are still logged.
 //!
 //! **Structured events** (events_log.rs): the same events at `info` and up, as JSON lines
 //! with where and when they happened, in `events-<UTC time>-<pid>.jsonl` beside the run log.
@@ -523,6 +524,22 @@ fn report_text(thread: &str, message: &str, location: &str, place: &str, command
     )
 }
 
+/// Write one panic report and its optional sidecars. `false` means an earlier report
+/// already owns this name; its evidence must stay together.
+fn write_panic_report(path: &Path, text: &str, sidecars: impl FnOnce()) -> std::io::Result<bool> {
+    let result = match File::options().write(true).create_new(true).open(path) {
+        Ok(mut file) => file.write_all(redact(text).as_bytes()),
+        // Reserve the report name before collecting sidecars: concurrent or reentrant
+        // panics must not replace the report or the context belonging to it.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_file() => return Ok(false),
+        Err(e) => Err(e),
+    };
+    // As before, try the sidecars even if the text could not be written.
+    sidecars();
+    result?;
+    Ok(true)
+}
+
 fn set_hook() {
     std::panic::set_hook(Box::new(move |info| {
         // A broken model, texture or animation: caught, and that file counts as failed
@@ -546,23 +563,27 @@ fn set_hook() {
         let backtrace = std::backtrace::Backtrace::force_capture().to_string();
         let text = report_text(&thread, &message, &location, &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &backtrace);
         let written = LOG_DIR.get().map(|dir| {
-            let path = dir.join(format!("crash-{}-{}.txt", stamp(now_secs()), std::process::id()));
-            // The flight recorder's last 60 s beside it, when reports are on (reports/anomaly.rs).
-            if crate::reports::active().is_some() {
-                let rec = crate::reports::anomaly::dump_recorder(&dir.join(format!("recorder-{}-{}.jsonl", stamp(now_secs()), std::process::id())));
-                let snap = crate::reports::snapshot::dump(&dir.join(format!("snapshot-{}-{}.json", stamp(now_secs()), std::process::id())));
-                match (rec.is_ok(), snap.is_ok()) {
-                    (true, true) => info!("reports: the flight recorder and world snapshot written beside the crash report"),
-                    (true, false) => info!("reports: the flight recorder written beside the crash report (no world snapshot yet)"),
-                    (false, true) => info!("reports: the world snapshot written beside the crash report (no flight recorder)"),
-                    (false, false) => {}
+            let when = stamp(now_secs());
+            let path = dir.join(format!("crash-{when}-{}.txt", std::process::id()));
+            let result = write_panic_report(&path, &text, || {
+                // The flight recorder's last 60 s beside it, when reports are on (reports/anomaly.rs).
+                if crate::reports::active().is_some() {
+                    let rec = crate::reports::anomaly::dump_recorder(&dir.join(format!("recorder-{when}-{}.jsonl", std::process::id())));
+                    let snap = crate::reports::snapshot::dump(&dir.join(format!("snapshot-{when}-{}.json", std::process::id())));
+                    match (rec.is_ok(), snap.is_ok()) {
+                        (true, true) => info!("reports: the flight recorder and world snapshot written beside the crash report"),
+                        (true, false) => info!("reports: the flight recorder written beside the crash report (no world snapshot yet)"),
+                        (false, true) => info!("reports: the world snapshot written beside the crash report (no flight recorder)"),
+                        (false, false) => {}
+                    }
                 }
-            }
-            (std::fs::write(&path, redact(&text).as_bytes()).map(|_| path.clone()), path)
+            });
+            (result, path)
         });
         let place = if place.is_empty() { "not known yet" } else { place.as_str() };
         match &written {
-            Some((Ok(p), _)) => error!("panic on thread '{thread}' at {location}: {message}; where: {place}; crash report written to {}", p.display()),
+            Some((Ok(true), p)) => error!("panic on thread '{thread}' at {location}: {message}; where: {place}; crash report written to {}", p.display()),
+            Some((Ok(false), p)) => error!("panic on thread '{thread}' at {location}: {message}; where: {place}; earlier crash report preserved at {}", p.display()),
             Some((Err(e), p)) => error!("panic on thread '{thread}' at {location}: {message}; the crash report could not be written to {}: {e}", p.display()),
             None => error!("panic on thread '{thread}' at {location}: {message} (no logs folder for a crash report)"),
         }
@@ -683,6 +704,93 @@ pub fn report_exit(mut exit: MessageReader<AppExit>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ReportDir(PathBuf);
+
+    impl ReportDir {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let path = std::env::temp_dir().join(format!("nvf-panic-report-test-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for ReportDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn same_second_panics_preserve_the_first_report_and_sidecars() {
+        let dir = ReportDir::new();
+        let path = dir.0.join("crash-20261116-120000-42.txt");
+        let recorder = dir.0.join("recorder-20261116-120000-42.jsonl");
+        let snapshot = dir.0.join("snapshot-20261116-120000-42.json");
+        let first = report_text("render worker", "first panic", "first.rs:1:1", "cell", "command", None, "first backtrace");
+        let later = report_text("readback worker", "later panic", "later.rs:2:2", "cell", "command", None, "later backtrace");
+        let write_sidecars = |text: &str| {
+            std::fs::write(&recorder, text).unwrap();
+            std::fs::write(&snapshot, text).unwrap();
+        };
+        assert!(write_panic_report(&path, &first, || write_sidecars("first context")).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), redact(&first));
+        assert!(!write_panic_report(&path, &later, || write_sidecars("later context")).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), redact(&first));
+        assert_eq!(std::fs::read_to_string(&recorder).unwrap(), "first context");
+        assert_eq!(std::fs::read_to_string(&snapshot).unwrap(), "first context");
+        // A later second still gets its own report with the established name.
+        let next = dir.0.join("crash-20261116-120001-42.txt");
+        assert!(write_panic_report(&next, &later, || {}).unwrap());
+        assert_eq!(std::fs::read_to_string(next).unwrap(), redact(&later));
+    }
+
+    #[test]
+    fn concurrent_panics_keep_one_complete_report_with_its_sidecars() {
+        let dir = ReportDir::new();
+        let path = dir.0.join("crash-20261116-120000-42.txt");
+        let sidecar = dir.0.join("snapshot-20261116-120000-42.json");
+        let barrier = std::sync::Barrier::new(4);
+        let winners = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..4).map(|i| {
+                let (path, sidecar, barrier) = (&path, &sidecar, &barrier);
+                scope.spawn(move || {
+                    let text = format!("panic {i}\n{}", "backtrace\n".repeat(1000));
+                    barrier.wait();
+                    write_panic_report(path, &text, || std::fs::write(sidecar, &text).unwrap()).unwrap()
+                })
+            }).collect();
+            handles.into_iter().map(|h| usize::from(h.join().unwrap())).sum::<usize>()
+        });
+        assert_eq!(winners, 1);
+        let report = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(report, std::fs::read_to_string(sidecar).unwrap());
+        assert!((0..4).any(|i| report == format!("panic {i}\n{}", "backtrace\n".repeat(1000))));
+    }
+
+    #[test]
+    fn a_reentrant_report_attempt_preserves_the_reserved_report() {
+        let dir = ReportDir::new();
+        let path = dir.0.join("crash-20261116-120000-42.txt");
+        assert!(write_panic_report(&path, "first", || {
+            assert!(!write_panic_report(&path, "nested", || panic!("a collision must not collect sidecars again")).unwrap());
+        }).unwrap());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "first");
+    }
+
+    #[test]
+    fn a_report_io_error_is_not_a_preserved_report() {
+        let dir = ReportDir::new();
+        let absent = dir.0.join("missing").join("crash-20261116-120000-42.txt");
+        let mut collected = false;
+        assert_eq!(write_panic_report(&absent, "panic", || collected = true).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        assert!(collected, "failure to write the text must still try to collect the sidecars");
+        // A directory occupying the name is an error, not an earlier report.
+        let sidecar = dir.0.join("snapshot-20261116-120000-42.json");
+        assert!(write_panic_report(&dir.0, "panic", || std::fs::write(&sidecar, "context").unwrap()).is_err());
+        assert_eq!(std::fs::read_to_string(sidecar).unwrap(), "context");
+    }
 
     /// #2755: an allocation the system cannot give is noted (and, with a run log, written).
     #[test]

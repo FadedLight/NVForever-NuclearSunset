@@ -962,7 +962,6 @@ fn register_graphics(app: &mut App) {
     nvf_play::settings::set_choice_labels(app, QUALITY_KEY, quality_label);
     // The upscaler's own rows show only for the upscaler chosen (the Upscaler row's choice),
     // Anti-Aliasing only without one [design: owner 2026-11-15, the menu overhaul].
-    nvf_play::settings::set_shown_when(app, QUALITY_KEY, UPSCALER_KEY, |w| upscaler_of(w) != Upscaler::Off);
     // The DLSS model, under the mode: dimmed while DLSS is not what draws.
     add_choice_list(
         app,
@@ -978,7 +977,6 @@ fn register_graphics(app: &mut App) {
     );
     nvf_play::settings::set_choice_labels(app, MODEL_KEY, |_, name| fnv_util::words::tr_str(name).to_string());
     nvf_play::settings::set_disabled_status(app, MODEL_KEY, model_dimmed);
-    nvf_play::settings::set_shown_when(app, MODEL_KEY, UPSCALER_KEY, |w| upscaler_of(w) == Upscaler::Dlss);
     nvf_play::settings::set_list_alias(
         app,
         LEGACY_KEY,
@@ -1007,7 +1005,6 @@ fn register_graphics(app: &mut App) {
         },
     );
     nvf_play::settings::set_disabled_status(app, "fsr-library", fsr_library_dimmed);
-    nvf_play::settings::set_shown_when(app, "fsr-library", UPSCALER_KEY, |w| upscaler_of(w) == Upscaler::Fsr);
     // Lists [design: the menu overhaul: 7 or fewer values]; the INI's older slider part loads.
     add_choice_list(
         app,
@@ -1045,7 +1042,6 @@ fn register_graphics(app: &mut App) {
         ChoiceList { names: |_| graphics::SHADOW_FILTERS.iter().map(|f| f.0.to_string()).collect(), chosen: shadow_filter_chosen, pick: take_shadow_filter, save: shadow_filter_chosen, load: take_shadow_filter, ask_keep: false },
     );
     nvf_play::settings::set_disabled_status(app, "anti-aliasing", |w| crate::upscaler::temporal_active(w).then_some("Off (upscaling active)"));
-    nvf_play::settings::set_shown_when(app, "anti-aliasing", UPSCALER_KEY, |w| upscaler_of(w) == Upscaler::Off);
     // Frame generation: Off, FSR 3.1 or DLSS (#2317), each choice dimmed with its reason; the
     // INI's old on/off still reads. Then DLSS's frames per real frame.
     add_choice_list(
@@ -1070,7 +1066,6 @@ fn register_graphics(app: &mut App) {
     nvf_play::settings::set_choice_unavailable(app, FRAMES_KEY, frames_unavailable);
     nvf_play::settings::set_disabled_status(app, FRAMES_KEY, frames_dimmed);
     // Only DLSS makes more than one frame (FSR 3.1: 2x) [design: owner 2026-11-15].
-    nvf_play::settings::set_shown_when(app, FRAMES_KEY, FRAME_GENERATION_KEY, |w| w.get_resource::<crate::frame_gen::FrameGeneration>().is_some_and(|f| f.kind == crate::frame_gen::FrameGenKind::Dlss));
     nvf_play::settings::set_note_now(app, FRAMES_KEY, frames_note_now);
     add_setting(
         app,
@@ -1424,13 +1419,8 @@ fn take_shadow_distance(w: &mut World, text: &str) -> bool {
     }
 }
 
-/// The upscaler the Upscaler row has chosen.
-fn upscaler_of(world: &World) -> Upscaler {
-    world.get_resource::<Graphics>().map_or(Upscaler::Off, |g| g.upscaler.upscaler())
-}
-
 fn upscaler_chosen(world: &World) -> String {
-    let upscaler = world.resource::<Graphics>().upscaler.upscaler();
+    let upscaler = world.get_resource::<Graphics>().map_or(Upscaler::Off, |g| g.upscaler.upscaler());
     UPSCALERS.iter().find(|(_, u)| *u == upscaler).map_or("Off", |(name, _)| *name).to_string()
 }
 
@@ -1702,8 +1692,10 @@ fn frames_dimmed(world: &World) -> Option<&'static str> {
     }
 }
 
+/// Off while the frame generation's state is not there (a test app): the page's hidden rows
+/// ask every run (`settings_layout::SHOWN_WITH`).
 fn frame_generation_chosen(world: &World) -> String {
-    world.resource::<crate::frame_gen::FrameGeneration>().kind.name().to_string()
+    world.get_resource::<crate::frame_gen::FrameGeneration>().map_or(crate::frame_gen::FrameGenKind::Off, |f| f.kind).name().to_string()
 }
 
 fn frame_generation_saved(world: &World) -> String {
@@ -1773,6 +1765,23 @@ pub(crate) fn register_mobile_test_rows(app: &mut App) {
 #[cfg(test)]
 mod fsr_settings_tests {
     use super::*;
+
+    /// The shared tables the page and the launcher hide and grey rows by
+    /// (`nvf_play::settings_layout::SHOWN_WITH`, `NEEDS_CHOICE`) name choices these lists have.
+    #[test]
+    fn the_shared_rules_name_real_choices() {
+        let upscalers: Vec<&str> = UPSCALERS.iter().map(|(n, _)| *n).collect();
+        let frame_gen: Vec<&str> = crate::frame_gen::FrameGenKind::ALL.iter().map(|k| k.name()).collect();
+        for (row, parent, choices) in nvf_play::settings_layout::SHOWN_WITH {
+            let names = match *parent {
+                UPSCALER_KEY => &upscalers,
+                FRAME_GENERATION_KEY => &frame_gen,
+                other => panic!("{row}: a rule on {other}; name its choices here"),
+            };
+            assert!(choices.iter().all(|c| names.contains(c)), "{row}: {choices:?} not all of {names:?}");
+        }
+        assert_eq!(nvf_play::settings_layout::SHOWN_WITH.iter().filter(|(_, p, c)| *p == UPSCALER_KEY && !c.contains(&"Off")).count(), 3, "upscaling mode, DLSS model, FSR library: only with an upscaler");
+    }
 
     // [design] Menu tests install a scoped probe: choice validation and INI snapshots can
     // reach offered indirectly, and neither the real folder nor the global cache is a fixture.

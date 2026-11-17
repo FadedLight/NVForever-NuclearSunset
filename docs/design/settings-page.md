@@ -12,7 +12,11 @@ The owner reorganised the page on 2026-11-15, tab by tab (the menu overhaul). Ev
 added or changed later keeps to these rules; the checks named fail CI or log a warning when
 one is broken. Read §1–§4 for how the page works.
 
-1. **Place the row** in `engine/nvf-play/src/settings_layout.rs` `SECTIONS`: its tab, its
+1. **Place the row** in `crates/nvf-settings-layout/src/lib.rs` `SECTIONS` (the table the
+   pause menu and the launcher share, re-exported as `nvf_play::settings_layout`; the
+   launcher's Settings page follows it and the game's `settings-menu.json`,
+   docs/design/launcher.md), and list it in `docs/settings-reference.md` under the same tab
+   and category (a test fails while it is missing or elsewhere): its tab, its
    category (heading) and its position. A row the table does not name falls to its group's
    tab with no heading (and a Tweaks row to the group Other); the layout tests list every
    row there is (`KNOWN`), so a new row fails them until it is placed.
@@ -32,9 +36,15 @@ one is broken. Read §1–§4 for how the page works.
    quantity of many steps (volumes, distances, field of view). When a slider becomes a list,
    its `load` still takes the older number (`settings::choice_of`, `nearest`).
 6. **A row that cannot apply** is greyed with its value kept and the reason in its note:
-   name it in `settings_layout::NEEDS` (the row, the row it needs, why) or give it a
-   `set_disabled_status`. Hide it instead (`settings::set_shown_when`, with the row that
-   stands for it) only where the owner asked: the upscaler's own rows (Upscaling Mode, DLSS
+   name it in `settings_layout::NEEDS` (the row, the row it needs on, why) or `NEEDS_CHOICE`
+   (the row, a list row and the choices it needs, why). Hide it instead, by
+   `settings_layout::SHOWN_WITH` (the row, the list row that stands for it, the choices it
+   shows with), only where the owner asked. These three tables are in the crate the
+   launcher shares (`crates/nvf-settings-layout`), so its Settings page hides and greys
+   the same rows: a rule that other rows' values decide goes in them, not in code.
+   `set_disabled_status` and `settings::set_shown_when` are for what the INI cannot say
+   (the GPU, missing files, a run's command line); the launcher cannot follow those. The
+   rows hidden so far, where the owner asked: the upscaler's own rows (Upscaling Mode, DLSS
    Model, FSR Library, Anti-Aliasing), Generated Frames, the colour channels unless Custom,
    the controller rows, and Advanced Movement's categories while its Global Toggle is off.
 7. **Words**: write the label in sentence case; the page shows it in Title Case in English,
@@ -73,7 +83,8 @@ INI's (`GivenSwitches`, `apply_stored`, `after_ini`), as #1382 has it.
 
 ## 2. The layout table
 
-**Since the menu overhaul (2026-11-15)** the table is `settings_layout.rs` `SECTIONS` and the
+**Since the menu overhaul (2026-11-15)** the table is `SECTIONS` (`crates/nvf-settings-layout`
+since 2026-11-16, shared with the launcher) and the
 tables below are its earlier state, kept for #1953's history. Eight tabs: **Gameplay,
 Display, Audio, Controls, Graphics, NVF Features, Tweaks, Debug**, each a run of categories
 in the owner's order (`dev` plan of 2026-11-15; `docs/settings-reference.md` lists every row

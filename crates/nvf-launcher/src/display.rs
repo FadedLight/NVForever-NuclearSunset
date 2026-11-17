@@ -145,18 +145,6 @@ pub fn read_only(key: &str) -> bool {
     key == "quality"
 }
 
-/// A key the game reads only while the INI lacks the key that took over from it
-/// (`set_older_key`): `fsr-upscaling` before Upscaler and Upscaling mode (settings.rs
-/// `LEGACY_KEY`), `vsync` before Display sync (`read_old_vsync`). The Other tab leaves it out
-/// once the newer key is there.
-pub fn superseded_by(key: &str) -> Option<&'static str> {
-    match key {
-        "fsr-upscaling" => Some("upscaler"),
-        "vsync" => Some("display-sync"),
-        _ => None,
-    }
-}
-
 /// The game's name for display `i` of the left-to-right order (`monitor_label`).
 pub fn monitor_label(i: usize, m: &Monitor) -> String {
     format!("Display {} ({}x{})", i + 1, m.size.0, m.size.1)

@@ -485,10 +485,12 @@ impl Settings {
         if let Some(status) = self.2.iter().find(|(k, _)| *k == key).and_then(|(_, f)| f(world)) {
             return Some(status);
         }
-        // A row whose parent is off (`crate::settings_layout::NEEDS`).
-        crate::settings_layout::NEEDS.iter().filter(|(k, _, _)| *k == key).find_map(|(_, parent, why)| {
-            let p = self.index(parent)?;
-            (self.value(world, p) < 0.5).then_some(*why)
+        // A row whose parent is off or not on a choice it needs (the shared tables
+        // `settings_layout::NEEDS` and `NEEDS_CHOICE`, which the launcher follows too).
+        crate::settings_layout::needs(key).into_iter().find_map(|r| {
+            let p = self.index(r.parent)?;
+            let holds = if r.choices.is_empty() { self.value(world, p) >= 0.5 } else { self.choices(p).is_some_and(|c| r.choices.contains(&(c.chosen)(world).as_str())) };
+            (!holds).then_some(r.why)
         })
     }
 
@@ -541,17 +543,22 @@ impl Settings {
         })
     }
 
-    /// The rows their module hides now ([`set_shown_when`]): each one's index and the index
-    /// of the row that stands for it (itself when that row is not registered).
+    /// The rows hidden now: by another list row's choice (the shared table
+    /// `settings_layout::SHOWN_WITH`, which the launcher follows too) or by their module
+    /// ([`set_shown_when`]); each one's index and the index of the row that stands for it
+    /// (itself when that row is not registered).
     pub fn hidden(&self, world: &World) -> Vec<(usize, usize)> {
-        self.8
-            .iter()
-            .filter(|(_, _, shown)| !shown(world))
-            .filter_map(|(key, parent, _)| {
-                let i = self.index(key)?;
-                Some((i, self.index(parent).unwrap_or(i)))
-            })
-            .collect()
+        let by_choice = crate::settings_layout::SHOWN_WITH.iter().filter_map(|(key, parent, choices)| {
+            let i = self.index(key)?;
+            let p = self.index(parent)?;
+            let list = self.choices(p)?;
+            (!choices.contains(&(list.chosen)(world).as_str())).then_some((i, p))
+        });
+        let by_module = self.8.iter().filter(|(_, _, shown)| !shown(world)).filter_map(|(key, parent, _)| {
+            let i = self.index(key)?;
+            Some((i, self.index(parent).unwrap_or(i)))
+        });
+        by_choice.chain(by_module).collect()
     }
 
     /// Every row's state as a number: [`Setting::value`], a list's chosen index (-1: not
@@ -622,7 +629,9 @@ pub fn set_disabled_status(app: &mut App, key: &'static str, status: fn(&World) 
 
 /// Show row `key` only while `shown` says so [design: the menu overhaul, owner 2026-11-15:
 /// rows that cannot apply to the parent's choice are hidden, not greyed, where the owner
-/// said so (the upscaler's own rows, Generated Frames, the movement categories)]. While it
+/// said so (the upscaler's own rows, Generated Frames, the movement categories)]. A row
+/// hidden by another list row's choice goes in `settings_layout::SHOWN_WITH` instead, so the
+/// launcher hides it too; this is for a test the INI's values cannot say. While it
 /// is hidden the row `parent` stands for it: the search and the Changed list show that row,
 /// and a choice on the hidden row moves to it (`crate::settings_view::parent_of`). The INI
 /// and the test aids still set the hidden row.
@@ -1011,6 +1020,8 @@ pub(crate) fn setup(app: &mut App) {
     app.add_systems(PostStartup, fix_ui_scale.after(apply_stored));
     app.add_systems(PostStartup, fix_smooth_terrain.after(apply_stored));
     app.add_systems(PostStartup, check_notes.after(apply_stored));
+    // The page for the launcher, once every row is registered (crate::settings_menu).
+    app.add_systems(PostStartup, crate::settings_menu::write_menu.after(check_notes));
     app.add_systems(Update, revert_unkept);
 }
 

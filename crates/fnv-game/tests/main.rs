@@ -90,6 +90,7 @@ mod respawn;
 mod save_pairs;
 mod script_events;
 mod script_stack;
+mod short_hex_receivers;
 mod showoff3;
 mod set_class;
 mod showoff4;

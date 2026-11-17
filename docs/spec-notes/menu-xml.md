@@ -708,6 +708,21 @@ marked]:
 
 A trait that is not there reads 0 [hypothesis].
 
+[design] Named expression sources keep their existing precedence: the first
+descendant in file order, then a menu of that name, then a bare built-in source
+such as `parent` or `me`. `Ui::find_named` indexes the first descendant of each
+case-insensitive name once per tree shape. Making, unloading, renaming or otherwise
+reshaping tiles invalidates that index; value writes reuse it. The index contains
+only the current loaded tree, so menu reloads and reused slots cannot retain old
+IDs. The fallback order and expression/write-override rules are unchanged.
+
+Owned synthetic controls call `Ui::update` with bare-source expressions on many
+rows, bound total name-lookup node visits to linear work, and report fixed-workload
+times without using wall time as a pass threshold. Separate controls retain
+named-before-built-in precedence, nested duplicate order, another-menu fallback,
+unloading, injection and menu reload. These are core implementation checks, not
+original-game captures or a measured installed-mod frame-rate result.
+
 ### 4.3 `onlyif`
 
 `onlyif` never comes first: 196 are last in their list and 99 in the middle, always

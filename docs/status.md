@@ -548,3 +548,18 @@ controls drive attached start-enabled quest sources through that startup method
 and a registered load-event recipient. Live title-screen
 execution, native timing and original Helmet Overlay/Titans acceptance remain
 unqualified. Contract: [Title-start MenuMode](spec-notes/script-language.md#title-start-menumode-group-4).
+
+### MCM integer RGB consumer contract
+
+[design] Bounded integer land/shl/shr operations connect packed colour extraction,
+picker packing and live/reopened image previews. Four authored libtests cover those
+consumers and the explicit exact-integer mapping while retaining accepted bt and
+ordinary operators. Actual c264 normal-Cargo CPU comparison: baseline116PASS/4
+intendedFAIL, candidate120PASS, all120once/0ignored. Overallcontrollerfalse is
+retained for an unknown post-Cargo descendant terminated during boundedcleanup;
+this is not whole-run qualification. Engine callback/draw-piece,
+native/originalMCM/rendered acceptance remain open. Independent raw/source review
+confirmed those bounded case results and the false overall flag. The accepted-main
+060d union retains the tested fnv-ui Rust/fixtures; whole-graph qualification stays
+bound to its exact executed source, separately from the c264 comparison.
+Contract: [MCM integer RGB consumers](spec-notes/mcm-rgb-integer-consumers.md).

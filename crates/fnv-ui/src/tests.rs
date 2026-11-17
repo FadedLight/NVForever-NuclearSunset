@@ -4,6 +4,84 @@
 use crate::tree::{MemSource, Origin, Source, Ui};
 use crate::value::Value;
 
+fn named_source_menu(rows: usize) -> MemSource {
+    let mut xml = String::from(r#"<menu name="NamedWork"><width>400</width>"#);
+    for i in 0..rows {
+        xml.push_str(&format!(r#"<rect name="Row{i}"><width><copy src="parent" trait="width"/></width><height><copy src="me" trait="width"/></height></rect>"#));
+    }
+    xml.push_str("</menu>");
+    MemSource::default().with("named-work.xml", &xml)
+}
+
+#[test]
+fn named_source_update_keeps_menu_walks_linear() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let rows = 512;
+    let src = named_source_menu(rows);
+    let mut ui = Ui::new();
+    ui.load_menu(&src, "named-work.xml").unwrap();
+    ui.update();
+    let visits = ui.named_source_visits.load(Relaxed);
+    for i in 0..rows {
+        assert_eq!(ui.get_float(&format!("NamedWork/Row{i}/height")), Some(400.0));
+    }
+    assert!(visits <= ui.live_tiles() * 4, "NAMED_SOURCE_WALK_BOUND: {visits} node visits for {} live tiles", ui.live_tiles());
+    ui.named_source_visits.store(0, Relaxed);
+    ui.set_float("NamedWork/width", 401.0);
+    ui.update();
+    assert_eq!(ui.get_float("NamedWork/Row511/height"), Some(401.0));
+    assert_eq!(ui.named_source_visits.load(Relaxed), 0, "value changes must reuse structural name lookup");
+}
+
+#[test]
+fn named_source_precedence_and_first_match_follow_tree_changes() {
+    let src = MemSource::default()
+        .with("names.xml", r#"<menu name="Names"><width>12</width><rect name="Branch"><rect name="Parent"><width>7</width></rect></rect><rect name="parent"><width>8</width></rect><rect name="Reader"><width>10</width><height><copy src="pArEnT" trait="width"/></height><x><copy src="Remote" trait="width"/></x></rect></menu>"#)
+        .with("remote.xml", r#"<menu name="Remote"><width>9</width></menu>"#);
+    let mut ui = Ui::new();
+    ui.load_menu(&src, "names.xml").unwrap();
+    ui.load_menu(&src, "remote.xml").unwrap();
+    ui.update();
+    assert_eq!(ui.get_float("Names/Reader/height"), Some(7.0), "first descendant wins before a later shallow match and builtin");
+    assert_eq!(ui.get_float("Names/Reader/x"), Some(9.0), "another menu remains a fallback");
+    let first = ui.find_tile("Names/Branch/Parent").unwrap();
+    ui.unload_tile(first);
+    ui.set_float("Names/parent/width", 8.5);
+    ui.update();
+    assert_eq!(ui.get_float("Names/Reader/height"), Some(8.5), "unloading selects the next duplicate");
+    let second = ui.find_tile("Names/parent").unwrap();
+    ui.unload_tile(second);
+    ui.set_float("Names/width", 12.5);
+    ui.update();
+    assert_eq!(ui.get_float("Names/Reader/height"), Some(12.5), "no named tile falls back to the actual parent");
+    assert!(ui.inject_file(&MemSource::default().with("insert.xml", r#"<rect name="PARENT"><width>15</width></rect>"#), "Names/Branch", "insert.xml"));
+    ui.update();
+    assert_eq!(ui.get_float("Names/Reader/height"), Some(15.0), "injection and slot reuse invalidate an earlier miss");
+    ui.load_menu(&src, "names.xml").unwrap();
+    ui.update();
+    assert_eq!(ui.get_float("Names/Reader/height"), Some(7.0), "reload drops cached old IDs");
+}
+
+#[test]
+fn named_source_fixed_workload_reports_update_cost() {
+    for rows in [256, 1024, 2048] {
+        let src = named_source_menu(rows);
+        let mut ui = Ui::new();
+        ui.load_menu(&src, "named-work.xml").unwrap();
+        let start = std::time::Instant::now();
+        ui.update();
+        let initial = start.elapsed();
+        let start = std::time::Instant::now();
+        for width in [401.0, 402.0, 403.0] {
+            ui.set_float("NamedWork/width", width);
+            ui.update();
+        }
+        let changes = start.elapsed();
+        assert_eq!(ui.get_float(&format!("NamedWork/Row{}/height", rows - 1)), Some(403.0));
+        eprintln!("NAMED_SOURCE_FIXED_WORKLOAD rows={rows} initial_ms={:.3} three_value_updates_ms={:.3}", initial.as_secs_f64() * 1000.0, changes.as_secs_f64() * 1000.0);
+    }
+}
+
 /// A small menu in the shape of the game's: a gauge prefab included twice, a template,
 /// named traits on the menu that code would set.
 fn files() -> MemSource {

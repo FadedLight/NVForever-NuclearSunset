@@ -13,7 +13,7 @@ use super::barter::{self, Flow};
 use crate::pipboy::items::{tiles_in, Info};
 use super::model::{Category, Command, MenuModel, Mode, Quantity, Row, Side};
 use super::{AmountMeter, CategoryTitle, CmdButton, RowButton};
-use crate::interface::{amber, at, face, plain_font, set_line, texture, Face, Picture, Pictures};
+use crate::interface::{amber, at, face, plain_font, texture, Face, Picture, Pictures};
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
 use bevy::prelude::*;
 use crate::ui_pointer::{Button, PointerState};

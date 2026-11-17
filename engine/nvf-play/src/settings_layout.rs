@@ -1934,7 +1934,7 @@ mod tests {
     fn mobile_row_identity_still_edits_the_registered_state_and_changed_list() {
         use bevy::prelude::*;
         use crate::settings::{self, SettingsFile};
-        use crate::settings_view::{self as view, Found, RowId, SettingsScope, Visibility};
+        use crate::settings_view::{self as view, Found, RowId, SettingsScope};
         #[derive(Resource, Default)]
         struct Consent(bool);
         let mut app = App::new();

@@ -10,6 +10,7 @@ impl Side {
     fn name(self) -> &'static str { match self { Self::Standard => "Standard", Self::Left => "Speaker left", Self::Right => "Speaker right" } }
     fn named(name: &str) -> Option<Self> { [Self::Standard, Self::Left, Self::Right].into_iter().find(|s| s.name() == name) }
 }
+#[cfg_attr(test, derive(Debug))]
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
 pub struct Options { pub side: Side }
 impl Default for Options {

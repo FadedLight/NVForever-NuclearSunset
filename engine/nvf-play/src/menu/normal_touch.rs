@@ -439,7 +439,7 @@ pub(crate) fn same_target(a:Target,b:Target)->bool {
 fn commands(t:Target,m:&MenuModel)->[Option<Command>;2] {
     match t {
         Target::Row(s,i)=>{
-            let v=crate::tiles::item_menu::row_commands(s,i,m.focus==s && m.selected[s as usize]==i,false);
+            let v=crate::tiles::container_menu::row_commands(s,i,m.focus==s && m.selected[s as usize]==i,false);
             [v.first().copied(),v.get(1).copied()]
         }
         Target::Command(c)=>[Some(c),None],

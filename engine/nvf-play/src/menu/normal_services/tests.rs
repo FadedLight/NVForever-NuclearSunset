@@ -8,6 +8,7 @@ use bevy::{app::{HierarchyPropagatePlugin,PropagateSet},camera::{ComputedCameraV
 use crate::{script::ScriptState,sim::{SimState,test_world},menu::{ActiveMenu,model::Command}};
 use fnv_sim::{FormId,forms::{BaseData,ItemKind},inventory::Extra};
 use bevy::ecs::system::RunSystemOnce;
+use bevy::state::app::StatesPlugin;
 const PLAYER:FormId=FormId::PLAYER_REF;
 const VENDOR:FormId=FormId(0xFC101);
 const ARMOR:FormId=FormId(0xFC110);
@@ -42,9 +43,9 @@ fn authored_world()->SimState {
     }
     for id in [CAPS,INPUT,OUTPUT] {let mut b=test_world::item_base(id.0);
         b.name=Some(format!("Authored material {}",id.0));bases.push(b);}
-    let mut vendor=test_world::item_base(VENDOR.0-1);vendor.sig=*b"NPC_";
+    let mut vendor=test_world::item_base(VENDOR.0-1);vendor.sig = *b"NPC_";
     vendor.data=BaseData::Actor(fnv_sim::forms::ActorBase {entries:vec![],attributes:None});bases.push(vendor);
-    let mut placed=test_world::placed(VENDOR.0,VENDOR.0-1);placed.sig=*b"ACHR";
+    let mut placed=test_world::placed(VENDOR.0,VENDOR.0-1);placed.sig = *b"ACHR";
     let mut sim=test_world::sim(bases,vec![placed]);
     for i in 0..12 {let id=FormId(ARMOR.0+i);sim.world.add_item(PLAYER,id,1).unwrap();
         assert!(sim.world.inventory_mut(PLAYER).unwrap().set_condition_one(id,Extra::default(),0.2));}

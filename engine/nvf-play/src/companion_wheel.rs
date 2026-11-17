@@ -645,6 +645,7 @@ pub fn report_progress_fixture(step: usize) -> WheelScreen {
         companion: FormId(42),
         name: "Synthetic companion".into(),
         buttons: vec![WheelButton { command: Command::Talk, alt: false, enabled: true, label: "Synthetic command", context: None }],
+        unavailable: vec![None],
         selected: (step >= 1).then_some(0),
         exit_hover: step >= 2,
         fresh: false,

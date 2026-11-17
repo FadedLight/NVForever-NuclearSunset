@@ -150,17 +150,19 @@ Pip-Boy's world and local maps. Fast travel keeps its usual eligibility checks a
 confirmation.
 
 Android's Mobile > Inventory and quick access section offers **Touch in barter menus**
-and **Touch repair and weapon mods**. On desktop, they appear under Gameplay >
+and **Touch repair, mods and workbenches**. On desktop, they appear under Gameplay >
 Inventory menus. Barter keeps its ordinary native or hand-built presentation.
 Drag either inventory list to browse without choosing an item; a stationary tap
 uses its usual row and quantity actions. Review the prices and caps before Accept.
-Cancel preserves carried items and caps. Repair and weapon-mod lists retain their
-separate touch presentation while their ordinary-menu adapters are in development;
-the existing eligibility rules decide which actions can be confirmed.
+Cancel preserves carried items and caps. Vendor repair and workbenches use their
+ordinary menu adapters, which remain under validation. Pip-Boy donor repair and
+weapon mods retain their separate touch presentation. Existing eligibility rules
+decide which actions can be confirmed.
 
 Mouse, keyboard and controller input keep their existing menu actions. A first
-return touch restores touch ownership without activating an item. The corrected
-ordinary-barter source and its new regression controls remain uncompiled and unrun.
+return touch restores touch ownership without activating an item. R41 compiled
+these adapters and passed the thirteen ordinary barter/typography controls, but
+the nine quantity-meter and fourteen ordinary service-menu cases failed.
 Phone acceptance for readability, reach and native-menu coexistence remains open.
 
 [qualification] R31 tested merge `86e010a5` of source `79891b03` with main
@@ -483,3 +485,39 @@ host checks and SDK signature compilation; see the
 [loading-cover note](design/android-loading-cover.md). Actual Android presentation,
 touch recovery after backgrounding and leaving Doc Mitchell's still require a
 current qualified APK and device testing. This correction is absent from R9.
+
+## R41 touch menu validation
+
+[qualification] R41 tested source `a18b10ae42844958267733dca4227e29ca7ab089`
+through checkout `54f8997be55812311288940238be1d0e724781a0`, with parents
+`[a0ebe1c516ce9472ae9c051cb53bc85ce7135c0f, a18b10ae42844958267733dca4227e29ca7ab089]`.
+Its tree `18cae67880cd5c5d5d178a1f1c5bcdf4de3e0132` equals the source tree.
+All eight jobs finished: changes, guard, core, strict engine Clippy and Android
+packaging passed; Tools, engine and aggregate failed. Core passed 3,462 tests
+with five ignored, including all 59 launcher tests; strict root Clippy passed.
+
+Engine assets passed 221 with one ignored. Play passed 2,348, failed 24 and ignored
+one; the wrapper passed 1,555, failed four and ignored one. Two SPIR-V integration
+tests, one TGA integration test and two viewer unit tests passed. Eleven positive child-process runs are
+reported separately and are not added again to parent totals. Cargo's
+`--no-fail-fast` reached the wrapper after the play failure and still failed the job.
+The fourteen service-menu failures have named failure records but no captured
+individual panic payloads; no shared cause is inferred. The other failures are
+nine quantity-meter cases, script trace ownership, one arm-fixture resource and
+three parent router recoveries. The prior typography clipping case passed.
+
+Tools' smoke suite ran 167 tests with five failure events and five skips. Three events are
+document subtests: the engine CI command changed without its documentation and
+local push-check command lists. The follow-up updates all consumers together;
+the four owning static CheckLists methods reproduced five baseline failures and
+then all passed, retaining equality, order, uniqueness and legacy parser controls.
+This focused result is not a full Tools or engine pass.
+
+The native job passed the ARM cross-check, nine shader/layout controls, host Java
+loading/diagnostic controls, APK build, lint, signature and upload. Its artifact
+remains permanently unqualified and was not downloaded, served or installed.
+R10 remains the last delivered TEST build. Current corrections require actual
+owning engine execution and package qualification before another device build.
+Main-menu touch, dialogue readability, editor comfort, background return, phone
+saves, Doc Mitchell's exit and Bluetooth input still require physical acceptance.
+No repair of the reported close-to-home or loading-cover hang is claimed.

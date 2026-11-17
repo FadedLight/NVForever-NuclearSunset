@@ -705,7 +705,8 @@ not zoom the entire canvas or synthesize a mouse click. Quantity-meter dragging
 uses the composed original Amount consumer and preserves these size/source
 guards, including acknowledged same-geometry repaint. R41 compiled these adapters
 and passed all thirteen ordinary barter/typography controls. Its nine quantity-meter
-cases failed; the remaining boundary and follow-up source are distinguished below.
+cases failed; R42 subsequently passed all nine original cases. The remaining new
+context-control boundary and follow-up source are distinguished below.
 
 
 ## Ordinary touch quantity meter
@@ -745,8 +746,9 @@ drawn-meter geometry in their shared fixture; the physical hand-built control
 applied amount 2, then failed the next drag expectation of 6. The corrected native
 fixture retains a drawn meter parent with its original writer/text identity and a
 full-size hit-testable child. All nine complete case bodies and their effect
-assertions remain. This fixture correction and the physical repair below require
-actual owning execution; no claim that all nine failures are fixed is made.
+assertions remain. R42 source `e5b00f0b`, actual checkout `56793aa7`, executed
+these corrections and passed all nine original cases. This is a combined-source
+CPU result, without physical-phone or full original-menu acceptance.
 
 [design] Only a hand-built Barter meter participates in physical leaf retention.
 Its original Amount consumer must acknowledge the exact requested change before
@@ -770,6 +772,12 @@ or allocation reduction is claimed.
 [qualification] Four additional App cases cover competing commands, context and
 geometry retirement with fresh recovery, partial-viewport original clicks, and an
 unrelated Container control. The existing component-only Inventory switching and
-release case is unchanged. All thirteen proposed meter cases remain uncompiled
-and unrun on the corrected source. The current separate services diagnostic run
-does not include these meter changes and cannot qualify them.
+release case is unchanged. R42 executed all thirteen: twelve passed and the new
+context case failed an interactive-hit witness while observing deliberately
+translated, invalidated geometry. The reported right-edge hit was the actual
+neighboring amount-step arrow. The follow-up reads computed geometry for only
+that transient change observation; the four hit witnesses remain at actual meter
+samples and fresh recovery, with all thirteen context causes and later refusal,
+hardware, amount and effect assertions retained. This explicit fixture-observation
+adaptation is unexecuted. No production input, quantity effect or successful
+thirteen-case outcome is inferred from it.

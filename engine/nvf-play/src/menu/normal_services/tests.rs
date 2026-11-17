@@ -1,5 +1,5 @@
 //! Raw finger -> existing native/HB geometry -> original services consumers.
-//! Authored controls only: UNCOMPILED / UNRUN; no renderer/device acceptance.
+//! Authored CPU controls; source-specific results do not establish renderer/device acceptance.
 use super::*;
 use bevy::{app::{HierarchyPropagatePlugin,PropagateSet},camera::{ComputedCameraValues,RenderTargetInfo,
     RenderTarget,visibility::VisibilityPlugin},input::{InputPlugin,InputSystems,touch::Touches},

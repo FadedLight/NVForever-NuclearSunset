@@ -30,16 +30,19 @@ with device confirmation pending. Full
 gameplay, lifecycle and performance acceptance remain open. This is not a qualified
 Android release. [Build and touch-control instructions](android.md).
 
-Latest Android validation is R41 at source `a18b10ae`, actual checkout `54f8997b`
-with Main `a0ebe1c5` and the same source tree. Core passed 3,462 tests with five
-ignored, and strict root/engine Clippy passed. Engine play passed 2,348 and failed
-24; the wrapper passed 1,555 and failed four, each with one ignored. Failures cover
-nine quantity-meter cases, all fourteen ordinary service-menu cases, script trace
-ownership and four wrapper fixtures. The service failures have no captured
-individual panic payloads; their cause remains open. Five command-list failure
-events also fail Tools. Successful ARM/APK packaging does not qualify this failed
-cycle, whose artifact was not downloaded or delivered. R10 remains the last
-delivered TEST build. [Current validation and remaining acceptance](android.md#r41-touch-menu-validation).
+Latest Android validation is R42 at source `e5b00f0b`, actual checkout `56793aa7`
+with Main `98fb59a9` and the same source tree. Core passed 3,472 tests with five
+ignored, Tools and strict root/engine Clippy passed. Engine play passed 2,362 and
+failed 15; the wrapper passed 1,559 with no failures, each with one ignored.
+All nine old quantity-meter cases, four trace cases and four prior wrapper failures
+passed. Fourteen service cases and one new meter-context witness still failed.
+Thirteen service payloads identify the second boot update and an empty-list index;
+source review found an invalid empty partition in the manual stack fixture. Its
+minimal producer correction and the meter observation adaptation remain unexecuted;
+the native-entry case has no individual captured payload. Successful ARM/APK
+packaging does not qualify this failed cycle, whose artifact was not downloaded
+or delivered. R10 remains the last delivered TEST build.
+[Current validation and remaining acceptance](android.md#r42-touch-menu-validation).
 
 Controller switching, independent look/ADS scales, dead zone and hold/toggle choices,
 four original SVG icon families, adaptive Aim/Block/Scope captions and individual HUD

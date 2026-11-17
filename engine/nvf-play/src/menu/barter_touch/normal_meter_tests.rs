@@ -39,7 +39,8 @@ fn meter_display(app:&mut App,density:f32,scale:f32) {
     for _ in 0..4 {app.update();}
     assert_eq!(app.world().get::<Window>(f.window).unwrap().scale_factor(),density);
 }
-fn meter_bounds(app:&mut App,native:bool)->Rect {
+// Observe deliberately invalidated paint without asserting it is an input target.
+fn meter_geometry(app:&mut App,native:bool)->Rect {
     let f=app.world().resource::<Fixture>().0;
     let bounds=if native {
         let game=&app.world().resource::<crate::script::ScriptState>().rt.as_ref().unwrap().game;
@@ -51,9 +52,14 @@ fn meter_bounds(app:&mut App,native:bool)->Rect {
         let (node,at)=q.single(world).unwrap();assert!(node.size().min_element()>0.0);
         Rect::from_center_size(at.translation/f.density,node.size()/f.density)
     };
-    let viewport=Rect::from_corners(Vec2::ZERO,f.size);
     assert!(bounds.min.is_finite() && bounds.max.is_finite() && bounds.width()>0.0 && bounds.height()>0.0,
         "invalid actual meter bounds: native={native} density={} ui_scale={} bounds={bounds:?}",f.density,f.ui_scale);
+    bounds
+}
+fn meter_bounds(app:&mut App,native:bool)->Rect {
+    let f=app.world().resource::<Fixture>().0;
+    let bounds=meter_geometry(app,native);
+    let viewport=Rect::from_corners(Vec2::ZERO,f.size);
     // Witness each live sample region through the actual consumer, not merely
     // through a ComputedNode or XML rectangle that might not be interactive.
     for point in [meter_at(bounds,0.25),meter_at(bounds,0.5),meter_at(bounds,0.75),
@@ -344,7 +350,7 @@ fn ordinary_physical_meter_context_changes_retire_hold_and_noop_size_keeps_live_
                 let entity={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
                 app.world_mut().get_mut::<bevy::ui::UiTransform>(entity).unwrap().translation=bevy::ui::Val2::px(12.0,0.0);
                 app.update();
-                let moved=meter_bounds(&mut app,false);
+                let moved=meter_geometry(&mut app,false);
                 assert!((moved.center().x-bounds.center().x).abs()>5.0,"actual layout applied the changed transform before the next held sample");
                 app.world_mut().get_mut::<Window>(f.window).unwrap().set_cursor_position(Some(meter_at(bounds,0.75)));
             }

@@ -486,7 +486,55 @@ host checks and SDK signature compilation; see the
 touch recovery after backgrounding and leaving Doc Mitchell's still require a
 current qualified APK and device testing. This correction is absent from R9.
 
-## R41 touch menu validation
+## R42 touch menu validation
+
+[qualification] R42 tested source `e5b00f0b440a3fc28120a141a0677fde151f58a6`
+through checkout `56793aa71260b77cc63dfb0beb8c816c4cb4bf6b`, with parents
+`[98fb59a91bc7ab1ee48604e320e7645f4360b35c, e5b00f0b440a3fc28120a141a0677fde151f58a6]`.
+Its tree `6335818b29bde61adf44c1847d3fe3193e6a49d7` equals all 4,504 source entries.
+All eight jobs finished: changes, guard, Tools, core, strict engine Clippy and
+Android packaging passed; engine and aggregate failed. Core passed 3,472 tests
+with five ignored, including all 59 launcher tests. Strict root Clippy passed.
+All ten incoming Main UI controls and four retained title-start cases have named
+passing records. Tools' smoke suite reported 167 tests OK with five skipped;
+skipped scenarios remain unexecuted.
+
+Engine assets passed 221 with one ignored. Play passed 2,362, failed 15 and ignored
+one; the wrapper passed 1,559 with zero failures and one ignored. Two SPIR-V
+integration tests, one TGA integration test and two viewer unit tests passed.
+Eleven positive child-process runs remain separate from parent totals. All nine
+original quantity-meter cases, four trace-ownership cases and four formerly
+failing wrapper cases passed. The complete thirteen-case meter family passed
+twelve and failed one new context-control case.
+
+Fourteen service-menu cases failed. Thirteen captured sections identify the
+second boot update, hand-built Vendor or Workbench presentation, and an
+index-zero read from an empty list. Source review traced that boundary to the
+manual test stack: its first empty frame published a `0..0` partition, while the
+actual Bevy focus consumer reads the first node of every partition. The fixture
+now leaves the partition list empty when there are no nodes. Original ordering
+for nonempty stacks, all fourteen case bodies and seven boot updates remain.
+This correction is unexecuted. The native-entry case has a named failure without
+an individual captured payload, so its observed cause remains unknown.
+
+The new meter context case failed its interactive-hit witness while observing a
+deliberately moved, invalidated meter before the next consumer/painter update.
+That transient right edge hit the unchanged amount-step arrow. Its follow-up
+reads actual computed geometry for that change observation; every actual meter
+sample and fresh recovery retains the four interactive-hit checks. All thirteen
+context causes, stale-held refusal, hardware ownership and effect checks remain.
+This fixture observation adaptation is unexecuted and changes no quantity effect.
+
+The native job passed the ARM cross-check, nine shader/layout controls, host Java
+loading/diagnostic controls, APK build, lint, signature and upload. Its failed-cycle
+artifact remains permanently unqualified and was not downloaded, served or
+installed. R10 remains the last delivered TEST build. The new fixture corrections
+must pass owning execution before another test APK is qualified. Main-menu touch,
+dialogue readability, editor comfort, background return, phone saves, Doc Mitchell's
+exit and Bluetooth input still require physical acceptance. No repair of the
+reported close-to-home or loading-cover hang is claimed.
+
+## Earlier R41 touch menu validation
 
 [qualification] R41 tested source `a18b10ae42844958267733dca4227e29ca7ab089`
 through checkout `54f8997be55812311288940238be1d0e724781a0`, with parents

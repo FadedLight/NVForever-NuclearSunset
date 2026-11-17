@@ -1,4 +1,4 @@
-// Normal-presentation consumer controls. All outcomes remain UNCOMPILED/UNRUN.
+// Normal-presentation CPU consumer fixtures; source-specific results are in the Android notes.
 use crate::menu::normal_touch as normal;
 
 fn normal_raw_owner(frame:Res<Fixture>,touches:Res<Touches>,mut events:MessageReader<TouchInput>,
@@ -33,7 +33,7 @@ pub(crate) fn normal_ui_stack(mut stack:ResMut<bevy::ui::UiStack>,
     stack.uinodes.clear();
     for (_,root) in roots{walk(root,&children,&nodes,&mut stack.uinodes);}
     stack.partition.clear();
-    let n=stack.uinodes.len();stack.partition.push(0..n);
+    let n=stack.uinodes.len();if n>0 {stack.partition.push(0..n);}
 }
 fn normal_long_simulation() -> (crate::sim::SimState, FormId) {
     let mut misc = Vec::new();

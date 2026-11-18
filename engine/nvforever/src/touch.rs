@@ -90,7 +90,7 @@ struct Contact {
     started: f64,
     dragged: bool,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Role {
     Move,
     Look,
@@ -692,6 +692,7 @@ fn input(
                 || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
                 continue;
             }
+            if t.phase == TouchPhase::Started && !state.contacts.contains_key(&t.id) { sheets.release_overlay(t.id); }
             if sheets.overlay_owns(t.id) {
                 if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
                     state.contacts.remove(&t.id);
@@ -738,6 +739,7 @@ fn input(
                 if t.window != window_id || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
                     continue;
                 }
+                if t.phase == TouchPhase::Started && !state.contacts.contains_key(&t.id) { sheets.release_overlay(t.id); }
                 if sheets.overlay_owns(t.id) {
                     if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
                         state.contacts.remove(&t.id);
@@ -812,6 +814,9 @@ fn input(
             continue;
         }
         if sheets.tail(t) { vats.cancel(); continue; }
+        // A claim outlives its contact only to swallow that contact's own tail. A
+        // fresh Start reusing the id (Android reuses pointer ids) is a new touch.
+        if t.phase == TouchPhase::Started && !state.contacts.contains_key(&t.id) { sheets.release_overlay(t.id); }
         let owned_overlay = sheets.overlay_owns(t.id);
         if owned_overlay && !state.contacts.contains_key(&t.id) { continue; }
         if arm.captures(){vats.cancel();arm.event(t,size);continue;}
@@ -2851,12 +2856,18 @@ mod tests {
             app.insert_resource(nvf_play::dialogue_touch::TouchDialogue {enabled:true,..default()});
             app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(nvf_play::PlayState::Dialogue);
             button_touch(&mut app,w,63,TouchPhase::Started,Control::Use);app.update();
-            assert!(app.world().resource::<TouchState>().contacts.is_empty());
+            // Held gameplay sources are released. A press that lands on the menu
+            // overlay kept for dialogue (A12) owns only that menu key, never gameplay.
+            let survivors: Vec<Role> = app.world().resource::<TouchState>().contacts.values().map(|c| c.role).collect();
+            assert!(survivors.iter().all(|r| matches!(r, Role::DialogueOverlay(i) if !BUTTONS[*i].playing)), "{survivors:?}");
+            let enter_overlay = survivors.iter().any(|r| matches!(r, Role::DialogueOverlay(i) if BUTTONS[*i].key == Some(KeyCode::Enter)));
             assert!(!aim_requested(&app));assert!(!app.world().resource::<nvf_play::control::HeldSneakInput>().active);
             assert_eq!(sneak_requested(&app),native_sneak);
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
             assert!(app.world().resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Middle));
-            assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Enter));
+            assert_eq!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Enter), enter_overlay);
+            button_touch(&mut app,w,63,TouchPhase::Ended,Control::Use);app.update();
+            assert!(app.world().resource::<TouchState>().contacts.is_empty());
             app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(nvf_play::PlayState::Playing);
             tap_control(&mut app,w,64,Control::Block);assert!(!aim_requested(&app));
             tap_control(&mut app,w,65,Control::Block);assert!(aim_requested(&app));

@@ -24,6 +24,9 @@ impl Batch {
         if let Some(slot) = self.overlay.iter_mut().find(|slot| slot.is_none()) { *slot = Some(id); }
         else { self.overlay_overflow = true; }
     }
+    fn release_overlay(&mut self, id: u64) {
+        if let Some(slot) = self.overlay.iter_mut().find(|slot| **slot == Some(id)) { *slot = None; }
+    }
     fn record(&mut self, event: &TouchInput) {
         if !self.owns(event.id) {
             if let Some(slot) = self.ids.iter_mut().find(|slot| slot.is_none()) { *slot = Some(event.id); }
@@ -122,6 +125,7 @@ impl Ingress<'_> {
     pub fn settings(&self) -> bool { self.batch.kind == Some(Kind::Settings) }
     pub fn settings_event(&mut self, event: &TouchInput) { self.batch.record(event); }
     pub fn claim_overlay(&mut self, id: u64) { self.batch.claim_overlay(id); }
+    pub fn release_overlay(&mut self, id: u64) { self.batch.release_overlay(id); }
     pub fn overlay_owns(&self, id: u64) -> bool { self.batch.overlay_owns(id) }
     pub fn capture(&mut self, events: &mut MessageReader<TouchInput>) -> bool {
         if self.batch.kind.is_none() || self.settings() { return false; }

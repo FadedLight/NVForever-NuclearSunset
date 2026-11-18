@@ -1210,8 +1210,7 @@ fn show_labels(
     window: Query<&Window, With<PrimaryWindow>>,
     bindings: Option<Res<Bindings>>,
     pads: Query<&Gamepad>,
-    dialogue_camera: Query<(Entity, &Camera), With<nvf_play::dialogue_split::OverlayCamera>>,
-    mut commands: Commands,
+    (dialogue_camera, mut commands): (Query<(Entity, &Camera), With<nvf_play::dialogue_split::OverlayCamera>>, Commands),
     mut visuals: Query<(
         Entity,
         Option<&UiTargetCamera>,

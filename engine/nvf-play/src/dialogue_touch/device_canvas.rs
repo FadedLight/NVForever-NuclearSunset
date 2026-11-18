@@ -31,7 +31,13 @@ impl Art {
     }
 }
 #[derive(Resource,Default)]
-pub(super) struct ArtCache {terminal: Option<Art>, pipboy: Option<Art>}
+pub(crate) struct ArtCache {terminal: Option<Art>, pipboy: Option<Art>}
+impl ArtCache {
+    /// The device font has been loaded, so [`usable`] measures real text.
+    pub(crate) fn ready(&self, kind: DeviceKind) -> bool {
+        match kind {DeviceKind::Terminal=>self.terminal.is_some(),DeviceKind::PipBoy=>self.pipboy.is_some()}
+    }
+}
 
 #[derive(SystemSet,Clone,Copy,Debug,PartialEq,Eq,Hash)]
 pub(super) struct Draw;
@@ -58,7 +64,7 @@ fn label_height(face:&Face,text:&str,size:f32,width:f32)->Option<f32> {
 
 /// Use the same real font metrics and reserved areas as the painter. A model
 /// cannot qualify merely because its glass has a nominal minimum height.
-pub(super) fn usable(request:&Request,view:&DeviceView,menu:&DialogueMenu,
+pub(crate) fn usable(request:&Request,view:&DeviceView,menu:&DialogueMenu,
     settings:&TouchDialogue,cache:Option<&ArtCache>)->bool {
     let Some(content)=menu.view.as_ref() else{return false;};
     let Some(cache)=cache else{return false;};

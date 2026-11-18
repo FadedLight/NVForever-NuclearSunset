@@ -245,7 +245,12 @@ fn prepare(
         || !physical.contains(request.stamp.display.max)
         || request.target != nvf_play::pipboy::TARGET { return; }
     owned.attempted = true;
-    let Some(path) = owned.model.clone() else { return; };
+    let Some(path) = owned.model.clone() else {
+        // A character who has not been given a Pip-Boy wears none; the Wrist
+        // Terminal theme then keeps the conversation on Normal.
+        info!("dialogue Pip-Boy: the player wears no Pip-Boy model; Wrist Terminal dialogue uses Normal");
+        return;
+    };
     let Some(model) = models.model_with_cpu(&path) else {
         warn!("dialogue Pip-Boy: actual model {path} not loaded"); return;
     };

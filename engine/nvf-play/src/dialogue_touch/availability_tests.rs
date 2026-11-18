@@ -43,10 +43,15 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
     assert_eq!(app.world().resource::<appearance::Appearance>().theme,appearance::Theme::Minimal);
     for name in ["Normal","Classic","Retro Console","Wrist Terminal"] {
         assert_eq!(crate::settings::pick(app.world_mut(),theme_row,name),name!="Normal");
-        for key in ["dialogue-speaker-side","dialogue-background-opacity-v1","dialogue-background-tint-v1","dialogue-frame-opacity-v1","dialogue-hints-v1"] {
+        for key in ["dialogue-background-opacity-v1","dialogue-background-tint-v1","dialogue-frame-opacity-v1","dialogue-hints-v1"] {
             let settings=app.world().resource::<crate::settings::Settings>();
             assert_eq!(settings.disabled_status(app.world(),settings.index(key).unwrap()),Some("Available with the Field Notes theme."),"{name}: {key}");
         }
+        // The device models are placed by the speaker side too.
+        let settings=app.world().resource::<crate::settings::Settings>();
+        let side=settings.disabled_status(app.world(),settings.index("dialogue-speaker-side").unwrap());
+        assert_eq!(side,(!matches!(name,"Retro Console"|"Wrist Terminal"))
+            .then_some("Available with Field Notes, Retro Console and Wrist Terminal."),"{name}: speaker side");
     }
     assert!(crate::settings::pick(app.world_mut(),theme_row,"Field Notes"));
     for key in availability_children() {

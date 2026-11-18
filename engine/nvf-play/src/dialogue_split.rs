@@ -102,7 +102,7 @@ pub(crate) fn install(app: &mut App) {
         .add_systems(Update, apply.in_set(crate::PlaySet::Sync).after(crate::control::place_camera).after(crate::dialogue_zoom::apply));
     crate::settings::add_choice_list(app, crate::settings::Setting {
         key:KEY, group:crate::pause::GROUP_MENUS, label:"Dialogue speaker side",
-        note:"With touch dialogue, Field Notes can frame the speaker beside choices. Standard keeps it centered; other styles keep their own framing.",
+        note:"With touch dialogue, Field Notes, Retro Console and Wrist Terminal sit on one side and frame the speaker on the other. Standard keeps the speaker centered; Classic keeps its own framing.",
         switches:"", get:|_|false,set:|_,_|{},slider:None,
     },crate::settings::ChoiceList { names:|_|[Side::Standard,Side::Left,Side::Right].map(|s|s.name().into()).to_vec(),
         chosen,pick:choose,save:chosen,load:choose,ask_keep:false });
@@ -119,12 +119,18 @@ fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {
     Some(if side==Side::Left {(left,right)}else{(right,left)})
 }
 
+/// The physical window rectangle a side-placed device model is presented in.
+pub(crate) fn device_display(panel: Rect, density: f32) -> Rect {
+    Rect::from_corners(panel.min*density,panel.max*density)
+}
+
 type SplitResources<'w> = (
     Res<'w, Options>,
     Res<'w, SafeInsets>,
     Res<'w, TouchDialogue>,
     Res<'w, crate::dialogue_touch::appearance::Appearance>,
     Option<Res<'w, crate::dialogue_touch::classic_presenter::Surface>>,
+    Option<Res<'w, crate::dialogue_device::DeviceView>>,
 );
 type SceneState<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::free_cam::FreeCam>>, Option<Res<'w,crate::control::PlayerControl>>, Option<Res<'w,crate::player::ViewDriven>>,Option<Res<'w,crate::creator::CreatorMenu>>);
 type SpeakerSources<'w> = (Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::dialogue_look::SpeakerFace>>, Option<Res<'w,crate::phys::PhysState>>, Option<Res<'w,crate::sim::SimState>>);
@@ -139,7 +145,7 @@ type ResolveQueries<'w,'s> = (
 );
 type ResolveOutput<'w> = (ResMut<'w,DefaultPin>,ResMut<'w,Frame>,ResMut<'w,Target>,ResMut<'w,ClassicRequest>,ResMut<'w,ViewportLease>);
 fn resolve(
-    mut commands: Commands, (options,safe,touch,appearance,surface): SplitResources<'_>,
+    mut commands: Commands, (options,safe,touch,appearance,surface,device): SplitResources<'_>,
     (state,paused,free,control,driven,creator): SceneState<'_>, menu: Res<DialogueMenu>,
     (script,face,phys,sim): SpeakerSources<'_>,
     (windows,world_cameras,default_ui,default_markers,own_markers,overlays,all_cameras): ResolveQueries<'_,'_>,
@@ -189,6 +195,20 @@ fn resolve(
                 RenderTarget::Window(bevy::window::WindowRef::Entity(window_entity)),RenderLayers::none(),
             )).id()};
             next.ui_camera=Some(overlay);
+            use crate::dialogue_touch::appearance::Theme;
+            let device_kind=match appearance.theme {
+                Theme::RetroConsole=>Some(crate::dialogue_device::DeviceKind::Terminal),
+                Theme::WristTerminal=>Some(crate::dialogue_device::DeviceKind::PipBoy),
+                _=>None,
+            };
+            let sides=rectangles(Vec2::new(window.width(),window.height()),*safe,options.side);
+            // A device keeps its side even while camera framing is suspended, so
+            // its model is not rebuilt for every cinematic or held line.
+            if device_kind.is_some() {next.panel=sides.map(|(_,panel)|panel);}
+            // The speaker moves aside only once that side model actually presents.
+            let device_presented=device_kind.is_some() && device.as_deref().zip(next.panel).is_some_and(|(view,panel)|
+                Some(view.stamp.kind)==device_kind && view.stamp.window==window_entity
+                    && view.stamp.display==device_display(panel,window.scale_factor()));
             let framing_allowed=!foreign_change && !free.is_some_and(|f|f.on)
                 && !driven.is_some_and(|d|d.0) && !control.is_some_and(|c|c.cinematic || c.portrait.is_some());
             if framing_allowed {
@@ -197,7 +217,7 @@ fn resolve(
                     let primary=render_target.normalize(Some(window_entity))==RenderTarget::default().normalize(Some(window_entity));
                     if camera.is_active && primary && !crate::dialogue::held(game) {
                         if let Some(conv)=game.dialogue.as_ref() {
-                            if appearance.theme==crate::dialogue_touch::appearance::Theme::ClassicGlass
+                            if appearance.theme==Theme::ClassicGlass
                                 && matches!(projection,Projection::Perspective(_)) && lease.blocked!=Some(entity)
                                 && ((lease.owned.is_none() && camera.viewport.is_none()) || owns_viewport(&lease,entity,camera)) {
                                 if let Some(prepared)=surface.as_deref().and_then(|s|s.0.as_ref()).filter(|p|
@@ -209,14 +229,14 @@ fn resolve(
                                         request.0=classic_viewport(prepared,entity,window);
                                     }
                                 }
-                            } else if appearance.theme==crate::dialogue_touch::appearance::Theme::SplitPanel && camera.viewport.is_none() {
+                            } else if (appearance.theme==Theme::SplitPanel || device_presented) && camera.viewport.is_none() {
                                 let actor=conv.through.unwrap_or(conv.actor);
                                 let volume=phys.as_ref().and_then(|p|p.world.actor_volume(actor.0)).map(|v|(v.feet,v.height));
                                 let reference=sim.as_ref().and_then(|s|s.world.peek(actor).map(|r|r.pos).or_else(||s.refs.get(actor).map(|r|r.pos)));
                                 let point=if conv.through.is_some() {reference}else {
                                     crate::dialogue_look::face_point(actor.0,face.as_ref().and_then(|f|f.0),volume,reference).map(|p|p.0)
                                 };
-                                if let (Some(point),Some((world,panel)))=(point,rectangles(Vec2::new(window.width(),window.height()),*safe,options.side)) {
+                                if let (Some(point),Some((world,panel)))=(point,sides) {
                                     let point=crate::space::to_bevy(point);
                                     if point.is_finite() {next.panel=Some(panel);next.speaker=Some(world);target.0=Some(point);}
                                 }

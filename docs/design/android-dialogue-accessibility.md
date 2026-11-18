@@ -100,6 +100,14 @@ projection and position. Speaker changes recompute framing; Standard, disable,
 exit, pause and competing camera ownership release only the rotation this
 feature still owns. A foreign viewport is preserved and suspends this layout.
 
+Retro Console and Wrist Terminal use the same Speaker left/right choice: the
+model is presented in the safe-area half opposite the speaker, and the camera
+frames the speaker only once that model has published its glass there, so a
+missing model never moves the camera behind Normal. If the published side glass
+is too small for the device font and 48-unit rows, the model takes the whole safe
+area instead (centred, no side framing). Portrait windows without room for two
+halves, and Standard, keep the centred whole-area model.
+
 [qualification] Updated full-world projection, aspect/FOV, restoration and appearance
 consumer regressions are authored but not yet executed against this source. Earlier
 R9/R37 results do not qualify these changed camera and appearance paths. Native

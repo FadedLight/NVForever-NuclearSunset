@@ -4,7 +4,7 @@
 mod split_tests;
 pub(crate) mod appearance;
 mod native;
-mod device_canvas;
+pub(crate) mod device_canvas;
 mod classic;
 pub(crate) mod classic_presenter;
 pub(crate) mod classic_state;
@@ -173,8 +173,15 @@ pub(crate) fn install(app: &mut App) {
             (!world.resource::<TouchDialogue>().enabled).then_some("Enable Touch dialogue.")
         });
     }
-    for key in [crate::dialogue_split::KEY, appearance::BACKGROUND_KEY,
-        appearance::TINT_KEY, appearance::FRAME_KEY, appearance::HINTS_KEY] {
+    crate::settings::set_disabled_status(app,crate::dialogue_split::KEY,|world| {
+        use appearance::Theme;
+        if !world.resource::<TouchDialogue>().enabled {Some("Enable Touch dialogue.")}
+        else if !matches!(world.resource::<appearance::Appearance>().theme,
+            Theme::SplitPanel|Theme::RetroConsole|Theme::WristTerminal) {
+            Some("Available with Field Notes, Retro Console and Wrist Terminal.")
+        } else {None}
+    });
+    for key in [appearance::BACKGROUND_KEY,appearance::TINT_KEY,appearance::FRAME_KEY,appearance::HINTS_KEY] {
         crate::settings::set_disabled_status(app,key,|world| {
             if !world.resource::<TouchDialogue>().enabled {Some("Enable Touch dialogue.")}
             else if world.resource::<appearance::Appearance>().theme!=appearance::Theme::SplitPanel {

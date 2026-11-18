@@ -21,6 +21,8 @@ struct Owned {
     owner: Option<Entity>,
     camera: Option<Entity>,
     image: Option<Handle<Image>>,
+    /// A speaker-side panel whose published glass could not fit the real text.
+    refused: Option<Rect>,
 }
 
 pub(crate) fn install(app: &mut App) {
@@ -28,6 +30,14 @@ pub(crate) fn install(app: &mut App) {
         .after(crate::PlaySet::Scripts).after(crate::dialogue_split::Resolve)
         .before(crate::PlaySet::Ui));
 }
+
+/// The side placement and the facts that decide whether its smaller glass works.
+type Placement<'w> = (
+    Res<'w, crate::dialogue_split::Frame>,
+    Option<Res<'w, Request>>,
+    Option<Res<'w, DeviceView>>,
+    Option<Res<'w, crate::dialogue_touch::device_canvas::ArtCache>>,
+);
 
 #[allow(clippy::too_many_arguments)]
 fn prepare(
@@ -38,30 +48,42 @@ fn prepare(
     safe: Res<crate::touch_safe_area::SafeInsets>, scale: Option<Res<UiScale>>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut images: Option<ResMut<Assets<Image>>>, mut owned: ResMut<Owned>,
+    (split, request, view, art): Placement<'_>,
 ) {
     let kind = match appearance.theme {
         Theme::RetroConsole => Some(DeviceKind::Terminal),
         Theme::WristTerminal => Some(DeviceKind::PipBoy),
         _ => None,
     };
+    // The speaker-side panel is preferred. When the published model there is
+    // too small for the real device text and 48-unit rows, the same model takes
+    // the whole safe area instead of dropping straight to Normal.
+    if let (Some(panel), Some(request), Some(view), Some(art)) = (split.panel, request.as_deref(), view.as_deref(), art.as_deref()) {
+        if owned.owner == Some(request.stamp.owner) && owned.generation == request.stamp.generation
+            && request.stamp.display == crate::dialogue_split::device_display(panel, request.stamp.density)
+            && view.matches(request) && art.ready(request.stamp.kind)
+            && !crate::dialogue_touch::device_canvas::usable(request, view, &menu, &touch, Some(art)) {
+            owned.refused = Some(panel);
+        }
+    }
     let key = kind.filter(|_| touch.enabled && menu.view.is_some()
         && crate::dialogue_touch::available(state.as_deref(), paused.as_deref(), script.as_deref(), creator.as_deref()))
         .and_then(|kind| {
             let (entity, window) = windows.single().ok()?;
             let density = window.scale_factor();
-            // A physical device owns its frame. Fitting it into half a phone
-            // window would shrink its glass below usable touch/text dimensions.
             let safe=crate::touch_safe_area::SafeInsets::from_array([safe.left,safe.top,safe.right,safe.bottom])?;
             let minimum=Vec2::new(safe.left,safe.top);
             let maximum=Vec2::new(window.width()-safe.right,window.height()-safe.bottom);
             if !minimum.is_finite() || !maximum.is_finite() || !maximum.cmpgt(minimum).all() {return None;}
-            let logical = Rect::from_corners(minimum,maximum);
-            let display = Rect::from_corners(logical.min * density, logical.max * density);
+            let logical = split.panel.filter(|panel| owned.refused != Some(*panel))
+                .unwrap_or(Rect::from_corners(minimum,maximum));
+            let display = crate::dialogue_split::device_display(logical, density);
             let scale = scale.as_ref().map_or(1.0, |s| s.0);
             (positive_rect(display) && density.is_finite() && density > 0.0
                 && scale.is_finite() && scale > 0.0 && window.focused)
                 .then(|| Key {kind, window: entity, display, density, scale, list: menu.list.clone()})
         });
+    if key.is_none() { owned.refused = None; }
     if key == owned.key { return; }
     owned.generation = owned.generation.wrapping_add(1);
     owned.key = key.clone();

@@ -204,3 +204,113 @@ fn ordinary_view_is_untouched_and_framing_follows_aspect_and_current_fov() {
     app.update();
     assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,Quat::IDENTITY);
 }
+
+struct Glass { window: Rect, canvas: Rect }
+impl crate::dialogue_device::ScreenMap for Glass {
+    fn canvas_at(&self, point: Vec2) -> Option<Vec2> {
+        self.window.contains(point).then(|| self.canvas.min
+            + (point - self.window.min) * self.canvas.size() / self.window.size())
+    }
+    fn window_at(&self, point: Vec2) -> Option<Vec2> {
+        self.canvas.contains(point).then(|| self.window.min
+            + (point - self.canvas.min) * self.window.size() / self.canvas.size())
+    }
+}
+
+/// Publish the renderer's glass inside the requested display, as the model producers do.
+fn publish_glass(app: &mut App, fraction: f32) -> crate::dialogue_device::Request {
+    use crate::dialogue_device::{DeviceView, Request};
+    let request = app.world().resource::<Request>().clone();
+    let glass = Rect::from_center_size(request.stamp.display.center(), request.stamp.display.size() * fraction);
+    let scale = (glass.width() / request.canvas.width()).min(glass.height() / request.canvas.height());
+    let camera = app.world_mut().spawn(Camera3d::default()).id();
+    let image = app.world_mut().resource_mut::<Assets<Image>>().add(Image::transparent());
+    app.insert_resource(DeviceView { stamp: request.stamp, image, camera, scale,
+        map: std::sync::Arc::new(Glass { window: glass, canvas: request.canvas }) });
+    settle(app);
+    request
+}
+
+fn speaker_x(app: &App, world: Entity, size: Vec2, density: f32) -> f32 {
+    let camera = app.world().get::<Transform>(world).unwrap();
+    let view = camera.rotation.inverse() * (crate::space::to_bevy([35.0, 180.0, 130.0]) - camera.translation);
+    let Projection::Perspective(projection) = app.world().get::<Projection>(world).unwrap() else { panic!("perspective") };
+    assert!(view.z < 0.0);
+    (0.5 + 0.5 * view.x / (-view.z * (projection.fov * 0.5).tan() * (size.x / size.y))) * size.x * density
+}
+
+#[test]
+fn device_models_take_the_chosen_side_frame_the_speaker_opposite_and_map_taps_there() {
+    let size = Vec2::new(792.0, 363.0);
+    for theme in [appearance::Theme::RetroConsole, appearance::Theme::WristTerminal] {
+        for side in [Side::Left, Side::Right] {
+            for density in [1.0, 2.0] {
+                let (mut app, window, world) = scene(side, density);
+                app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>();
+                app.world_mut().resource_mut::<TouchDialogue>().confirm = false;
+                app.world_mut().resource_mut::<appearance::Appearance>().theme = theme;
+                settle(&mut app);
+                let panel = app.world().resource::<crate::dialogue_split::Frame>().panel.expect("device side panel");
+                let request = app.world().resource::<crate::dialogue_device::Request>().clone();
+                assert_eq!(request.stamp.display, Rect::from_corners(panel.min * density, panel.max * density));
+                // Inside the safe area (24, 12, 10, 18) and on the half opposite the speaker.
+                assert!(panel.min.x >= 24.0 && panel.min.y >= 12.0 && panel.max.x <= size.x - 10.0 && panel.max.y <= size.y - 18.0);
+                assert!(panel.width() > 300.0 && panel.height() > 300.0);
+                // The safe interior is 32..774, split at 403 with a 4-unit gutter each side.
+                if side == Side::Left { assert_eq!(panel.min.x, 407.0); } else { assert_eq!(panel.max.x, 399.0); }
+                assert_eq!(app.world().get::<Transform>(world).unwrap().rotation, Quat::IDENTITY,
+                    "the speaker moves aside only after the side model presents");
+
+                let request = publish_glass(&mut app, 0.9);
+                assert_eq!(app.world().resource::<crate::dialogue_device::Request>().stamp, request.stamp, "a usable side stays");
+                let x = speaker_x(&app, world, size, density);
+                if side == Side::Left {
+                    assert!(x < request.stamp.display.min.x && x > 24.0 * density);
+                } else {
+                    assert!(x > request.stamp.display.max.x && x < (size.x - 10.0) * density);
+                }
+                assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none(), "the world keeps its full viewport");
+                if density == 1.0 {
+                    // The device painter's rows are canvas pixels; map them back through the moved glass.
+                    let canvas_point = rows(&mut app)[1].1.center();
+                    let view = app.world().resource::<crate::dialogue_device::DeviceView>();
+                    let point = view.window_at(&request, canvas_point).unwrap();
+                    assert!(request.stamp.display.contains(point));
+                    send(&mut app, window, 51, TouchPhase::Started, point);
+                    send(&mut app, window, 51, TouchPhase::Ended, point);
+                    app.update();
+                    assert_eq!(app.world().resource::<TouchFrame>().asked.pick, Some(1));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn device_side_too_small_for_real_text_uses_the_whole_safe_area_and_portrait_stays_centered() {
+    for theme in [appearance::Theme::RetroConsole, appearance::Theme::WristTerminal] {
+        let (mut app, window, world) = scene(Side::Left, 2.0);
+        app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>();
+        app.world_mut().resource_mut::<TouchDialogue>().confirm = false;
+        app.world_mut().resource_mut::<appearance::Appearance>().theme = theme;
+        settle(&mut app);
+        let panel = app.world().resource::<crate::dialogue_split::Frame>().panel.unwrap();
+        // A glass a few units tall cannot hold a 48-unit row in the side panel.
+        let side = publish_glass(&mut app, 0.1);
+        assert_eq!(side.stamp.display, Rect::from_corners(panel.min * 2.0, panel.max * 2.0));
+        let full = app.world().resource::<crate::dialogue_device::Request>().clone();
+        assert_eq!(full.stamp.display, Rect::new(24.0 * 2.0, 12.0 * 2.0, (792.0 - 10.0) * 2.0, (363.0 - 18.0) * 2.0));
+        assert_eq!(app.world().get::<Transform>(world).unwrap().rotation, Quat::IDENTITY, "no side framing for a centred model");
+        assert_eq!(app.world().resource::<appearance::Appearance>().theme, theme, "the saved theme is unchanged");
+
+        // Portrait has no room for two halves: the device keeps the whole safe area.
+        app.world_mut().remove_resource::<crate::dialogue_device::DeviceView>();
+        app.world_mut().get_mut::<Window>(window).unwrap().resolution.set(400.0, 860.0);
+        settle(&mut app);
+        assert!(app.world().resource::<crate::dialogue_split::Frame>().panel.is_none());
+        let portrait = app.world().resource::<crate::dialogue_device::Request>().clone();
+        assert_eq!(portrait.stamp.display, Rect::new(48.0, 24.0, (400.0 - 10.0) * 2.0, (860.0 - 18.0) * 2.0));
+        publish_glass(&mut app, 0.9);
+        assert_eq!(app.world().get::<Transform>(world).unwrap().rotation, Quat::IDENTITY);
+    }
+}

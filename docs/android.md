@@ -253,16 +253,21 @@ Mobile > Dialogue offers Normal (default), Classic, Field Notes, Retro Console
 and Wrist Terminal. Classic fits the live world and dialogue into a bundled blank
 template unless the installation supplies `Textures/Interface/NVForever/Dialogue/classic.png`.
 Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
-with separate dialogue screens. If a model or
-template cannot safely present the conversation, Normal keeps dialogue playable
-without changing the saved theme. Minimal, Classic Glass and Split Panel still
-load as Normal, Classic and Field Notes, respectively.
+with separate dialogue screens; Wrist Terminal draws the Pip-Boy the player is
+wearing, so a character without one (such as a new character before receiving
+it) talks on Normal. If a model or template cannot safely present the
+conversation, Normal keeps dialogue playable, touch-scrollable and exitable with
+the on-screen controls still available, without changing the saved theme.
+Minimal, Classic Glass and Split Panel still load as Normal, Classic and Field
+Notes, respectively.
 
 AI-generated image supplied by the contributor for NVForever's Classic dialogue
 frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
 
-Field Notes uses the speaker-side and backing/accent settings; the real device
-and Classic surfaces keep their own palettes and geometry. Text size and
+Field Notes uses the speaker-side and backing/accent settings. Retro Console and
+Wrist Terminal place their model on the half opposite the chosen speaker side
+(the whole safe area in portrait, with Standard, or when the side is too small to
+read); the real device and Classic surfaces keep their own palettes. Text size and
 confirmation remain separate. Show dialogue hints and Show lockpicking hints
 hide explanatory captions without disabling the interaction.
 

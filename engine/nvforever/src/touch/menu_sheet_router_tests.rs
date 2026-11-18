@@ -301,6 +301,66 @@ mod menu_sheet_router_controls {
         touch(&mut app,window,4116,TouchPhase::Ended,point.x,point.y);app.update();
     }
 
+    #[derive(Resource, Default)]
+    struct TouchedSetting(bool);
+
+    #[test]
+    fn overlay_press_over_real_settings_row_has_no_pointer_or_gameplay_effect() {
+        use nvf_play::{pause::{self, Page, Paused}, settings, settings_view::RowId};
+        let (mut app, window) = default_menu_touch_scene(nvf_play::pipboy::Page::Items, false);
+        app.world_mut().resource_mut::<menu::ActiveMenu>().0 = None;
+        app.world_mut().resource_mut::<nvf_play::pipboy::PipBoy>().phase = nvf_play::pipboy::Phase::Down;
+        let camera = app.world().resource::<nvf_play::pipboy::PipBoyScreen>().camera;
+        app.world_mut().entity_mut(camera).insert(bevy::ui::IsDefaultUiCamera);
+        app.insert_resource(nvf_play::save::SaveConfig::with_dir(None))
+            .init_resource::<nvf_play::pad::PadGlyphs>()
+            .init_resource::<nvf_play::control::PlayerControl>()
+            .init_resource::<bevy::ui::UiStack>()
+            .init_resource::<TouchedSetting>()
+            .add_message::<nvf_play::save::SaveRequest>().add_message::<nvf_play::save::SaveDone>()
+            .add_message::<nvf_play::save::LoadRequest>().add_message::<nvf_play::ui_sounds::UiSound>()
+            .add_plugins((pause::PausePlugin, ui_pointer::UiPointerPlugin))
+            .add_systems(Update, nvf_play::control::read_controls)
+            .add_systems(PostUpdate, (bevy::ui::update::update_clipping_system, ApplyDeferred, painted_ui_stack)
+                .chain().after(bevy::ui::ui_layout_system));
+        pause::use_touch_fixture(&mut app, "Touch fixture");
+        settings::add_setting(&mut app, settings::Setting {
+            key: "touch-fixture", group: "Touch fixture", label: "Touch fixture row", note: "", switches: "",
+            get: |w| w.resource::<TouchedSetting>().0,
+            set: |w, value| w.resource_mut::<TouchedSetting>().0 = value, slider: None,
+        });
+        let row = app.world().resource::<settings::Settings>().index("touch-fixture").unwrap();
+        app.insert_resource(Paused(true)).insert_resource(Page::Settings { selected: Some(RowId::Setting(row)) });
+        for _ in 0..4 { app.update(); }
+        let (button, rect) = pause::fixture_row(app.world_mut(), RowId::Setting(row));
+        let point = rect.center();
+        let i = BUTTONS.iter().position(|b| b.key == Some(KeyCode::ArrowDown)).unwrap();
+        let size = Vec2::splat(1000.0);
+        let beside = point + Vec2::X * (rect.width() * 0.35);
+        app.world_mut().resource_mut::<Layout>().config.buttons[i].center = point / size;
+
+        touch(&mut app, window, 4117, TouchPhase::Started, point.x, point.y);
+        app.update();
+        assert!(matches!(app.world().resource::<TouchState>().contacts.get(&4117).map(|c| c.role),
+            Some(Role::SettingsOverlay(index)) if index == i));
+        assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(4117));
+        assert_ne!(*app.world().get::<PointerState>(button).unwrap(), PointerState::Pressed);
+        assert_eq!(*app.world().resource::<Page>(), Page::Settings { selected: Some(RowId::Setting(row)) });
+        assert!(!app.world().resource::<TouchedSetting>().0);
+        assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger);
+        touch(&mut app, window, 4117, TouchPhase::Moved, beside.x, beside.y);
+        app.update();
+        touch(&mut app, window, 4117, TouchPhase::Ended, beside.x, beside.y);
+        app.update();
+        assert!(!app.world().resource::<TouchedSetting>().0, "a drag off the overlay cannot release onto the row");
+
+        raw_tap(&mut app, window, 4118, beside);
+        assert!(app.world().resource::<TouchedSetting>().0, "touch beside the overlay takes the painted row");
+        app.world_mut().resource_mut::<Layout>().config.buttons[i].visible = false;
+        raw_tap(&mut app, window, 4119, point);
+        assert!(!app.world().resource::<TouchedSetting>().0, "hidden controls leave the row available");
+    }
+
     #[test]
     fn sole_raw_sheet_router_distinct_id_budget_quarantines_unrecordable_ids_until_real_neutral() {
         let (mut app,window,_)=scene_with_sheet(false);let point=painted_footer(&mut app);

@@ -96,6 +96,7 @@ enum Role {
     Look,
     Button(usize),
     RunLock,
+    SettingsOverlay(usize),
 }
 #[derive(Resource, Default)]
 struct TouchState {
@@ -682,6 +683,36 @@ fn input(
         sync_touch(&mut state, bindings.as_deref(), false);
         return;
     }
+    if sheets.settings() && !controller && !modal_captures {
+        // Settings has its own in-page controls. The overlay still owns and
+        // paints its press, but cannot dispatch a second action to this page.
+        for t in touches.read() {
+            if t.window != window_id || modal.tail(t) || !t.position.is_finite()
+                || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
+                continue;
+            }
+            if sheets.overlay_owns(t.id) {
+                if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
+                    state.contacts.remove(&t.id);
+                }
+            } else if sheets.tail(t) {
+                continue;
+            } else if t.phase == TouchPhase::Started && layout.config.opacity > 0.0
+                && let Some(Target::Button(i)) = layout.config.hit(t.position, size, false, false)
+            {
+                sheets.claim_overlay(t.id);
+                let p = t.position / size;
+                state.contacts.insert(t.id, Contact { origin: p, position: p,
+                    role: Role::SettingsOverlay(i), started: movement.now(), dragged: false });
+            } else {
+                sheets.settings_event(t);
+            }
+            sync_touch(&mut state, bindings.as_deref(), false);
+        }
+        vats.cancel(); arm.cancel(); model.cancel(); bar.cancel(); drawer.drawer.cancel();
+        world_touch.cancel(); map.cancel(); held_sneak.active = false;
+        return;
+    }
     if sheets.capture(&mut touches) {
         vats.cancel();
         arm.cancel(); model.cancel(); bar.cancel(); drawer.drawer.cancel(); map.cancel();
@@ -746,6 +777,8 @@ fn input(
             continue;
         }
         if sheets.tail(t) { vats.cancel(); continue; }
+        let owned_overlay = sheets.overlay_owns(t.id);
+        if owned_overlay && !state.contacts.contains_key(&t.id) { continue; }
         if arm.captures(){vats.cancel();arm.event(t,size);continue;}
         if !t.position.is_finite() { vats.cancel(); world_touch.cancel(); map.cancel(); state.cancel_touch(); sync_touch(&mut state, bindings.as_deref(), false); continue; }
         let p = t.position / size;
@@ -774,6 +807,7 @@ fn input(
             if layout.editor.is_none() {editor_session.closed();editor_closed=true;break;}
             continue;
         }
+        if !owned_overlay {
         // A restored presentation and existing body/Fire owner precede new
         // geometry. The actual Fire contact continues outside its button.
         if vats.returning(t) || (vats.owns(t.id) && vats.event(t, false, false)) {
@@ -848,17 +882,20 @@ fn input(
             world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false;
             sync_touch(&mut state, bindings.as_deref(), pause); continue;
         }
+        }
         let run_lock_hit=playing&&options.run_lock&&movement::lock_available(&layout,&state,size)
             &&movement::lock_rect(&layout,&state,size).contains(t.position);
         let world_eligible=unclaimed&&playing&&interactive&&state.contacts.is_empty()&&!run_lock_hit
             &&!(layout.config.floating&&layout.config.movement_area(p));
-        if world_touch.event(t,world_eligible)&&t.phase!=TouchPhase::Started {
+        if !owned_overlay && world_touch.event(t,world_eligible)&&t.phase!=TouchPhase::Started {
             if let Some(contact)=state.contacts.get_mut(&t.id){contact.dragged=true;}
         }
         match t.phase {
             TouchPhase::Started if interactive => {
                 if state.contacts.contains_key(&t.id) { continue; }
-                let role = if playing && options.run_lock && movement::lock_available(&layout, &state, size) && !bar.blocks(movement::lock_rect(&layout,&state,size)) && movement::lock_rect(&layout, &state, size).contains(t.position) {
+                let role = if layout.config.opacity <= 0.0 {
+                    None
+                } else if playing && options.run_lock && movement::lock_available(&layout, &state, size) && !bar.blocks(movement::lock_rect(&layout,&state,size)) && movement::lock_rect(&layout, &state, size).contains(t.position) {
                     Some(Role::RunLock)
                 } else { match layout.config.hit_filtered(t.position,size,playing,false,
                     |i| i != gyro::BUTTON || gyro_options.enabled) {
@@ -881,6 +918,10 @@ fn input(
                     })
                 });
                 if let Some(role) = role {
+                    if matches!(role, Role::Button(_) | Role::RunLock)
+                        || (matches!(role, Role::Move) && layout.config.hit(t.position, size, playing, false) == Some(Target::Stick)) {
+                        sheets.claim_overlay(t.id);
+                    }
                     let multiple = !state.contacts.is_empty();
                     if !matches!(role, Role::Look) || multiple { state.taps.clear(); }
                     if multiple { for c in state.contacts.values_mut() { if matches!(c.role, Role::Look) { c.dragged = true; } } }
@@ -1184,7 +1225,7 @@ fn show_labels(
                 let pressed = state
                     .contacts
                     .values()
-                    .any(|c| matches!(c.role,Role::Button(j) if j==i))
+                    .any(|c| matches!(c.role, Role::Button(j) | Role::SettingsOverlay(j) if j==i))
                     || (i == gyro::BUTTON && gyro_state.active(&gyro_options))
                     || (BUTTONS[i].control == Some(Control::Block) && state.aim_latched)
                     || (BUTTONS[i].control == Some(Control::CrouchSneak)

@@ -1166,7 +1166,7 @@ impl PauseLook {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-fixtures"))]
     fn plain() -> PauseLook {
         PauseLook { faces: Faces::plain(), band: None, screen: None, tick: None, shapes: None }
     }
@@ -1711,6 +1711,23 @@ impl Plugin for PausePlugin {
             },
         );
     }
+}
+
+/// Use the real pause presenter with authored fonts and mobile layout in wrapper fixtures.
+#[cfg(feature = "test-fixtures")]
+pub fn use_touch_fixture(app: &mut App, tab: &'static str) {
+    app.insert_resource(PauseLook::plain());
+    app.insert_resource(SettingsTouch::enabled_fixture());
+    app.world_mut().resource_mut::<PauseView>().scope = SettingsScope::Tab(tab);
+}
+
+#[cfg(feature = "test-fixtures")]
+pub fn fixture_row(world: &mut World, row: RowId) -> (Entity, Rect) {
+    let density = world.query_filtered::<&bevy::window::Window, With<bevy::window::PrimaryWindow>>()
+        .single(world).unwrap().scale_factor();
+    let (entity, _, node, transform) = world.query::<(Entity, &PauseButton, &ComputedNode, &UiGlobalTransform)>()
+        .iter(world).find(|(_, button, _, _)| **button == PauseButton::Row(row)).expect("painted settings row");
+    (entity, Rect::from_center_size(transform.translation / density, node.size() / density))
 }
 
 
@@ -3648,8 +3665,7 @@ fn choose(
         Option<Res<crate::ui_colour::CustomColours>>,
         Option<Res<crate::settings_view::HiddenRows>>,
     ),
-    (meters, pointed, mut tab_store, tweaks, mut report): (Query<(&PauseButton, &RelativeCursorPosition)>, Query<(&PointerState, &PauseButton)>, Option<ResMut<SettingsTabStore>>, Option<Res<crate::tweaks::TweakSettings>>, Option<ResMut<ReportEntry>>),
-    mut touch: touch::Input,
+    (meters, pointed, mut tab_store, tweaks, mut report, mut touch): (Query<(&PauseButton, &RelativeCursorPosition)>, Query<(&PointerState, &PauseButton)>, Option<ResMut<SettingsTabStore>>, Option<Res<crate::tweaks::TweakSettings>>, Option<ResMut<ReportEntry>>, touch::Input),
 ) {
     let keys = keys.snapshot();
     use crate::bindings::{Bindings, Input, InputDevice};
@@ -4644,9 +4660,7 @@ fn choose(
                 Some(RailItem::Back) => leave = true,
                 None => {}
             }
-            if leave {
-                *page = Page::Main;
-            } else {
+            if !leave {
                 if let Some(scope) = to_scope {
                     let on_rail = matches!(view.focus, SettingsFocus::Rail(_));
                     if scope != view.scope {
@@ -4679,12 +4693,11 @@ fn choose(
                 if let Some((id, a)) = row_act {
                     act_on_row(id, a, &settings, &mut view, &mut fx, controls, &mut listening, &mut commands, &mut sounds);
                 }
-                *page = Page::Settings { selected: sel };
             }
             // Mouse and touch both deliver a position on the actual painted meter.
             let mut meter = touch_meter;
             if let Some((id, _)) = meter {
-                *selected = Some(id);
+                sel = Some(id);
                 view.focus = SettingsFocus::Rows;
             } else if let Some(id) = view.dragging {
                 if mouse.pressed(MouseButton::Left) {
@@ -4721,6 +4734,7 @@ fn choose(
                 }
                 _ => {}
             }
+            *page = if leave { Page::Main } else { Page::Settings { selected: sel } };
         }
         // The mod's page takes the pointer and the keys through its tiles
         // (`crate::tiles::input`); Esc, Backspace or Back go back to the column.

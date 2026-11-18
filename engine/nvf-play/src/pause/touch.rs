@@ -2,7 +2,7 @@
 //! same Bevy buttons as the mouse. Only the pause consumer applies effects.
 use super::*;
 use crate::{menu::barter_touch::Frame, pipboy::touch_scroll::gesture::Intent, touch_safe_area::SafeInsets};
-use bevy::{input::touch::{TouchInput, TouchPhase}, ui::{CalculatedClip, ComputedUiTargetCamera, UiStack}, window::PrimaryWindow};
+use bevy::{input::touch::{TouchInput, TouchPhase}, ui::{CalculatedClip, ComputedUiTargetCamera, UiStack}, window::{PrimaryWindow, Window}};
 
 #[derive(Resource)]
 pub struct SettingsTouch {
@@ -20,6 +20,9 @@ impl Default for SettingsTouch {
 
 impl SettingsTouch {
     pub fn enabled(&self) -> bool { self.enabled }
+
+    #[cfg(feature = "test-fixtures")]
+    pub(super) fn enabled_fixture() -> Self { Self { enabled: true, ..Self::default() } }
 
     pub fn publish(&mut self, frame: Option<Frame>, edges: &mut Vec<TouchInput>) {
         self.edges.clear();

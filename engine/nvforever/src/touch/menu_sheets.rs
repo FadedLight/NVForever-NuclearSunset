@@ -14,9 +14,16 @@ struct Stamp { window: Entity, physical: UVec2, density: f32, safe: nvf_play::to
 pub(super) struct Batch {
     kind: Option<Kind>, stamp: Option<Stamp>, allowed: bool,
     events: Vec<TouchInput>, ids: [Option<u64>; MAX_IDS], overflow: bool,
+    overlay: [Option<u64>; MAX_IDS], overlay_overflow: bool,
 }
 impl Batch {
     fn owns(&self, id: u64) -> bool { self.ids.contains(&Some(id)) }
+    fn overlay_owns(&self, id: u64) -> bool { self.overlay_overflow || self.overlay.contains(&Some(id)) }
+    fn claim_overlay(&mut self, id: u64) {
+        if self.overlay_owns(id) { return; }
+        if let Some(slot) = self.overlay.iter_mut().find(|slot| slot.is_none()) { *slot = Some(id); }
+        else { self.overlay_overflow = true; }
+    }
     fn record(&mut self, event: &TouchInput) {
         if !self.owns(event.id) {
             if let Some(slot) = self.ids.iter_mut().find(|slot| slot.is_none()) { *slot = Some(event.id); }
@@ -102,6 +109,7 @@ impl Ingress<'_> {
         self.batch.events.clear(); self.batch.kind = None; self.batch.stamp = None; self.batch.allowed = false;
         if self.touches.iter().next().is_none() && !self.touches.any_just_released() && !self.touches.any_just_canceled() {
             self.batch.ids.fill(None); self.batch.overflow = false;
+            self.batch.overlay.fill(None); self.batch.overlay_overflow = false;
         }
     }
     pub fn prepare(&mut self, entity: Entity, window: &Window, allowed: bool) -> bool {
@@ -110,10 +118,16 @@ impl Ingress<'_> {
         self.batch.kind.is_some()
     }
     pub fn cancel(&mut self) { self.batch.allowed = false; self.batch.events.clear(); }
+    pub fn settings(&self) -> bool { self.batch.kind == Some(Kind::Settings) }
+    pub fn settings_event(&mut self, event: &TouchInput) { self.batch.record(event); }
+    pub fn claim_overlay(&mut self, id: u64) { self.batch.claim_overlay(id); }
+    pub fn overlay_owns(&self, id: u64) -> bool { self.batch.overlay_owns(id) }
     pub fn capture(&mut self, events: &mut MessageReader<TouchInput>) -> bool {
-        if self.batch.kind.is_none() { return false; }
+        if self.batch.kind.is_none() || self.settings() { return false; }
         for event in events.read() {
-            if self.batch.stamp.is_some_and(|s| s.window == event.window) { self.batch.record(event); }
+            if self.batch.stamp.is_some_and(|s| s.window == event.window) && !self.overlay_owns(event.id) {
+                self.batch.record(event);
+            }
         }
         true
     }
@@ -238,6 +252,8 @@ fn replay(
     }
     events.clear(); batch.events = events;
     for id in batch.ids.iter().flatten() { ownership.block(*id); }
+    for id in batch.overlay.iter().flatten() { ownership.block(*id); }
+    if batch.overlay_overflow { ownership.quarantine_overflow(); }
     let primary = windows.single().ok().map(|(entity,_)|entity);
     for touch in touches.iter().chain(touches.iter_just_pressed()).chain(touches.iter_just_released()).chain(touches.iter_just_canceled()) {
         if primary.is_some_and(|w|barter.captures_touch(w,touch.id()) || services.captures_touch(w,touch.id())) || maintenance.owns(touch.id()) || maintenance.captures_touch() || map.captures()

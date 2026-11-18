@@ -596,7 +596,7 @@ fn input(
         .as_deref()
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller);
     if !interactive || resized { editor_session.interrupt(&mut layout); }
-    let sheet_menu = sheets.prepare(window_id, window, interactive && !resized && layout.editor.is_none());
+    let sheet_menu = sheets.prepare(window_id, window, interactive && !resized && layout.editor.is_none(), practice.form_over());
     arm.prepare(interactive&&!resized&&!controller&&layout.editor.is_none()&&!modal_captures&&!sheet_menu
         &&(playing||arm.inventory()),platform.as_deref());
     let drawer_allowed =

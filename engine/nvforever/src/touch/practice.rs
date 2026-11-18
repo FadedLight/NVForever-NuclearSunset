@@ -370,6 +370,8 @@ pub(super) struct Bridge<'w, 's> {
     keys: MessageReader<'w, 's, KeyboardInput>,
 }
 impl Bridge<'_, '_> {
+    /// A form (practice, report or editor) is over the pause page.
+    pub fn form_over(&self) -> bool { self.over.0 }
     // Called only from the live touch reader, before it can create gameplay contacts.
     pub fn capture(
         &mut self,

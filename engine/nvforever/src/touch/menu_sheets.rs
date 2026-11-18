@@ -46,7 +46,6 @@ struct Sources<'w> {
     script: Option<Res<'w, nvf_play::script::ScriptState>>,
     paused: Option<Res<'w, nvf_play::pause::Paused>>,
     page: Option<Res<'w, nvf_play::pause::Page>>,
-    form: Option<Res<'w, nvf_play::pause::FormOver>>,
     creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>,
     keyboard: Option<Res<'w, nvf_play::bindings::KeyboardCapture>>,
     free: Option<Res<'w, nvf_play::free_cam::FreeCam>>,
@@ -56,10 +55,12 @@ struct Sources<'w> {
 impl Sources<'_> {
     // Routing prediction only. Each leaf rechecks the actual menu and item/quote
     // inside its effect consumer, after scripts and other menu activity.
-    fn kind(&self, maintenance_enabled: bool, settings_enabled: bool) -> Option<Kind> {
+    /// `form_over` comes from the caller's own FormOver access: the live reader's
+    /// practice bridge already holds it mutably, so this shared param cannot read it.
+    fn kind(&self, maintenance_enabled: bool, settings_enabled: bool, form_over: bool) -> Option<Kind> {
         if settings_enabled && self.paused.as_ref().is_some_and(|p| p.0)
             && self.page.as_deref().is_some_and(|page| matches!(page, nvf_play::pause::Page::Settings { .. }))
-            && self.form.as_ref().is_none_or(|f| !f.0) {
+            && !form_over {
             return Some(Kind::Settings);
         }
         if self.paused.as_ref().is_some_and(|p| p.0) || self.creator.as_ref().is_some_and(|c| c.is_open())
@@ -112,8 +113,8 @@ impl Ingress<'_> {
             self.batch.overlay.fill(None); self.batch.overlay_overflow = false;
         }
     }
-    pub fn prepare(&mut self, entity: Entity, window: &Window, allowed: bool) -> bool {
-        self.batch.kind = allowed.then(|| self.sources.kind(self.maintenance.enabled(), self.settings.enabled())).flatten();
+    pub fn prepare(&mut self, entity: Entity, window: &Window, allowed: bool, form_over: bool) -> bool {
+        self.batch.kind = allowed.then(|| self.sources.kind(self.maintenance.enabled(), self.settings.enabled(), form_over)).flatten();
         self.batch.stamp = Some(self.sources.stamp(entity, window)); self.batch.allowed = allowed;
         self.batch.kind.is_some()
     }
@@ -143,7 +144,7 @@ struct Gates<'w> {
     switching: Option<Res<'w, nvf_play::pad::TouchDeviceSwitch>>,
     paused: Option<Res<'w, nvf_play::pause::Paused>>, fresh: Option<Res<'w, nvf_play::menu::FreshMenu>>,
     keyboard: Option<Res<'w, nvf_play::bindings::KeyboardCapture>>, free: Option<Res<'w, nvf_play::free_cam::FreeCam>>,
-    creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>,
+    creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>, form: Option<Res<'w, nvf_play::pause::FormOver>>,
 }
 impl Gates<'_> {
     fn allows(&self, settings: bool) -> bool {
@@ -189,7 +190,7 @@ fn replay(
 ) {
     ownership.begin_frame();
     arm.publish_mask(&mut ownership, &touches);
-    let current = sources.kind(maintenance.enabled(), settings.enabled());
+    let current = sources.kind(maintenance.enabled(), settings.enabled(), gates.form.as_ref().is_some_and(|f| f.0));
     let settings_current = current == Some(Kind::Settings);
     let gates_allow = gates.allows(settings_current);
     let context = windows.single().ok().and_then(|(entity, window)| {

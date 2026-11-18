@@ -7,17 +7,13 @@ successful drawing, pixels, or a cause of device loss or visual corruption.
 
 ## Actual debug gate
 
-[documented: android/GameActivity.java, LanDiagnostics.available] This repository already
-uses `ApplicationInfo.FLAG_DEBUGGABLE` as the APK debug authority. The new JNI string
-method `renderDiagnosticsBuildType` returns only `debug` or `release` from that flag.
-Native code additionally requires `renderDiagnosticsUi` to return `enabled`, from
-the explicit default-off Gradle `nvfDiagnostics` option. Both exact results are
-cached once per process through the existing bounded `android::activity_string`
-helper. An absent method, JNI error, unknown value, disabled option or release APK
-disables the observer. This is independent of Rust `debug_assertions`: an opted-in
-debug APK's native library may be optimized and still enables the observer.
-No token, preference, path or device identity crosses this gate. Non-Android builds do
-not install this plugin; host tests explicitly inject a synthetic gate.
+[documented: `GameActivity`, `android_render_admission.rs`] The observer requires a
+debuggable APK and a local Android logging opt-in. Before starting the game process,
+use `adb shell setprop log.tag.NVFRenderAdmission DEBUG` to enable it or set the
+tag to `INFO` to turn it off. The JNI results are cached once per process. Missing
+methods, errors, unknown values and release APKs disable the observer, regardless
+of Rust optimization. Output is local only; no token, path, or device identity
+crosses the gate. Host tests inject a synthetic gate.
 
 ## Bounds and timing
 
@@ -67,20 +63,16 @@ be legitimate. Different counters are independent; they are not combined into a 
 that an object was drawn. No camera means no matching-view pipeline evidence.
 
 `rigid` means non-skinned NIF control meshes, not a claim that every shape is scenery.
-The existing conservative archive filter already admits `render:` technical lines.
-No production privacy whitelist changes. A shared synthetic numeric fixture checks
-the exact Rust schema and anchored Java retention while token-bearing lines remain
-excluded. The fixture contains no game data.
+The records are local log lines, not reports. A synthetic fixture checks the
+Rust numeric schema and contains no game data.
 
 ## Qualification
 
 Authored tests cover the APK metadata gate, actual App cap/order/hidden filtering,
 sparse bursts and lifecycle/new-skin cancellation/budget, real Extract copying and
 stale clearing with an existing foreign queue observer retained, and independent CPU/
-GPU/stale-instance counter projection. The Java archive test checks exact anchored
-retention of the same fixture. Source preparation is not Rust/Java compilation, test
-execution, Android driver validation or phone acceptance. Those results must be
-recorded separately after the parent admits their resource use.
+GPU/stale-instance counter projection. These controls do not establish Android
+driver behavior or device acceptance.
 
 The actual App cadence test also measures test-only scan/capture counters: exactly
 eight captures in a 65-frame burst, no detection scans during it, one detection

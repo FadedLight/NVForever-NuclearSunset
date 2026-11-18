@@ -20,8 +20,8 @@ one is broken. Read §1–§4 for how the page works.
 1. **Place the row** in `crates/nvf-settings-layout/src/lib.rs` `SECTIONS` (the table the
    pause menu and the launcher share, re-exported as `nvf_play::settings_layout`; the
    launcher's Settings page follows it and the game's `settings-menu.json`,
-   docs/design/launcher.md), and list it in `docs/settings-reference.md` under the same tab
-   and category (a test fails while it is missing or elsewhere): its tab, its
+   docs/design/launcher.md). List it in `docs/settings-reference.md` or the Android
+   supplement under the same tab and category (a test fails while it is missing or elsewhere): its tab, its
    category (heading) and its position. A row the table does not name falls to its group's
    tab with no heading (and a Tweaks row to the group Other); the layout tests list every
    row there is (`KNOWN`), so a new row fails them until it is placed.
@@ -213,7 +213,9 @@ keyboard/controller navigation and row identity use the existing page implementa
 | Dialogue | Touch dialogue, choice/subtitle text size, tap-selection policy |
 | Lockpicking | Touch scheme and scale |
 | Interface size | Existing menu/UI scale and canonical health/AP/compass sizes |
-| Performance and battery | Preset, FPS, resolution, opt-in thermal response and status |
+
+Preset, FPS, resolution and opt-in thermal response stay in **Display > Mobile
+performance**. The preset changes the frame limit and render resolution, not Graphics.
 
 The four Android-specific controller rows are in **Controls > Controller**. The four
 shared controller rows keep their **Controls > Input** and **Controls > Aim Assist**
@@ -224,15 +226,19 @@ Touch layout and guide** on Android, or **Controls > Touch** on desktop: Style /
 for appearance, Save to keep changes, Cancel to restore them. The practice note points
 to this route; there is no second editor or new persistence schema.
 
-`settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
-original sections claim their remaining rows. One row is resolved once, with its original
-registry index. The integrated fixture covers 203 fixed keys: 134 shared (Main's Quick
-Loot rows included) and 69 Android additions. There are 71 placement overrides, 67 in
-Mobile and four in Controls.
-The authored controls cover optional sections, actual page projection,
-search/Changed/device handoff, and a real Settings callback through its original index.
-Fresh Rust execution of the current merge and Android device acceptance remain
-pending and are recorded separately from source review.
+The shared crate's `MOBILE_SECTIONS` takes precedence over `SECTIONS` only on
+Android. The same profile determines the exported menu's layout stamp and the
+launcher's acceptance of that export. The launcher shows the in-game titles,
+choices and dependencies for its editable subset; game-only actions (such as
+the layout editor) stay in Pause. Before a normal Android start exports the
+catalogue, the launcher uses its smaller built-in settings copy.
+
+Dependencies on stored rows live in `NEEDS` and `NEEDS_CHOICE`. For example,
+turning off Touch dialogue, Gyroscope or Touch hotbar leaves its dependent
+settings visible with their saved value and reason. Renderer or hardware
+availability still comes from the live engine. See the
+[Android settings reference](../settings-reference-android.md) for placements
+and compatibility rows.
 
 ## 3. What the page lists (`settings_view.rs`)
 

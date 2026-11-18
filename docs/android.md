@@ -23,13 +23,9 @@ The final command prints the debug APK path. This is a development signing key, 
 an official release signature. A release distribution needs its own protected signing
 configuration and device qualification.
 
-Diagnostics controls are omitted by default. For an opt-in development test APK use
-`python tools/android/build.py --diagnostics`; direct Gradle builds use
-`-PnvfDiagnostics=true` (only `true` and `false` are accepted). The hosted test APK
-explicitly enables this option. LAN support additionally requires an Android
-debuggable build and the user's existing pairing/upload consent. Disabling the option
-does not erase pairing, pending reports, saves or local engine crash logs. This flag
-does not change Rust optimization, package identity or signing configuration.
+The Android port has no LAN log uploader, pairing flow, or background test-report
+queue in either APK variant. Native crash and event logs stay on the device for
+manual collection. Android does not prompt for or send player reports.
 
 Android launcher icons derive from the canonical NVForever artwork. To regenerate
 them, run `java -Djava.awt.headless=true tools/android/LauncherIcons.java` from the
@@ -50,10 +46,8 @@ Continue additionally requires an NVForever save. Settings writes only edited IN
 never writes the engine's settings catalogue: a normal player launch publishes it, including
 the Mobile tab. Practice and layout customization still open in the game. The Android
 launcher does not offer DLSS, desktop window controls or the desktop self-updater.
-Project news uses HTTPS and can be turned off on Home. When enabled in a diagnostic build,
-the existing LAN test logs dialog is under Game folder. The application ID, APK version and
-signing configuration are unchanged; an upgrade still requires the same signer as the
-installed APK.
+Project news is a separate HTTPS fetch and can be turned off on Home. An upgrade
+still requires the same signer as the installed APK.
 
 Developer checks without game data:
 
@@ -67,11 +61,12 @@ java -cp <temporary-output> org.nvforever.android.InstallConfigTest
 The existing desktop checks in CONTRIBUTING.md still apply to engine changes. A passing
 cross-check or Java compilation does not replace desktop regressions or device acceptance.
 
-The `android-test-apk` workflow cross-checks the engine and authored input test source,
-tests the mobile launcher consumer on the host, builds a development APK, verifies ARM64
-ELF/runtime contents, the packaged launcher JNI symbol and the signature, and uploads the
-APK as an artifact. It does not run Android gameplay or input tests on a
-device. CI debug signing keys are temporary; an APK from another run may require an
+The `android-test-apk` workflow cross-checks engine/input test source and runs the mobile
+launcher tests on the host. It builds a signed debug APK and an unsigned release variant
+using the same development native libraries. CI checks both APKs for the cleartext
+policy, absence of the LAN uploader, ARM64 binaries and runtime content. The debug
+signature and launcher JNI entry point are checked separately. These checks do not run
+Android gameplay or input on a device. CI debug signing keys are temporary; an APK from another run may require an
 uninstall, which deletes app saves. Keep your own development signing key for updates
 and export saves before replacing an installation signed by a different key.
 
@@ -221,8 +216,8 @@ Android pixels, performance, save/Doc exit or loading-cure result is inferred.
 
 ## Mobile performance
 
-Android's Mobile > Performance and battery (Display > Performance on desktop)
-offers Battery (30 FPS, 50% world resolution), Balanced
+**Display > Mobile performance** offers
+Battery (30 FPS, 50% world resolution), Balanced
 (60 FPS, 67%) and Quality (60 FPS, native). The frame limit and world resolution
 can also be selected separately. Smaller world resolutions require FSR support;
 unsupported choices explain why they are unavailable. Menus stay at display resolution.

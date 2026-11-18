@@ -45,84 +45,12 @@ pub use nvf_settings_layout::*;
 
 use crate::settings::Setting;
 
-/// The desktop profile is the exact shared table's tab order.
+#[cfg(test)]
 pub const DESKTOP_TAB_ORDER: [&str; 8] = nvf_settings_layout::TAB_ORDER;
-pub const MOBILE_TAB: &str = "Mobile";
-pub const MOBILE_TAB_ORDER: [&str; 9] = ["Gameplay", "Display", "Audio", "Controls", MOBILE_TAB, "Graphics", NVF_FEATURES_TAB, TWEAKS_TAB, "Debug"];
 #[cfg(target_os = "android")]
 pub const TAB_ORDER: [&str; 9] = MOBILE_TAB_ORDER;
 #[cfg(not(target_os = "android"))]
-pub const TAB_ORDER: [&str; 8] = DESKTOP_TAB_ORDER;
-
-// Android adds only its own rows; the shared Main table stays authoritative.
-// A matching category appends these keys after its shared rows.
-pub const ANDROID_SECTIONS: &[Section] = &[
-    section("Gameplay", Some("Camera"), &["touch-pipboy-size-v1", "touch-pipboy-tab-swipes"]),
-    section("Gameplay", Some("Dialogue"), &["touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]),
-    section("Display", Some("Interface"), &["hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1"]),
-    section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1"]),
-    section("Controls", Some("Touch"), &["touch-layout-editor-v1", "touch-practice-v1", "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-swipe-v1", "touch-pipboy-distance-v1", "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button", "touch-pipboy-button-graphics", "touch-pipboy-model-wheel", "touch-direct-pipboy-v1", "touch-world-activation-v1", "touch-icon-family", "adaptive-touch-actions", "lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints", "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1", "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1", "touch-analog-movement-v1", "touch-fire-drag-look-v1", "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1"]),
-    section("Controls", Some("Controller"), &["controller-ads-v1", "controller-dead-zone-v1", "controller-toggle-aim-v1", "controller-hold-sneak-v1"]),
-    section("Display", Some("Mobile performance"), &["mobile-performance", "mobile-fps", "mobile-resolution", "mobile-thermal-auto", "mobile-thermal-status"]),
-];
-
-/// Android claims only its named presentation overrides. Main's original controller
-/// rows keep their Input/Aim Assist categories, while all hardware routes stay Controls.
-pub const MOBILE_SECTIONS: &[Section] = &[
-    section(MOBILE_TAB, Some("Touch layout and guide"), &[
-        "touch-layout-editor-v1", "touch-practice-v1", "touch-icon-family", "adaptive-touch-actions",
-    ]),
-    section(MOBILE_TAB, Some("Movement and gestures"), &[
-        "touch-analog-movement-v1", "touch-fire-drag-look-v1",
-        "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1", "touch-world-activation-v1",
-    ]),
-    section(MOBILE_TAB, Some("Gyroscope"), &[
-        "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1",
-        "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1",
-    ]),
-    section(MOBILE_TAB, Some("Inventory and quick access"), &[
-        "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1",
-        "touch-pipboy-swipe-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-distance-v1", "touch-pipboy-size-v1", "touch-pipboy-tab-swipes", "touch-direct-pipboy-v1",
-        "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button",
-        "touch-pipboy-button-graphics", "touch-pipboy-model-wheel",
-        "touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1",
-    ]),
-    section(MOBILE_TAB, Some("Dialogue"), &[
-        "touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side",
-        "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1",
-    ]),
-    section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints"]),
-    section(MOBILE_TAB, Some("Interface size"), &[
-        "menu-scale", "ui-scale", "hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
-        "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1",
-    ]),
-    section(CONTROLS_TAB, Some("Controller"), &ANDROID_CONTROLLER_KEYS),
-    section(MOBILE_TAB, Some("Performance and battery"), &[
-        "mobile-performance", "mobile-fps", "mobile-resolution", "mobile-thermal-auto", "mobile-thermal-status",
-    ]),
-];
-
-/// The Controls tab's rows that are shown only while the input device is a controller
-/// (`crate::bindings::InputDevice`) [design: #1953].
-pub const ANDROID_CONTROLLER_KEYS: [&str; 4] = ["controller-ads-v1", "controller-dead-zone-v1", "controller-toggle-aim-v1", "controller-hold-sneak-v1"];
-pub const CONTROLLER_KEYS: [&str; 8] = ["button-style", "aim-assist", "aim-slowdown", "aim-lock",
-    "controller-ads-v1", "controller-dead-zone-v1", "controller-toggle-aim-v1", "controller-hold-sneak-v1"];
-
-/// Whether row `key` is shown only with a controller ([`CONTROLLER_KEYS`]).
-pub fn controller_only(key: &str) -> bool {
-    nvf_settings_layout::controller_only(key) || ANDROID_CONTROLLER_KEYS.contains(&key)
-}
-
-/// The shared visibility rule, with the existing Android controller rows included.
-pub fn shown_with(key: &str) -> Option<Rule> {
-    if ANDROID_CONTROLLER_KEYS.contains(&key) {
-        Some(Rule { parent: DEVICE_ROW, choices: &[CONTROLLER_DEVICE], why: "" })
-    } else {
-        nvf_settings_layout::shown_with(key)
-    }
-}
-
-
+pub const TAB_ORDER: [&str; 8] = nvf_settings_layout::TAB_ORDER;
 
 /// One line of a section: a registered row (its index in the registry) or a Controls row
 /// (its name after [`CONTROL_PREFIX`]).
@@ -210,7 +138,7 @@ pub fn resolve_layout(list: &[Setting]) -> ResolvedLayout {
 
 #[cfg(test)]
 pub(crate) fn resolve_desktop_layout(list: &[Setting]) -> ResolvedLayout {
-    resolve_layout_with(list, &DESKTOP_TAB_ORDER, &[])
+    resolve_layout_with(list, &nvf_settings_layout::TAB_ORDER, &[])
 }
 
 fn resolve_layout_with(list: &[Setting], tab_order: &[&'static str], overrides: &[Section]) -> ResolvedLayout {
@@ -720,7 +648,7 @@ mod shared_table_tests {
         // the complete registry fixture below. Explicit Mobile headings describe the
         // Android profile; the remaining headings describe the desktop profile.
         let list = registry(super::android_profile_tests::registered_rows());
-        let l = resolve_layout(&list);
+        let l = super::resolve_desktop_layout(&list);
         let mobile = super::resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
         for (key, tab, heading) in &listed {
             let i = list.iter().position(|s| s.key == key).unwrap_or_else(|| panic!("{key}: in the reference, but the game has no such row"));
@@ -1492,17 +1420,14 @@ mod android_profile_tests {
                 assert_eq!(mobile.placement_of(index), Some(section.placement));
             }
         }
-        assert_eq!(mobile_keys.len(), 71);
-        let added = ["hud-scale-v2", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1", "dialogue-background-tint-v1", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1"];
-        assert!(added.iter().all(|key| mobile_keys.contains(key)));
-        assert_eq!(mobile_keys.iter().filter(|key| !added.contains(key)).count(), 64, "four original Main controller rows retain their new Main categories");
         assert!(!mobile_keys.contains("physics-rate"), "upstream screen setting is shared, not mobile-only");
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "NVF Features > World Interaction");
         assert!(!mobile_keys.contains("grass-fire"), "upstream world setting is shared, not mobile-only");
+        let desktop = resolve_desktop_layout(&list);
         for (index, row) in list.iter().enumerate() {
             if !mobile_keys.contains(row.key) {
-                assert_eq!(mobile.placement_of(index), resolve_desktop_layout(&list).placement_of(index));
+                assert_eq!(mobile.placement_of(index), desktop.placement_of(index));
             }
         }
         assert_eq!(before, list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect::<Vec<_>>());
@@ -1539,11 +1464,13 @@ mod android_profile_tests {
             ("touch-vats-targeting-v1", "Movement and gestures"),
             ("touch-practice-v1", "Touch layout and guide"), ("touch-gyro-v1", "Gyroscope"),
             ("touch-hotbar", "Inventory and quick access"), ("touch-dialogue", "Dialogue"),
-            ("menu-scale", "Interface size"), ("mobile-performance", "Performance and battery"),
+            ("menu-scale", "Interface size"),
         ] {
             assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at(key)))));
             assert_eq!(mobile.placement_of(at(key)).unwrap().heading, Some(heading));
         }
+        assert!(!touch.contains(&ViewEntry::Row(RowId::Setting(at("mobile-performance")))));
+        assert_eq!(mobile.placement_of(at("mobile-performance")).unwrap().path(), "Display > Mobile performance");
         let chooser = RowId::Setting(at("touch-pipboy-dismiss-side-v2"));
         assert!(touch.contains(&ViewEntry::Row(chooser)));
         assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at("touch-pipboy-dismiss-travel-v1")))));
@@ -1584,8 +1511,8 @@ mod android_profile_tests {
         assert_eq!(app.world().resource::<Settings>().values(app.world()), baseline);
         let original_index = app.world().resource::<Settings>().index("mobile-thermal-auto").unwrap();
         let id = RowId::Setting(original_index);
-        let (scope, chosen, _) = view::normalize(&mobile, &list, SettingsScope::Tab("Display"), Some(id), &mobile_visibility(&list), &Found::default(), &view::Folding::default());
-        assert_eq!((scope, chosen), (SettingsScope::Tab(MOBILE_TAB), Some(id)));
+        let (scope, chosen, _) = view::normalize(&mobile, &list, SettingsScope::Tab(MOBILE_TAB), Some(id), &mobile_visibility(&list), &Found::default(), &view::Folding::default());
+        assert_eq!((scope, chosen), (SettingsScope::Tab("Display"), Some(id)));
         assert_eq!(settings::flip(app.world_mut(), original_index), Some(true));
         assert!(app.world().resource::<Consent>().0);
         let changed = settings::changed_rows(app.world(), &baseline);
@@ -1594,7 +1521,7 @@ mod android_profile_tests {
         let found = view::search(&mobile, &list, "mobile-thermal-auto", |r| r.name());
         assert_eq!(found, [id]);
         assert_eq!(view::listing(&mobile, &found)[0], view::ViewEntry::Crumb(Placement {
-            tab: MOBILE_TAB, subgroup: None, heading: Some("Performance and battery"),
+            tab: "Display", subgroup: None, heading: Some("Mobile performance"),
         }));
         assert_eq!(app.world().resource::<Settings>().list().iter().map(|s| (s.key, s.group)).collect::<Vec<_>>(),
             list.iter().map(|s| (s.key, s.group)).collect::<Vec<_>>());

@@ -23,13 +23,15 @@ def library(machine=183):
 
 
 class ApkTests(unittest.TestCase):
-    def apk(self, root, *, machine=183, missing=None, extra=None):
+    def apk(self, root, *, machine=183, missing=None, extra=None, secondary_dex=None):
         path = Path(root) / "fixture.apk"
         with zipfile.ZipFile(path, "w") as archive:
             for name in verify_apk.REQUIRED - {missing}:
                 archive.writestr(name, library(machine) if name.endswith(".so") else b"authored fixture")
             if extra:
                 archive.writestr(extra, b"authored fixture")
+            if secondary_dex is not None:
+                archive.writestr("classes2.dex", secondary_dex)
         return path
 
     def test_accepts_arm64_runtime_and_reports_alignment(self):
@@ -59,6 +61,12 @@ class ApkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
             with self.assertRaisesRegex(ValueError, "game-data"):
                 verify_apk.verify(self.apk(root, extra="assets/forbidden.bsa"))
+
+    def test_rejects_the_lan_uploader_in_secondary_dex(self):
+        with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
+            path = self.apk(root, secondary_dex=b"\x00Lorg/nvforever/android/LanDiagnostics;\x00")
+            with self.assertRaisesRegex(ValueError, "LAN reporting uploader: classes2.dex"):
+                verify_apk.verify(path)
 
 
 if __name__ == "__main__":

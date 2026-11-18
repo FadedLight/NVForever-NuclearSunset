@@ -1407,4 +1407,4 @@ mod preactivation_tests;
 mod preactivation_mutation_tests;
 
 #[cfg(test)]
-mod classic_dialogue_tests;
+pub(crate) mod classic_dialogue_tests;

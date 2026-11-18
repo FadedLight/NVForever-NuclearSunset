@@ -52,7 +52,15 @@ pub fn menu_of(world: &World, settings: &Settings) -> Menu {
             tabs.push(menu::Tab { name: t.name.to_string(), label: on_page(t.name), categories });
         }
     }
-    Menu { version: env!("CARGO_PKG_VERSION").to_string(), layout: nvf_settings_layout::layout_stamp(), tabs }
+    Menu { version: env!("CARGO_PKG_VERSION").to_string(), layout: layout_stamp(), tabs }
+}
+
+fn layout_stamp() -> String {
+    if cfg!(target_os = "android") {
+        nvf_settings_layout::mobile_layout_stamp()
+    } else {
+        nvf_settings_layout::layout_stamp()
+    }
 }
 
 fn row(world: &World, settings: &Settings, i: usize) -> menu::Row {
@@ -190,7 +198,7 @@ mod tests {
         let app = app();
         let w = app.world();
         let m = menu_of(w, w.resource::<Settings>());
-        assert_eq!((m.version.as_str(), m.layout.clone()), (env!("CARGO_PKG_VERSION"), nvf_settings_layout::layout_stamp()));
+        assert_eq!((m.version.as_str(), m.layout.clone()), (env!("CARGO_PKG_VERSION"), layout_stamp()));
         let tabs: Vec<&str> = m.tabs.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(tabs, ["Gameplay", "Display", "Audio"], "in the table's order, a tab with no rows left out");
         let g = &m.tabs[0];

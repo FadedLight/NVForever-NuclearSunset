@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Verify the development APK's architecture, runtime assets and absence of game data.
+"""Verify an APK's architecture, runtime assets and absence of game data and the LAN uploader.
 
 Signature verification is separate: use the Android SDK's apksigner verify command.
 """
 from pathlib import Path
 import hashlib
 import json
+import re
 import struct
 import sys
 import zipfile
@@ -22,6 +23,10 @@ REQUIRED = {
     "assets/NDK-NOTICE.txt", "assets/NDK-NOTICE.toolchain.txt", "assets/SOURCE.txt",
 }
 GAME_SUFFIXES = {".esm", ".esp", ".esl", ".bsa", ".dds", ".nif", ".kf", ".bik", ".fnt", ".lip", ".fos", ".ogg", ".wav", ".mp3"}
+# Check every DEX, not just classes.dex. These ASCII descriptors and the route
+# are stored verbatim in DEX string data, even in multi-DEX APKs.
+LAN_DEX_STRINGS = (b"Lorg/nvforever/android/LanDiagnostics;",
+                   b"Lorg/nvforever/android/DiagnosticsTransport;", b"/api/v1/log-bundles")
 
 
 def verify(path: Path) -> dict:
@@ -35,6 +40,11 @@ def verify(path: Path) -> dict:
             raise ValueError(f"APK contains game-data file names: {sorted(forbidden)}")
         if any(".." in Path(name).parts or name.startswith("/") for name in names):
             raise ValueError("APK contains an unsafe member path")
+        for name in sorted(names):
+            if re.fullmatch(r"classes(?:[0-9]+)?\.dex", name):
+                dex = apk.read(name)
+                if any(marker in dex for marker in LAN_DEX_STRINGS):
+                    raise ValueError(f"APK contains the LAN reporting uploader: {name}")
         alignments = {}
         for name in sorted(n for n in names if n.endswith(".so")):
             if not name.startswith("lib/arm64-v8a/"):

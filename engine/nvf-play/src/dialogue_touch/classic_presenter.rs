@@ -346,12 +346,15 @@ mod tests {
             Vec2::new(1024.,768.),Vec2::new(393.,873.)] {
             let density=2.0;
             let (mut app,_,_,_files)=scene_with_art(size,density,1.5,true,false);
-            {
-                let mut state=app.world_mut().resource_mut::<classic_state::State>();
-                state.caps=Some(1234);
-                state.spoken=Some("Welcome".into());
-            }
+            let (mut script, mut sim) = crate::menu::classic_dialogue_tests::classic_merchant_world();
+            sim.world.add_item(fnv_sim::FormId::PLAYER_REF, crate::menu::model::CAPS, 1234).unwrap();
+            let conversation = app.world_mut().resource_mut::<crate::script::ScriptState>()
+                .rt.as_mut().unwrap().game.dialogue.take();
+            script.rt.as_mut().unwrap().game.dialogue = conversation;
+            app.insert_resource(script).insert_resource(sim);
+            app.world_mut().resource_mut::<classic_state::State>().spoken = Some("Welcome".into());
             settle(&mut app);
+            assert_eq!(app.world().resource::<classic_state::State>().caps, Some(1234));
             let prepared=lease(&app).prepared;
             assert_eq!(prepared.layout.template,classic::Template::Wide);
             let to_window=|r:Rect| Rect::from_corners((r.min+prepared.origin)*density,(r.max+prepared.origin)*density);

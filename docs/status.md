@@ -30,7 +30,12 @@ with device confirmation pending. Full
 gameplay, lifecycle and performance acceptance remain open. This is not a qualified
 Android release. [Build and touch-control instructions](android.md).
 
-Latest Android validation is R43 at source `1c1b96bb`, actual checkout `a53b0978`
+The Android port shares Mobile settings placement and dependency rules between the
+pause menu and the launcher. The debug and release sources omit the LAN uploader,
+and Android runs do not collect or send player reports. Built APK verification
+and physical-device qualification remain separate.
+
+Historical Android validation R43 was at source `1c1b96bb`, actual checkout `a53b0978`
 with Main `98fb59a9` and the same source tree. Core passed 3,472 tests with five
 ignored; Tools and strict root/engine Clippy passed. Play passed 2,374 and failed
 three; the wrapper passed 1,559 with no failures, each with one ignored. All
@@ -72,8 +77,8 @@ pending.
 
 The next Android increment is **In progress**: direct map pan/pinch, barter,
 repair and weapon-mod touch sheets are integrated over the existing game-rule
-consumers. Canonical launcher/adaptive icon resources and an explicit diagnostics
-build option are implemented. R31 hosted execution passed the former native-map
+consumers. Canonical launcher/adaptive icon resources are implemented.
+R31 hosted execution passed the former native-map
 failure and all eight root routing cases. The wrapper executed 1,308 passes and
 four failures (three map-parent fixtures plus practice); the map fixture now
 registers its actual DATA consumer's missing `MenuInput` provider. Its logs lack

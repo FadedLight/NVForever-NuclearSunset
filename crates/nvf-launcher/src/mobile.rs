@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const MOBILE: &str = "Mobile";
-const TABS: [&str; 5] = ["Gameplay", "Display", "Graphics", nvf_settings_layout::TWEAKS_TAB, MOBILE];
+use nvf_settings_layout::MOBILE_TAB;
+const TABS: [&str; 5] = ["Gameplay", "Display", MOBILE_TAB, "Graphics", nvf_settings_layout::TWEAKS_TAB];
 const IMPORT_FIRST: &str = "Import a complete Fallout: New Vegas folder before starting.";
 
 #[derive(Deserialize)]
@@ -95,7 +95,7 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
         }
         Request::Settings { edits } => Ok(settings(&path, &ini, &edits)),
         Request::SaveSettings { edits } => {
-            let catalog = catalog::Catalog::load_tabs(Some(&path), &TABS);
+            let catalog = catalog::Catalog::load_mobile(Some(&path), &TABS);
             for (key, v) in &edits {
                 let row = catalog.rows.iter().find(|row| row.key == *key && allowed_row(key)).ok_or("That setting is not available on Android.")?;
                 if !safe_value(v) || desktop_choice(key, v) || display::read_only(&row.key) {
@@ -189,8 +189,8 @@ fn safe_value(value: &str) -> bool {
 }
 
 fn allowed_row(key: &str) -> bool {
-    // Reports have their separate Android diagnostics flow; these desktop controls and
-    // in-game actions do not represent editable Android INI settings.
+    // Android has no player-report controls. Desktop controls and in-game
+    // actions do not represent editable Android INI settings.
     !matches!(key, "monitor" | "resolution" | "borderless" | "dlss-model" | "frame-generation-frames"
         | "send-reports" | "reports-delete" | "touch-layout-editor-v1" | "touch-practice-v1"
         | "touch-tray-editor-v1" | "mobile-thermal-status")
@@ -208,7 +208,7 @@ fn display_choices(key: &str, home: &Path) -> Option<Vec<display::Choice>> {
 }
 
 fn settings(path: &Path, ini: &str, edits: &BTreeMap<String, String>) -> Value {
-    let catalog = catalog::Catalog::load_tabs(Some(path), &TABS);
+    let catalog = catalog::Catalog::load_mobile(Some(path), &TABS);
     let home = path.parent().unwrap_or(path);
     let stored: BTreeMap<_, _> = ini_pairs(ini, "Settings").into_iter().collect();
     let current = |key: &str| edits.get(key).or_else(|| stored.get(key)).map(String::as_str);
@@ -240,8 +240,9 @@ fn settings(path: &Path, ini: &str, edits: &BTreeMap<String, String>) -> Value {
                 "readOnly": display::read_only(&r.key)})
         }).collect();
     let mut tabs = catalog.tabs;
-    if !tabs.iter().any(|(name, _)| name == MOBILE) {
-        tabs.push((MOBILE.into(), MOBILE.into()));
+    if !tabs.iter().any(|(name, _)| name == MOBILE_TAB) {
+        let index = tabs.iter().position(|(name, _)| name == "Graphics").unwrap_or(tabs.len());
+        tabs.insert(index, (MOBILE_TAB.into(), MOBILE_TAB.into()));
     }
     json!({"rows": rows, "tabs": tabs})
 }

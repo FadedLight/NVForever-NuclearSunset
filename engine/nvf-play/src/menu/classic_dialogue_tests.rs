@@ -45,7 +45,7 @@ fn fixture() -> Vec<u8> {
     ].concat()
 }
 
-fn classic_merchant_world() -> (crate::script::ScriptState, SimState) {
+pub(crate) fn classic_merchant_world() -> (crate::script::ScriptState, SimState) {
     let mut bytes = fixture();
     bytes.extend(top(b"MISC", &record(b"MISC", model::CAPS.0, &[sub(b"EDID", z("Caps")), sub(b"DATA", [1i32.to_le_bytes(), 0f32.to_le_bytes()].concat())])));
     let topic = 0xa01u32;

@@ -88,3 +88,22 @@ current-head compiler/runtime and real Bluetooth-controller acceptance are pendi
 - Each slider has 21 choices from 50% to 150%, in 5% steps, saved independently. Missing values use 100%. These sizes are for the ordinary menus; their text, row layout, scrolling and hit geometry must remain aligned.
 - [qualification] Settings/migration controls are authored but unexecuted. Actual menu rendering/drag integration is pending its owning consumer qualification; these settings alone do not establish working menu sizing.
 
+## Android placement by stored key
+
+The shared layout assigns the following named settings. Rows that cannot apply keep
+their stored value; the settings page shows why they are disabled. The launcher uses
+the exported catalogue after a normal Android start. In-game actions and the live
+thermal status are not editable in the launcher.
+
+| Android placement | Stored keys | Notes |
+| --- | --- | --- |
+| Mobile > Touch layout and guide | `touch-layout-editor-v1`, `touch-practice-v1`, `touch-icon-family`, `adaptive-touch-actions` | Edit or practice without sending gameplay actions. Icon family selects the artwork; adaptive controls follow context. |
+| Mobile > Movement and gestures | `touch-analog-movement-v1`, `touch-fire-drag-look-v1`, `touch-auto-move-lock-v1`, `touch-vats-double-tap-v1`, `touch-vats-targeting-v1`, `touch-world-activation-v1` | Configure stick movement, swipe aiming, running, V.A.T.S. targeting and interacting with the world. |
+| Mobile > Gyroscope | `touch-gyro-v1`, `touch-gyro-recenter-v1`, `touch-gyro-toggle-v1`, `touch-gyro-ads-only-v1`, `touch-gyro-invert-x-v1`, `touch-gyro-invert-y-v1`, `touch-gyro-sensitivity-v1`, `touch-gyro-ads-v1` | Gyroscope off leaves the secondary values saved. The sensor is not a keyboard, mouse or controller button. |
+| Mobile > Inventory and quick access | `touch-hotbar`, `touch-hotbar-slots`, `touch-hotbar-tray`, `touch-tray-editor-v1`, `touch-hotbar-size`, `touch-pipboy-swipe-v1`, `touch-bottom-swipe-target-v1`, `touch-pipboy-distance-v1`, `touch-pipboy-size-v1`, `touch-pipboy-tab-swipes`, `touch-direct-pipboy-v1`, `touch-pipboy-dismiss-left`, `touch-pipboy-dismiss-right`, `touch-pipboy-dismiss-side-v2`, `touch-pipboy-dismiss-travel-v1`, `touch-pipboy-close-button`, `touch-pipboy-button-graphics`, `touch-pipboy-model-wheel`, `touch-barter-v1`, `touch-maintenance-v1`, `touch-terminal-v1`, `touch-companion-v1` | Quick slot count is a 4/6/8 list. Pip-Boy dismissal uses a list in place of the legacy side switches; the old saved inputs still load. |
+| Mobile > Dialogue | `touch-dialogue`, `dialogue-theme-v1`, `dialogue-touch-choice`, `dialogue-speaker-side`, `dialogue-background-tint-v1`, `dialogue-hints-v1`, `dialogue-choice-text-size`, `dialogue-subtitle-text-size`, `dialogue-background-opacity-v1`, `dialogue-frame-opacity-v1` | Touch dialogue off leaves its choices saved. Speaker side applies to Field Notes, Retro Console and Wrist Terminal; backing, accent, tint and hints apply to Field Notes only. |
+| Mobile > Lockpicking | `lockpick-touch`, `lockpick-touch-hints`, `lockpick-touch-size` | Choose the touch scheme, its hints and control size. |
+| Mobile > Interface size | `menu-scale`, `ui-scale`, `hud-scale-v2`, `hud-health-size-v1`, `hud-action-points-size-v1`, `hud-compass-size-v1`, `barter-menu-size-v1`, `repair-menu-size-v1`, `workbench-menu-size-v1` | HUD and menu sizes are independent. Compatibility rows retain their saved values. |
+| Controls > Controller | `controller-ads-v1`, `controller-dead-zone-v1`, `controller-toggle-aim-v1`, `controller-hold-sneak-v1` | These rows are shown for controller input. Main's Input and Aim Assist rows keep their original placement. |
+| Display > Mobile performance | `mobile-performance`, `mobile-fps`, `mobile-resolution`, `mobile-thermal-auto`, `mobile-thermal-status` | Preset, frame rate and world resolution are lists. Thermal adjustment is off by default, affects the running session only, and keeps the selected values. |
+

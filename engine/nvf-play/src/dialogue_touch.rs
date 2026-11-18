@@ -173,30 +173,6 @@ pub(crate) fn install(app: &mut App) {
         switches: "",
         get: |_|false,set:|_,_|{},slider:None }, ChoiceList { names: |_|vec!["Select then confirm".into(),"Direct tap".into()],
             chosen:mode,pick:set_mode,save:mode,load:set_mode,ask_keep:false });
-    // These rows configure the enhanced consumer only. Keep their stored requests
-    // and normal INI loaders while the page explains why they cannot apply now.
-    for key in ["dialogue-choice-text-size", "dialogue-subtitle-text-size",
-        "dialogue-touch-choice", appearance::THEME_KEY] {
-        crate::settings::set_disabled_status(app, key, |world| {
-            (!world.resource::<TouchDialogue>().enabled).then_some("Enable Touch dialogue.")
-        });
-    }
-    crate::settings::set_disabled_status(app,crate::dialogue_split::KEY,|world| {
-        use appearance::Theme;
-        if !world.resource::<TouchDialogue>().enabled {Some("Enable Touch dialogue.")}
-        else if !matches!(world.resource::<appearance::Appearance>().theme,
-            Theme::SplitPanel|Theme::RetroConsole|Theme::WristTerminal) {
-            Some("Available with Field Notes, Retro Console and Wrist Terminal.")
-        } else {None}
-    });
-    for key in [appearance::BACKGROUND_KEY,appearance::TINT_KEY,appearance::FRAME_KEY,appearance::HINTS_KEY] {
-        crate::settings::set_disabled_status(app,key,|world| {
-            if !world.resource::<TouchDialogue>().enabled {Some("Enable Touch dialogue.")}
-            else if world.resource::<appearance::Appearance>().theme!=appearance::Theme::SplitPanel {
-                Some("Available with the Field Notes theme.")
-            } else {None}
-        });
-    }
 }
 
 #[derive(Resource, Default)]

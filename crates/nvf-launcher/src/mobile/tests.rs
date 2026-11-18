@@ -82,7 +82,7 @@ fn settings_read_and_save_use_player_catalogue_without_overwriting_the_export_or
     fixture.ini("[Game]\nPath=/keep\n[Settings]\nframe-cap=0.20\n");
     let row = |key: &str| menu::Row { key: key.into(), label: key.into(), note: "engine export".into(), kind: menu::Kind::Switch, default: "0".into(), shown_with: None, needs: vec![] };
     let menu = menu::Menu {
-        version: env!("CARGO_PKG_VERSION").into(), layout: nvf_settings_layout::layout_stamp(),
+        version: env!("CARGO_PKG_VERSION").into(), layout: nvf_settings_layout::mobile_layout_stamp(),
         tabs: vec![
             menu::Tab { name: "Mobile".into(), label: "Mobile".into(), categories: vec![menu::Category { group: None, heading: Some("Movement".into()), rows: vec![row("touch-gyro-v1"), row("touch-layout-editor-v1")] }] },
             menu::Tab { name: "Display".into(), label: "Display".into(), categories: vec![menu::Category { group: None, heading: None, rows: vec![row("borderless"), row("resolution"), row("dlss-model")] }] },
@@ -105,9 +105,47 @@ fn settings_read_and_save_use_player_catalogue_without_overwriting_the_export_or
     assert_eq!(ini_get(&ini, "Game", "Path").as_deref(), Some("/keep"));
     assert_eq!(ini_get(&ini, "Settings", "frame-cap").as_deref(), Some("0.60"));
     assert_eq!(ini_get(&ini, "Settings", "touch-gyro-v1").as_deref(), Some("1"));
-    assert_eq!(fs::read_to_string(export).unwrap(), menu);
+    assert_eq!(fs::read_to_string(&export).unwrap(), menu);
     assert!(fixture.call(json!({"action":"save_settings", "edits":{"borderless":"1"}}))["error"].is_string());
     assert_eq!(fs::read_to_string(&config).unwrap(), ini);
+    let desktop_export = menu.replace(&nvf_settings_layout::mobile_layout_stamp(), &nvf_settings_layout::layout_stamp());
+    fs::write(&export, desktop_export).unwrap();
+    assert!(fixture.call(json!({"action":"settings", "edits":{}}))["data"]["rows"]
+        .as_array().unwrap().iter().all(|row| row["key"] != "touch-gyro-v1"));
+}
+
+#[test]
+fn mobile_catalog_disables_and_restores_the_same_saved_dialogue_choice() {
+    let fixture = Fixture::new();
+    fixture.ini("[Settings]\ntouch-dialogue=0\ndialogue-theme-v1=Classic\n");
+    let row = |key: &str, kind| menu::Row {
+        key: key.into(), label: key.into(), kind,
+        note: String::new(), default: String::new(), shown_with: None, needs: vec![],
+    };
+    let menu = menu::Menu {
+        version: env!("CARGO_PKG_VERSION").into(),
+        layout: nvf_settings_layout::mobile_layout_stamp(),
+        tabs: vec![menu::Tab {
+            name: MOBILE_TAB.into(), label: MOBILE_TAB.into(),
+            categories: vec![menu::Category {
+                group: None, heading: Some("Dialogue".into()),
+                rows: vec![row("touch-dialogue", menu::Kind::Switch), row("dialogue-theme-v1", menu::Kind::List {
+                    choices: ["Normal", "Classic"].map(|name| menu::Choice {
+                        name: name.into(), label: name.into(),
+                    }).to_vec(),
+                })],
+            }],
+        }],
+    };
+    fs::write(fixture.home().join(menu::MENU_FILE), menu.to_text()).unwrap();
+    let theme = |enabled| fixture.call(json!({"action":"settings", "edits":{"touch-dialogue":enabled}}))
+        ["data"]["rows"].as_array().unwrap().iter().find(|r| r["key"] == "dialogue-theme-v1").unwrap().clone();
+    let disabled = theme("0");
+    assert_eq!(disabled["value"], "Classic");
+    assert_eq!(disabled["reason"], "Enable Touch dialogue.");
+    let enabled = theme("1");
+    assert_eq!(enabled["value"], "Classic");
+    assert!(enabled["reason"].is_null());
 }
 
 #[test]

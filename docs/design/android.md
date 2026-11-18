@@ -13,8 +13,9 @@ with its ordinary desktop binary. Desktop builds do not produce an Android share
 [design] The initial package targets ARM64, Android 10/API 29 or later, and Vulkan 1.1.
 This is a build target, not a supported-device or frame-rate guarantee. Android UI uses
 the device's display density; the desktop's fixed screenshot scale is retained on desktop. It starts with
-MSAA off and the existing vanilla graphics preset. APKs contain engine code, owned
-schemas and translation text only. They contain no game content. Player reports are off.
+MSAA off and the existing vanilla graphics preset. APKs ship code, the project's runtime
+resources and licensed artwork, but no original game content. Android has no player-report
+collection or submission path.
 
 ## Files and import
 
@@ -124,10 +125,9 @@ documentation. Neither tag there claims anything about the original game. The gr
   8 bursts, 8 idle frames, `android_render_admission.rs`), 32 render diagnostics reports,
   16 Pip-Boy UV attempts (`dialogue_pipboy.rs`) and the eight NIF rejection samples
   ([NIF numeric admission](../spec-notes/nif-numeric-admission.md)).
-- Timeouts and lifetimes: the Java diagnostics transport (3 s connect, 5 s read, 30 s
-  total), retry back-off (30 s first, 15 min maximum), archive and queue byte limits,
-  thermal sampling (10 s, 25 s stale), gyro sample gap and age (50 ms, 100 ms), and the
-  loading-cover ticket, lease and generation checks ([loading cover](android-loading-cover.md)).
+- Timeouts and lifetimes: thermal sampling (10 s, 25 s stale), gyro sample gap
+  and age (50 ms, 100 ms), and the loading-cover ticket, lease and generation
+  checks ([loading cover](android-loading-cover.md)).
 - Mode and layout policy: the Mobile settings tab and its placements
   ([settings page](settings-page.md)), Battery/Balanced/Quality performance presets
   with 30 or 60 FPS caps (`mobile_performance.rs`), borderless and one MSAA sample as

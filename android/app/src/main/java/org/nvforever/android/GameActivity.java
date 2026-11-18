@@ -17,7 +17,10 @@ public final class GameActivity extends NativeActivity {
     public String renderDiagnosticsBuildType() {
         return (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 ? "debug" : "release";
     }
-    public String renderDiagnosticsUi() { return BuildConfig.NVF_DIAGNOSTICS ? "enabled" : "disabled"; }
+    /** Local opt-in through Android's per-tag logging level; no upload capability. */
+    public String renderAdmissionLog() {
+        return android.util.Log.isLoggable("NVFRenderAdmission", android.util.Log.DEBUG) ? "enabled" : "disabled";
+    }
     private ControllerDevices controllers;
     private AndroidGyro gyro;
     private AndroidPerformance performance;
@@ -41,7 +44,6 @@ public final class GameActivity extends NativeActivity {
         if (loading.blocking()) loadingHandler.postDelayed(this, 250);
     }};
     @Override public void onCreate(Bundle state) {
-        LanDiagnostics.record(this, "GAME_CREATE_STARTED", -1);
         String id = getIntent().getStringExtra(RestartActivity.REQUEST);
         if (id == null || !id.matches("[0-9a-f]{32}")) id = java.util.UUID.randomUUID().toString().replace("-", "");
         loading = new LoadingState(id, SystemClock.uptimeMillis());
@@ -55,8 +57,7 @@ public final class GameActivity extends NativeActivity {
         // NativeActivity owns the application surface: Java cover frames need a
         // separate, noninteractive Window, never children of the taken surface.
         try { loadingCover = LoadingUi.cover(this); }
-        catch (RuntimeException unavailable) { loading.fail(); LanDiagnostics.record(this, "LOADING_COVER_FAILED", -1); }
-        LanDiagnostics.record(this, "GAME_CREATED", -1);
+        catch (RuntimeException unavailable) { loading.fail(); }
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(touchInsetsObserver);
         refreshTouchInsets(); refreshCover();
     }
@@ -78,7 +79,7 @@ public final class GameActivity extends NativeActivity {
         if (gyro != null) gyro.resumed(true);
         if (performance != null) performance.start();
         LoadingUi.immersive(this); refreshCover();
-        LanDiagnostics.record(this, "GAME_RESUMED", -1); refreshTouchInsets();
+        refreshTouchInsets();
     }
     @Override public void onWindowFocusChanged(boolean focused) {
         if (gyro != null) gyro.focused(focused);
@@ -106,7 +107,6 @@ public final class GameActivity extends NativeActivity {
         destroyed = true; loadingHandler.removeCallbacks(watchdog);
         if (loadingCover != null) loadingCover.close();
         if (loadingDialog != null) loadingDialog.dismiss();
-        LanDiagnostics.record(this, "GAME_DESTROYED", -1);
         getWindow().getDecorView().getViewTreeObserver().removeOnGlobalLayoutListener(touchInsetsObserver);
         if (controllers != null) controllers.close();
         super.onDestroy();
@@ -132,7 +132,6 @@ public final class GameActivity extends NativeActivity {
     private void coverUnavailable() {
         if (destroyed || loading == null) return;
         loading.fail();
-        LanDiagnostics.record(this, "LOADING_COVER_FAILED", -1);
         showLoadingBack(true);
     }
     private void sendLoading(int code) {
@@ -168,7 +167,6 @@ public final class GameActivity extends NativeActivity {
             public void completed() {
                 loadingHandler.removeCallbacks(watchdog);
                 sendLoading(RestartActivity.SUBMITTED);
-                LanDiagnostics.record(GameActivity.this, "NATIVE_CONTENT_SUBMITTED", -1);
             }
             public void failed() { coverUnavailable(); }
         });
@@ -177,7 +175,6 @@ public final class GameActivity extends NativeActivity {
         runOnUiThread(() -> {
             if (destroyed) return;
             loadRefusal = reason == null ? "The save could not be loaded." : reason.substring(0, Math.min(reason.length(), 4096));
-            LanDiagnostics.record(this, "LOAD_REFUSED", -1);
             showLoadRefusal();
         });
         return "";
@@ -240,7 +237,6 @@ public final class GameActivity extends NativeActivity {
             for (int i = 0; i < parsed.length(); i++) if (!(parsed.get(i) instanceof String)) return "Invalid loading argument";
         } catch (org.json.JSONException invalid) { return "Invalid loading arguments"; }
         if (!restartQueued.compareAndSet(false, true)) return "";
-        LanDiagnostics.record(this, "RESTART_REQUESTED", android.os.Process.myPid());
         runOnUiThread(() -> {
             if (loadingCover == null || !loadingCover.show()) { coverUnavailable(); return; }
             LoadingUi.immersive(this);
@@ -250,13 +246,11 @@ public final class GameActivity extends NativeActivity {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     .putExtra("args", args).putExtra("pid", android.os.Process.myPid()).putExtra(RestartActivity.REQUEST, request),
                     android.app.ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle());
-                LanDiagnostics.record(this, "RESTART_ACTIVITY_QUEUED", android.os.Process.myPid());
             } catch (Exception failure) { loading.fail(); showLoadingBack(true); }
         });
         return "";
     }
     public String engineStopped(String reason) {
-        LanDiagnostics.record(this, reason.isEmpty() ? "ENGINE_EXITED" : "ENGINE_STOPPED_WITH_ERROR", -1);
         sendLoading(RestartActivity.FAILURE);
         runOnUiThread(() -> {
             if (!reason.isEmpty()) startActivity(new Intent(this, LauncherActivity.class)

@@ -91,26 +91,31 @@ impl Catalog {
     /// The game's menu beside `ini` when it is this launcher's version and table, else the
     /// built-in one.
     pub fn load(ini: Option<&Path>) -> Catalog {
-        Self::load_tabs(ini, &LAUNCHER_TABS)
+        Self::load_tabs(ini, &LAUNCHER_TABS, nvf_settings_layout::layout_stamp)
     }
 
-    pub(crate) fn load_tabs(ini: Option<&Path>, tabs: &[&str]) -> Catalog {
+    #[cfg(feature = "mobile")]
+    pub(crate) fn load_mobile(ini: Option<&Path>, tabs: &[&str]) -> Catalog {
+        Self::load_tabs(ini, tabs, nvf_settings_layout::mobile_layout_stamp)
+    }
+
+    fn load_tabs(ini: Option<&Path>, tabs: &[&str], stamp: fn() -> String) -> Catalog {
         ini.and_then(|p| std::fs::read_to_string(p.with_file_name(menu::MENU_FILE)).ok())
             .and_then(|t| Menu::parse(&t))
-            .and_then(|m| Catalog::from_menu_tabs(&m, env!("CARGO_PKG_VERSION"), tabs))
+            .and_then(|m| Catalog::from_menu_tabs(&m, env!("CARGO_PKG_VERSION"), tabs, stamp))
             .unwrap_or_else(Catalog::built_in)
     }
 
     /// The game's menu `m`, when it is version `version`'s and of this launcher's table
     /// (`nvf_settings_layout::layout_stamp`).
     pub fn from_menu(m: &Menu, version: &str) -> Option<Catalog> {
-        Self::from_menu_tabs(m, version, &LAUNCHER_TABS)
+        Self::from_menu_tabs(m, version, &LAUNCHER_TABS, nvf_settings_layout::layout_stamp)
     }
 
-    fn from_menu_tabs(m: &Menu, version: &str, tabs: &[&str]) -> Option<Catalog> {
+    fn from_menu_tabs(m: &Menu, version: &str, tabs: &[&str], stamp: fn() -> String) -> Option<Catalog> {
         // Not this version's, another build's table (or a file from before the stamp), or
         // with no row (a broken write): the built-in copy.
-        if m.version != version || m.layout != nvf_settings_layout::layout_stamp() || m.rows().next().is_none() {
+        if m.version != version || m.layout != stamp() || m.rows().next().is_none() {
             return None;
         }
         let mut rows = Vec::new();

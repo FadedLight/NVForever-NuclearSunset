@@ -72,8 +72,6 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--tests", action="store_true", help="Cross-check authored engine tests (does not execute them)")
     parser.add_argument("--gradle-build-dir", type=Path, help="Optional separate Gradle output/cache directory")
-    parser.add_argument("--diagnostics", action="store_true",
-                        help="Opt into diagnostics UI in the debug APK; uploads still require consent")
     args = parser.parse_args()
     if args.ndk is None or args.jobs < 1:
         parser.error("set ANDROID_NDK_HOME or --ndk, and a positive --jobs")
@@ -111,8 +109,7 @@ def main() -> None:
         shutil.rmtree(assets)
     stage_assets(assets)
     gradle = shutil.which(args.gradle) or args.gradle
-    command = [gradle, "--no-daemon", "--max-workers=2",
-               "-PnvfDiagnostics=" + str(args.diagnostics).lower()]
+    command = [gradle, "--no-daemon", "--max-workers=2"]
     if args.gradle_build_dir:
         command.extend(["--project-cache-dir", str(args.gradle_build_dir / "project-cache")])
     # Incremental APK updates can retain an obsolete native payload outside the

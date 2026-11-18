@@ -37,13 +37,11 @@ public final class RestartActivity extends Activity {
         }
         public void stop(int pid) { if (owned(pid)) android.os.Process.killProcess(pid); }
         public void launch(String request, String args) {
-            LanDiagnostics.record(RestartActivity.this, "SUCCESSOR_LAUNCH_REQUESTED", session.oldPid);
             Intent next = new Intent(RestartActivity.this, GameActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 .putExtra("args", args).putExtra(REQUEST, request)
                 .putExtra(RECEIVER, new ReadyReceiver(getApplicationContext(), request));
             startActivity(next, android.app.ActivityOptions.makeCustomAnimation(RestartActivity.this, 0, 0).toBundle());
-            LanDiagnostics.record(RestartActivity.this, "SUCCESSOR_LAUNCH_QUEUED", session.oldPid);
         }
     };
     @Override public void onCreate(Bundle state) {
@@ -59,7 +57,6 @@ public final class RestartActivity extends Activity {
         } catch (IllegalArgumentException invalid) {
             creationError = "The loading request could not be identified."; return;
         }
-        LanDiagnostics.record(this, "RESTART_ACTIVITY_CREATED", session.oldPid);
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);

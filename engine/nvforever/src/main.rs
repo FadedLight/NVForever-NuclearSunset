@@ -1225,7 +1225,6 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     }
     // The run log and crash reports in NVForever's home (crash.rs).
     crash::install(args.data(), args.handoff.is_some());
-    // Player reports: the player's choice, asked once on a player's start (reports/).
     reports::decide(developer_data, args.handoff.is_some());
     let fail = |e: String| {
         eprintln!("error: {e}");
@@ -1919,9 +1918,12 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_systems(PostUpdate, sky::log_sun_cascades.after(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades).before(shadow_anchor::anchor_cascades))
     .add_systems(Startup, (crash::report_start, report_archives))
     .add_systems(Startup, move || cpu_placed.report())
-    .add_plugins(start_times::StartTimesPlugin)
-    .add_plugins(reports::ReportsPlugin { plugins: args.plugins.clone(), data: args.data().to_path_buf(), mo2: fnv_install::mo2::usvfs_loaded(), handoff: args.handoff.is_some(), start_kind: if args.load.is_some() { "save_load" } else { "new_game" } })
-    .add_systems(Last, (crash::note_place, crash::test_device_lost, events_log::note_context, stray_commands::report))
+    .add_plugins(start_times::StartTimesPlugin);
+    // Android keeps local crash logs but exposes neither player-report collection nor its form.
+    if !cfg!(target_os = "android") {
+        app.add_plugins(reports::ReportsPlugin { plugins: args.plugins.clone(), data: args.data().to_path_buf(), mo2: fnv_install::mo2::usvfs_loaded(), handoff: args.handoff.is_some(), start_kind: if args.load.is_some() { "save_load" } else { "new_game" } });
+    }
+    app.add_systems(Last, (crash::note_place, crash::test_device_lost, events_log::note_context, stray_commands::report))
     // After Bevy's window-closed exit, which writes AppExit in Last too: before it, closing
     // the window left no clean-exit line and the run was reported as a native crash (#2203).
     .add_systems(Last, crash::report_exit.after(bevy::window::ExitSystems));

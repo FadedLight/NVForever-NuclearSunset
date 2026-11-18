@@ -33,7 +33,7 @@ fn enabled() -> bool {
         static DIAGNOSTICS_APK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *DIAGNOSTICS_APK.get_or_init(|| diagnostics_metadata(
             crate::android::activity_string("renderDiagnosticsBuildType", None).ok().as_deref(),
-            crate::android::activity_string("renderDiagnosticsUi", None).ok().as_deref(),
+            crate::android::activity_string("renderAdmissionLog", None).ok().as_deref(),
         ))
     }
     #[cfg(not(target_os = "android"))]
@@ -107,7 +107,7 @@ impl Plugin for AndroidRenderAdmissionPlugin {
             .add_message::<AppLifecycle>().add_systems(Last, watch);
     }
     fn finish(&self, app: &mut App) {
-        // Explicit diagnostics request AND APK debug authority, independent of Rust optimization.
+        // Local logging must be requested on a debuggable APK, irrespective of Rust optimization.
         if !app.world().resource::<Gate>().0 { return; }
         // Installed before DefaultPlugins; the render app exists only after plugin builds.
         if let Some(render) = app.get_sub_app_mut(RenderApp) {

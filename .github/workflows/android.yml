@@ -56,13 +56,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/java-tests"
           "$JAVA_HOME/bin/javac" -d "$RUNNER_TEMP/java-tests" android/app/src/main/java/org/nvforever/android/InstallConfig.java android/app/src/test/java/org/nvforever/android/InstallConfigTest.java
           "$JAVA_HOME/bin/java" -cp "$RUNNER_TEMP/java-tests" org.nvforever.android.InstallConfigTest
-      - name: LAN diagnostics archive, queue and HTTP controls
-        shell: bash
-        run: |
-          "$JAVA_HOME/bin/javac" --add-modules jdk.httpserver -encoding UTF-8 -d "$RUNNER_TEMP/java-tests" android/app/src/main/java/org/nvforever/android/DiagnosticsArchive.java android/app/src/main/java/org/nvforever/android/DiagnosticsQueue.java android/app/src/main/java/org/nvforever/android/DiagnosticsTransport.java android/app/src/main/java/org/nvforever/android/DiagnosticsSession.java android/app/src/main/java/org/nvforever/android/DiagnosticsFresh.java android/tests/Diagnostics*Test.java
-          for control in DiagnosticsArchiveTest DiagnosticsQueueTest DiagnosticsTransportTest DiagnosticsSessionTest DiagnosticsFreshTest; do
-            "$JAVA_HOME/bin/java" --add-modules jdk.httpserver -cp "$RUNNER_TEMP/java-tests" "org.nvforever.android.$control"
-          done
       - name: Loading handoff, gyro math and thermal state controls
         shell: bash
         run: |
@@ -87,13 +80,25 @@ jobs:
         run: cargo test --manifest-path tools/android/skinning-check/Cargo.toml --target-dir target-android-cpu --locked --jobs 6
       - name: Build the signed development APK
         shell: bash
-        run: python3 tools/android/build.py --jobs 2 --diagnostics
-      - name: Android lint and signature
+        run: python3 tools/android/build.py --jobs 2
+      - name: Build the unsigned release package and verify Android privacy policy
         shell: bash
         run: |
-          gradle -p android --no-daemon --max-workers=2 -PnvfDiagnostics=true :app:lintDebug
-          "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
-          python3 tools/android/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk > android-apk-verification.json
+          gradle -p android --no-daemon --max-workers=2 :app:lintDebug :app:assembleRelease
+          tools="$ANDROID_HOME/build-tools/35.0.1"
+          debug=android/app/build/outputs/apk/debug/app-debug.apk
+          release=android/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$tools/apksigner" verify --verbose "$debug"
+          for apk in "$debug" "$release"; do
+            manifest=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk")
+            grep -Eq '^[[:space:]]*A: (http://schemas\.android\.com/apk/res/)?android:usesCleartextTraffic\(0x010104ec\)=false[[:space:]]*$' <<< "$manifest"
+            if grep -Eq 'android:networkSecurityConfig|DIAGNOSTICS_REQUESTED' <<< "$manifest"; then
+              echo "Unexpected network security override or private test metadata: $apk" >&2
+              exit 1
+            fi
+          done
+          python3 tools/android/verify_apk.py "$debug" > android-apk-verification.json
+          python3 tools/android/verify_apk.py "$release" > android-release-apk-verification.json
           expected=$(sha256sum engine/nvf-play/assets/dialogue/classic.png | cut -d ' ' -f 1)
           actual=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["classicCasingSha256"])' < android-apk-verification.json)
           if [[ "$actual" != "$expected" ]]; then
@@ -112,4 +117,5 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android-apk-verification.json
+            android-release-apk-verification.json
           if-no-files-found: error

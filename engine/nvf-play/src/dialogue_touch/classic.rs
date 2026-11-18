@@ -282,7 +282,7 @@ pub(super) mod tests {
             assert!(Layout::new(Vec2::new(width,120.),96.).is_none(),"no hidden target shrinking");
             let mut app=App::new();let mut images=Assets::<Image>::default();
             let art=LoadedArt {image:images.add(decode(&authored_png()).unwrap())};
-            app.insert_resource(Fixture {art,layout:layout.clone(),scale}).add_systems(Update,paint);app.update();
+            app.insert_resource(Fixture {art,layout,scale}).add_systems(Update,paint);app.update();
             let mut pieces=app.world_mut().query::<(&Node,&ImageNode,&Pickable)>();let mut count=0;
             for (node,image,picking) in pieces.iter(app.world()) {
                 count+=1;assert_eq!(*picking,Pickable::IGNORE);assert_eq!(image.color,Color::WHITE);

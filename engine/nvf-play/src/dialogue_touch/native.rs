@@ -2,7 +2,6 @@
 use super::*;
 use crate::dialogue_menu::{ChoicePlace, Kit, Layout, ListPlace, Placed, ScrollBar, TouchNativeRoot};
 use crate::interface::Face;
-use nvf_assets::GameData;
 
 #[derive(SystemSet,Clone,Copy,Debug,PartialEq,Eq,Hash)]
 pub(super) struct Draw;

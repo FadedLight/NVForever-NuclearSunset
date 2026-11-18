@@ -7,7 +7,7 @@ use nvf_play::{maintenance_touch, menu::{barter_touch, normal_touch, normal_serv
 const MAX_EDGES: usize = 128;
 const MAX_IDS: usize = 32;
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind { Barter, Repair, Mod, Vendor, Workbench }
+enum Kind { Settings, Barter, Repair, Mod, Vendor, Workbench }
 #[derive(Clone, Copy, PartialEq)]
 struct Stamp { window: Entity, physical: UVec2, density: f32, safe: nvf_play::touch_safe_area::SafeInsets, scale: f32 }
 #[derive(Resource, Default)]
@@ -38,6 +38,8 @@ struct Sources<'w> {
     pip: Option<Res<'w, nvf_play::pipboy::PipBoy>>,
     script: Option<Res<'w, nvf_play::script::ScriptState>>,
     paused: Option<Res<'w, nvf_play::pause::Paused>>,
+    page: Option<Res<'w, nvf_play::pause::Page>>,
+    form: Option<Res<'w, nvf_play::pause::FormOver>>,
     creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>,
     keyboard: Option<Res<'w, nvf_play::bindings::KeyboardCapture>>,
     free: Option<Res<'w, nvf_play::free_cam::FreeCam>>,
@@ -47,7 +49,12 @@ struct Sources<'w> {
 impl Sources<'_> {
     // Routing prediction only. Each leaf rechecks the actual menu and item/quote
     // inside its effect consumer, after scripts and other menu activity.
-    fn kind(&self, maintenance_enabled: bool) -> Option<Kind> {
+    fn kind(&self, maintenance_enabled: bool, settings_enabled: bool) -> Option<Kind> {
+        if settings_enabled && self.paused.as_ref().is_some_and(|p| p.0)
+            && self.page.as_deref().is_some_and(|page| matches!(page, nvf_play::pause::Page::Settings { .. }))
+            && self.form.as_ref().is_none_or(|f| !f.0) {
+            return Some(Kind::Settings);
+        }
         if self.paused.as_ref().is_some_and(|p| p.0) || self.creator.as_ref().is_some_and(|c| c.is_open())
             || self.keyboard.as_ref().is_some_and(|k| k.0) || self.free.as_ref().is_some_and(|f| f.active) { return None; }
         let model = self.active.as_ref().and_then(|a| a.0.as_ref());
@@ -72,6 +79,7 @@ impl Sources<'_> {
                 Kind::Mod => game.open_menu_code().is_none_or(|c| matches!(c, menus::INVENTORY | menus::ITEM_MOD)),
                 Kind::Vendor => game.open_menu_code().is_none_or(|c| c == fnv_game::repair::REPAIR_SERVICES_MENU),
                 Kind::Workbench => game.top_menu().is_none_or(|c| c == fnv_game::crafting::RECIPE_MENU),
+                Kind::Settings => unreachable!("Settings is routed above game menus"),
             };
             if !own { return None; }
         }
@@ -87,6 +95,7 @@ impl Sources<'_> {
 pub(super) struct Ingress<'w> {
     batch: ResMut<'w, Batch>, sources: Sources<'w>, touches: Res<'w, Touches>,
     maintenance: Res<'w, maintenance_touch::State>,
+    settings: Res<'w, nvf_play::pause::SettingsTouch>,
 }
 impl Ingress<'_> {
     pub fn reset(&mut self) {
@@ -96,7 +105,7 @@ impl Ingress<'_> {
         }
     }
     pub fn prepare(&mut self, entity: Entity, window: &Window, allowed: bool) -> bool {
-        self.batch.kind = allowed.then(|| self.sources.kind(self.maintenance.enabled())).flatten();
+        self.batch.kind = allowed.then(|| self.sources.kind(self.maintenance.enabled(), self.settings.enabled())).flatten();
         self.batch.stamp = Some(self.sources.stamp(entity, window)); self.batch.allowed = allowed;
         self.batch.kind.is_some()
     }
@@ -123,11 +132,11 @@ struct Gates<'w> {
     creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>,
 }
 impl Gates<'_> {
-    fn allows(&self) -> bool {
+    fn allows(&self, settings: bool) -> bool {
         self.bindings.as_ref().is_none_or(|b| b.device != nvf_play::bindings::InputDevice::Controller)
             && self.platform.as_ref().is_none_or(|g| g.allows_actions())
-            && self.paused.as_ref().is_none_or(|p| !p.0)
-            && self.keyboard.as_ref().is_none_or(|k| !k.0)
+            && (settings || (self.paused.as_ref().is_none_or(|p| !p.0)
+                && self.keyboard.as_ref().is_none_or(|k| !k.0)))
             && self.free.as_ref().is_none_or(|f| !f.active)
             && self.creator.as_ref().is_none_or(|c| !c.is_open())
     }
@@ -155,7 +164,7 @@ impl Cameras<'_, '_> {
 fn replay(
     mut batch: ResMut<Batch>, state: Res<TouchState>, sources: Sources, gates: Gates, cameras: Cameras,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>, touches: Res<Touches>,
-    (mut barter, mut services): (normal_touch::Bridge, normal_services::Bridge),
+    (mut barter, mut services, mut settings): (normal_touch::Bridge, normal_services::Bridge, ResMut<nvf_play::pause::SettingsTouch>),
     mut maintenance: maintenance_touch::Bridge,
     mut ownership: ResMut<nvf_play::ui_pointer::TouchUiCapture>, mut editor: ResMut<super::entrypoints::Session>,
     mut modal: ResMut<super::modal::Capture>,
@@ -166,7 +175,9 @@ fn replay(
 ) {
     ownership.begin_frame();
     arm.publish_mask(&mut ownership, &touches);
-    let current = sources.kind(maintenance.enabled());
+    let current = sources.kind(maintenance.enabled(), settings.enabled());
+    let settings_current = current == Some(Kind::Settings);
+    let gates_allow = gates.allows(settings_current);
     let context = windows.single().ok().and_then(|(entity, window)| {
         let stamp = sources.stamp(entity, window);
         let camera = cameras.select(entity, stamp.physical, window.resolution.size())?;
@@ -174,8 +185,8 @@ fn replay(
     });
     let consumed = gates.switching.as_ref().is_some_and(|s| !s.allows_actions());
     let fresh = consumed || gates.fresh.as_ref().is_some_and(|f| f.0);
-    vats.after_switch(state.hardware_intent, consumed && gates.allows());
-    let allowed = batch.allowed && !batch.overflow && !state.suspended && gates.allows()
+    vats.after_switch(state.hardware_intent, consumed && gates_allow);
+    let allowed = batch.allowed && !batch.overflow && !state.suspended && gates_allow
         && state.physical_keys.is_empty() && state.physical_mouse.is_empty()
         && batch.kind == current && context.is_some_and(|(s, w, _)| batch.stamp == Some(s) && w.focused);
     let neutral = touches.iter().next().is_none() && !touches.any_just_released() && !touches.any_just_canceled();
@@ -200,8 +211,16 @@ fn replay(
             allowed && !fresh && matches!(current, Some(Kind::Repair | Kind::Mod)));
     } else { barter.cancel(); services.cancel(); maintenance.cancel(); }
     if state.hardware_intent { barter.hardware_intent(); services.hardware_intent(); maintenance.hardware_intent(); map.cancel(); }
-    else if consumed && gates.allows() { barter.restore_touch(); services.restore_touch(); maintenance.restore_touch(); }
+    else if consumed && gates_allow { barter.restore_touch(); services.restore_touch(); maintenance.restore_touch(); }
     let mut events = std::mem::take(&mut batch.events);
+    let settings_frame = context.filter(|_| allowed && settings_current && !state.hardware_intent).map(|(stamp, window, camera)| normal_touch::Frame {
+        window: stamp.window, camera, size: window.resolution.size(), safe: stamp.safe,
+        ui_scale: stamp.scale, density: stamp.density, admitted: true, fresh, neutral,
+    });
+    if settings_frame.is_some() {
+        events.retain(|e| gates.platform.as_ref().is_none_or(|g| g.allows_touch(e.id)));
+    }
+    settings.publish(settings_frame, &mut events);
     for event in &events {
         if consumed && allowed && !state.hardware_intent && current==Some(Kind::Barter) {
             barter.consume_touch_return(event);
@@ -212,7 +231,7 @@ fn replay(
             continue;
         }
         // Physical hardware or the already-consumed selector edge wins this batch.
-        if !allowed || fresh || state.hardware_intent { continue; }
+        if !allowed || fresh || state.hardware_intent || settings_current { continue; }
         if current == Some(Kind::Barter) || barter.captures_touch(event.window,event.id) { barter.event(event); }
         else if matches!(current, Some(Kind::Vendor | Kind::Workbench)) || services.captures_touch(event.window,event.id) { services.event(event); }
         else { maintenance.event(event, gates.platform.as_ref().is_none_or(|g| g.allows_touch(event.id))); }
@@ -232,6 +251,7 @@ fn replay(
 pub(super) fn install(app: &mut App) {
     app.add_plugins(maintenance_touch::MaintenanceTouchPlugin)
         .init_resource::<barter_touch::Options>().init_resource::<barter_touch::TouchBarter>()
+        .init_resource::<nvf_play::pause::SettingsTouch>()
         .init_resource::<normal_touch::NormalBarter>().init_resource::<normal_services::NormalServices>()
         .init_resource::<Batch>().init_resource::<nvf_play::ui_pointer::TouchUiCapture>()
         .add_systems(PreUpdate, replay.after(InputSystems).after(nvf_play::pad::InputSwitchSystems::Switch)

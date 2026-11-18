@@ -233,6 +233,14 @@ rendering stays native. The status row shows the effective limit and world resol
 Settings recover gradually after sustained cooling; your latest choices remain saved.
 Unavailable thermal feedback uses manual settings. Performance varies by phone and scene.
 
+## In-game settings by touch
+
+Tap a tab or row to select it. Drag the settings list to browse without changing
+values. Drag a slider sideways on its meter; a vertical drag there still scrolls
+the list. Drag within an open choice list to see more choices, tap one to apply it,
+or tap outside to dismiss the list. Back and Defaults stay below the list, inside
+the system safe area.
+
 ## Optional touch views and appearance
 
 Pause > Settings > Mobile keeps controls under topic headings. Enhanced terminal

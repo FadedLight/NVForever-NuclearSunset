@@ -235,6 +235,9 @@
 //! `heading-up`, `heading-down`, `tab:<name>`, `row:<key>`, `choice:<n>`), `press` and
 //! `release` (the left mouse button) [design: #1953].
 
+mod touch;
+pub use touch::SettingsTouch;
+
 use crate::interface::{bc_supported, u, Face};
 use crate::menu_shapes::{Dir, Kind};
 use crate::settings::{add_choice_list, add_setting, Setting, Settings};
@@ -1272,6 +1275,7 @@ pub struct PauseView {
     /// The settings page's window's lines ([`window_lines`]), set before the keys and the
     /// pointer are read each frame; 0 until then (taken as [`window_lines`]).
     lines: usize,
+    mobile: Option<touch::Layout>,
     /// What the settings page lists: a tab (or the search, the Changed list).
     scope: SettingsScope,
     /// Where the settings page's keys are: the rows or the rail.
@@ -1334,6 +1338,7 @@ impl PauseView {
     /// `settings_now` (`settings_view::follow`) [design: #2377].
     fn set_lines(&mut self) {
         let lines = window_lines();
+        let lines = self.mobile.map_or(lines, |layout| layout.lines(self.scope));
         if lines != self.lines {
             info!("pause menu: settings window of {lines} lines");
             self.lines = lines;
@@ -1462,6 +1467,7 @@ struct Drawn {
     scroll: usize,
     /// The settings page's window's lines ([`PauseView::lines`]).
     lines: usize,
+    mobile: Option<touch::Layout>,
     /// The list rows: each one's row, choices and chosen one.
     lists: Vec<(usize, Vec<String>, String)>,
     /// The list rows that show their choices by other words or hold some out of reach
@@ -1883,6 +1889,10 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
                 root.spawn((full(), BackgroundColor(Color::srgba(0.30, 0.24, 0.14, SCREEN_ALPHA))));
             }
         }
+        if let (Some(layout), Page::Settings { selected }) = (d.mobile, d.page) {
+            touch::paint(root, d, look, settings, selected, layout, glyphs);
+            return;
+        }
         // The page at the UI scale, in the middle of the view (`crate::interface::menu_frame`,
         // #1631); the sheet and the screen above keep to the view.
         crate::interface::in_spread_frame(root, crate::interface::MIDDLE, |root| {
@@ -2010,8 +2020,14 @@ struct KeepLine;
 /// links under the note.
 fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: &[Setting], selected: Option<RowId>, lb: ListBox, glyphs: &crate::pad::PadGlyphs) {
     let f = &look.faces;
-    rail_column(root, f, d, glyphs);
-    let top = OPTIONS_TOP;
+    let top = if let Some(mobile) = d.mobile {
+        let top = mobile.top(d.scope);
+        root.spawn((touch::Surface::Rows, from_middle(lb.left, top, lb.width, d.lines as f32 * OPTION_ROW)));
+        top
+    } else {
+        rail_column(root, f, d, glyphs);
+        OPTIONS_TOP
+    };
     let left = lb.left;
     let entries = &d.entries;
     if entries.is_empty() {
@@ -2019,12 +2035,15 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
     }
     // The search's line over the rows, their whole width [design: #1953].
     if let Some((query, typing)) = &d.search {
-        search_line(root, f, query, *typing, left, lb.width - 10.0);
+        let search_top = d.mobile.map_or(SEARCH_TOP, |_| top - OPTION_ROW);
+        search_line(root, f, query, *typing, left, lb.width - 10.0, search_top);
     }
     let lines = d.lines.max(1);
     let first = d.scroll.min(entries.len().saturating_sub(lines));
     let drawn = crate::settings_view::drawn_slots(entries, first, lines);
-    scroll_bar(root, look, entries.len(), first, top, lb, lines);
+    if d.mobile.is_none() {
+        scroll_bar(root, look, entries.len(), first, top, lb, lines);
+    }
     for (n, k) in drawn.clone().enumerate() {
         let y = top + n as f32 * OPTION_ROW;
         match entries[k] {
@@ -2042,6 +2061,14 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
         None => selected.map_or_else(String::new, |id| note_of(list, id, d)),
     };
     root.spawn((SwitchNote, Text::new(note.clone()), Node { display: Display::None, ..default() }));
+    if let Some(mobile) = d.mobile {
+        mobile.note(root, f, &note, lb, d.scope);
+        if let Some((o, names)) = d.dropdown.and_then(|o| Some((o, d.list(o.row)?.0))) {
+            let w = lb.width.min(650.0);
+            mobile.choices_panel(root, d, f, o, names, lb.left + (lb.width - w) / 2.0, w);
+        }
+        return;
+    }
     let shown = (entries.len() - first.min(entries.len())).min(lines) as f32;
     let note_top = top + shown * OPTION_ROW + NOTE_GAP;
     let appearance_row = selected.and_then(|id| match id { RowId::Setting(i) => list.get(i), _ => None })
@@ -2099,7 +2126,7 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
 fn heading_line(root: &mut ChildSpawnerCommands, look: &PauseLook, d: &Drawn, p: crate::settings_layout::Placement, on: bool, lb: ListBox, y: f32, crumb: bool) {
     let (count, open) = d.heading(p);
     let name = if crumb { [Some(p.tab), p.subgroup, p.heading].into_iter().flatten().map(on_page).collect::<Vec<_>>().join(" > ") } else { on_page(p.heading.unwrap_or(p.tab)) };
-    title_line(root, look, &name, count, open, Some((PauseButton::Row(RowId::Heading(p)), on)), lb, y);
+    title_line(root, look, &name, count, open, Some((PauseButton::Row(RowId::Heading(p)), on)), lb, y, d.mobile.is_some());
 }
 
 /// A category's or a crumb's line (module notes of [`heading_line`]): the arrow (right while
@@ -2108,7 +2135,7 @@ fn heading_line(root: &mut ChildSpawnerCommands, look: &PauseLook, d: &Drawn, p:
 /// owner 2026-11-15, the menu overhaul: no rule under the words; the fifth build: "no hover or
 /// selection box" on the category titles].
 #[allow(clippy::too_many_arguments)]
-fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, count: usize, open: bool, button: Option<(PauseButton, bool)>, lb: ListBox, y: f32) {
+fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, count: usize, open: bool, button: Option<(PauseButton, bool)>, lb: ListBox, y: f32, mobile: bool) {
     let f = &look.faces;
     // The aids read a closed category as "Screen (3)".
     let read = if open { words.to_string() } else { format!("{words} ({count})") };
@@ -2124,8 +2151,8 @@ fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, co
         // fifth build; 2026-11-16: the hover box back], its right edge where the heading
         // links' words end (right-aligned in the list, `ENTRY_BOX_PAD` in) [design: owner
         // 2026-11-16, "aligned with the hints"].
-        let row = lb.row();
-        let words = fit_text(|t| f.title.font.width(t), words, row.value_left() - LABEL_GAP - x);
+        let right = if mobile { lb.width - 64.0 } else { lb.row().value_left() - LABEL_GAP };
+        let words = fit_text(|t| f.title.font.width(t), words, right - x);
         sm_text(r, &f.title, &words, x, BASE + 2.0, bright);
         if button.is_some_and(|(_, on)| on) {
             let n = count.to_string();
@@ -2181,7 +2208,7 @@ fn empty_words(scope: SettingsScope) -> &'static str {
 /// The search's line over its results, from the rows' left edge, `width` wide: "Search:"
 /// and its text (its start left out when it does not fit), the mark after it and the box
 /// round it while the keys are in it; a click puts them there [design: #1953].
-fn search_line(root: &mut ChildSpawnerCommands, f: &Faces, query: &str, typing: bool, left: f32, width: f32) {
+fn search_line(root: &mut ChildSpawnerCommands, f: &Faces, query: &str, typing: bool, left: f32, width: f32, top: f32) {
     let width = width.max(160.0);
     let caret = if typing { CARET } else { "" };
     let line = |q: &str| format!("{}: {q}{caret}", tr(SEARCH));
@@ -2191,7 +2218,7 @@ fn search_line(root: &mut ChildSpawnerCommands, f: &Faces, query: &str, typing: 
     }
     let words = line(&shown);
     root.spawn((SearchText, Text::new(words.clone()), Node { display: Display::None, ..default() }));
-    root.spawn((Button, PauseButton::SearchField, boxed(from_middle(left, SEARCH_TOP, width, ITEM), typing))).with_children(|t| sm_text(t, &f.entry, &words, 10.0, BASE, color(Shade::Bright)));
+    root.spawn((Button, PauseButton::SearchField, boxed(from_middle(left, top, width, ITEM), typing))).with_children(|t| sm_text(t, &f.entry, &words, 10.0, BASE, color(Shade::Bright)));
 }
 
 /// The search's line, kept as text too (tests read it).
@@ -2226,6 +2253,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
     let f = &look.faces;
     let x = lb.row();
     let width = |t: &str| f.entry.font.width(t);
+    let parts = |kind| if d.mobile.is_some() { touch::parts(lb.width, kind) } else { row_parts(x, kind) };
     let node = boxed(from_middle(lb.left, y, lb.width, OPTION_ROW), on);
     match id {
         RowId::Setting(i) => {
@@ -2244,14 +2272,14 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
                 }
                 if let Some(slider) = &s.slider {
                     let value = slider.text(v);
-                    let parts = row_parts(x, ValueKind::Slider(width(tr_str(&value))));
+                    let parts = parts(ValueKind::Slider(width(tr_str(&value))));
                     sm_text(r, &f.entry, &fit_text(width, label, parts.label_room()), parts.label.0, BASE + 2.0, label_shade);
-                    slider_row(r, look, &parts, id, v, &value, value_shade, disabled.is_none());
+                    slider_row(r, look, &parts, id, v, &value, value_shade, disabled.is_none(), d.mobile.is_some());
                     return;
                 }
                 if let Some((_, chosen)) = d.list(i) {
                     let shown = d.chosen_words(i, chosen);
-                    let parts = row_parts(x, ValueKind::List(width(tr_str(shown.0))));
+                    let parts = parts(ValueKind::List(width(tr_str(shown.0))));
                     sm_text(r, &f.entry, &fit_text(width, label, parts.label_room()), parts.label.0, BASE + 2.0, label_shade);
                     list_row(r, look, &parts, id, chosen, (shown.0, shown.1 || disabled.is_some()), d.dropdown.is_some_and(|o| o.row == i), disabled.is_none());
                     return;
@@ -2260,7 +2288,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
                 if disabled.is_none() {
                     r.spawn((SwitchState(id), Text::new(value), Node { display: Display::None, ..default() }));
                 }
-                let parts = row_parts(x, ValueKind::Centred(width(value)));
+                let parts = parts(ValueKind::Centred(width(value)));
                 let (label, value) = fit_row(width, &parts, label, value);
                 sm_text(r, &f.entry, &label, parts.label.0, BASE + 2.0, label_shade);
                 sm_text(r, &f.entry, &value, parts.text_x(width(&value)), BASE + 2.0, color(value_shade));
@@ -2277,13 +2305,13 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
                         ControlRow::AimSensitivity(_) => d.aim,
                         _ => d.sensitivity,
                     };
-                    let parts = row_parts(x, ValueKind::Slider(width(tr_str(&value))));
+                    let parts = parts(ValueKind::Slider(width(tr_str(&value))));
                     sm_text(r, &f.entry, &fit_text(width, name, parts.label_room()), parts.label.0, BASE + 2.0, color(Shade::Bright));
-                    slider_row(r, look, &parts, id, crate::bindings::sensitivity_part(m), &value, Shade::Bright, true);
+                    slider_row(r, look, &parts, id, crate::bindings::sensitivity_part(m), &value, Shade::Bright, true, d.mobile.is_some());
                     return;
                 }
                 let vw = crate::pad::button_width(&f.entry, &value, glyphs);
-                let parts = row_parts(x, ValueKind::Binding(vw));
+                let parts = parts(ValueKind::Binding(vw));
                 sm_text(r, &f.entry, &fit_text(width, name, parts.label_room()), parts.label.0, BASE + 2.0, color(Shade::Bright));
                 // The full words stay in the state the aids read; what is drawn is cut to the
                 // row (a button's picture is narrow and always fits).
@@ -2303,7 +2331,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
         RowId::Group => {
             let group = d.group.unwrap_or("");
             root.spawn((Button, PauseButton::Row(id), node)).with_children(|r| {
-                let parts = row_parts(x, ValueKind::List(width(tr(group))));
+                let parts = parts(ValueKind::List(width(tr(group))));
                 sm_text(r, &f.entry, &fit_text(width, &on_page(GROUP_ROW), parts.label_room()), parts.label.0, BASE + 2.0, color(Shade::Bright));
                 list_row(r, look, &parts, id, group, (group, false), d.dropdown.is_some_and(|o| o.row == GROUP_LIST), true);
             });
@@ -2399,8 +2427,9 @@ fn list_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, i:
     let bright = color(if live { Shade::Bright } else { Shade::Dim });
     let (line, fill) = highlight_colors();
     let list_left = parts.value.0;
+    let list_width = parts.value.1 - list_left;
     let line = line.with_alpha(if open { 1.0 } else if live { 0.6 } else { 0.25 });
-    r.spawn((at(list_left, LIST_BOX_INSET, LIST_WIDTH, OPTION_ROW - 2.0 * LIST_BOX_INSET), Pickable::IGNORE)).with_children(|c| crate::menu_shapes::framed(c, line, if open { fill } else { Color::NONE }, LINE));
+    r.spawn((at(list_left, LIST_BOX_INSET, list_width, OPTION_ROW - 2.0 * LIST_BOX_INSET), Pickable::IGNORE)).with_children(|c| crate::menu_shapes::framed(c, line, if open { fill } else { Color::NONE }, LINE));
     // The state kept as text stays the English name (tests and aids read it); the page
     // shows it in the language chosen.
     if live {
@@ -2413,7 +2442,7 @@ fn list_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, i:
     // The arrow pointing down, in the middle of its strip (inside the box's line) and of the
     // row [design: owner 2026-11-15, third test: "the arrow down symbol is not aligned"].
     let strip = LIST_ARROW_STRIP - LINE;
-    let centre = Vec2::new(list_left + LIST_WIDTH - LINE - strip / 2.0, OPTION_ROW / 2.0);
+    let centre = Vec2::new(list_left + list_width - LINE - strip / 2.0, OPTION_ROW / 2.0);
     crate::menu_shapes::shape(r, look.shapes.as_ref(), Kind::Triangle, Dir::Down, centre, LIST_ARROW, bright);
 }
 
@@ -2744,7 +2773,7 @@ fn meter_ticks(v: f32, meter_w: f32) -> usize {
 /// A slider's meter, arrows and value (`value`: `v` as shown, e.g. a percentage) in its
 /// row `i`, laid out by `parts` (wide words take room from the meter, then are cut).
 #[allow(clippy::too_many_arguments)]
-fn slider_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, i: RowId, v: f32, value: &str, shade: Shade, live: bool) {
+fn slider_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, i: RowId, v: f32, value: &str, shade: Shade, live: bool, mobile: bool) {
     let bright = color(shade);
     let my = (OPTION_ROW - METER_HEIGHT) / 2.0;
     let (meter_left, meter_w) = parts.meter;
@@ -2762,7 +2791,8 @@ fn slider_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, 
     // Over them what takes the pointer, a little taller than the meter; a greyed slider has
     // nothing to click.
     if live {
-        r.spawn((Button, PauseButton::Meter(i), RelativeCursorPosition::default(), at(meter_left, my - 6.0, meter_w, METER_HEIGHT + 12.0)));
+        let (top, height) = if mobile { (0.0, OPTION_ROW) } else { (my - 6.0, METER_HEIGHT + 12.0) };
+        r.spawn((Button, PauseButton::Meter(i), RelativeCursorPosition::default(), at(meter_left, top, meter_w, height)));
     }
     for (x, step, dir) in [(parts.value.0, -1, Dir::Left), (parts.right_arrow, 1, Dir::Right)] {
         // The arrow level with the meter's middle; its old box takes the pointer.
@@ -3619,6 +3649,7 @@ fn choose(
         Option<Res<crate::settings_view::HiddenRows>>,
     ),
     (meters, pointed, mut tab_store, tweaks, mut report): (Query<(&PauseButton, &RelativeCursorPosition)>, Query<(&PointerState, &PauseButton)>, Option<ResMut<SettingsTabStore>>, Option<Res<crate::tweaks::TweakSettings>>, Option<ResMut<ReportEntry>>),
+    mut touch: touch::Input,
 ) {
     let keys = keys.snapshot();
     use crate::bindings::{Bindings, Input, InputDevice};
@@ -3633,8 +3664,6 @@ fn choose(
     if !paused.0 || intro.is_some_and(|i| i.is_playing()) {
         return;
     }
-    view.set_lines();
-    let lines = view.lines();
     // Under the main menu the first page is the main menu's own (`crate::main_menu`): its
     // pages come from here, and going back shows it again.
     let under_main = main_menu.as_ref().is_some_and(|m| m.open);
@@ -3682,6 +3711,9 @@ fn choose(
     }
     let list = settings.list();
     let layout = layout.refresh(list);
+    view.mobile = touch.layout(layout.tab_names().len());
+    view.set_lines();
+    let lines = view.lines();
     let device = bindings.as_ref().map_or(InputDevice::KeyboardMouse, |b| b.device);
     let vis = Visibility::of(device, colours.as_deref()).with_hidden(hidden.as_deref());
     let mut fx = RowEffects::default();
@@ -3991,9 +4023,10 @@ fn choose(
             listening.0 = None;
         } else {
             let controller = asked_with == InputDevice::Controller;
+            let touch_action = touch.read(&view, *page, &[], None, true);
             let key = keys.get_just_pressed().copied().find(|k| crate::bindings::key_name(*k).is_some() || *k == KeyCode::Escape);
             let start = pads.iter().any(|g| g.just_pressed(GamepadButton::Start));
-            if key == Some(KeyCode::Escape) || (controller && start) {
+            if key == Some(KeyCode::Escape) || (controller && start) || touch_action.click == Some(PauseButton::Back) {
                 info!("controls: rebinding cancelled");
                 listening.0 = None;
                 sounds.write(UiSound { menu: UiMenu::Settings, event: UiEvent::Back });
@@ -4045,6 +4078,8 @@ fn choose(
         page.set_if_neq(Page::Settings { selected: sel });
         rows = e;
     }
+    let touch_action = touch.read(&view, *page, &rows, pending.as_ref().map(|p| p.row), false);
+    let drop_rows = view.mobile.map_or(DROP_ROWS, touch::Layout::choices);
     let mut clicked = None;
     // A list takes the row the pointer moves onto (not one it rests on while the keys
     // move the choice, nor the one a redrawn page puts under it).
@@ -4069,7 +4104,7 @@ fn choose(
         match (interaction, b, &mut *page) {
             (PointerState::Hovered | PointerState::Pressed, b, _) if !in_window(b) => {}
             (PointerState::Hovered, PauseButton::Choice(r, k), _) if moved => {
-                if let Some(o) = view.dropdown.as_mut().filter(|o| o.row == *r && (o.first..o.first + DROP_ROWS).contains(k)) {
+                if let Some(o) = view.dropdown.as_mut().filter(|o| o.row == *r && (o.first..o.first + drop_rows).contains(k)) {
                     o.at = *k;
                 }
             }
@@ -4092,6 +4127,10 @@ fn choose(
             _ => {}
         }
     }
+    if let Some(b) = touch_action.click.filter(in_window) {
+        clicked = Some(b);
+    }
+    let touch_meter = touch_action.meter.filter(|(id, _)| in_window(&PauseButton::Meter(*id)));
     // The rail's line under the pointer: boxed unfilled and bright, the focus sound once
     // as the pointer comes onto it (every button looked at: a redrawn page's are new)
     // [design: #1953; docs/design/screen-menu.md §3.1].
@@ -4162,14 +4201,17 @@ fn choose(
         match clicked {
             Some(PauseButton::Choice(r, k)) if r == o.row => take = Some(k),
             Some(_) => shut = true,
-            None if mouse.just_pressed(MouseButton::Left) => shut = true,
+            None if touch_action.outside || mouse.just_pressed(MouseButton::Left) => shut = true,
             None if pressed.any([KeyCode::Escape, KeyCode::Backspace]) || act("back") => shut = true,
             None if pressed.any([KeyCode::ArrowUp, KeyCode::KeyW]) || act("up") => o.at = o.at.saturating_sub(1),
             None if pressed.any([KeyCode::ArrowDown, KeyCode::KeyS]) || act("down") => o.at = (o.at + 1).min(n.saturating_sub(1)),
             None if pressed.any([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space]) || act("pick") => take = Some(o.at),
             None => {}
         }
-        let last = n.saturating_sub(DROP_ROWS);
+        let last = n.saturating_sub(drop_rows);
+        if let Some(first) = touch_action.first {
+            o.first = first.min(last);
+        }
         let wheel = menu.scroll.as_ref().map_or(0.0, |s| s.delta.y);
         if wheel > 0.0 {
             o.first = o.first.saturating_sub(1);
@@ -4177,7 +4219,7 @@ fn choose(
             o.first = (o.first + 1).min(last);
         }
         if o.at != before {
-            o.first = o.first.max((o.at + 1).saturating_sub(DROP_ROWS)).min(o.at).min(last);
+            o.first = o.first.max((o.at + 1).saturating_sub(drop_rows)).min(o.at).min(last);
             sounds.write(UiSound { menu: UiMenu::Settings, event: UiEvent::Focus });
         }
         let out_of_reach = take.is_some_and(|k| view.drawn.as_ref().is_some_and(|d| d.choice_reason(o.row, k).is_some()));
@@ -4639,42 +4681,45 @@ fn choose(
                 }
                 *page = Page::Settings { selected: sel };
             }
-            // A drag on a meter: the value under the pointer while the button is held
-            // (the page is drawn again as the value changes, so the meter is looked up
-            // by its row each frame).
-            if let Some(id) = view.dragging {
+            // Mouse and touch both deliver a position on the actual painted meter.
+            let mut meter = touch_meter;
+            if let Some((id, _)) = meter {
+                *selected = Some(id);
+                view.focus = SettingsFocus::Rows;
+            } else if let Some(id) = view.dragging {
                 if mouse.pressed(MouseButton::Left) {
-                    let under = meters.iter().find(|(b, _)| **b == PauseButton::Meter(id)).and_then(|(_, at)| at.normalized);
-                    match (id, under) {
-                        (RowId::Setting(i), Some(p)) => {
-                            let v = (p.x + 0.5).clamp(0.0, 1.0);
-                            if list.get(i).and_then(|s| s.slider).is_some_and(|s| s.fit(v) != s.fit(view_value(&view, i))) {
-                                fx.sets.push((i, v));
-                            }
-                        }
-                        (RowId::Control(ControlRow::Sensitivity(_)), Some(p)) => {
-                            let m = crate::bindings::sensitivity_at_part(p.x + 0.5);
-                            if (m - controls.sensitivity).abs() > 1e-4 {
-                                commands.queue(move |world: &mut World| crate::bindings::set_sensitivity(world, m));
-                            }
-                        }
-                        (RowId::Control(ControlRow::Vertical(_)), Some(p)) => {
-                            let m = crate::bindings::sensitivity_at_part(p.x + 0.5);
-                            if (m - controls.vertical).abs() > 1e-4 {
-                                commands.queue(move |world: &mut World| crate::bindings::set_vertical(world, m));
-                            }
-                        }
-                        (RowId::Control(ControlRow::AimSensitivity(_)), Some(p)) => {
-                            let m = crate::bindings::sensitivity_at_part(p.x + 0.5);
-                            if (m - controls.aim).abs() > 1e-4 {
-                                commands.queue(move |world: &mut World| crate::bindings::set_aim_sensitivity(world, m));
-                            }
-                        }
-                        _ => {}
-                    }
+                    meter = meters.iter().find(|(b, _)| **b == PauseButton::Meter(id))
+                        .and_then(|(_, at)| at.normalized).map(|p| (id, p.x + 0.5));
                 } else {
                     view.dragging = None;
                 }
+            }
+            match meter {
+                Some((RowId::Setting(i), v)) => {
+                    let v = v.clamp(0.0, 1.0);
+                    if list.get(i).and_then(|s| s.slider).is_some_and(|s| s.fit(v) != s.fit(view_value(&view, i))) {
+                        fx.sets.push((i, v));
+                    }
+                }
+                Some((RowId::Control(ControlRow::Sensitivity(_)), v)) => {
+                    let m = crate::bindings::sensitivity_at_part(v);
+                    if (m - controls.sensitivity).abs() > 1e-4 {
+                        commands.queue(move |world: &mut World| crate::bindings::set_sensitivity(world, m));
+                    }
+                }
+                Some((RowId::Control(ControlRow::Vertical(_)), v)) => {
+                    let m = crate::bindings::sensitivity_at_part(v);
+                    if (m - controls.vertical).abs() > 1e-4 {
+                        commands.queue(move |world: &mut World| crate::bindings::set_vertical(world, m));
+                    }
+                }
+                Some((RowId::Control(ControlRow::AimSensitivity(_)), v)) => {
+                    let m = crate::bindings::sensitivity_at_part(v);
+                    if (m - controls.aim).abs() > 1e-4 {
+                        commands.queue(move |world: &mut World| crate::bindings::set_aim_sensitivity(world, m));
+                    }
+                }
+                _ => {}
             }
         }
         // The mod's page takes the pointer and the keys through its tiles
@@ -4770,6 +4815,10 @@ fn choose(
         let last = n.saturating_sub(w.shown);
         let mut first = view.scroll.min(last);
         let mut scrolled = by != 0;
+        if let Some(next) = touch_action.first {
+            by = next as i64 - first as i64;
+            scrolled = true;
+        }
         if view.bar_dragging {
             if mouse.pressed(MouseButton::Left) {
                 if let Some(p) = meters.iter().find(|(b, _)| **b == PauseButton::ScrollTrack).and_then(|(_, at)| at.normalized) {
@@ -4938,7 +4987,8 @@ fn open_dropdown(view: &mut PauseView, i: usize) {
     if view_disabled(view, i) { return; }
     let Some((names, chosen)) = view.drawn.as_ref().and_then(|d| d.list(i)) else { return };
     let at = names.iter().position(|n| n == chosen).unwrap_or(0);
-    let first = (at + 1).saturating_sub(DROP_ROWS).min(names.len().saturating_sub(DROP_ROWS));
+    let shown = view.mobile.map_or(DROP_ROWS, touch::Layout::choices);
+    let first = (at + 1).saturating_sub(shown).min(names.len().saturating_sub(shown));
     info!("pause menu: the list of {} choice(s) open", names.len());
     view.dropdown = Some(Dropdown { row: i, at, first });
 }
@@ -5168,6 +5218,7 @@ fn drawn_now(world: &mut World) -> Drawn {
         aim: world.get_resource::<crate::bindings::Bindings>().map_or(1.0, |b| b.aim_sensitivity()),
         scroll: view.scroll,
         lines: view.lines(),
+        mobile: view.mobile.filter(|_| matches!(page, Page::Settings { .. })),
         lists,
         looks,
         dropdown: view.dropdown.filter(|_| matches!(page, Page::Settings { .. })),
@@ -5390,6 +5441,7 @@ fn close(mut commands: Commands, mut paused: ResMut<Paused>, mut page: ResMut<Pa
     view.colours_shown = None;
     *list = LoadList::default();
     view.drawn = None;
+    view.mobile = None;
     view.confirm = None;
     view.dragging = None;
     view.bar_dragging = false;

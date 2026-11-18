@@ -160,7 +160,7 @@ fn draw(
     let (_,source) = kit.as_ref().unwrap();
     let height = key.size.y.max(1.0);
     let units = 960.0 / height;
-    let size = 20.0 * super::scale(if key.view.choices.is_empty() {touch.subtitle_scale}else{touch.choice_scale});
+    let size = if key.view.choices.is_empty() {touch.subtitle_size()} else {touch.choice_size()};
     let body = scaled_face(&source.body,size*units/source.body.font.size.max(1.0));
     let name = scaled_face(&source.name,18.0*units/source.name.font.size.max(1.0));
     // Reuse the native kit's pictures, glyphs, fade brackets and selection painter.

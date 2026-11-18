@@ -205,7 +205,7 @@ fn speech(root:&mut ChildSpawnerCommands,key:&Key,face:&Face) {
                 label(p,key,&key.view.speaker,18.0,rect.width(),face,crate::terminal::screen::bright());
             }
             if let Some(line)=&key.spoken {
-                label(p,key,line,20.0*super::scale(key.settings.subtitle_scale),rect.width(),face,crate::terminal::screen::bright());
+                label(p,key,line,key.settings.subtitle_size(),rect.width(),face,crate::terminal::screen::bright());
             }
         });
     });
@@ -233,7 +233,7 @@ fn responses(root:&mut ChildSpawnerCommands,key:&Key,face:&Face) {
                 p.spawn((Button,native_choice(index,key.list.clone(),row.short),Node {width:percent(100.0),
                     min_height:px(48.0/scale),padding:UiRect::all(px(6.0/scale)),flex_shrink:0.0,..default()},
                     Outline::new(px(1.0/scale),px(-1.0/scale),if selected {ink}else{Color::NONE})))
-                    .with_children(|p|label(p,key,&row.label,20.0*super::scale(key.settings.choice_scale),
+                    .with_children(|p|label(p,key,&row.label,key.settings.choice_size(),
                         rect.width()-12.0,face,ink));
             }
         });

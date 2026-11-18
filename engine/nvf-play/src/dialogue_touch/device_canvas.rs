@@ -235,7 +235,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
                         p.spawn((Button,native_skip(key.list.clone()),Node {width:percent(100.0),
                             min_height:px(length(56.0)/units),padding:UiRect::all(px(row_padding/units)),
                             flex_shrink:0.0,..default()})).with_children(|p|label(p,line,art.face(false),
-                                length(20.0*super::scale(key.settings.subtitle_scale)),width-2.0*row_padding,
+                                length(key.settings.subtitle_size()),width-2.0*row_padding,
                                 units,art.ink(false,false)));
                     }
                     for (index,row) in key.view.choices.iter().enumerate() {
@@ -252,7 +252,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
                             BackgroundColor(fill),Outline::new(px(1.0/units),px(-1.0/units),
                                 if selected && matches!(art,Art::PipBoy(_, _)) {line}else{Color::NONE})))
                             .with_children(|p|label(p,&row.label,art.face(selected),
-                                length(20.0*super::scale(key.settings.choice_scale)),width-2.0*row_padding,
+                                length(key.settings.choice_size()),width-2.0*row_padding,
                                 units,art.ink(selected,row.darkened)));
                     }
                 });

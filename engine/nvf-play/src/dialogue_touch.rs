@@ -23,6 +23,9 @@ pub struct TouchDialogue {
     pub choice_scale: f32,
     pub subtitle_scale: f32,
     pub confirm: bool,
+    /// [design] Platform text size at 100%, in logical units: phones hold more
+    /// choices at a smaller base. Not saved; the saved sliders stay percentages of it.
+    pub text_base: f32,
 }
 impl Default for TouchDialogue {
     fn default() -> Self {
@@ -31,12 +34,17 @@ impl Default for TouchDialogue {
 }
 impl TouchDialogue {
     fn for_platform(android: bool) -> Self {
-        Self { enabled: android, choice_scale: if android { 0.85 } else { 1.0 }, subtitle_scale: 1.0, confirm: !android }
+        Self { enabled: android, choice_scale: if android { 0.85 } else { 1.0 }, subtitle_scale: 1.0, confirm: !android,
+            text_base: if android { 16.0 } else { 20.0 } }
     }
     /// The conversation owns raw touches; the underlying virtual menu keys must sleep.
     pub fn captures(&self, state: crate::PlayState) -> bool {
         self.enabled && state == crate::PlayState::Dialogue
     }
+    /// Choice text size in logical units for every dialogue theme.
+    pub fn choice_size(&self) -> f32 { self.text_base * scale(self.choice_scale) }
+    /// Speaking-line text size in logical units for every dialogue theme.
+    pub fn subtitle_size(&self) -> f32 { self.text_base * scale(self.subtitle_scale) }
 }
 /// Platform layout policy is separate from persisted text sizes. Existing saved
 /// scales are never interpreted as a request to reset density or accessibility.
@@ -151,12 +159,12 @@ pub(crate) fn install(app: &mut App) {
         switches: "",
         get: |w| w.resource::<TouchDialogue>().enabled, set: set_enabled, slider: None });
     add_setting(app, Setting { key: "dialogue-choice-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue choice text",
-        note: "Choice text size (75-200%), independent of subtitles. Android starts at 85% to fit more choices; your saved size is kept.",
+        note: "Choice text size in every dialogue style (75-200%), independent of subtitles. Phones use a smaller 100% and start at 85% to fit more choices; your saved size is kept. Rows stay at least 48 units tall.",
         switches: "",
         get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().choice_scale),
             set: |w,v| w.resource_mut::<TouchDialogue>().choice_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
     add_setting(app, Setting { key: "dialogue-subtitle-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue subtitle text",
-        note: "Speaking-line text size in the touch dialogue view (75-200%). Does not change choices or world HUD subtitles.",
+        note: "Speaking-line text size in every dialogue style (75-200%; phones use a smaller 100%). Does not change choices or world HUD subtitles.",
         switches: "",
         get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().subtitle_scale),
             set: |w,v| w.resource_mut::<TouchDialogue>().subtitle_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
@@ -849,7 +857,7 @@ fn draw(
                                     text(
                                         p,
                                         line,
-                                        20.0 * scale(settings.subtitle_scale),
+                                        settings.subtitle_size(),
                                         appearance::Paint::Speech,
                                         &appearance,
                                     )
@@ -889,7 +897,7 @@ fn draw(
                                     text(
                                         p,
                                         &row.label,
-                                        20.0 * scale(settings.choice_scale),
+                                        settings.choice_size(),
                                         appearance::Paint::ChoiceText {darkened:row.darkened},
                                         &appearance,
                                     );

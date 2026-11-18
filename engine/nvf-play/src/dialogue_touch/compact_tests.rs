@@ -242,7 +242,7 @@ fn actual_phone_layout_fits_more_whole_choices_without_shrinking_targets_below_4
         assert!(
             text.iter(compact.world())
                 .any(|(t, f, n)| t.0 == "Offered response 0"
-                    && f.font_size == FontSize::Px(17.0)
+                    && f.font_size == FontSize::Px(16.0 * 0.85)
                     && n.size().y > 0.0),
             "production text must actually be measured"
         );
@@ -271,7 +271,7 @@ fn compact_wrapped_choice_keeps_full_text_and_saved_scale_in_actual_layout() {
         .world_mut()
         .query::<(&Text, &TextFont, &TextLayout, &ComputedNode)>();
     assert!(text.iter(app.world()).any(|(t, f, l, n)| t.0 == long
-        && f.font_size == FontSize::Px(30.0)
+        && f.font_size == FontSize::Px(16.0 * 1.5)
         && l.linebreak == bevy::text::LineBreak::WordOrCharacter
         && n.size().y > 60.0));
     assert!(
@@ -358,4 +358,29 @@ fn compact_computed_targets_keep_release_scroll_and_size_change_guards() {
         Some(index),
         "fresh resized target remains usable"
     );
+}
+
+#[test]
+fn android_dialogue_text_is_smaller_by_default_and_the_mobile_sliders_resize_it_live() {
+    let (android, desktop) = (TouchDialogue::for_platform(true), TouchDialogue::for_platform(false));
+    assert!(android.choice_size() < desktop.choice_size() && android.subtitle_size() < desktop.subtitle_size());
+    assert_eq!((android.choice_size(), android.subtitle_size()), (16.0 * 0.85, 16.0));
+    let (mut app, _) = layout_scene(true, Vec2::new(792.0, 363.0), 1.0);
+    let sizes = |app: &mut App| {
+        let world = app.world_mut();
+        world.query::<(&appearance::Paint, &TextFont)>().iter(world)
+            .filter(|(p, _)| matches!(p, appearance::Paint::ChoiceText { .. }))
+            .map(|(_, f)| match f.font_size { bevy::text::FontSize::Px(px) => px, other => panic!("{other:?}") })
+            .collect::<Vec<_>>()
+    };
+    assert!(sizes(&mut app).iter().all(|s| (*s - 16.0 * 0.85).abs() < 0.01), "the painter uses the Android default");
+    // The Mobile tab's real slider row changes the painted size without reopening.
+    let row = app.world().resource::<crate::settings::Settings>().index("dialogue-choice-text-size").unwrap();
+    assert!(crate::settings::set_slider(app.world_mut(), row, 0.0).is_some());
+    settle(&mut app);
+    assert!(sizes(&mut app).iter().all(|s| (*s - 16.0 * 0.75).abs() < 0.01), "smallest choice text");
+    for (_, r) in rows(&mut app) { assert!(r.height() >= 47.99, "targets keep 48 units"); }
+    let layout = crate::settings_layout::MOBILE_SECTIONS.iter().any(|s|
+        s.keys.contains(&"dialogue-choice-text-size") && s.keys.contains(&"dialogue-subtitle-text-size"));
+    assert!(layout, "both text sizes are on the Mobile tab");
 }

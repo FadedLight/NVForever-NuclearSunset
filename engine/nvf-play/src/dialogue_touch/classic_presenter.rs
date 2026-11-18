@@ -48,7 +48,7 @@ fn caps_fit(face: &Face) -> Option<CapsFit> {
     if !scale.is_finite() || scale <= 0.0 { return None; }
     let (mut digit, mut left, mut right, mut descent) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
     let baseline = crate::interface::line_base(face);
-    for c in (b'0'..=b'9').chain([b'-']) {
+    for &c in b"0123456789-" {
         let glyph = face.font.glyph(c);
         let advance = glyph.advance();
         if !glyph.drawn() || !advance.is_finite() || advance <= 0.0 { return None; }

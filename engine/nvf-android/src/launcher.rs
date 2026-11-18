@@ -19,7 +19,8 @@ pub extern "system" fn Java_org_nvforever_android_MobileLauncher_request(
                     return Ok(None);
                 }
                 let text: JString<'_> = text.into();
-                Ok(Some(env.get_string(&text)?.into()))
+                let body: String = env.get_string(&text)?.into();
+                Ok(Some(body))
             }).map_err(|e| e.to_string())?.ok_or_else(|| format!("Could not read {url}"))
         });
         Ok(env.new_string(response)?.into_raw())

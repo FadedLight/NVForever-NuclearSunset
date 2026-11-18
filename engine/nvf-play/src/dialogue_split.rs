@@ -130,7 +130,7 @@ type SplitResources<'w> = (
     Res<'w, TouchDialogue>,
     Res<'w, crate::dialogue_touch::appearance::Appearance>,
     Option<Res<'w, crate::dialogue_touch::classic_presenter::Surface>>,
-    Option<Res<'w, crate::dialogue_device::DeviceView>>,
+    (Option<Res<'w, crate::dialogue_device::DeviceView>>, Option<Res<'w, crate::dialogue_device::Request>>),
 );
 type SceneState<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::free_cam::FreeCam>>, Option<Res<'w,crate::control::PlayerControl>>, Option<Res<'w,crate::player::ViewDriven>>,Option<Res<'w,crate::creator::CreatorMenu>>);
 type SpeakerSources<'w> = (Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::dialogue_look::SpeakerFace>>, Option<Res<'w,crate::phys::PhysState>>, Option<Res<'w,crate::sim::SimState>>);
@@ -145,7 +145,7 @@ type ResolveQueries<'w,'s> = (
 );
 type ResolveOutput<'w> = (ResMut<'w,DefaultPin>,ResMut<'w,Frame>,ResMut<'w,Target>,ResMut<'w,ClassicRequest>,ResMut<'w,ViewportLease>);
 fn resolve(
-    mut commands: Commands, (options,safe,touch,appearance,surface,device): SplitResources<'_>,
+    mut commands: Commands, (options,safe,touch,appearance,surface,(device,device_request)): SplitResources<'_>,
     (state,paused,free,control,driven,creator): SceneState<'_>, menu: Res<DialogueMenu>,
     (script,face,phys,sim): SpeakerSources<'_>,
     (windows,world_cameras,default_ui,default_markers,own_markers,overlays,all_cameras): ResolveQueries<'_,'_>,
@@ -205,9 +205,11 @@ fn resolve(
             // A device keeps its side even while camera framing is suspended, so
             // its model is not rebuilt for every cinematic or held line.
             if device_kind.is_some() {next.panel=sides.map(|(_,panel)|panel);}
-            // The speaker moves aside only once that side model actually presents.
-            let device_presented=device_kind.is_some() && device.as_deref().zip(next.panel).is_some_and(|(view,panel)|
-                Some(view.stamp.kind)==device_kind && view.stamp.window==window_entity
+            // The speaker moves aside only once that side model actually presents
+            // the current request; a publication left from a replaced request does not.
+            let device_presented=device_kind.is_some() && device.as_deref().zip(next.panel).zip(device_request.as_deref())
+                .is_some_and(|((view,panel),request)| view.matches(request)
+                    && Some(view.stamp.kind)==device_kind && view.stamp.window==window_entity
                     && view.stamp.display==device_display(panel,window.scale_factor()));
             let framing_allowed=!foreign_change && !free.is_some_and(|f|f.on)
                 && !driven.is_some_and(|d|d.0) && !control.is_some_and(|c|c.cinematic || c.portrait.is_some());

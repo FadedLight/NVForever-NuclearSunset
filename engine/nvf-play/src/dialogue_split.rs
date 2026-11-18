@@ -67,7 +67,8 @@ fn classic_viewport(surface:&crate::dialogue_touch::classic_presenter::Prepared,
 #[derive(Resource, Default)]
 struct Target(Option<Vec3>);
 #[derive(Component)]
-struct OverlayCamera;
+/// Full-window UI camera for active enhanced dialogue, including fallback views.
+pub struct OverlayCamera;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Resolve;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]

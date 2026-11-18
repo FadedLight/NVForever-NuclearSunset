@@ -197,6 +197,39 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_wrist_terminal_normal_fallback_scrolls_and_selects_revealed_choice() {
+        use crate::dialogue_touch::compact_tests::{rows, send};
+        let (mut app, window) = layout_scene(true, Vec2::new(792.0, 363.0), 2.0);
+        app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>();
+        app.world_mut().resource_mut::<TouchDialogue>().confirm = false;
+        let theme = app.world().resource::<crate::settings::Settings>()
+            .index(appearance::THEME_KEY).unwrap();
+        assert!(crate::settings::pick(app.world_mut(), theme, "Wrist Terminal"));
+        settle(&mut app);
+        published_camera(&mut app);
+        assert!(!app.world().contains_resource::<crate::dialogue_device::DeviceView>());
+        let before = rows(&mut app);
+        let start = before[1].1.center() / 2.0;
+        let end = start - Vec2::Y * 160.0;
+        send(&mut app, window, 31, TouchPhase::Started, start);
+        app.update();
+        send(&mut app, window, 31, TouchPhase::Moved, end);
+        app.update();
+        send(&mut app, window, 31, TouchPhase::Ended, end);
+        app.update();
+        assert!(app.world().resource::<TouchFrame>().asked.pick.is_none());
+        let after = rows(&mut app);
+        assert!(after[0].1.center().y < before[0].1.center().y - 100.0,
+            "the actual painted row transforms move rather than merely updating ScrollPosition");
+        let point = after[5].1.center() / 2.0;
+        send(&mut app, window, 32, TouchPhase::Started, point);
+        send(&mut app, window, 32, TouchPhase::Ended, point);
+        app.update();
+        assert_eq!(app.world().resource::<TouchFrame>().asked.pick, Some(5));
+        assert_eq!(app.world().resource::<appearance::Appearance>().theme, appearance::Theme::WristTerminal);
+    }
+
+    #[test]
     fn normal_palette_change_is_painted_once_at_the_new_hud_colour() {
         let _palette = crate::interface::colours_at([80,100,120], [30,60,90]);
         let (mut app, _) = layout_scene(true, Vec2::new(792.,363.), 1.);

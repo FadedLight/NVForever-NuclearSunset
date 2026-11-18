@@ -97,6 +97,7 @@ enum Role {
     Button(usize),
     RunLock,
     SettingsOverlay(usize),
+    DialogueOverlay(usize),
 }
 #[derive(Resource, Default)]
 struct TouchState {
@@ -445,7 +446,7 @@ fn sync_touch(state: &mut TouchState, bindings: Option<&Bindings>, pause: bool) 
                     controls.push(Control::Forward);
                 }
             }
-            Role::Button(i) => {
+            Role::Button(i) | Role::DialogueOverlay(i) => {
                 let b = BUTTONS[i];
                 if b.playing != state.playing {
                     continue;
@@ -725,6 +726,38 @@ fn input(
         arm.cancel();
         bar.cancel();
         drawer.drawer.cancel();
+        if modal.dialogue_only() && !controller && layout.editor.is_none() {
+            state.contacts.retain(|_, c| matches!(c.role, Role::DialogueOverlay(_)));
+            state.aim_latched = false;
+            state.look_owner = None;
+            state.taps.clear();
+            world_touch.cancel(); map.cancel(); held_sneak.active = false;
+            sync_touch(&mut state, bindings.as_deref(), false);
+            for t in touches.read() {
+                if t.window != window_id || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
+                    continue;
+                }
+                if sheets.overlay_owns(t.id) {
+                    if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
+                        state.contacts.remove(&t.id);
+                    }
+                } else if !sheets.tail(t) && !modal.tail(t) {
+                    if t.phase == TouchPhase::Started && t.position.is_finite() && interactive
+                        && !state.ui_capture && layout.config.opacity > 0.0
+                        && let Some(Target::Button(i)) = layout.config.hit(t.position, size, false, false)
+                    {
+                        sheets.claim_overlay(t.id);
+                        let p = t.position / size;
+                        state.contacts.insert(t.id, Contact { origin: p, position: p,
+                            role: Role::DialogueOverlay(i), started: movement.now(), dragged: false });
+                    } else {
+                        modal.capture_event(t);
+                    }
+                }
+                sync_touch(&mut state, bindings.as_deref(), false);
+            }
+            return;
+        }
         world_touch.cancel(); map.cancel(); state.cancel_touch();
         held_sneak.active = false;
         sync_touch(&mut state, bindings.as_deref(), false);
@@ -882,13 +915,13 @@ fn input(
             world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false;
             sync_touch(&mut state, bindings.as_deref(), pause); continue;
         }
-        }
         let run_lock_hit=playing&&options.run_lock&&movement::lock_available(&layout,&state,size)
             &&movement::lock_rect(&layout,&state,size).contains(t.position);
         let world_eligible=unclaimed&&playing&&interactive&&state.contacts.is_empty()&&!run_lock_hit
             &&!(layout.config.floating&&layout.config.movement_area(p));
-        if !owned_overlay && world_touch.event(t,world_eligible)&&t.phase!=TouchPhase::Started {
+        if world_touch.event(t,world_eligible)&&t.phase!=TouchPhase::Started {
             if let Some(contact)=state.contacts.get_mut(&t.id){contact.dragged=true;}
+        }
         }
         match t.phase {
             TouchPhase::Started if interactive => {
@@ -1047,7 +1080,7 @@ fn labels(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 },
                 BackgroundColor(Color::srgba(0.02, 0.06, 0.07, 0.7)),
                 BorderColor::all(Color::srgba(0.7, 0.9, 0.85, 0.7)),
-                GlobalZIndex(2000),
+                GlobalZIndex(2500),
                 TouchVisual::Button(i),
             ))
             .with_children(|p| {
@@ -1175,7 +1208,11 @@ fn show_labels(
     window: Query<&Window, With<PrimaryWindow>>,
     bindings: Option<Res<Bindings>>,
     pads: Query<&Gamepad>,
+    dialogue_camera: Query<(Entity, &Camera), With<nvf_play::dialogue_split::OverlayCamera>>,
+    mut commands: Commands,
     mut visuals: Query<(
+        Entity,
+        Option<&UiTargetCamera>,
         &TouchVisual,
         &mut Node,
         &mut Visibility,
@@ -1207,9 +1244,20 @@ fn show_labels(
         |c| c.origin * size,
     );
     let stick_diameter = layout.config.diameter(Target::Stick, size);
-    for (visual, mut node, mut visibility, mut background, text, image, border, text_color) in
+    let dialogue_camera = dialogue_camera.single().ok().filter(|(_, camera)| camera.is_active)
+        .map(|(entity, _)| entity);
+    for (entity, target, visual, mut node, mut visibility, mut background, text, image, border, text_color) in
         &mut visuals
     {
+        if matches!(visual, TouchVisual::Button(i) if !BUTTONS[*i].playing) {
+            match (target.map(|target| target.0), dialogue_camera) {
+                (current, Some(camera)) if current != Some(camera) => {
+                    commands.entity(entity).insert(UiTargetCamera(camera));
+                }
+                (Some(_), None) => { commands.entity(entity).remove::<UiTargetCamera>(); }
+                _ => {}
+            }
+        }
         let mut rect = None;
         let visible = match *visual {
             TouchVisual::EditorShield=>editing,
@@ -1225,7 +1273,7 @@ fn show_labels(
                 let pressed = state
                     .contacts
                     .values()
-                    .any(|c| matches!(c.role, Role::Button(j) | Role::SettingsOverlay(j) if j==i))
+                    .any(|c| matches!(c.role, Role::Button(j) | Role::SettingsOverlay(j) | Role::DialogueOverlay(j) if j==i))
                     || (i == gyro::BUTTON && gyro_state.active(&gyro_options))
                     || (BUTTONS[i].control == Some(Control::Block) && state.aim_latched)
                     || (BUTTONS[i].control == Some(Control::CrouchSneak)
@@ -1462,7 +1510,7 @@ fn show_labels(
             }
         }
         *visibility =
-            if visible && !state.ui_capture && !practice.blocking() && !modal.blocking() && (!controller || editing) {
+            if visible && !state.ui_capture && !practice.blocking() && !modal.hides_overlay() && (!controller || editing) {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
@@ -2815,16 +2863,17 @@ mod tests {
     }
 
     #[test]
-    fn dialogue_touch_view_releases_and_hides_underlying_virtual_menu_controls() {
+    fn dialogue_preserves_menu_overlay_without_leaking_gameplay_input() {
         let (mut app,w)=scene();
         app.insert_resource(nvf_play::dialogue_touch::TouchDialogue {enabled:true,..default()});
         app.world_mut().resource_mut::<NextState<nvf_play::PlayState>>().set(nvf_play::PlayState::Dialogue);
         app.update();app.update();
         touch(&mut app,w,1,TouchPhase::Started,920.0,900.0);app.update();
-        assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Enter));
-        assert!(app.world().resource::<TouchState>().contacts.is_empty());
+        assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::Enter));
+        assert!(!app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(1));
         let world=app.world_mut();let mut q=world.query::<(&TouchVisual,&Visibility)>();
-        assert!(q.iter(world).all(|(_,v)|*v==Visibility::Hidden));
+        assert!(q.iter(world).any(|(kind,v)| matches!(kind, TouchVisual::Button(i) if BUTTONS[*i].key == Some(KeyCode::Enter)) && *v == Visibility::Inherited));
+        assert!(q.iter(world).all(|(kind,v)| !matches!(kind, TouchVisual::Button(i) if BUTTONS[*i].playing) || *v == Visibility::Hidden));
     }
 
     #[test]

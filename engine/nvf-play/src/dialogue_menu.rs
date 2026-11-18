@@ -595,7 +595,8 @@ fn spawn_menu_on(commands: &mut Commands, view: &MenuView, l: &Layout, kit: &Kit
         // The choices, cut at the brackets' lines.
         let clip_top = list.top_line + THICK;
         let mut window = at(0.0, clip_top, 0.0, list.bottom_line - clip_top);
-        (window.width, window.overflow) = (Val::Percent(100.0), Overflow::clip());
+        (window.width, window.overflow) = (Val::Percent(100.0),
+            if touch { Overflow::scroll_y() } else { Overflow::clip() });
         let mut clip = s.spawn(window);
         if touch {clip.insert(crate::dialogue_touch::native_viewport());}
         clip.with_children(|w| {

@@ -24,6 +24,14 @@ impl Capture {
     pub(super) fn blocking(&self) -> bool {
         self.active || self.draining
     }
+
+    pub(super) fn hides_overlay(&self) -> bool {
+        self.blocking() && !self.dialogue_only()
+    }
+
+    fn dialogue_only(&self) -> bool {
+        self.active && self.features == bit(Feature::Dialogue) && self.present == self.features
+    }
     fn record(&mut self, event: &super::TouchInput, claimed: bool) -> bool {
         if self.primary != Some(event.window) { return false; }
         let index = self.contacts.iter().position(|slot| slot.is_some_and(|c| c.window == event.window && c.id == event.id));
@@ -125,6 +133,10 @@ impl Bridge<'_> {
         }
         if pending.overflowed() { self.state.overflow = Some(primary); }
     }
+    pub(super) fn dialogue_only(&self) -> bool { self.state.dialogue_only() }
+
+    pub(super) fn capture_event(&mut self, event: &super::TouchInput) { self.state.record(event, true); }
+
     pub(super) fn capture_batch(&mut self, touches: &mut MessageReader<super::TouchInput>) {
         for event in touches.read() { self.state.record(event, true); }
     }

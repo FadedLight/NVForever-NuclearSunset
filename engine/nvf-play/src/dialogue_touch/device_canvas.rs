@@ -65,7 +65,6 @@ pub(super) fn usable(request:&Request,view:&DeviceView,menu:&DialogueMenu,
     let art=match request.stamp.kind {DeviceKind::Terminal=>cache.terminal.as_ref(),DeviceKind::PipBoy=>cache.pipboy.as_ref()};
     let Some(art)=art else{return false;};
     let face=art.face(false);
-    if face.image.is_none() && face.vector.is_none() {return false;}
     let Some(unit)=view.canvas_length(request,1.0) else{return false;};
     let width=request.canvas.width()-16.0*unit;
     let inner=width-12.0*unit;
@@ -159,16 +158,16 @@ fn draw(mut commands: Commands, menu: Res<DialogueMenu>, settings: Res<TouchDial
                 DeviceKind::PipBoy=>crate::interface::pipboy_amber(255.0)},publication:view.publication()}));
     if *shown==key {return;}
     for root in &roots {commands.entity(root).despawn();}
-    let (Some(key),Some((request,view)),Some(data),Some(mut images)) = (key,surface,data,images)
+    let (Some(key),Some((request,view)),Some(mut images)) = (key,surface,images)
         else {*shown=None;return;};
     let slot = match request.stamp.kind {DeviceKind::Terminal=>&mut cache.terminal,DeviceKind::PipBoy=>&mut cache.pipboy};
     slot.get_or_insert_with(|| {
         let bc = crate::interface::bc_supported(formats.as_deref());
         match request.stamp.kind {
-            DeviceKind::Terminal=>Art::Terminal(crate::terminal::screen::load_faces(Some(&data),&mut images,bc)),
+            DeviceKind::Terminal=>Art::Terminal(crate::terminal::screen::load_faces(data.as_deref(),&mut images,bc)),
             DeviceKind::PipBoy=>Art::PipBoy(crate::interface::face(crate::pipboy::frame::FONTS[1],
-                crate::interface::plain_font(31.0,13.0),Some(&data),&mut images,bc),
-                crate::pipboy::device_screen::DialogueScreenArt::load(&data,&mut images,bc)),
+                crate::interface::plain_font(31.0,13.0),data.as_deref(),&mut images,bc),
+                data.as_deref().and_then(|data| crate::pipboy::device_screen::DialogueScreenArt::load(data,&mut images,bc))),
         }
     });
     if !usable(request,view,&menu,&settings,Some(&cache)) {
@@ -261,3 +260,6 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
         }
     });
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,7 +2,7 @@
 # compile Bevy (docs/adr/0001-bevy-viewer.md, docs/design/layer3.md §2.2).
 [workspace]
 resolver = "2"
-members = ["nvf-assets", "nvf-play", "nvf-viewer", "nvforever", "nvf-android"]
+members = ["nvf-assets", "nvf-play", "nvf-viewer", "nvforever", "nvf-shader-tests", "nvf-android"]
 exclude = ["vendor/wgpu-ffx", "vendor/wgpu-ffx/wgpu-ffx", "vendor/wgpu-ffx/wgpu-ffx-shaders-spv"]
 
 [workspace.package]
@@ -75,6 +75,7 @@ winit = { path = "vendor/winit" }
 rapier3d = { path = "../vendor/rapier3d" }
 gpu-allocator = { path = "vendor/gpu-allocator" }
 bevy_pbr = { path = "vendor/bevy_pbr" }
+bevy_post_process = { path = "vendor/bevy_post_process" }
 bevy_render = { path = "vendor/bevy_render" }
 wgpu-hal = { path = "vendor/wgpu-hal" }
 naga = { path = "vendor/naga" }

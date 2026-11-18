@@ -145,7 +145,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | NVF Features | Gameplay (after an empty line) | `movement-inertia`, `weapon-handling`, `advanced-recoil` |
 | NVF Features | Visual Only (after an empty line) | `weapon-inertia`, `animation-smoothing`, `camera-motion` (player-body.md §1.4a.3) |
 | Graphics | Quality | `quality` (#1966; only when the install has its preset files: docs/spec-notes/quality-presets.md) |
-| Graphics | Picture | `enhanced` (#1966; removed by the overhaul), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `terrain-anti-tiling` (#2551), `light-shafts`, `water-reflections`, `water-mirror`, `smooth-terrain` (#2149) |
+| Graphics | Picture | `enhanced` (#1966; removed by the overhaul), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `cloud-shadows` (#2670), `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `terrain-anti-tiling` (#2551), `light-shafts`, `water-reflections`, `water-mirror`, `smooth-terrain` (#2149) |
 | Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance` |
 | Graphics | World | `head-tracking`, `foot-ik`, `sky-clock` |
 | Tweaks | (none) | none named yet |
@@ -159,10 +159,10 @@ contributor's pick from in-game comparisons (2026-11-15), for the maintainer to 
 world.md §3 "Smoothing"]. 4 x 4 near draws 4 × 4 near the camera and 2 × 2 further on the 4 × 4
 surface [design, #2676]; the INI's older on/off reads as 4 x 4 and Off.
 
-The table names every row the registry can hold [documented: `settings_layout.rs::SECTIONS`],
+The shared table names 128 fixed registry rows [documented: `settings_layout.rs::SECTIONS`],
 including #1966's `quality`, the overhaul's `menu-font` (#1966's `enhanced` is gone),
 #2014's nine `fps-counter-*` rows, #2242's `fps-counter-upscaling`, #2317's
-`frame-generation-frames`, #2550's `terrain-height-blend`, #2662's `grass-fire`, #2551's `terrain-anti-tiling`, #2688's `sound-cover`, and #2149's `smooth-terrain` and `terrain-wireframe` (`KNOWN` in
+`frame-generation-frames`, #2550's `terrain-height-blend`, #2662's `grass-fire`, #2551's `terrain-anti-tiling`, #2688's `sound-cover`, #2670's `cloud-shadows`, #2910's `gore-shake`, #2149's `smooth-terrain` and `terrain-wireframe`, the Advanced Movement rows, #2843's `shadow-resolution` (under Graphics › Shadows after `shadow-filter`), and #2661's `mesh-terrain-blend` (Graphics › Detail and Distance, after the terrain rows) (`KNOWN` in
 `settings_layout.rs`); a test keeps
 it so (`settings_layout.rs`, `the_table_names_each_key_once_in_one_of_the_tabs`). The
 original puts the HUD and Pip-Boy colours and the crosshair in its Display category
@@ -194,9 +194,9 @@ registrations nor `resolve_layout`'s interface change for it.
 ### Android mobile organization
 
 [design] Android uses the same dynamic settings page, adding **Mobile** after Controls.
-Desktop keeps its seven tabs and existing placements. This changes presentation only:
-all 177 known settings retain their registration order, keys, callbacks, saved values
-and defaults. Missing optional rows and empty headings stay omitted. Search, Changed,
+Desktop keeps its eight tabs and existing placements. This changes presentation only:
+the settings retain their registration order, keys, callbacks, saved values and defaults.
+Missing optional rows and empty headings stay omitted. Search, Changed,
 keyboard/controller navigation and row identity use the existing page implementation.
 
 | Mobile heading | Existing controls |
@@ -210,9 +210,10 @@ keyboard/controller navigation and row identity use the existing page implementa
 | Interface size | Existing menu/UI scale and canonical health/AP/compass sizes |
 | Performance and battery | Preset, FPS, resolution, opt-in thermal response and status |
 
-The eight controller-specific registry rows remain in **Controls > Controller** on
-Android. Hardware bindings and Input Device remain in the original Controls page;
-changing devices keeps its native hidden-row projection and remapping behavior.
+The four Android-specific controller rows are in **Controls > Controller**. The four
+shared controller rows keep their **Controls > Input** and **Controls > Aim Assist**
+placements. Hardware bindings and Input Device remain in Controls; changing devices
+keeps the existing hidden-row projection and remapping behavior.
 The existing transactional layout editor opens from **Pause > Settings > Mobile >
 Touch layout and guide** on Android, or **Controls > Touch** on desktop: Style / profiles
 for appearance, Save to keep changes, Cancel to restore them. The practice note points
@@ -220,7 +221,9 @@ to this route; there is no second editor or new persistence schema.
 
 `settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
 original sections claim their remaining rows. One row is resolved once, with its original
-registry index. Authored controls cover all 177 potential rows, optional sections, actual page projection,
+registry index. The integrated fixture covers 197 fixed keys: 128 shared and 69 Android
+additions. There are 71 placement overrides, 67 in Mobile and four in Controls.
+The authored controls cover optional sections, actual page projection,
 search/Changed/device handoff, and a real Settings callback through its original index.
 Fresh Rust execution of the current merge and Android device acceptance remain
 pending and are recorded separately from source review.

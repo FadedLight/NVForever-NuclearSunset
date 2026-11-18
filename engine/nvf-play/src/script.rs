@@ -945,7 +945,9 @@ impl Runtime {
         let has_block = g.ref_script(target).and_then(|s| g.data.script(s)).is_some_and(|u| u.has_block(event::ON_ACTIVATE));
         let r = if has_block {
             info!("script: activating {target} runs its OnActivate block instead of the default action");
-            g.activate(player, target, ActMode::Hand).map(|_| ByHand::Script)
+            g.activate(player, target, ActMode::Hand).map(|done| {
+                if matches!(done["result"].as_str(), Some("prevented" | "destroyed")) { ByHand::Refused } else { ByHand::Script }
+            })
         } else {
             // The shared default action; what is this path's own is that `activate.rs`
             // applies the outcome, so these events do not become effects as well.
@@ -1501,26 +1503,42 @@ pub(crate) fn responses(play: &PlayWorld, info: FormId) -> Vec<String> {
 
 // ---- trace log -------------------------------------------------------------------------
 
-struct TraceLog {
-    out: std::io::BufWriter<TraceFile>,
-    path: PathBuf,
-    lines: u64,
-}
-
 struct TraceFile(std::fs::File);
 
 impl std::io::Write for TraceFile {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> { self.0.write(bytes) }
-    fn flush(&mut self) -> std::io::Result<()> { self.0.flush() }
-    fn write_vectored(&mut self, bytes: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> { self.0.write_vectored(bytes) }
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.0.write_vectored(bufs)
+    }
 }
 
 impl Drop for TraceFile {
     fn drop(&mut self) {
-        // BufWriter flushes before dropping its inner writer. Release ownership
-        // explicitly: a concurrently forked child can still hold an inherited fd.
+        // BufWriter attempts its final flush before dropping this guard. Release
+        // ownership explicitly:
+        // another thread's fork may still hold a duplicate until its child execs.
         let _ = self.0.unlock();
     }
+}
+
+#[cfg(test)]
+impl TraceFile {
+    fn try_clone(&self) -> std::io::Result<std::fs::File> {
+        self.0.try_clone()
+    }
+}
+
+struct TraceLog {
+    out: std::io::BufWriter<TraceFile>,
+    path: PathBuf,
+    lines: u64,
 }
 
 impl TraceLog {
@@ -1530,7 +1548,7 @@ impl TraceLog {
             std::fs::create_dir_all(dir)?;
         }
         let (path, file) = Self::create_owned(path)?;
-        let mut out = std::io::BufWriter::new(TraceFile(file));
+        let mut out = std::io::BufWriter::new(file);
         let head = serde_json::json!({"format": "nvforever.play.script_log/1",
             "processId": std::process::id(),
             "events": "one fnv.script.trace/1 event per line (frame, kind, ...), with t = seconds since scripts started and gt = game time (Game::time); aid, menu_answer and controls lines; a final line at exit"});
@@ -1539,7 +1557,7 @@ impl TraceLog {
         Ok(TraceLog { out, path, lines: 0 })
     }
 
-    fn create_owned(requested: &std::path::Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    fn create_owned(requested: &std::path::Path) -> std::io::Result<(PathBuf, TraceFile)> {
         for attempt in 0..64 {
             let path = if attempt == 0 {
                 requested.to_path_buf()
@@ -1557,7 +1575,8 @@ impl TraceLog {
             let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
             match file.try_lock() {
                 Ok(()) => {
-                    file.set_len(0)?;
+                    let file = TraceFile(file);
+                    file.0.set_len(0)?;
                     return Ok((path, file));
                 }
                 Err(std::fs::TryLockError::WouldBlock) => continue,
@@ -1631,6 +1650,35 @@ mod trace_ownership_tests {
     }
 
     #[test]
+    fn dropped_trace_writer_releases_ownership_while_a_duplicate_handle_remains_open() {
+        let root = std::env::temp_dir().join(format!("nvf-duplicate-trace-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = root.join("script-trace.jsonl");
+        let mut first = TraceLog::create(&path).unwrap();
+        let duplicate = first.out.get_ref().try_clone().unwrap();
+        first.write(&serde_json::json!({"kind":"finished-owner"}));
+        let overlapping = TraceLog::create(&path).unwrap();
+        assert_ne!(overlapping.path, path, "the trace writer still owns the requested file");
+        drop(overlapping);
+        drop(first);
+
+        // A duplicate models the descriptor retained between another thread's fork
+        // and exec. Its lifetime must not extend the finished trace's ownership.
+        let mut next = TraceLog::create(&path).unwrap();
+        assert_eq!(next.path, path, "a duplicate handle must not retain a finished writer's lock");
+        next.write(&serde_json::json!({"kind":"replacement-owner"}));
+        drop(next);
+        let bytes = std::fs::read_to_string(&path).unwrap();
+        let rows: Vec<serde_json::Value> = bytes.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["format"], "nvforever.play.script_log/1");
+        assert_eq!(rows[0]["processId"], std::process::id());
+        assert_eq!(rows[1]["kind"], "replacement-owner");
+        assert!(!bytes.contains("finished-owner") && !bytes.contains('\0'));
+        drop(duplicate);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn overlapping_trace_processes_hold_locks_until_their_writers_close() {
         const TEST: &str = "script::trace_ownership_tests::overlapping_trace_processes_hold_locks_until_their_writers_close";
         const CHILD: &str = "NVF_OWNED_TRACE_TEST_CHILD";
@@ -1672,7 +1720,7 @@ mod trace_ownership_tests {
         assert!(parent_bytes.contains("parent-before-child") && parent_bytes.contains("parent-after-child"));
         assert!(!parent_bytes.contains("child-only"));
         assert!(child_bytes.contains("child-only") && !child_bytes.contains("parent-before-child"));
-        // Closing the writer releases ownership without a sidecar lock.
+        // Dropping the writer releases ownership without a sidecar lock.
         let mut next = TraceLog::create(&path).unwrap();
         assert_eq!(next.path, path);
         next.write(&serde_json::json!({"kind":"next-run"}));
@@ -1688,7 +1736,7 @@ mod trace_ownership_tests {
         let path = root.join("script-trace.jsonl");
         let mut parent = TraceLog::create(&path).unwrap();
         parent.write(&serde_json::json!({"kind":"finished-owner"}));
-        let duplicate = parent.out.get_ref().0.try_clone().unwrap();
+        let duplicate = parent.out.get_ref().try_clone().unwrap();
         let overlap = TraceLog::create(&path).unwrap();
         assert_ne!(overlap.path, path, "an active writer retains its lock despite duplication");
         drop(overlap);

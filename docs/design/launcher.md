@@ -18,13 +18,23 @@ without the launcher is the same as before.
   2026-11-16), with the same categories and rows in the same order, the Tweaks tab's
   groups too (as "Group › Category" headings). The game writes its page beside the INI at every start
   (`settings-menu.json`, `nvf_settings_layout::menu`, `engine/nvf-play/src/settings_menu.rs`):
-  each row's label and note as the page shows them, and its kind (switch, slider and its
-  steps' words, list and its choices). The launcher shows that file while its version is the
-  launcher's (`src/catalog.rs`). Rows are hidden and greyed as the game's page does it, by
+  each row's label and note as the page shows them, its kind (switch, slider and its
+  steps' words, list and its choices) and its default (the value the game takes while the INI
+  has none). Only a player's start writes it: a run given a switch a row names (`--no-voice`,
+  `--graphics-only`, …) leaves the file there as it is, and so does a run with fewer rows than
+  the same build's file there (a module missing that run); the log says
+  `settings: menu for the launcher not written: …` with the reason. The launcher shows that
+  file while its version and its table stamp (`nvf_settings_layout::layout_stamp`, a hash of
+  the tabs, categories, rows and rules) are the launcher's (`src/catalog.rs`): dev builds
+  between releases share a version, the stamp keeps one from showing another build's rows.
+  Rows are hidden and greyed as the game's page does it, by
   the same tables (`nvf_settings_layout::SHOWN_WITH`, `NEEDS`, `NEEDS_CHOICE`, the
   controller's rows by `[Controls] Input Device`), live as rows are changed on the page; a
-  greyed row keeps its value and says why ("Greyed out: Needs Sun Shadows."), a tab whose
-  rows are all hidden says what shows them. Greying the game decides from the machine (the
+  greyed row keeps its value and says why ("Greyed out: Needs Sun Shadows."). A rule's row
+  the INI does not hold yet counts as the game's default for it (the menu file's); with no
+  default known (the built-in copy) the rule holds, so the launcher never greys or hides a row
+  the game may not. No tab the launcher shows can have every row hidden (only the game's
+  Controls tab can). Greying the game decides from the machine (the
   GPU, DLSS's files, a run's command line) is the game's alone; a choice that is an action, not a value (Download DLSS… on
   the Upscaler row), is not in it. A row whose INI value the game's row takes is drawn from the
   game's row before the launcher's own lists (`src/display.rs`), which stay for the rows the INI
@@ -35,7 +45,7 @@ without the launcher is the same as before.
   `docs/settings-reference.md` (a test in the game holds the reference to the table; a
   Tweaks row is shown there by its key, only while the INI holds it). A row with no kind
   from the game goes by the value in the INI: `1`/`0` a switch, `0.50` a
-  slider (as a percentage, or the step's words for Difficulty), anything else text; Kill camera, V.A.T.S. style and the Display rows (Resolution as a Window and a Full screen
+  slider (as a percentage, or the step's words for Difficulty; the words can be typed into it too), anything else text; Kill camera, V.A.T.S. style and the Display rows (Resolution as a Window and a Full screen
   list of the chosen display's sizes, Monitor from the displays Windows lists, Display sync,
   Frame rate limit; `src/display.rs`, words and values the game's)
   get their choices as a list (a test checks the engine still has them). A
@@ -43,16 +53,22 @@ without the launcher is the same as before.
   `[Settings]` key the game's menu does not place (an older build's) is not shown. A slider the player
   moves is fitted onto its steps as the game fits it (from 0, to the thousandth); one only
   drawn keeps the INI's value, so opening a tab changes nothing. Save writes only the changed keys over the file as it is on disk then.
-- **Mods**: NVForever's own `plugins.txt` (turn on/off with the box or a click on the name; drag a row anywhere but its box to move it, with a gold line where it lands; FalloutNV.esm stays first). While the load order has
-  `TaleOfTwoWastelands.esm`, a box "start new games in Vault 101" writes TTW's two lines to
-  the INI's `[General]` (`sCharGenQuest=001FFFF8`, `sIntroMovie=`) at once, or takes them out
-  again (`src/ttw.rs`; a start quest of another mod is named and left until the box is
-  ticked), and warns while TTW is off in the list. Opening the page runs
+- **Mods**: NVForever's own `plugins.txt` (turn on/off with the box or a click on the name; drag a row anywhere but its box to move it, with a gold line where it lands; FalloutNV.esm stays first). A "New game start" card (`src/start.rs`, #2945) has the
+  start quest and intro film as free text with hints (`[General] sCharGenQuest`, `sIntroMovie`
+  of the INI, written by its Save start button over the file as it is on disk; an empty field
+  takes its line out, the game's default; "No intro film" writes `sIntroMovie=`). While the
+  load order has `TaleOfTwoWastelands.esm`, a button fills in TTW's values (`001FFFF8`, no
+  film), and the card warns while TTW is off in the list. Opening the page runs
   `fnv_install::plugins::sync`, as the game's start does, so new plugins get their lines.
 - **Game folder**: `[Game] Path` with the required-files check, the program to start
   (`[Launcher] Exe`, else `nvforever(.exe)` beside the launcher, else this checkout's
   `engine/target/release`), and buttons that open the saves, logs, screenshots and settings
-  folders.
+  folders. With no usable game folder (none in the INI that holds the game, no Mod
+  Organizer 2 start, no `NVFOREVER_DATA`) the launcher opens on this page and says so
+  (#2938). The box then starts on the game's usual place when the game is there (Steam's
+  default library: `~/.local/share/Steam` or `~/.steam/steam` on Linux, `C:\Program Files
+  (x86)\Steam` on Windows, and GOG's `C:\GOG Games\Fallout New Vegas`); it is stored only
+  by Save.
 - **Website / GitHub**: open nv-forever.com and the repository in the browser.
 
 ## Top and bottom bars
@@ -68,6 +84,12 @@ without the launcher is the same as before.
   (`--explore`) and "Close the launcher when the game starts" (`[Launcher] CloseOnPlay`).
   No `--data` is passed: the game reads its folder from the INI, so a launcher start is a
   player's start in every way (reports included, by the player's own choice).
+- With no usable game folder every start goes to the Game folder page and says the folder
+  must be set first, instead of starting a game that would only ask for it (Windows) or
+  quit (elsewhere) (#2938).
+- A game that ends with an error is said in the message line, with its exit code and the
+  logs folder; a clean exit clears "The game is starting…" (#2938). Not when the launcher
+  closed at the start (`CloseOnPlay`).
 
 ## Fonts
 
@@ -113,10 +135,13 @@ displays' adapters, the game asks the driver itself at start; the four upscaling
 frame generation files in the `dlss` folder), and Download DLSS…, Open dlss folder, NVIDIA's
 release page, Check again. Download DLSS… opens NVIDIA's licence (`nvf_dlss_files::LICENCE`);
 **I accept** takes a mouse click only, as in the game, and starts
-`nvf_dlss_files::download::start`: the game's own download, moved into the shared crate
+`nvf_dlss_files::download::start_into`: the game's own download, moved into the shared crate
 `crates/nvf-dlss-files` with its pins, signature checks and folder rule, so the two cannot
-differ. Its progress shows on the card; the folder is `dlss` beside the launcher, which is
-beside `nvforever.exe` in a release. The launcher never passes the developer test address.
+differ. Its progress shows on the card; the folder is `dlss` beside the game program the
+launcher starts (`dlss::folder_for`; the same folder as the launcher's in a release, and
+`engine/target/release/dlss` for a source checkout's launcher in `target/release`, where a
+folder beside the launcher was never read by the game), `NVF_DLSS_DIR` when set. The launcher
+never passes the developer test address.
 
 ## Updater (#2713)
 

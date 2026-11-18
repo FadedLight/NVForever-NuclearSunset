@@ -96,7 +96,7 @@ pub const SECTIONS: &[Section] = &[
     section("Gameplay", Some("Game"), &["difficulty", "hardcore", "reload-slows", "UsePipBoy", "sound-cover"]),
     // "V.A.T.S." as the data spells it (MESG `HelpVATS`).
     section("Gameplay", Some("V.A.T.S."), &["vats-style", "vats-slowdown", "kill-camera"]),
-    section("Gameplay", Some("Camera"), &["detached-camera", "true-iron-sights", "first-person-body", "weapon-lower", "field-of-view", "viewmodel-field-of-view"]),
+    section("Gameplay", Some("Camera"), &["detached-camera", "true-iron-sights", "first-person-body", "weapon-lower", "gore-shake", "field-of-view", "viewmodel-field-of-view"]),
     section("Gameplay", Some("Dialogue"), &["dialogue-zoom", "dialogue-look", "dialogue-recentre", "menu-pause", "dialogue-goodbye-hint", "lip-sync"]),
     section("Gameplay", Some("Saving"), &["autosave-travel", "autosave-fast-travel", "autosave-wait", "autosave-sleep", "autosave-scripts"]),
     section("Gameplay", Some("Bug Reports"), &["send-reports", "reports-delete"]),
@@ -193,10 +193,12 @@ pub const SECTIONS: &[Section] = &[
         ],
     ),
     section("Graphics", Some("Quality"), &["quality"]),
-    section("Graphics", Some("Shadows"), &["sun-shadows", "shadow-filter", "shadow-distance", "fine-shadows"]),
+    // Shadow resolution sizes the flashlight's maps too, so it needs no Sun shadows (no NEEDS
+    // line) (#2843).
+    section("Graphics", Some("Shadows"), &["sun-shadows", "shadow-filter", "shadow-resolution", "shadow-distance", "fine-shadows", "cloud-shadows"]),
     section("Graphics", Some("Lighting and Effects"), &["ambient-occlusion", "light-shafts", "bloom", "grade", "glow", "eye-adaptation", "neon-glow"]),
     section("Graphics", Some("Water"), &["water-reflections", "water-mirror"]),
-    section("Graphics", Some("Detail and Distance"), &["distant-lod", "grass", "anisotropic", "terrain-height-blend", "terrain-anti-tiling", "smooth-terrain", "object-distance", "actor-distance", "item-distance", "grass-distance"]),
+    section("Graphics", Some("Detail and Distance"), &["distant-lod", "grass", "anisotropic", "terrain-height-blend", "terrain-anti-tiling", "mesh-terrain-blend", "smooth-terrain", "object-distance", "actor-distance", "item-distance", "grass-distance"]),
     section("Graphics", Some("World and Animation"), &["head-tracking", "foot-ik", "sky-clock"]),
     // The owner's own layout of the movement work (tech/movement-inertia, 2026-11-15).
     section(NVF_FEATURES_TAB, Some("Advanced Movement"), &["advanced-movement", "movement-weight"]),
@@ -1005,6 +1007,55 @@ pub fn needs(key: &str) -> Vec<Rule> {
     let off = NEEDS.iter().filter(|(k, _, _)| *k == key).map(|(_, parent, why)| Rule { parent, choices: &[], why });
     let choice = NEEDS_CHOICE.iter().filter(|(k, _, _, _)| *k == key).map(|(_, parent, choices, why)| Rule { parent, choices, why });
     off.chain(choice).collect()
+}
+
+/// A stamp of this table (its tabs, every category and row in order, the rules): 16 hex
+/// digits, the same in every build of the same table and different once a row moves, is
+/// renamed, added or dropped or a rule changes. The game writes it in its menu file
+/// ([`menu::Menu::layout`]) and the launcher takes the file only while it is its own, as dev
+/// builds between releases share a version [design: #2830 review: the version alone let a
+/// launcher show an older build's rows].
+pub fn layout_stamp() -> String {
+    stamp_of(SECTIONS)
+}
+
+/// [`layout_stamp`] with `sections` for [`SECTIONS`].
+pub(crate) fn stamp_of(sections: &[Section]) -> String {
+    // FNV-1a, 64 bits: fixed by its definition, unlike std's hasher, so every build and
+    // platform agrees; the separators keep `["ab"]` and `["a", "b"]` apart.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut put = |s: &str, end: u8| {
+        for b in s.bytes().chain([end]) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    for t in TAB_ORDER {
+        put(t, 0x1f);
+    }
+    for s in sections {
+        let p = s.placement;
+        put(p.tab, 0x1f);
+        put(p.subgroup.unwrap_or(""), 0x1f);
+        put(p.heading.unwrap_or(""), 0x1f);
+        for k in s.keys {
+            put(k, 0x1f);
+        }
+        put("", 0x1e);
+    }
+    for (row, parent, why) in NEEDS {
+        put(&format!("{row}\u{1f}{parent}\u{1f}{why}"), 0x1e);
+    }
+    for (row, parent, choices) in SHOWN_WITH {
+        put(&format!("{row}\u{1f}{parent}\u{1f}{}", choices.join("\u{1f}")), 0x1e);
+    }
+    for (row, parent, choices, why) in NEEDS_CHOICE {
+        put(&format!("{row}\u{1f}{parent}\u{1f}{}\u{1f}{why}", choices.join("\u{1f}")), 0x1e);
+    }
+    for k in CONTROLLER_KEYS {
+        put(k, 0x1f);
+    }
+    format!("{h:016x}")
 }
 
 /// The table's faults: a key named twice, a tab not in [`TAB_ORDER`], a group outside the

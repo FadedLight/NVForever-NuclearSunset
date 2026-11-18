@@ -242,12 +242,16 @@ practice explains the selected movement thumb, dead zone, walking/running and
 fixed or floating joystick without using ammo or sending game actions.
 
 Mobile > Dialogue offers Normal (default), Classic, Field Notes, Retro Console
-and Wrist Terminal. Classic fits the live world and dialogue into a locally
-supplied blank template. Retro Console and Wrist Terminal use the installed
-Terminal and Pip-Boy models with separate dialogue screens. If a model or
+and Wrist Terminal. Classic fits the live world and dialogue into a bundled blank
+template unless the installation supplies `Textures/Interface/NVForever/Dialogue/classic.png`.
+Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
+with separate dialogue screens. If a model or
 template cannot safely present the conversation, Normal keeps dialogue playable
 without changing the saved theme. Minimal, Classic Glass and Split Panel still
 load as Normal, Classic and Field Notes, respectively.
+
+AI-generated image supplied by the contributor for NVForever's Classic dialogue
+frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
 
 Field Notes uses the speaker-side and backing/accent settings; the real device
 and Classic surfaces keep their own palettes and geometry. Text size and

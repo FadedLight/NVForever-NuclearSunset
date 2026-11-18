@@ -16,9 +16,11 @@ ROOT = Path(__file__).resolve().parents[2]
 TARGET = "aarch64-linux-android"
 API = 29
 
+CLASSIC_CASING = Path("dialogue/classic.png")
+
 
 def stage_assets(destination: Path) -> None:
-    """Stage only the tracked, engine-owned runtime files required by the launcher."""
+    """Stage only tracked, project-owned runtime data and Classic casing artwork."""
     for name in ("schemas", "lang"):
         source = ROOT / name
         for path in source.rglob("*"):
@@ -34,6 +36,13 @@ def stage_assets(destination: Path) -> None:
                 output = destination / name / relative
                 output.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, output)
+
+    casing = Path("engine/nvf-play/assets") / CLASSIC_CASING
+    subprocess.run(["git", "ls-files", "--error-unmatch", "--", casing.as_posix()],
+                   cwd=ROOT, stdout=subprocess.DEVNULL, check=True)
+    output = destination / CLASSIC_CASING
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / casing, output)
 
 
 def build_environment(ndk: Path, target_dir: Path, jobs: int) -> dict[str, str]:

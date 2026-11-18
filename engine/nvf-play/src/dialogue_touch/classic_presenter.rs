@@ -273,8 +273,13 @@ mod tests {
         }
     }
     fn scene(width:f32,density:f32,ui_scale:f32,font:bool)->(App,Entity,Entity,classic::tests::Files) {
+        scene_with_art(width, density, ui_scale, font, true)
+    }
+    fn scene_with_art(width: f32, density: f32, ui_scale: f32, font: bool, override_art: bool)
+        -> (App, Entity, Entity, classic::tests::Files)
+    {
         let (mut app,window)=layout_scene(true,Vec2::new(width,360.0),density);
-        let (files,data)=classic::tests::files(font);
+        let (files, data) = classic::tests::files_with_art(font, override_art);
         app.insert_resource(data).insert_resource(Assets::<Image>::default()).insert_resource(UiScale(ui_scale));
         app.configure_sets(Update,(crate::PlaySet::Input,crate::PlaySet::Physics,crate::PlaySet::Activation,
             crate::PlaySet::Scripts,crate::PlaySet::Ui,crate::PlaySet::Sync).chain());
@@ -312,6 +317,27 @@ mod tests {
         send(app,window,id,TouchPhase::Started,point);app.update();
         send(app,window,id,TouchPhase::Ended,point);app.update();
     }
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn classic_painter_uses_the_bundled_casing_unless_the_user_overrides_it() {
+        for (override_art, expected_pixel) in [
+            (false, [54, 45, 27, 255]),
+            (true, [37, 51, 73, 255]),
+        ] {
+            let (mut app, window, _, files) = scene_with_art(800., 1., 1., true, override_art);
+            assert_eq!(files.0.join(classic::ASSET).exists(), override_art);
+            let frame = *app.world().resource::<crate::dialogue_split::Frame>();
+            assert!(ready_for(window, Some(app.world().resource::<Surface>()), &frame));
+            let atlas = lease(&app).prepared.casing;
+            let mut nodes = app.world_mut().query::<&ImageNode>();
+            assert!(nodes.iter(app.world()).any(|node| node.image.id() == atlas && node.rect.is_some()));
+            let assets = app.world().resource::<Assets<Image>>();
+            let pixels = assets.get(atlas).unwrap().data.as_deref().unwrap();
+            let at = (100 * 1447 + 100) * 4;
+            assert_eq!(&pixels[at..at + 4], &expected_pixel);
+        }
+    }
+
     #[test]
     fn real_vfs_font_and_authored_camera_metadata_publish_safe_classic_rows_at_each_density_and_scale() {
         for (width,density,scale) in [(640.,1.,0.75),(640.,2.,1.5),(800.,1.,1.5),(800.,2.,1.)] {

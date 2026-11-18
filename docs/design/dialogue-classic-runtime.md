@@ -1,9 +1,15 @@
-# Supplied Classic dialogue casing
+# Classic dialogue casing
 
-Classic reads an optional locally supplied blank template at
-`Textures/Interface/NVForever/Dialogue/classic.png` through `GameData`. The calibrated
-layout is 1447×1087. The artwork remains private runtime data; it is not bundled in
-this repository or copied into the player's data by this implementation.
+Classic reads an optional local override at
+`Textures/Interface/NVForever/Dialogue/classic.png` through `GameData`. When no
+override is present, it uses the same bundled PNG on desktop and Android. The
+desktop executable embeds it; Android reads `assets/dialogue/classic.png` from
+the APK via the native asset manager. No file is written into the player's data.
+
+AI-generated image supplied by the contributor for NVForever's Classic dialogue
+frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
+
+The decoder expects a 1447×1087 8-bit RGB or RGBA PNG.
 
 The real supplied casing, lamps, speaker and controls remain opaque and retain their
 original colours. A bounded connected-black mask clears the four actual rounded
@@ -49,9 +55,10 @@ The old custom backing, tint, accent and frame-opacity choices remain stored for
 configurable Field Notes treatment. They do not fade or recolour real hardware. Text
 sizes and the saved confirmation mode still apply to Classic.
 
-`Cache::prepare` retries while `GameData` is absent, then reads and decodes once. A
-presentation/data reload can explicitly reset the caches. Ordinary frames do not read
-the file again. `Surface` describes actual prepared art/font/geometry; it alone is not a rendered-frame
+`Cache::prepare` retries while `GameData` is absent, then reads and decodes the
+override or bundled default once. An invalid override is refused rather than
+silently replaced. A presentation/data reload can explicitly reset the caches.
+Ordinary frames do not read the file again. `Surface` describes actual prepared art/font/geometry; it alone is not a rendered-frame
 claim. Resolve keeps its camera proposal private. The ordered Admit phase validates
 current ownership and writes the actual viewport before either UI painter selects a
 view; only then does `Frame.classic` publish that applied identity. Before Scripts,

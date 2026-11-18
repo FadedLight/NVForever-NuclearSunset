@@ -49,7 +49,7 @@ fn pick(world: &mut World, name: &str) -> bool {
     world.resource_mut::<Appearance>().theme = theme;
     true
 }
-const THEME_NOTE: &str = "Choose standard dialogue, Field Notes, a local Classic template, or an installed Terminal or Pip-Boy model.";
+const THEME_NOTE: &str = "Choose standard dialogue, Field Notes, the Classic casing, or an installed Terminal or Pip-Boy model.";
 fn theme_setting(note: &'static str) -> Setting {
     Setting { key: THEME_KEY, group: crate::pause::GROUP_MENUS, label: "Dialogue theme",
         note, switches: "", get: |_|false, set: |_,_|{}, slider: None }

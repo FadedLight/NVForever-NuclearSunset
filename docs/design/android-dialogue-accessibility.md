@@ -71,8 +71,8 @@ filter is a separate integration change. Native/device rendering remains unquali
 
 Enhanced dialogue keeps its own on/off switch, text sizes and confirmation mode.
 Normal reuses the native dialogue kit and is the fallback when a requested
-surface cannot be admitted. [Classic](dialogue-classic-runtime.md) uses a locally
-supplied template. Retro Console and Wrist Terminal render into separate
+surface cannot be admitted. [Classic](dialogue-classic-runtime.md) uses bundled
+art unless locally overridden. Retro Console and Wrist Terminal render into separate
 dialogue-owned screen canvases on the actual Terminal and resolved Pip-Boy
 models. Targets are mapped from the projected glass back into these canvases;
 housing, switches, stale presentation stamps and unavailable assets cannot act

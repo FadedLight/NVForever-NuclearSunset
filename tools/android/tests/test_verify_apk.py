@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 from pathlib import Path
 import struct
 import tempfile
@@ -37,6 +38,7 @@ class ApkTests(unittest.TestCase):
             self.assertEqual(result["gameDataFiles"], 0)
             self.assertEqual(set(result["elfLoadAlignments"].values()), {16384})
             self.assertEqual(len(result["sha256"]), 64)
+            self.assertEqual(result["classicCasingSha256"], hashlib.sha256(b"authored fixture").hexdigest())
 
     def test_rejects_x86_library_in_arm64_directory(self):
         with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
@@ -47,6 +49,11 @@ class ApkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
             with self.assertRaisesRegex(ValueError, "missing required"):
                 verify_apk.verify(self.apk(root, missing="assets/schemas/script/functions.json"))
+
+    def test_rejects_missing_classic_casing(self):
+        with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
+            with self.assertRaisesRegex(ValueError, "dialogue/classic.png"):
+                verify_apk.verify(self.apk(root, missing=verify_apk.CLASSIC_CASING))
 
     def test_rejects_accidental_game_content(self):
         with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:

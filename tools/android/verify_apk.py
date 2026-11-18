@@ -10,11 +10,14 @@ import struct
 import sys
 import zipfile
 
+CLASSIC_CASING = "assets/dialogue/classic.png"
+
 REQUIRED = {
     "AndroidManifest.xml", "classes.dex",
     "lib/arm64-v8a/libnvf_android.so", "lib/arm64-v8a/libc++_shared.so",
     "assets/schemas/fnv/common.json", "assets/schemas/nif/core.json",
     "assets/schemas/script/functions.json",
+    CLASSIC_CASING,
     "assets/LICENSE.txt", "assets/LEGAL.txt", "assets/THIRD-PARTY-LICENSES.txt",
     "assets/NDK-NOTICE.txt", "assets/NDK-NOTICE.toolchain.txt", "assets/SOURCE.txt",
 }
@@ -57,10 +60,13 @@ def verify(path: Path) -> dict:
         bad = apk.testzip()
         if bad:
             raise ValueError(f"Corrupt APK member: {bad}")
+        with apk.open(CLASSIC_CASING) as casing:
+            casing_digest = hashlib.file_digest(casing, "sha256").hexdigest()
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     return {"apk": str(path.resolve()), "bytes": path.stat().st_size, "sha256": digest,
             "abi": "arm64-v8a", "elfLoadAlignments": alignments, "gameDataFiles": 0,
+            "classicCasingSha256": casing_digest,
             "signature": "Verify separately with apksigner"}
 
 

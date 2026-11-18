@@ -27,7 +27,7 @@ struct Args {
     nif_schema: PathBuf,
     #[arg(long)]
     esm_schema: PathBuf,
-    /// Current locally supplied industrial dialogue frame, for Classic.
+    /// Classic industrial frame override; uses the bundled frame if absent.
     #[arg(long)]
     classic: Option<PathBuf>,
     /// New evidence directory, outside the game installation.
@@ -295,10 +295,9 @@ pub fn run() {
     );
     std::fs::create_dir(&args.output).expect("fresh output directory");
     let overlay = args.output.join("overlay");
-    let art = if args.theme == "Classic" {
+    let art = if let Some(path) = args.classic.as_ref().filter(|_| args.theme == "Classic") {
         let dest = overlay.join(CASING);
-        let source = std::fs::read(args.classic.as_ref().expect("--classic required"))
-            .expect("current private casing");
+        let source = std::fs::read(path).expect("Classic casing override");
         std::fs::create_dir_all(dest.parent().unwrap()).expect("owned asset overlay");
         std::fs::write(&dest, &source).expect("stage unchanged casing");
         Some((dest, source))

@@ -1,4 +1,4 @@
-//! Optional, locally supplied casing atlas. Live scene/text/actions belong to the
+//! Bundled casing atlas with a local override. Live scene/text/actions belong to the
 //! dialogue presentation, never to pixels captured in the supplied picture.
 use bevy::{image::ImageSampler,prelude::*,render::render_resource::TextureFormat};
 use nvf_assets::GameData;
@@ -21,7 +21,7 @@ const SEEDS:[UVec2;4]=[UVec2::new(300,500),UVec2::new(1000,310),
 
 /// Asset preparation only; Loaded does not assert a rendered frame or working input.
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub(crate) enum Status<'a> {WaitingForData,Missing,Invalid(&'a str),Loaded}
+pub(crate) enum Status<'a> {WaitingForData,Invalid(&'a str),Loaded}
 
 #[derive(Resource,Default)]
 pub(crate) struct Cache {
@@ -36,25 +36,43 @@ impl Cache {
         if !self.attempted {
             let Some(data)=data else{return Status::WaitingForData;};
             self.attempted=true;
-            if let Some(bytes)=data.read(ASSET) {
-                match decode(&bytes) {
-                    Ok(image)=>self.art=Some(LoadedArt {image:images.add(image)}),
-                    Err(error)=>{warn!("classic dialogue casing: {error}");self.error=Some(error);}
+            let image = match data.vfs.read(ASSET) {
+                Some(Ok(bytes)) => decode(&bytes),
+                Some(Err(error)) => Err(error.to_string()),
+                None => decode_bundled(),
+            };
+            match image {
+                Ok(image) => self.art = Some(LoadedArt { image: images.add(image) }),
+                Err(error) => {
+                    warn!("classic dialogue casing: {error}");
+                    self.error = Some(error);
                 }
-            } else {warn!("Classic dialogue casing is unavailable; using the normal dialogue view");}
+            }
         }
         self.status()
     }
     pub(crate) fn status(&self)->Status<'_> {
         if self.art.is_some(){Status::Loaded}
         else if let Some(error)=self.error.as_deref(){Status::Invalid(error)}
-        else if self.attempted {Status::Missing}
         else {Status::WaitingForData}
     }
     pub(crate) fn loaded(&self)->Option<&LoadedArt> {self.art.as_ref()}
 }
 
 pub(crate) fn install(app:&mut App) {app.init_resource::<Cache>();}
+
+#[cfg(not(target_os = "android"))]
+fn decode_bundled() -> Result<Image, String> {
+    decode(include_bytes!("../../assets/dialogue/classic.png"))
+}
+
+#[cfg(target_os = "android")]
+fn decode_bundled() -> Result<Image, String> {
+    let app = bevy::android::ANDROID_APP.get().ok_or("Android activity is unavailable")?;
+    let mut asset = app.asset_manager().open(c"dialogue/classic.png")
+        .ok_or("Bundled Classic dialogue casing is missing from the APK")?;
+    decode(asset.buffer().map_err(|error| error.to_string())?)
+}
 
 fn decode(bytes:&[u8])->Result<Image,String> {
     let mut decoder=png::Decoder::new(std::io::Cursor::new(bytes));
@@ -210,10 +228,18 @@ pub(super) mod tests {
     pub(crate) struct Files(pub std::path::PathBuf);
     impl Drop for Files {fn drop(&mut self){let _=std::fs::remove_dir_all(&self.0);}}
     pub(crate) fn files(with_font:bool)->(Files,GameData) {
+        files_with_art(with_font, true)
+    }
+    pub(crate) fn files_with_art(with_font: bool, override_art: bool) -> (Files, GameData) {
         let root=std::env::temp_dir().join(format!("nvf-classic-presenter-{}-{}",std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        let files=Files(root);let path=files.0.join(ASSET);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();std::fs::write(path,authored_png()).unwrap();
+        let files = Files(root);
+        std::fs::create_dir_all(&files.0).unwrap();
+        if override_art {
+            let path = files.0.join(ASSET);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, authored_png()).unwrap();
+        }
         if with_font {
             // Independently authored bitmap font, through the real .fnt/.tex reader.
             let name=crate::interface::font_file(crate::interface::FONT_FILES[4]).replace('\\',"/");
@@ -258,7 +284,7 @@ pub(super) mod tests {
         assert!(decode(&short).is_err(),"a different atlas cannot use these source apertures");
     }
     #[test]
-    fn runtime_vfs_asset_is_loaded_once_and_missing_data_never_fakes_presence() {
+    fn runtime_vfs_override_is_loaded_once_and_malformed_data_is_refused() {
         let (files,data)=files(false);let mut cache=Cache::default();let mut images=Assets::<Image>::default();
         assert_eq!(cache.prepare(None,&mut images),Status::WaitingForData);assert!(cache.loaded().is_none());
         assert_eq!(cache.prepare(Some(&data),&mut images),Status::Loaded);
@@ -266,10 +292,10 @@ pub(super) mod tests {
         std::fs::remove_file(files.0.join(ASSET)).unwrap();
         assert_eq!(cache.prepare(Some(&data),&mut images),Status::Loaded);
         assert_eq!(cache.loaded().unwrap().image.id(),image);assert_eq!(images.len(),1,"no per-frame decode");
-        let missing_root=files.0.join("missing");std::fs::create_dir(&missing_root).unwrap();
-        let missing_data=GameData {vfs:std::sync::Arc::new(fnv_vfs::Vfs::open(&missing_root,&[]).unwrap()),schema:data.schema.clone()};
-        let mut missing=Cache::default();assert_eq!(missing.prepare(Some(&missing_data),&mut images),Status::Missing);
-        assert!(missing.loaded().is_none());
+        std::fs::write(files.0.join(ASSET), b"not a PNG").unwrap();
+        let mut malformed = Cache::default();
+        assert!(matches!(malformed.prepare(Some(&data), &mut images), Status::Invalid(_)));
+        assert!(malformed.loaded().is_none(), "an invalid override is not silently replaced");
     }
     #[derive(Resource)]
     struct Fixture {art:LoadedArt,layout:Layout,scale:f32}

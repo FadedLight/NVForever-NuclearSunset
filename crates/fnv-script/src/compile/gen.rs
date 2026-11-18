@@ -314,7 +314,10 @@ impl<'a> Gen<'a> {
                 let i = self.lambdas.len();
                 self.lambdas.push((names, body));
                 let rest = &l.text[l.text.find(')').map_or(l.text.len(), |p| p + 1)..];
-                let text = format!("{before}__lambda{i}{rest}");
+                // The opening `(` separated a joined command name from its lambda.
+                // Keep that boundary without changing whitespace next to operators.
+                let sep = if before.ends_with(lex::word_char) { " " } else { "" };
+                let text = format!("{before}{sep}__lambda{i}{rest}");
                 let merged = lex::Line { no: first.no, toks: lex::tokens(&text), text };
                 match open.last_mut() {
                     Some(o) => o.3.push(merged),

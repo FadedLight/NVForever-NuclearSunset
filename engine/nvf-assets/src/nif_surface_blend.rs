@@ -546,6 +546,9 @@ impl From<&NifSurfaceBlendColour> for NifSurfaceBlendKey {
             add_linear: s.add_linear,
             pipboy_screen: s.pipboy_screen,
             anti_tiling: s.anti_tiling && crate::terrain_sampling::repeat_valid(s.terrain_repeat),
+            // An object blended into the landscape, not a landscape layer: bevy_pbr's rule
+            // decides its ambient occlusion.
+            terrain_layer: false,
         }, s.mesh_terrain_layout)
     }
 }

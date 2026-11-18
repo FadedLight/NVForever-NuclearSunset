@@ -195,7 +195,8 @@ pub fn ini_game_path(ini: &str) -> Option<PathBuf> {
 /// `%BASE_DIR%` itself defaulting to the instance's folder; the profile is
 /// `selected_profile` under `[General]`. Neither of the owner's instances sets the folders
 /// [observed: F:\Modlists\VNV and F:\Modding\MO2, 2026-11-01: `mods`, `overwrite` and
-/// `profiles` beside the INI]. A relative folder is read from the instance's folder
+/// profiles` beside the INI]. MO2 itself only substitutes `%BASE_DIR%` [documented:
+/// `PathSettings::resolve`]; a relative folder is joined onto the instance's folder here
 /// [hypothesis].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -324,6 +325,37 @@ impl Layout {
             }
         }
         names
+    }
+
+    /// The archives the profile has enabled, lowest precedence first, and the file the list
+    /// came from: `archives.txt` (the Archives tab's ticked entries, one name per line
+    /// [documented: MO2 `MainWindow::saveArchiveList`]) or, when that file is absent or
+    /// empty, `[Archive] SArchiveList` of the profile's `fallout.ini` [documented:
+    /// `FalloutNVDataArchives::archives`, which reads that key from the profile's INI when
+    /// local settings are on]. `None` when neither names an archive, so a profile made by
+    /// hand still starts with the shipped default list.
+    pub fn profile_archives(&self) -> Option<(Vec<String>, PathBuf)> {
+        let list = self.profile.join("archives.txt");
+        if let Ok(text) = std::fs::read_to_string(&list) {
+            let names: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_string)
+                .collect();
+            if !names.is_empty() {
+                return Some((names, list));
+            }
+        }
+        let ini = std::fs::read_dir(&self.profile).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case("fallout.ini")))?;
+        let text = std::fs::read_to_string(&ini).ok()?;
+        let names: Vec<String> = ini_value(&text, "Archive", "SArchiveList")?
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        (!names.is_empty()).then_some((names, ini))
     }
 
     /// Where a save of plugin `name` goes: the file of the enabled mod that gives `Data`
@@ -738,6 +770,34 @@ mod tests {
         // Overwrite beats every mod.
         std::fs::write(l.overwrite.join("Mine.esp"), "").unwrap();
         assert_eq!(l.save_target("Mine.esp"), SaveTarget { path: l.overwrite.join("Mine.esp"), mod_name: None, exists: true });
+        std::fs::remove_dir_all(&t).ok();
+    }
+
+    #[test]
+    fn profile_archives_from_the_tab_then_the_ini() {
+        let t = std::env::temp_dir().join(format!("nvf-mo2-archives-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let l = Layout { mods: t.join("mods"), overwrite: t.join("overwrite"), profile: t.join("profiles/P") };
+        std::fs::create_dir_all(&l.profile).unwrap();
+        // Neither file: the shipped default list stays.
+        assert_eq!(l.profile_archives(), None);
+        // The profile's own INI, matched without case, supplies SArchiveList when the
+        // Archives tab has not written its list.
+        std::fs::write(
+            l.profile.join("Fallout.ini"),
+            "[Archive]\r\nSArchiveList=Fallout - Textures.bsa, SomeMod - Textures.bsa\r\n",
+        )
+        .unwrap();
+        assert_eq!(l.profile_archives().unwrap().0, names(&["Fallout - Textures.bsa", "SomeMod - Textures.bsa"]));
+        assert_eq!(l.profile_archives().unwrap().1, l.profile.join("Fallout.ini"));
+        // archives.txt is what the Archives tab ticked: one name per line, and it wins.
+        std::fs::write(l.profile.join("archives.txt"), "Fallout - Meshes.bsa\r\nSomeMod.bsa\r\n").unwrap();
+        let (list, from) = l.profile_archives().unwrap();
+        assert_eq!(list, names(&["Fallout - Meshes.bsa", "SomeMod.bsa"]));
+        assert_eq!(from, l.profile.join("archives.txt"));
+        // An empty archives.txt (a profile MO2 has not filled yet) falls back to the INI.
+        std::fs::write(l.profile.join("archives.txt"), "").unwrap();
+        assert_eq!(l.profile_archives().unwrap().1, l.profile.join("Fallout.ini"));
         std::fs::remove_dir_all(&t).ok();
     }
 

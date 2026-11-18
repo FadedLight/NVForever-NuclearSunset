@@ -67,6 +67,8 @@ mod combat_style_session_tests;
 #[cfg(test)]
 #[path = "../tests/common/mod.rs"]
 mod common;
+#[cfg(test)]
+mod faction_modifier_tests;
 pub mod companion_wheel;
 pub mod coop;
 pub mod cond;
@@ -102,6 +104,7 @@ mod jip_provenance;
 #[cfg(test)]
 mod handler_diagnostics_tests;
 pub mod nvse;
+mod nvse_faction_modifiers;
 pub mod nvse_ttw;
 pub mod nvse_unlisted;
 pub mod nvse_unlisted2;
@@ -172,6 +175,7 @@ pub mod nvse_lu2;
 pub mod nvse_lu3;
 pub mod nvse_showoff4;
 pub mod nvse_leveled;
+mod nvse_actor_queries;
 pub mod nvse_jip2;
 pub mod nvse_gaps;
 pub mod nvse_jip3;
@@ -249,3 +253,5 @@ pub mod zones;
 
 pub use data::GameData;
 pub use game::{Game, GameConfig, InstKey};
+
+mod texture_filter;

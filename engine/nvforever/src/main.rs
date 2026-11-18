@@ -91,6 +91,7 @@ mod facegen;
 mod flashlight;
 mod eye_adapt;
 mod fog;
+mod haze;
 mod fly;
 mod foot_ik;
 mod anti_lag;
@@ -174,6 +175,7 @@ mod iron_sights;
 mod head_bob;
 mod view_sway;
 mod weapon_lower;
+mod sprint_view;
 mod setup;
 mod shadow_anchor;
 mod shadow_probe;
@@ -181,6 +183,7 @@ mod shadow_rate;
 mod shadow_thin;
 mod shafts;
 mod heat_haze;
+mod sun_heightfield;
 mod imagespace;
 mod imposters;
 mod sky;
@@ -191,6 +194,7 @@ mod limping;
 mod sneaking;
 mod swimming;
 mod ssao;
+mod ssao_lighting;
 mod taa;
 mod fg_presenter;
 mod ffx_api;
@@ -207,6 +211,7 @@ mod terrain;
 mod terrain_surface;
 mod mesh_terrain_blend;
 mod terrain_lod;
+mod terrain_shadows;
 mod terrain_wireframe;
 mod texture_swap;
 mod effect_particles;
@@ -214,7 +219,9 @@ mod effect_shaders;
 mod vats_highlight;
 mod tree;
 mod treelod;
+mod river_flow;
 mod underwater;
+mod underwater_caustics;
 mod vigor_view;
 mod walk_probe;
 mod water;
@@ -569,7 +576,7 @@ struct Args {
     dlss_model: Option<upscaler::DlssModel>,
     /// Instead of --graphics: exactly these improvements on, by the settings page's keys
     /// (ambient-occlusion, fine-shadows, bloom, sharpen, anisotropic, light-shafts,
-    /// water-reflections, terrain-height-blend, terrain-anti-tiling, cloud-shadows, heat-haze, and
+    /// water-reflections, water-effects, terrain-height-blend, terrain-anti-tiling, cloud-shadows, terrain-shadows, heat-haze, desert-haze, and
     /// mesh-terrain-blend, which no look turns on) and choices (fxaa, smaa or taa instead of --msaa;
     /// shadow-filter-hardware or shadow-filter-temporal), for comparing them one at a time.
     #[arg(long, value_delimiter = ',', conflicts_with = "graphics")]
@@ -851,6 +858,14 @@ struct Args {
     /// (nvf_play::inertia); a switch of the settings page (on by default).
     #[arg(long, requires = "play")]
     no_advanced_recoil: bool,
+    /// Sprint: the Sprint control (a key the player binds; none by default) runs faster for AP
+    /// (nvf_play::stance); off unless given; a switch of the settings page.
+    #[arg(long, requires = "play", conflicts_with = "no_sprint")]
+    sprint: bool,
+    /// No Sprint: the Sprint control does nothing (nvf_play::stance), the default; a switch of
+    /// the settings page.
+    #[arg(long, requires = "play")]
+    no_sprint: bool,
     /// Keep the first-person weapon up against walls and friendly actors close ahead
     /// (weapon_lower.rs); a switch of the settings page.
     #[arg(long, requires = "play")]
@@ -1159,12 +1174,19 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         None => None,
     };
     if let Some(l) = &mo2 {
-        let archives = l.mod_archives();
+        let (archives, listed) = match l.profile_archives() {
+            Some((list, _)) => {
+                let unlisted: Vec<String> = l.mod_archives().into_iter().filter(|a| !list.iter().any(|n| n.eq_ignore_ascii_case(a))).collect();
+                (unlisted, true)
+            }
+            None => (l.mod_archives(), false),
+        };
         if !archives.is_empty() {
             let shown: Vec<&str> = archives.iter().take(5).map(String::as_str).collect();
             eprintln!(
-                "warning: {} mod archive(s) are not mounted yet (#1526 phase 1): {}{}",
+                "warning: {} mod archive(s) {} (#1526): {}{}",
                 archives.len(),
+                if listed { "are not ticked in the profile's archive list, so not mounted" } else { "cannot be mounted: the profile names no archive list" },
                 shown.join(", "),
                 if archives.len() > shown.len() { ", …" } else { "" }
             );
@@ -1272,13 +1294,30 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             }
         }
     }
-    // The archives beside a plugin in the mods folder are mounted with it.
-    let game = match &mo2 {
-        Some(_) => {
-            let mut roots = mods.clone();
-            roots.reverse();
-            GameData::open_for_plugins_layered(args.data(), &roots, &args.plugins, &args.nif_schema)
+    // `--mo2`: the profile's own archive list (archives.txt, or its fallout.ini's
+    // SArchiveList) takes NVForever.ini's place, as MO2's Archives tab sets the game's list
+    // (#1526 phase 2).
+    if let Some(l) = &mo2 {
+        match l.profile_archives() {
+            Some((_, from)) if std::env::var(fnv_vfs::ARCHIVE_ORDER_ENV).is_ok_and(|v| !v.trim().is_empty()) => {
+                eprintln!("vfs: the Mod Organizer 2 profile's archive list from {} not used: {} sets the whole order", from.display(), fnv_vfs::ARCHIVE_ORDER_ENV);
+            }
+            Some((list, from)) => {
+                if fnv_vfs::set_archive_list(list.clone()).is_ok() {
+                    eprintln!("vfs: archive list from the Mod Organizer 2 profile ({})", from.display());
+                    for a in fnv_vfs::DEFAULT_ARCHIVE_LIST.iter().filter(|a| !list.iter().any(|n| n.eq_ignore_ascii_case(a))) {
+                        eprintln!("vfs: warning: the profile's archive list leaves out {a}; its files will be missing");
+                    }
+                }
+            }
+            None => eprintln!("setup: the Mod Organizer 2 profile names no archive list; using the shipped default"),
         }
+    }
+    // The archives beside a plugin in the mods folder are mounted with it. The VFS takes
+    // the layers lowest precedence first (usvfs' merge order), unlike the plugin lookup
+    // above, which wants the overwrite folder first.
+    let game = match &mo2 {
+        Some(l) => GameData::open_for_plugins_layered(args.data(), &l.mod_roots(), &args.plugins, &args.nif_schema),
         None => GameData::open_for_plugins_in(args.data(), mods.first().map(|p| p.as_path()), &args.plugins, &args.nif_schema),
     };
     let game = match game {
@@ -1722,10 +1761,12 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     )
     .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
-    .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
+    .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins((imagespace::ImageSpacePlugin, sky::SkyPlugin, cloud_shadows::CloudShadowsPlugin, graphics::GraphicsPlugin(graphics, msaa, frame_times), minimap_render::MinimapRenderPlugin))
     // The sun visibility factor: cloud and terrain shadows on the sun (off until a producer sets it).
     .add_plugins(sun_visibility::SunVisibilityPlugin)
+    // The ambient occlusion's shader for the lighting (imported only under its def).
+    .add_plugins(ssao_lighting::SsaoLightingPlugin)
     .add_plugins(mesh_terrain_blend::MeshTerrainBlendPlugin)
     // The switches the settings page weighs against the INI (`--play` only), for the
     // frame split's start-time decision (perf_overlay/split.rs).
@@ -1825,6 +1866,13 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_systems(Update, world::note_other_cameras.after(world::stream))
     // 4 x 4 near's redraws by distance (#2676): after streaming spawned this frame's cells.
     .add_plugins(terrain_lod::TerrainLodPlugin)
+    // The landscape's height map around the camera for terrain shadows (#2671); built only
+    // while the Terrain shadows row (or NVF_PLAY_DEBUG_SUN_HEIGHTFIELD) wants it (sun_heightfield.rs).
+    .add_plugins(sun_heightfield::SunHeightfieldPlugin)
+    // Terrain shadow heights from that map, on the GPU (#2671); the Terrain shadows row
+    // (terrain_shadows::follow_graphics) or NVF_PLAY_DEBUG_TERRAIN_SHADOWS turns them on,
+    // nothing allocated or dispatched while off (terrain_shadows.rs).
+    .add_plugins(terrain_shadows::TerrainShadowsPlugin)
     .add_systems(Update, (cell_buffer::remember, cell_buffer::tell_game).chain().after(world::stream))
     .add_systems(Update, world::script_markers.before(world::stream))
     .add_systems(Update, world::draw_waiting_actors.after(world::stream))
@@ -1866,6 +1914,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // Placed models' and effect models' billboard nodes face the camera (#2549).
     .add_systems(PostUpdate, world::face_camera.before(bevy::transform::TransformSystems::Propagate))
     .add_systems(PostUpdate, sky::sun_casters_over_slice.after(bevy::light::SimulationLightSystems::CheckLightVisibility))
+    .add_systems(PostUpdate, shadow_rate::share_mirror_casters.after(sky::sun_casters_over_slice).after(player_body::near_shade_casters))
     // The sun's cascades' far bounds and texel sizes, logged when they change.
     .add_systems(PostUpdate, sky::log_sun_cascades.after(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades).before(shadow_anchor::anchor_cascades))
     .add_systems(Startup, (crash::report_start, report_archives))
@@ -1982,6 +2031,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             inertia.weapon_handling = args.weapon_handling;
             inertia.smooth = args.animation_smoothing;
             inertia.recoil = !args.no_advanced_recoil;
+            inertia.sprint = args.sprint;
             inertia.advanced = !args.no_advanced_movement;
             app.insert_resource(inertia);
             app.add_plugins(decals::DecalsPlugin);

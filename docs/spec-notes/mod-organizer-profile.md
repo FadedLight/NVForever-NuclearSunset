@@ -32,9 +32,12 @@ Keys [documented: `PathSettings`]:
 - `[Settings] overwrite_directory` — default `%BASE_DIR%/overwrite`.
 
 Values are QSettings strings: `%BASE_DIR%` is substituted, and `\\`, `\"`, `\xHH` and the
-other Qt escapes are read (the engine already had `mo2::ini_value` for this). A relative
-value is joined onto the instance folder [hypothesis: MO2 resolves relative to the same
-folder; no instance on this host sets one].
+other Qt escapes are read (the engine already had `mo2::ini_value` for this). MO2's
+substitution is all `PathSettings::resolve` does — it replaces `%BASE_DIR%` and leaves any
+other value as written [documented: `PathSettings::resolve`, `getConfigurablePath`], so a
+relative value would be relative to MO2's own working directory. NVForever instead joins a
+relative value onto the instance folder, the reading that makes a hand-written INI work
+[hypothesis: no instance on this host sets one].
 
 The profile's files are `<profiles_directory>/<name>/modlist.txt`, `plugins.txt` and
 `loadorder.txt`.
@@ -74,12 +77,28 @@ Nominal New Vegas load order still applies on top: the first master first, maste
 their dependants; the engine's `fnv_esm::loadorder` refuses a list that breaks it and says
 why.
 
+## The profile's archive list
+
+[documented: `MainWindow::saveArchiveList`, `FalloutNVDataArchives::archives`/`writeArchiveList`]
+
+- `archives.txt` in the profile: one **ticked** archive name per line (CRLF), from MO2's
+  Archives tab, in the tab's display order; nothing else. MO2 writes it whenever the
+  archive list or mod priorities change, so it is the profile's live archive choice.
+- The same ticks are also written into `[Archive] SArchiveList` of the applicable
+  `fallout.ini`: the profile's own file when local settings are on, else the one under
+  `Documents\My Games\FalloutNV`. MO2 joins the names with `, `.
+- An empty `archives.txt` (a profile made by hand, or one MO2 has not opened) means the
+  game's list comes from the INI; with neither, MO2 falls back to the six vanilla archives.
+- A `.bsa` in a mod folder is only loaded when its name is in this list; usvfs makes the
+  file visible in `Data`, but the game loads archives by name. NVForever mounts exactly the
+  listed names, taking each from the highest layer that has the file.
+
 ## What usvfs merges, in order
 
 [documented: `OrganizerCore::fileMapping`, usvfs' mapping priorities]
 
 The program sees `Data` as: the game folder's own files, then each enabled mod's folder by
 priority (higher priority replacing lower), then the overwrite folder. NVForever implements
-the same precedence for loose files and for looking a plugin up. Archives inside mods are a
-separate mechanism (the game loads `.bsa`s by name from `Data`), not covered here; see
-docs/design/mod-folders.md for what is still missing.
+the same precedence for loose files, for looking a plugin up, and for finding the file an
+archive name stands for (a mod's copy of a base archive replaces the game's). Which archives
+are mounted at all is the profile's archive list, above.

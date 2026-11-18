@@ -1057,6 +1057,8 @@ pub struct GameData {
     /// FACT XNAM: (other faction, group combat reaction 0 neutral, 1 enemy, 2 ally,
     /// 3 friend).
     pub faction_reactions: HashMap<FormId, Vec<(FormId, i64)>>,
+    /// Directional decoded FACT XNAM disposition modifiers, separate from combat.
+    pub faction_modifiers: HashMap<FormId, Vec<(FormId, i64)>>,
     /// FACT DATA flags as one number: the first byte's bits (1 Hidden from PC, 2 Evil,
     /// 4 Special Combat) and the second's shifted by 8 (256 Track Crime, 512 Allow Sell)
     /// [documented: xEdit wbDefinitionsFNV.pas FACT, schema `gameplay.json`; the numbering
@@ -1522,6 +1524,7 @@ struct Read {
     race_older: Option<FormId>,
     race_younger: Option<FormId>,
     faction: Option<Vec<(FormId, i64)>>,
+    faction_modifiers: Option<Vec<(FormId, i64)>>,
     faction_flags: Option<u16>,
     faction_reputation: Option<FormId>,
     cell: Option<crate::crime::CellDef>,
@@ -1961,6 +1964,7 @@ impl GameData {
             race_older: HashMap::new(),
             race_younger: HashMap::new(),
             faction_reactions: HashMap::new(),
+            faction_modifiers: HashMap::new(),
             faction_flags: HashMap::new(),
             faction_reputations: HashMap::new(),
             cells: HashMap::new(),
@@ -2222,6 +2226,9 @@ impl GameData {
                 }
                 if let Some(v) = r.faction {
                     d.faction_reactions.insert(id, v);
+                }
+                if let Some(v) = r.faction_modifiers {
+                    d.faction_modifiers.insert(id, v);
                 }
                 if let Some(v) = r.destruction {
                     d.destructibles.insert(id, v);
@@ -3629,6 +3636,11 @@ fn read_one(lo: &LoadOrder, schema: &Schema, types: &ParamTypes, g: u32, pi: usi
             out.race_younger = link(b"YNAM");
         }
         b"FACT" => {
+            out.faction_modifiers = Some(decoded.iter().filter(|(s, _)| *s == b"XNAM").filter_map(|(_, v)| {
+                let v = v.as_ref()?;
+                let f = v.get("faction").and_then(hexid).and_then(map)?;
+                Some((FormId(f), v.get("modifier")?.as_i64()?))
+            }).collect());
             out.faction = Some(
                 decoded
                     .iter()

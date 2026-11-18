@@ -3,7 +3,7 @@
 
 use crate::fade::CellFade;
 use crate::terrain::{prepare_terrain, spawn_terrain, TerrainCtx, TerrainMaterials, TerrainPrep};
-use crate::water::{water_material, WaterCtx};
+use crate::water::{cell_water_center, water_material, WaterCtx};
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, Task};
@@ -1247,7 +1247,7 @@ fn spawn_ref(
         return;
     }
     // Placeable water: its model's shapes drawn as its water type's surface.
-    if &base.sig == b"PWAT" && spawn_placed_water(commands, cell_e, world, &base, r, to_cell * ref_affine(&p), models, water, stats) {
+    if &base.sig == b"PWAT" && spawn_placed_water(commands, cell_e, world, &base, r, streamer.interior.is_none().then(|| Vec3::from_array(p.position)), to_cell * ref_affine(&p), models, water, stats) {
         return;
     }
     // A destroyed reference: its destruction stage's replacement model (destroyed.rs).
@@ -1273,6 +1273,7 @@ fn spawn_placed_water(
     world: &WorldData,
     base: &BaseObject,
     r: u32,
+    exterior_position: Option<Vec3>,
     rt: Affine3A,
     models: &mut ModelCtx,
     water: &mut WaterCtx,
@@ -1282,7 +1283,7 @@ fn spawn_placed_water(
     let Some(path) = base.world_model_path() else { return false };
     let Some(model) = models.model(&path) else { return false };
     let reflects = fnv_world::sky::placeable_water_reflects(world.lo, world.schema, base.form_id);
-    let Some(mat) = water_material(world, wid, reflects, true, models, water) else { return false };
+    let Some(mat) = water_material(world, wid, reflects, true, exterior_position, models, water) else { return false };
     if !reflects {
         info!("placed water {r:08X}: its PWAT {:08X} does not set Reflects, drawn without reflection", base.form_id);
     }
@@ -1768,7 +1769,7 @@ fn spawn_water(
     // The same surface the physics swims in (`Cell::water_surface`, physics.md §6.6).
     let Some(height) = c.water_surface(ws.default_water_height) else { return };
     let Some(wid) = c.water_type.or(ws.water) else { return };
-    let Some(mat) = water_material(world, wid, true, false, models, water) else { return };
+    let Some(mat) = water_material(world, wid, true, false, c.grid.map(|grid| cell_water_center(grid, height)), models, water) else { return };
     let s = CELL_SIZE;
     let mesh = water.plane(&mut models.meshes);
     commands.entity(cell_e).with_child((

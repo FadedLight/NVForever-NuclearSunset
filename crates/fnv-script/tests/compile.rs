@@ -549,6 +549,37 @@ end");
 }
 
 #[test]
+fn a_joined_block_lambda_is_the_calls_first_argument() {
+    // Public issue #2985: the opener's `(` can be the only separator.
+    for opener in ["Call (begin function", "Call ( begin function", "Call(begin function"] {
+        let source = format!(
+            "int result\nint input\nbegin GameMode\n\
+             let result := {opener}{{input}}\nSetFunctionValue input\nend) 7\n\
+             {opener}{{input}}\nSetFunctionValue input\nend) 7\nend"
+        );
+        let (_, p) = build(&source);
+        let [Stmt::Let { expr: XExpr::Assign { value, .. } }, Stmt::Eval { expr: XExpr::Call { call: statement } }] = body(&p)
+        else {
+            panic!("{opener}: expected a let and a call statement, got {:?}", body(&p));
+        };
+        let XExpr::Call { call: assigned } = value.as_ref() else {
+            panic!("{opener}: expected a call on the right of let, got {value:?}");
+        };
+        for call in [assigned, statement] {
+            assert_eq!(call.func, FuncId::Name("Call".into()), "{opener}");
+            let [XExpr::Lambda { params, body, value: None, .. }, XExpr::Num { value, .. }] = call.args.as_slice() else {
+                panic!("{opener}: expected a block lambda and the trailing argument, got {:?}", call.args);
+            };
+            assert_eq!(*value, 7.0, "{opener}");
+            let [param] = params.as_slice() else { panic!("{opener}: expected one lambda parameter, got {params:?}") };
+            assert!(param.on.is_none() && matches!(param.var, VarSlot::Local { index: 2, .. }), "{opener}: {param:?}");
+            let [Stmt::Eval { expr }] = body.as_slice() else { panic!("{opener}: expected the lambda body, got {body:?}") };
+            assert_eq!(x(expr), "SetFunctionValue(v2)", "{opener}");
+        }
+    }
+}
+
+#[test]
 fn lambdas_in_both_forms() {
     let src = "int r
 int x

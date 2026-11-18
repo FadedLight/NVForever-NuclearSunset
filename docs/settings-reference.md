@@ -894,7 +894,12 @@ below cover them all.
 - On the page: Enter or a click: bind a new key or mouse button to the control (a control
   that had it gets the old one). Delete clears its key.
 - In full: a key replaces the control's key, a mouse button its mouse button. Kept under the
-  control's name in [Controls] of NVForever.ini.
+  control's name in [Controls] of NVForever.ini. Sprint (NVForever's own, at the end of
+  Movement) is greyed and cannot be rebound while its NVF Features › Advanced Movement switch
+  is off; its note says so. It has no key until the player binds one, and Run keeps Left
+  Shift whether Sprint is on or off; a key bound to Sprint that another control has is
+  swapped as for any two controls (`sprint` under NVF Features › Gameplay below; #3000, the
+  maintainer's decision on #3002).
 
 ### A control (controller)
 
@@ -1001,6 +1006,24 @@ below cover them all.
 - More: docs/design/sun-visibility.md
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `terrain-shadows`: Terrain shadows (experimental)
+
+- On the page: On: at a low sun, hills and mountains shade the land beyond the reach of the
+  sun's shadows. Still being tuned. Not in the original.
+- In full: A height map of the land around you (32 by 32 cells, 256 units a texel) is
+  marched towards the sun on the GPU into a shadow-height map, which darkens the sun's (and
+  at night the moon's) direct light on everything below a ridge's shadow, softened with the
+  ridge's distance. Near you the sun shadows already show the land's own shadows, and the
+  darker of the two counts; beyond their reach the terrain's shade alone, and object
+  shadows end where the sun shadows end, as with the row off. Ambient light,
+  lamps, fog and reflections are left alone. Experimental: off by default and in every
+  preset; its softness and its bias against speckle on slopes are not tuned yet. Switching
+  it rebuilds the world's material pipelines (Continue waits for them). Works with Sun
+  shadows off too.
+- Command-line switches: `--graphics`, `--graphics-only`
+- More: docs/design/terrain-shadows.md, docs/design/sun-visibility.md
+- Registered in `engine/nvforever/src/settings.rs`
+
 ## Graphics › Lighting and Effects
 
 ### `ambient-occlusion`: Ambient occlusion
@@ -1030,7 +1053,18 @@ below cover them all.
   overcast is not told from clear yet. Near things, the weapon and the HUD stay sharp. Off
   in both presets; not in the original.
 - Command-line switches: `--graphics-only`
-- More: docs/design/graphics-enhanced.md §3.15
+
+### `desert-haze`: Desert haze (experimental)
+
+- On the page: On: a thin dust haze thickens with distance and toward the ground, warmer
+  toward the sun, as far as the weather's fog allows. Not in the original.
+- In full: On: a dust haze is added to the weather's own distance fog, worked out per
+  pixel in the fog itself: thicker with distance and toward the ground under the camera,
+  warmer looking into the sun by day. A clear weather gets all of it, a short or dense fog
+  (a hazy weather, a dust storm) none; a weather with a very far fog a thinner one. Off in
+  every preset; not in the original. Outdoors only.
+- Command-line switches: `--graphics`, `--graphics-only`
+- More: docs/design/graphics-enhanced.md §3.16
 - Registered in `engine/nvforever/src/settings.rs`
 
 ### `bloom`: Bloom
@@ -1095,6 +1129,16 @@ below cover them all.
   second time for it while water is on screen. Off: water reflects the sky, and what is on
   the screen with screen-space reflections.
 - Command-line switches: `--graphics-only`
+- More: docs/design/graphics-enhanced.md
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `water-effects`: Water caustics and river flow
+
+Sunlight shifts across shallow beds. Deeper water looks murkier from shore and
+underwater, using each water type's own colours and fog distances. Selected river
+stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
+
+- Command-line switches: `--graphics`, `--graphics-only water-effects`
 - More: docs/design/graphics-enhanced.md
 - Registered in `engine/nvforever/src/settings.rs`
 
@@ -1283,6 +1327,24 @@ below cover them all.
 - On the page: On: a shot's kick eases the view up and part of it settles back down, and the view nudges back. Off: the whole kick stays, as in the original.
 - Command-line switches: `--no-advanced-recoil`
 - On by default, the one Advanced Movement part that is.
+- Registered in `engine/nvf-play/src/player.rs`
+
+### `sprint`: Sprint
+
+- On the page: On: hold the Sprint key (set it in Controls) to run faster, spending AP every second; stopping low on AP leaves you out of breath. Off: as in the original.
+- In full: the Sprint control (Controls › Movement) has no key until the player binds one,
+  and is greyed and does nothing while this is off or the Global Toggle is; Run keeps Left
+  Shift whatever this is (#3000, the maintainer's decision on #3002). A full sprint is
+  1.45 times the run speed, walking (Always Run off) too, and costs 10 AP a second (none
+  come back meanwhile; it ends at 0 AP); forward only, half a sprint diagonally; aiming,
+  attacking, reloading, sneaking, lying down,
+  over-encumbered or in water stop it, eased out. Stopping under 20 % AP leaves you out of
+  breath, and sprinting the view sways a little to the sides (both shown by Camera Motion).
+  While sprinting and while the AP comes back after it, a quiet heartbeat beats: slower under
+  40 % AP, faster under 20 % (the low-health heartbeat wins). The speed and AP perks apply to the sprint
+  (docs/design/player-body.md §1.4a.4).
+- Command-line switches: `--sprint`, `--no-sprint`
+- Off by default.
 - Registered in `engine/nvf-play/src/player.rs`
 
 ## NVF Features › Visual Only

@@ -387,6 +387,44 @@ pub fn depth_equal(descriptor: &mut RenderPipelineDescriptor, mesh_key: MeshPipe
     }
 }
 
+/// The shader def under which the lighting takes the ambient occlusion on the ambient light
+/// (nvforever ssao_lighting.rs; bevy_pbr pushes it, for pipelines that write depth, on the
+/// views that have the occlusion's bindings: engine/vendor/README.md).
+pub const AMBIENT_OCCLUSION_DEF: &str = "NVF_AMBIENT_OCCLUSION";
+
+/// A pipeline that must not take the ambient occlusion although bevy_pbr's rule gives it the
+/// def: its surface is not the one the depth prepass holds (water, a refracting shape), so
+/// the texels under it are another surface's (the bed's, the wall's behind), or a material
+/// that chose not to (nvforever grass.rs, tree.rs constants). The view's layout keeps the
+/// bindings; the shader just does not read them.
+pub fn ambient_occlusion_opt_out(descriptor: &mut RenderPipelineDescriptor) {
+    let def = ShaderDefVal::from(AMBIENT_OCCLUSION_DEF);
+    descriptor.vertex.shader_defs.retain(|d| *d != def);
+    if let Some(fragment) = descriptor.fragment.as_mut() {
+        fragment.shader_defs.retain(|d| *d != def);
+    }
+}
+
+/// A main-pass pipeline that takes the ambient occlusion although bevy_pbr's rule (depth
+/// written) leaves it out: a blended surface drawn on the surface the depth prepass holds
+/// (the landscape's blended texture layers), whose crease would otherwise show the base's
+/// occlusion through unoccluded patches. Only on a view that has the bindings (the key's
+/// bit), never in a prepass.
+pub fn ambient_occlusion_opt_in(descriptor: &mut RenderPipelineDescriptor, mesh_key: MeshPipelineKey) {
+    if !mesh_key.contains(MeshPipelineKey::NVF_AMBIENT_OCCLUSION) || descriptor.vertex.shader_defs.contains(&ShaderDefVal::from("PREPASS_PIPELINE")) {
+        return;
+    }
+    let def = ShaderDefVal::from(AMBIENT_OCCLUSION_DEF);
+    if let Some(fragment) = descriptor.fragment.as_mut() {
+        if !fragment.shader_defs.contains(&def) {
+            fragment.shader_defs.push(def.clone());
+        }
+    }
+    if !descriptor.vertex.shader_defs.contains(&def) {
+        descriptor.vertex.shader_defs.push(def);
+    }
+}
+
 /// The extension part: the falloff parameters, the alpha cut, the decal switch and the
 /// fragment shader.
 ///
@@ -628,6 +666,10 @@ pub struct NifSurfaceKey {
     pub pipboy_screen: bool,
     /// A landscape material with anti-tiling on and a repeat to place it with.
     pub anti_tiling: bool,
+    /// A landscape material (a repeat to place it with): its blended texture layers lie on
+    /// the surface the depth prepass holds and take the ambient occlusion
+    /// ([`ambient_occlusion_opt_in`]).
+    pub terrain_layer: bool,
 }
 
 impl From<&NifSurface> for NifSurfaceKey {
@@ -643,6 +685,7 @@ impl From<&NifSurface> for NifSurfaceKey {
             add_linear: surface.add_linear,
             pipboy_screen: surface.pipboy_screen,
             anti_tiling: surface.anti_tiling && crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
+            terrain_layer: crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
         }
     }
 }
@@ -695,6 +738,14 @@ impl MaterialExtension for NifSurface {
         }
         if key.bind_group_data.anti_tiling {
             crate::terrain_sampling::anti_tiling_defs(descriptor, true);
+        }
+        // The ambient occlusion in the lighting (module notes of nvforever ssao_lighting.rs):
+        // a refracting shape is in no prepass, so the texels under it are the surface behind;
+        // the landscape's blended layers lie on the prepass's surface.
+        if key.bind_group_data.refract {
+            ambient_occlusion_opt_out(descriptor);
+        } else if key.bind_group_data.terrain_layer {
+            ambient_occlusion_opt_in(descriptor, key.mesh_key);
         }
         if key.bind_group_data.refract {
             refraction_pipeline(descriptor);
@@ -1462,7 +1513,7 @@ mod tests {
         // Only the switches in `NifSurfaceKey` select the pipeline; the falloff and the
         // alpha cut are uniforms.
         let mut surface = NifSurface::default();
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         assert_eq!(surface.alpha_cut, 0.0);
         assert_eq!(surface.emissive_rule, Vec4::ZERO);
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, Vec4::ZERO);
@@ -1472,19 +1523,19 @@ mod tests {
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, surface.emissive_rule);
         assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey::from(&NifSurface::default()));
         surface.decal = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         surface.hard_edges = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         surface.shade_light = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         // The refraction strength is a uniform; whether the shape refracts is the pipeline's.
         surface.refraction = 0.1;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         surface.refract = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
         // A FaceGen offset selects the tinting shader.
         surface.facegen_offset = Some(Handle::default());
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
     }
 
     /// First-person depth (module notes): the squeeze keeps the near plane at 1, puts the
@@ -1512,6 +1563,11 @@ mod tests {
         assert!(!NifSurfaceKey::from(&NifSurface { anti_tiling: true, ..default() }).anti_tiling, "not a landscape material");
         assert!(!NifSurfaceKey::from(&NifSurface { terrain_repeat: 256.0, ..default() }).anti_tiling, "switch off");
         assert!(NifSurfaceKey::from(&NifSurface { terrain_repeat: 256.0, anti_tiling: true, ..default() }).anti_tiling);
+        // A landscape material is a terrain layer (its blended layers take the ambient
+        // occlusion), with anti-tiling or without; a repeat it cannot place with is not.
+        assert!(NifSurfaceKey::from(&NifSurface { terrain_repeat: 256.0, ..default() }).terrain_layer);
+        assert!(!NifSurfaceKey::from(&NifSurface::default()).terrain_layer);
+        assert!(!NifSurfaceKey::from(&NifSurface { terrain_repeat: -1.0, ..default() }).terrain_layer);
         assert_eq!(NifSurfaceUniform::from(&NifSurface { terrain_repeat: 300.0, ..default() }).terrain, Vec4::new(300.0, 0.0, 0.0, 0.0));
         assert_eq!(NifSurfaceUniform::from(&NifSurface::default()).terrain, Vec4::ZERO);
         assert_eq!(NifSurfaceUniform::from(&NifSurface { terrain_repeat: -1.0, anti_tiling: true, ..default() }).terrain, Vec4::ZERO);

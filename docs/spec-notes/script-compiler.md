@@ -322,8 +322,11 @@ expression parser), `vm.rs` (`xeval`).
   variable. Lambdas: `(begin function {params} … end)`, which may span lines, and
   `{params} => expr` [documented: Lambda], both an `XExpr::Lambda` whose parameters and
   variables are the enclosing script's; the block form's statements are compiled with the
-  unit's own lists. Running them (calls, the 30-call nesting limit, SetFunctionValue) is
-  B7/B8.
+  unit's own lists. [design, #2985] The block lambda's `(` may directly follow the command
+  name: `Call(begin function {params} … end) args` in NVForever has the same argument
+  structure as `Call (begin function {params} … end) args`.
+  [hypothesis] The original extender parses the joined form the same way; this has not been observed.
+  Running them (calls, the 30-call nesting limit, SetFunctionValue) is B7/B8.
 - **Compiler-override blocks** (A12): `Begin _GameMode` (any block name after `_`) is that
   block, and inside it `if`, `elseif` and `set` take extended expressions too, with the
   argument rule above [documented: Script Compiler Override].

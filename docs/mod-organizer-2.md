@@ -52,8 +52,10 @@ MO2 does not run on Linux, so the native engine can do the merge itself from the
 `selected_profile`) reads the active mods' loose files over `Data`, the overwrite folder last,
 and loads the profile's plugins in its order. Nothing is written into the game folder or into
 MO2's folders, and MO2 keeps being where mods are installed and ordered. Mod-held `.bsa`
-archives are not mounted yet (phase 2) and the start warns about them. Design and limits:
-[mod-folders](design/mod-folders.md).
+archives are mounted too: the profile's archive list (`archives.txt`, or its `fallout.ini`'s
+`SArchiveList`) decides which, and each is read from the enabled mod's folder that holds it.
+Profile INIs beyond that key, and the profile's saves, are still for a later phase. Design and
+limits: [mod-folders](design/mod-folders.md).
 
 ```
 nvforever --data "<game>\Data" --mo2 "<instance>" --profile "<name>"

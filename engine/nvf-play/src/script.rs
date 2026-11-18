@@ -801,7 +801,8 @@ impl Runtime {
         if let Some(f) = front {
             if let Some(m) = self.game.message_box.as_mut().filter(|m| m.message == f && m.pressed.is_none()) {
                 let b = button.unwrap_or(0);
-                if b < 0 || b as usize >= m.buttons {
+                // A box without buttons shows OK alone: button 0 (#2925).
+                if b < 0 || b as usize >= m.buttons.max(1) {
                     return false;
                 }
                 m.pressed = Some(b);
@@ -2977,6 +2978,44 @@ mod no_messages_tests {
     fn a_box_of_one_button_asks_nothing() {
         assert!(asks_nothing(0) && asks_nothing(1));
         assert!(!asks_nothing(2));
+    }
+
+    /// The front box, waiting, of a message with `buttons` buttons.
+    fn box_open(buttons: usize) -> ScriptState {
+        let mut s = ScriptState::over_no_plugins();
+        let g = &mut s.rt.as_mut().unwrap().game;
+        let m = FormId(0x810);
+        g.message_box = Some(fnv_game::game::MessageBox { message: m, buttons, pressed: None, owner: Some("owner".into()), hidden: Vec::new() });
+        g.show_box_buttons(m, buttons);
+        assert_eq!(g.menu, Some(MENU_MESSAGE));
+        s
+    }
+
+    fn pressed(s: &ScriptState) -> Option<i32> {
+        s.rt.as_ref().unwrap().game.message_box.as_ref().and_then(|m| m.pressed)
+    }
+
+    /// #2925: OK on a box without buttons (the Broken Mr. Handy's "the robot jumps to
+    /// life") answers button 0, as the player's OK; before, the box's OK was refused once
+    /// the box had a `message_box` of 0 buttons, and had none to answer before that.
+    #[test]
+    fn ok_on_a_box_without_buttons_answers_button_0() {
+        let mut s = box_open(0);
+        assert!(!s.answer(Some(1), "key"), "no second button");
+        assert_eq!(pressed(&s), None);
+        assert!(s.answer(None, "OK"));
+        assert_eq!(pressed(&s), Some(0));
+        assert!(s.answered(), "the box closes after the frame's scripts");
+    }
+
+    /// A box with buttons still refuses a button it does not have.
+    #[test]
+    fn a_box_with_buttons_refuses_a_button_past_its_last() {
+        let mut s = box_open(2);
+        assert!(!s.answer(Some(2), "key"));
+        assert_eq!(pressed(&s), None);
+        assert!(s.answer(Some(1), "key"));
+        assert_eq!(pressed(&s), Some(1));
     }
 }
 

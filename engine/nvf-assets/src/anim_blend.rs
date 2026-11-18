@@ -168,6 +168,16 @@ impl Layer {
         }
     }
 
+    /// Take the fade straight again (no longer [`Self::smooth`]), keeping the shown fade
+    /// where it is: a layer that stays (an idle, a weapon's hold) after the settling curve
+    /// is switched off fades the clips' own way from then on, with no step.
+    pub fn straighten(&mut self) {
+        if self.smooth {
+            self.ease = self.shown_ease();
+            self.smooth = false;
+        }
+    }
+
     /// Start to leave or to come back (`leaving`), keeping a smooth layer's shown fade
     /// where it is: the coming-in and going-out curves differ, so the fade's place on
     /// the other curve is found.
@@ -910,6 +920,7 @@ mod tests {
             locals,
             bind_world: vec![Affine3A::IDENTITY; 4],
             by_name: names.iter().enumerate().map(|(i, n)| (n.to_string(), i)).collect::<HashMap<_, _>>(),
+            ..Default::default()
         })
     }
 
@@ -1247,6 +1258,39 @@ mod tests {
             assert!((s - settle(t)).abs() < 1e-3, "{k}: {s} against {}", settle(t));
         }
         assert!(shares[2] > 0.6 && shares[5] > 0.95 && shares[5] < 1.0, "{shares:?}");
+    }
+
+    #[test]
+    fn a_layer_straightened_mid_fade_keeps_its_place_and_fades_straight() {
+        let mut a = animator();
+        let x = clip(&[("A", [0.0, 0.0, 0.0], 30)], 1.0);
+        // y over x: its fade is how much of the bone it takes.
+        let y = clip(&[("A", [1.0, 0.0, 0.0], 40)], 1.0);
+        a.begin();
+        a.want(&x, 0, 1.0, Mode::Loop, 0.0);
+        a.end();
+        a.begin();
+        a.want(&x, 0, 1.0, Mode::Loop, 0.0);
+        a.want(&y, 1, 1.0, Mode::Loop, 0.4);
+        a.end();
+        a.layers[1].smooth = true;
+        a.advance(0.1, 1.0);
+        a.pose();
+        let before = a.locals[2].translation.x;
+        assert!((before - settle(0.25)).abs() < 1e-4, "{before}");
+        // The settling curve switched off part-way (Animation Smoothing off): no step.
+        a.layers[1].straighten();
+        assert!(!a.layers[1].smooth);
+        a.pose();
+        assert!((a.locals[2].translation.x - before).abs() < 1e-5, "{} against {before}", a.locals[2].translation.x);
+        // From there straight at its own rate: 0.05 s of a 0.4 s fade is an eighth more.
+        a.advance(0.05, 1.0);
+        a.pose();
+        assert!((a.locals[2].translation.x - (before + 0.125)).abs() < 1e-4, "{}", a.locals[2].translation.x);
+        // A straight layer stays as it is.
+        let ease = a.layers[0].ease;
+        a.layers[0].straighten();
+        assert_eq!(a.layers[0].ease, ease);
     }
 
     #[test]

@@ -744,7 +744,12 @@ state and one call per frame:
   script) receives it from GetButtonPressed; every other script reads −1 and the box
   stays [hypothesis, from the GECK wiki's ShowMessage and GetButtonPressed pages; with a
   global button the `--play` integration saw Doc Mitchell's chemistry set take every
-  box's button].
+  box's button]. A message box without buttons shows a default OK [documented: GECK
+  wiki ShowMessage notes] and has a `message_box` too (`buttons: 0`): its OK is button 0,
+  read once by the script that showed it [hypothesis: inferred from SCPT 0x000E9483,
+  Black Mountain's Broken Mr. Handy, which waits for button 0 after such a box, #2925;
+  observer check 240]. It does not replace a box with buttons still waiting for the
+  player [design, #2925]. A corner message (no Message Box flag) has none: −1.
 - Round 4 (§7.7): scripts now open menus themselves (`Game::open_menu`: a message box
   is 1001, the name, race, tag-skill, trait and S.P.E.C.I.A.L. menus have their codes),
   and boxes wait in `Game::boxes`. The engine should show `game.menu` and call

@@ -826,6 +826,9 @@ pub fn spawn_creature_body(
         RefVisual(reference),
         ActorRig { reference, base, body: c.body.0, skeleton: c.skeleton.clone(), skel: skel.clone(), nodes: spawned.nodes.clone(), base_scale: c.base_scale as f32 },
     ));
+    if let Some(half_width) = skel.bbx_half_width {
+        commands.entity(spawned.root).insert(nvf_play::hitvol::CreatureBbx { reference, half_width });
+    }
     for e in &spawned.drawn {
         commands.entity(*e).insert(RefVisual(reference));
     }

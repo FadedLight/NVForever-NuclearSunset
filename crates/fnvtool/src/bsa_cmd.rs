@@ -93,28 +93,48 @@ pub fn run_vfs(cmd: crate::VfsCmd) -> anyhow::Result<Value> {
                 .collect();
             let roots: Vec<String> = layout.mod_roots().iter().map(|r| r.display().to_string()).collect();
             let plugins = layout.profile_plugins().map_err(|e| anyhow::anyhow!(e))?;
+            let profile_archives = layout.profile_archives();
+            let unlisted: Vec<String> = match &profile_archives {
+                Some((list, _)) => layout.mod_archives().into_iter().filter(|a| !list.iter().any(|n| n.eq_ignore_ascii_case(a))).collect(),
+                None => layout.mod_archives(),
+            };
             let mut out = json!({
-                "schema": "fnv.vfs.mods/1",
+                "schema": "fnv.vfs.mods/2",
                 "instance": instance.display().to_string(),
                 "profile": layout.profile_name(),
                 "profile_dir": layout.profile.display().to_string(),
                 "mods": mods,
                 "roots": roots,
                 "plugins": plugins,
-                "archives_not_mounted": layout.mod_archives(),
+                "profile_archives": profile_archives.as_ref().map(|(l, _)| l.clone()),
+                "profile_archives_from": profile_archives.as_ref().map(|(_, p)| p.display().to_string()),
+                "archives_not_ticked": unlisted,
             });
             if let Some(p) = path {
                 let data = data.ok_or_else(|| anyhow::anyhow!("--path needs --data (the game's Data folder)"))?;
                 anyhow::ensure!(data.is_dir(), "{}: not a folder", data.display());
+                if let Some((list, _)) = &profile_archives {
+                    fnv_vfs::set_archive_list(list.clone()).map_err(|_| anyhow::anyhow!("the profile's archive list names no archive"))?;
+                }
                 let vfs = fnv_vfs::Vfs::open_for_plugins_layered(&data, &layout.mod_roots(), &plugins)?;
+                out["archives"] = json!(vfs.archives().map(|n| json!({"name": n, "file": vfs.archive_path(n).map(|p| p.display().to_string())})).collect::<Vec<_>>());
                 let key = fnv_vfs::normalize(&p);
-                let found = vfs.loose_path(&key).or_else(|| vfs.source_of(&key).map(std::path::PathBuf::from));
+                let loose = vfs.loose_path(&key);
+                let archive_file = vfs.source_of(&key).filter(|s| *s != "loose").and_then(|n| vfs.archive_path(n).map(std::path::Path::to_path_buf));
+                let found = loose.clone().or(archive_file);
                 let layer = found.as_ref().and_then(|f| {
                     let mut layers: Vec<&std::path::Path> = vec![vfs.data_dir()];
                     layers.extend(vfs.loose_roots().iter().skip(1).map(std::path::PathBuf::as_path));
+                    layers.extend(vfs.archives().filter_map(|n| vfs.archive_path(n)).filter_map(|f| f.parent()));
                     layers.iter().rev().find(|r| f.starts_with(r)).map(|r| r.display().to_string())
                 });
-                out["path"] = json!({"asked": p, "key": key, "found": found.map(|f| f.display().to_string()), "layer": layer});
+                out["path"] = json!({
+                    "asked": p,
+                    "key": key,
+                    "found": found.map(|f| f.display().to_string()),
+                    "source": vfs.source_of(&key),
+                    "layer": layer,
+                });
             }
             Ok(out)
         }

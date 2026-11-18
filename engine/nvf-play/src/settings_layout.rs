@@ -393,12 +393,13 @@ mod shared_table_tests {
     /// #2198's upscaler rows, #2169's FSR library row, #2242's upscaling counter row, #2317's
     /// Generated frames row, the field of view rows, the menu scale and Physics rate rows,
     /// #2662's grass fires, #2550's terrain height blending, #2551's terrain anti-tiling,
-    /// #2688's sound cover, #2670's cloud shadows, #2149's smooth terrain and its Debug row terrain wireframe, the
+    /// #2688's sound cover, #2670's cloud shadows, #2671's terrain shadows, #2149's smooth terrain and its Debug row terrain wireframe, the
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, #2843's Shadow
-    /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, and
-    /// the Quick Loot rows; #2965's heat haze row), by the group it registers with.
-    const KNOWN: [(&str, &str); 135] = [
+    /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, the
+    /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
+    /// shadows row), by the group it registers with.
+    const KNOWN: [(&str, &str); 139] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -406,6 +407,7 @@ mod shared_table_tests {
         ("movement-inertia", "Gameplay"),
         ("weapon-handling", "Gameplay"),
         ("advanced-recoil", "Gameplay"),
+        ("sprint", "Gameplay"),
         ("animation-smoothing", "Gameplay"),
         ("sound-cover", "Gameplay"),
         ("menu-pause", "Gameplay"),
@@ -504,6 +506,7 @@ mod shared_table_tests {
         ("ambient-occlusion", "Graphics"),
         ("fine-shadows", "Graphics"),
         ("cloud-shadows", "Graphics"),
+        ("terrain-shadows", "Graphics"),
         ("bloom", "Graphics"),
         ("glow", "Graphics"),
         ("eye-adaptation", "Graphics"),
@@ -516,7 +519,9 @@ mod shared_table_tests {
         ("smooth-terrain", "Graphics"),
         ("light-shafts", "Graphics"),
         ("heat-haze", "Graphics"),
+        ("desert-haze", "Graphics"),
         ("water-reflections", "Graphics"),
+        ("water-effects", "Graphics"),
         ("water-mirror", "Graphics"),
         ("quality", "Graphics"),
         ("volume-master", "Sound"),
@@ -744,7 +749,7 @@ mod shared_table_tests {
         assert_eq!(keys(&list, &l, "Controls")[..6], ["[Input]", "@device", "button-style", "@automatic-input", "@rumble", ""]);
         assert_eq!(
             keys(&list, &l, NVF_FEATURES_TAB),
-            ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire", "", "[Quick Loot]", "quick-loot", "quick-loot-scale", "quick-loot-background", "quick-loot-weight", "quick-loot-value", "quick-loot-value-per-weight"]
+            ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "sprint", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire", "", "[Quick Loot]", "quick-loot", "quick-loot-scale", "quick-loot-background", "quick-loot-weight", "quick-loot-value", "quick-loot-value-per-weight"]
         );
         assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "scope-3d"]);
         assert!(keys(&list, &l, "Tweaks").is_empty(), "an empty tab is still a tab");
@@ -759,8 +764,13 @@ mod shared_table_tests {
         assert_eq!(at("terrain-anti-tiling"), "Graphics > Detail and Distance", "beside terrain height blending (#2551)");
         assert_eq!(at("mesh-terrain-blend"), "Graphics > Detail and Distance", "beside the terrain rows (#2661)");
         assert_eq!(at("cloud-shadows"), "Graphics > Shadows", "after Longer sun shadows (#2670)");
+        assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
         assert_eq!(l.control_placement("bind:Jump").unwrap().path(), "Controls > Movement");
+        assert_eq!(l.control_placement("bind:Sprint").unwrap().path(), "Controls > Movement", "beside the movement controls (#3000)");
+        // Sprint is not greyed under the Global Toggle, as its Advanced Movement neighbours
+        // (#3000); only its binding is, while it is off.
+        assert!(needs("sprint").is_empty());
         // The registry itself is left as it was: its order and each row's group.
         let again = registry(&KNOWN);
         assert!(list.iter().zip(&again).all(|(a, b)| a.key == b.key && a.group == b.group && a.label == b.label && a.note == b.note));

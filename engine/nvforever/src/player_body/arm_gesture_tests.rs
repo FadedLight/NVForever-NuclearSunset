@@ -21,6 +21,7 @@ fn direct_arm_times_really_pose_forward_reverse_and_settled_model_variants() {
             locals: vec![Transform::IDENTITY; 2],
             bind_world: vec![bevy::math::Affine3A::IDENTITY; 2],
             by_name: [("OwnedRoot".into(), 0), (bone.into(), 1)].into(),
+            bbx_half_width: None,
         });
         let clip = Arc::new(Clip {
             name: "Owned arm pose".into(),

@@ -169,14 +169,21 @@ fn install_cached_rig(app: &mut App) -> (Entity, Entity) {
         names: vec![Some("OwnedRoot".into()), Some("OwnedArm".into())],
         parents: vec![None,Some(0)], locals: vec![Transform::IDENTITY;2],
         bind_world: vec![Affine3A::IDENTITY;2], by_name: [("OwnedRoot".into(),0),("OwnedArm".into(),1)].into(),
+        bbx_half_width: None,
     });
     let actor = crate::limbs::ActorRig { reference: 0, base: 0, body: 0, skeleton: "Owned".into(),
         skel, nodes: vec![root,bone], base_scale: 1. };
     let third_root = app.world_mut().spawn((Transform::IDENTITY, GlobalTransform::IDENTITY, Visibility::Visible)).id();
     let mut third = actor.clone();
     third.nodes = vec![third_root];
-    third.skel = Arc::new(PreparedSkeleton { names: vec![Some("OwnedThird".into())], parents: vec![None],
-        locals: vec![Transform::IDENTITY], bind_world: vec![Affine3A::IDENTITY], by_name: [("OwnedThird".into(),0)].into() });
+    third.skel = Arc::new(PreparedSkeleton {
+        names: vec![Some("OwnedThird".into())],
+        parents: vec![None],
+        locals: vec![Transform::IDENTITY],
+        bind_world: vec![Affine3A::IDENTITY],
+        by_name: [("OwnedThird".into(), 0)].into(),
+        bbx_half_width: None,
+    });
     let mut body = PlayerBody::synthetic_script_models((third_root,third),Some((root,actor)));
     let clip = Arc::new(Clip {
         name: "Authored coupled arm".into(), start: 0., stop: nvf_play::pipboy::CLIP_SECONDS,

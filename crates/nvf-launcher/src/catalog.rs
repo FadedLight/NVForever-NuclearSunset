@@ -94,7 +94,7 @@ impl Catalog {
         Self::load_tabs(ini, &LAUNCHER_TABS, nvf_settings_layout::layout_stamp)
     }
 
-    #[cfg(feature = "mobile")]
+    #[cfg(any(feature = "mobile", test))]
     pub(crate) fn load_mobile(ini: Option<&Path>, tabs: &[&str]) -> Catalog {
         Self::load_tabs(ini, tabs, nvf_settings_layout::mobile_layout_stamp)
     }

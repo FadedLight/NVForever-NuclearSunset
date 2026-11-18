@@ -121,3 +121,8 @@ path = "tests/get_files_data_roots.rs"
 [[test]]
 name = "crosshair_water"
 path = "tests/crosshair_water.rs"
+
+# CompileScript fixture owns the process-wide Data reader.
+[[test]]
+name = "crosshair_prompt_events"
+path = "tests/crosshair_prompt_events.rs"

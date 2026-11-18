@@ -42,6 +42,9 @@
 //!   the weather's cloud layers darken the sun's direct light where their shadow falls
 //!   (cloud_shadows.rs, sun_visibility.rs, docs/design/sun-visibility.md). Switching it
 //!   rebuilds the world views' material pipelines.
+//! - **Heat haze** (`heat-haze`, a prototype, off in both presets): the far ground near the
+//!   horizon shimmers slightly on hot clear days, by the sun and the live weather
+//!   (`heat_haze.rs`).
 //!
 //! Another switch is off in both looks and not part of `enhanced`: **Blend meshes into
 //! ground** (`mesh-terrain-blend`, `mesh_terrain_blend.rs`), outdoor roads, rocks and
@@ -190,11 +193,13 @@ pub struct Graphics {
     /// The weather's clouds shade the sun (cloud_shadows.rs; off in both presets)
     /// [design, #2670].
     pub cloud_shadows: bool,
+    /// Heat haze at distance (heat_haze.rs; a prototype, off in both presets) [design].
+    pub heat_haze: bool,
 }
 
 /// The keys of `--graphics-only`: the settings page's switches and the anti-aliasing and
 /// shadow-filter choices that are not vanilla's, in the order of [`Graphics::describe`].
-pub const KEYS: [&str; 16] = [
+pub const KEYS: [&str; 17] = [
     "ambient-occlusion",
     "fine-shadows",
     "bloom",
@@ -211,6 +216,7 @@ pub const KEYS: [&str; 16] = [
     "terrain-height-blend",
     "terrain-anti-tiling",
     "cloud-shadows",
+    "heat-haze",
 ];
 
 impl Graphics {
@@ -259,6 +265,8 @@ impl Graphics {
             // The same for cloud shadows, whose strength is still to calibrate [design,
             // #2670; the issue's "in enhanced" names a row the overhaul removed].
             cloud_shadows: false,
+            // Off in both looks: a prototype of our own [design].
+            heat_haze: false,
         }
     }
 
@@ -280,6 +288,7 @@ impl Graphics {
             "terrain-height-blend" => &mut self.terrain_height_blend,
             "terrain-anti-tiling" => &mut self.terrain_anti_tiling,
             "cloud-shadows" => &mut self.cloud_shadows,
+            "heat-haze" => &mut self.heat_haze,
             _ => return None,
         })
     }
@@ -331,6 +340,7 @@ impl Graphics {
             (self.terrain_height_blend, "terrain height blending"),
             (self.terrain_anti_tiling, "terrain anti-tiling"),
             (self.cloud_shadows, "cloud shadows"),
+            (self.heat_haze, "heat haze"),
         ];
         let mut on: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
         if self.fsr().is_some() {
@@ -559,7 +569,7 @@ impl Plugin for GraphicsPlugin {
         app.insert_resource(g)
             .insert_resource(MsaaSetting(self.1))
             .insert_resource(DirectionalLightShadowMap { size: SHADOW_MAP })
-            .add_plugins((crate::ssao::SsaoPlugin, crate::post::PostPlugin, crate::taa::TaaPlugin, crate::shafts::ShaftsPlugin, crate::upscaler::prep::PrepPlugin, crate::fsr::FsrPlugin, crate::dlss::DlssPassPlugin))
+            .add_plugins((crate::ssao::SsaoPlugin, crate::post::PostPlugin, crate::taa::TaaPlugin, crate::shafts::ShaftsPlugin, crate::heat_haze::HeatHazePlugin, crate::upscaler::prep::PrepPlugin, crate::fsr::FsrPlugin, crate::dlss::DlssPassPlugin))
             .add_systems(Startup, |g: Res<Graphics>| info!("graphics: {}", g.describe()))
             .add_systems(Update, (crate::upscaler::follow_request, apply, sun_shadow_key.pipe(sun_shadow_quality).after(crate::sky::update_sky)).chain())
             .add_systems(PostUpdate, log_shadow_map.before(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades));
@@ -972,6 +982,11 @@ fn apply(
             e.insert(LightShafts::default());
         } else {
             e.remove::<LightShafts>();
+        }
+        if g.heat_haze {
+            e.insert(crate::heat_haze::HeatHaze::default());
+        } else {
+            e.remove::<crate::heat_haze::HeatHaze>();
         }
     }
     let reach = if g.fine_shadows { FINE_SHADOW_REACH } else { 1.0 };
@@ -1505,6 +1520,18 @@ mod tests {
         let mut g = Graphics::preset(Preset::Vanilla);
         *g.switch("terrain-anti-tiling").expect("settings key") = true;
         assert_eq!(g, on);
+    }
+
+    #[test]
+    fn heat_haze_is_off_in_both_looks_and_has_its_own_key() {
+        assert!(!Graphics::preset(Preset::Vanilla).heat_haze && !Graphics::preset(Preset::Enhanced).heat_haze);
+        let on = Graphics::only(&["heat-haze".into()]).expect("heat-haze");
+        assert!(on.heat_haze);
+        assert_eq!(on.describe(), "light glow, heat haze");
+        let mut g = Graphics::preset(Preset::Vanilla);
+        *g.switch("heat-haze").expect("settings key") = true;
+        assert_eq!(g, on);
+        assert!(!Graphics::preset(Preset::Enhanced).describe().contains("heat haze"));
     }
 
     // The guard alone: repeated requests and an earlier registration. Both callers

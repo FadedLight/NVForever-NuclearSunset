@@ -110,7 +110,7 @@ pub fn unhandled_unused(table_json: &serde_json::Value) -> (Vec<String>, Vec<Str
         if f["family"] != "vanilla" || f["script_calls"].as_u64().unwrap_or(0) > 0 {
             continue;
         }
-        if super::lookup_name(name).is_some() || lookup(name).is_some() || super::player_source::handles(name) || ENGINE_WORDS.iter().any(|w| w.eq_ignore_ascii_case(name)) {
+        if super::lookup_name(name).is_some() || lookup(name).is_some() || super::player_source::handles(name) || crate::vats::handles_area_query(name) || ENGINE_WORDS.iter().any(|w| w.eq_ignore_ascii_case(name)) {
             continue;
         }
         let in_console = f["categories"].as_array().into_iter().flatten().any(|c| c == "Console Functions");
@@ -1027,5 +1027,14 @@ unhandled other vanilla functions: {other:?}");
             let f = t.by_name(alias).and_then(|op| t.get(op)).unwrap_or_else(|| panic!("{alias}"));
             assert!(lookup(&f.name).is_some(), "{alias}");
         }
+    }
+
+    #[test]
+    fn named_area_source_queries_are_handled_but_unknown_vanilla_names_are_not() {
+        let rows = ["GetVATSLeftAreaFree", "getvatsrightareafree", "OwnedUnknownVanillaQuery"]
+            .map(|name| serde_json::json!({"name": name, "family": "vanilla", "script_calls": 0}));
+        let (console, other) = unhandled_unused(&serde_json::json!({"functions": rows}));
+        assert!(console.is_empty());
+        assert_eq!(other, ["OwnedUnknownVanillaQuery"]);
     }
 }

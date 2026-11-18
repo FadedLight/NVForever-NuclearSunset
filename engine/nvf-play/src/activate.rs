@@ -352,11 +352,7 @@ impl TargetPicker<'_,'_,'_>{
         }
         // GetCrosshairRef: what is in activation reach; GetCrosshairRefEx: at any range.
         let now = hit.as_ref().and_then(|h| h.form_id).map(FormId);
-        // JohnnyGuitar's crosshair handlers hear each reference the prompt comes onto.
-        if let Some(r) = now.filter(|_| now != rt.game.senses.crosshair_ref) {
-            rt.game.jg8_crosshair(r);
-        }
-        rt.game.senses.crosshair_ref = now;
+        rt.game.set_crosshair_ref(now);
         rt.game.senses.crosshair_far = far_ref.map(FormId);
     }
     let mut described: HashMap<u32, Option<(String, Action)>> = HashMap::new();

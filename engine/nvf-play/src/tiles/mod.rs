@@ -43,6 +43,7 @@ pub mod repair_cards;
 pub mod repair_menu;
 pub mod repair_services_menu;
 pub mod runtime_images;
+pub mod modern_minimap;
 mod item_menu;
 pub mod dialog_menu;
 pub mod draw;

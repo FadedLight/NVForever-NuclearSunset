@@ -2261,7 +2261,7 @@ fn barred(v: &VatsMode, mut script: Option<&mut ScriptState>, sim: &mut SimState
     let melee = v.weapon.as_ref().is_some_and(|w| w.style == AttackStyle::Melee);
     // The base from the simulation: the game's world is not attached outside its turn.
     let flagged = melee
-        && sim.base_of(actor).is_some_and(|b| script.as_deref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| { let (seed, at) = sim.pick(&rt.game, FormId(actor)); rt.game.data.no_vats_melee(b, seed, at) }));
+        && sim.base_of(actor).is_some_and(|b| script.as_deref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| { let (seed, at) = sim.pick(&rt.game, FormId(actor)); rt.game.runtime_template_source(b, seed, at, |_| false).is_some_and(|(_, d)| d.no_vats_melee) }));
     if flagged {
         return Err(Bar::NoVatsMelee);
     }

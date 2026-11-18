@@ -2311,7 +2311,7 @@ impl Ai {
         // shooter fires only once it faces the target (`use_weapon::shot_facing`).
         let space = self.agents[&actor].walker.space;
         if let Some(t) = game.active_weapon_use(actor).filter(|w| w.in_place && !w.taken).map(|w| w.target) {
-            if let Some(to) = goal::place_of_ref(game, t).filter(|p| p.space == space) {
+            if let Some(to) = goal::weapon_target_place(game, t, space) {
                 self.combat_face(game, actor, to, dt);
                 return;
             }
@@ -3123,7 +3123,7 @@ impl Ai {
                 self.combat_face(game, actor, Place { space, pos: at }, dt);
             }
         } else if let Some(t) = game.active_weapon_use(actor).filter(|w| w.in_place && standing).map(|w| w.target) {
-            if let Some(at) = goal::place_of_ref(game, t).filter(|p| p.space == space) {
+            if let Some(at) = goal::weapon_target_place(game, t, space) {
                 self.face(game, actor, at, dt);
             }
         }

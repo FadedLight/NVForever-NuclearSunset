@@ -520,3 +520,6 @@ name = "Español"
 "Menus and Conversations" = "Menús y conversaciones"
 "Starting and Loading" = "Inicio y carga"
 "World and Items" = "Mundo y objetos"
+# [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+"Heat haze (experimental)" = "Reverberación del calor (experimental)"
+"On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Activado: el suelo lejano cerca del horizonte reverbera levemente en días calurosos y despejados, según el sol y el clima. Un prototipo. No está en el original."

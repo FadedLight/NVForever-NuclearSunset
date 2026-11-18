@@ -4069,6 +4069,111 @@ fn a_use_weapon_package_stands_at_its_place_and_meets_its_goal_when_its_shots_ar
     assert!(s.game.active_weapon_use(actor).is_none());
 }
 
+/// [design, #2652] Authored fixture cells represent two exterior worldspaces; the
+/// engine shooter tests separately exercise WNAM decoding into world_parents.
+fn weapon_worlds(f: &mut Fixture, sibling: bool) -> Space {
+    let (a, b, parent) = (FormId(0xA00), FormId(0xA01), FormId(0xA02));
+    f.refs.cell_world.insert(FormId(CELL_A), a);
+    f.refs.cell_world.insert(FormId(CELL_B), b);
+    f.refs.world_parents.insert(a, parent);
+    f.refs.world_parents.insert(b, if sibling { parent } else { FormId(0xA03) });
+    Space::World(a.0)
+}
+
+/// [hypothesis, #2652] Only non-actor targets with a shared immediate parent project;
+/// [design] ordinary place_of_ref and actor/interior space checks stay unchanged.
+#[test]
+fn weapon_target_place_projects_only_sibling_objects() {
+    let mut f = fixture();
+    let space = weapon_worlds(&mut f, true);
+    let mut s = sim(&f, &[]);
+    let target = FormId(MARK_B);
+    let actual = fnv_ai::goal::place_of_ref(&s.game, target).unwrap();
+    assert_ne!(actual.space, space);
+    assert_eq!(fnv_ai::goal::weapon_target_place(&s.game, target, space), Some(Place { space, pos: actual.pos }));
+    assert_eq!(fnv_ai::goal::place_of_ref(&s.game, target), Some(actual));
+    assert!(fnv_ai::goal::weapon_target_place(&s.game, target, A).is_none(), "interior shooter");
+    assert!(fnv_ai::goal::weapon_target_place(&s.game, FormId(MARK_C), space).is_none(), "interior target");
+    s.game.world.get(FormId(R_LONER)).unwrap().cell = Some(FormId(CELL_B));
+    assert!(fnv_ai::goal::weapon_target_place(&s.game, FormId(R_LONER), space).is_none(), "actors do not project");
+    assert!(fnv_ai::goal::weapon_target_place(&s.game, FormId(R_SHOOTER), space).is_some(), "same-space actor");
+}
+
+/// [design, #2652] Standing and rooted UseWeapon users turn to sibling objects, and
+/// keep their heading for unrelated-world objects and sibling-world actors.
+#[test]
+fn weapon_users_face_sibling_objects_but_not_unrelated_objects_or_actors() {
+    use fnv_game::use_weapon::WeaponUse;
+    for rooted in [false, true] {
+        for (sibling, actor_target) in [(true, false), (false, false), (true, true)] {
+            let mut f = fixture();
+            weapon_worlds(&mut f, sibling);
+            let mut s = sim(&f, &[R_LONER]);
+            let actor = FormId(R_LONER);
+            let target = if actor_target {
+                let state = s.game.world.get(FormId(R_SHOOTER)).unwrap();
+                state.cell = Some(FormId(CELL_B));
+                state.pos = [5250.0, 5250.0, 50.0];
+                FormId(R_SHOOTER)
+            } else {
+                FormId(MARK_B)
+            };
+            if rooted {
+                s.ai.root(&s.game, actor);
+            }
+            let feet = s.feet(R_LONER);
+            let want = fnv_nav::follow::heading_of([5250.0 - feet[0], 5250.0 - feet[1]]);
+            let initial = want + 2.5;
+            s.ai.agents.get_mut(&actor).unwrap().walker.heading = initial;
+            s.game.give_weapon_use(actor, WeaponUse::of_script(None, None, target, 1, false, false, true, true, None));
+            s.run(5.0);
+            assert!(s.game.weapon_use(actor).unwrap().in_place);
+            let expected = if sibling && !actor_target { want } else { initial };
+            let heading = s.ai.agents[&actor].walker.heading;
+            let off = fnv_nav::follow::heading_delta(heading, expected);
+            assert!(off.abs() < 0.05, "rooted {rooted}, sibling {sibling}, actor target {actor_target}: {heading} vs {expected}");
+            assert_eq!(s.feet(R_LONER), feet);
+        }
+    }
+}
+
+/// [design, #2652] EvaluatePackage selects immediately after its conditions change;
+/// the next high-process AI step starts the use already at its stand, then faces it.
+#[test]
+fn evaluate_package_starts_sibling_object_weapon_use_when_conditions_pass() {
+    use fnv_game::cond::{Cmp, Condition, Operand, RunOn};
+    use fnv_game::package::TargetKind;
+    use fnv_game::use_weapon::Source;
+    use fnv_script::vm::{ArgValue, Value};
+    let mut f = fixture();
+    weapon_worlds(&mut f, true);
+    let global = f.data.table.by_name("GetGlobalValue").unwrap() - 0x1000;
+    let dead = f.data.table.by_name("GetDead").unwrap() - 0x1000;
+    let def = f.data.package_defs.get_mut(&FormId(P_SHOOT)).unwrap();
+    def.conditions = vec![
+        Condition { cmp: Cmp::Eq, or: false, run_on: RunOn::Subject, function: global, params: vec![ArgValue::Value(Value::Ref(0x807))], rhs: Operand::Value(1.0) },
+        Condition { cmp: Cmp::Eq, or: false, run_on: RunOn::Reference(Some(R_LONER)), function: dead, params: vec![], rhs: Operand::Value(0.0) },
+    ];
+    def.target2.as_mut().unwrap().kind = TargetKind::Reference(Some(FormId(MARK_B)));
+    let mut s = sim(&f, &[R_SHOOTER]);
+    let actor = FormId(R_SHOOTER);
+    s.game.world.get(FormId(MARK_A)).unwrap().pos = START;
+    assert_eq!(s.game.evaluate_package(actor), None, "the authored global starts at zero");
+    s.game.world.set_global(FormId(0x807), 1.0).unwrap();
+    assert_eq!(s.game.evaluate_package(actor), Some(FormId(P_SHOOT)));
+    assert_eq!(s.game.package_def(&FormId(P_SHOOT)).unwrap().ty.runtime_code(), Some(33));
+    s.run(5.0);
+    let w = s.game.active_weapon_use(actor).expect("high-process AI starts the selected use");
+    assert_eq!(w.source, Source::Package(FormId(P_SHOOT)));
+    assert_eq!(w.target, FormId(MARK_B));
+    assert!(w.in_place);
+    let feet = s.feet(R_SHOOTER);
+    let want = fnv_nav::follow::heading_of([5250.0 - feet[0], 5250.0 - feet[1]]);
+    assert!(fnv_nav::follow::heading_delta(s.ai.agents[&actor].walker.heading, want).abs() < 0.05);
+    s.game.extra.entry(FormId(R_LONER)).or_default().dead = true;
+    assert_eq!(s.game.evaluate_package(actor), None, "the not-dead condition still applies");
+}
+
 /// #2120: a Use Weapon package's fire waits while the actor is in a combat state (Alert,
 /// Combat, Lost), unless the package has Continue During Combat: then it goes on, at the
 /// package's own target, from its stand. A script's use goes on in every state; a spent

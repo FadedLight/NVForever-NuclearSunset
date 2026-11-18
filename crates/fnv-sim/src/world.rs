@@ -827,13 +827,21 @@ impl<'a> World<'a> {
         self.inventory_sources = sources;
     }
 
-    /// The base whose carried items placed `id` starts with, in place of its own base's
-    /// (`None`: its own base's), after its leveled choices were rolled again. Not saved:
-    /// the game layer works it out again on a load.
+    /// The base whose carried items `id` starts with, in place of its own base's
+    /// (`None`: its own base's), after its leveled choices were rolled again. Created
+    /// references save their source; placed references reconstruct it on a load.
     pub fn set_inventory_source(&mut self, id: FormId, source: Option<FormId>) {
+        let sources = if id.is_dynamic() {
+            // A created reference's saved source takes precedence in inventory_base.
+            // Retire an earlier reconstructed entry too, including when clearing it.
+            self.inventory_sources.remove(&id);
+            &mut self.created_inventory_sources
+        } else {
+            &mut self.inventory_sources
+        };
         match source {
-            Some(s) => self.inventory_sources.insert(id, s),
-            None => self.inventory_sources.remove(&id),
+            Some(s) => sources.insert(id, s),
+            None => sources.remove(&id),
         };
     }
 
@@ -2111,11 +2119,7 @@ impl<'a> World<'a> {
     /// LvlNCRTrooper fought with their fists).
     pub fn give_items_of(&mut self, id: FormId, source: FormId) -> Result<(), SimError> {
         self.get(id)?;
-        if id.is_dynamic() {
-            self.created_inventory_sources.insert(id, source);
-        } else {
-            self.set_inventory_source(id, Some(source));
-        }
+        self.set_inventory_source(id, Some(source));
         let mut inv = self.roll_inventory(source, self.item_level(id))?;
         let outfitted = self.equip_default(source, &mut inv);
         let s = self.get(id)?;

@@ -605,6 +605,12 @@ fn with_ray_caster<R>(phys: &mut PhysState, play: &PlayData, worldspace: u32, f:
         let hit = match kind {
             fnv_game::ray::CastKind::Scene => w.queries().ray(a, d, len, &filter),
             fnv_game::ray::CastKind::World => w.queries().ray(a, d, len, &fnv_phys::world::Filter { no_terrain: false, ..filter.clone() }),
+            fnv_game::ray::CastKind::CameraClearance => w.queries().ray(a, d, len, &fnv_phys::world::Filter {
+                exclude_layers: fnv_phys::layers::character_ignores().union(fnv_phys::layers::actor_volumes()),
+                no_dynamic: true,
+                no_actors: true,
+                ..Default::default()
+            }),
             // The terrain's own hit, past anything standing on it.
             fnv_game::ray::CastKind::Terrain | fnv_game::ray::CastKind::LandTexture => {
                 w.queries().ray_all(a, d, len, &fnv_phys::world::Filter::default()).into_iter().find(|h| matches!(h.owner, fnv_phys::world::Owner::Terrain { .. }))
@@ -642,8 +648,11 @@ pub fn with_world<R>(rt: &mut Runtime, sim: &mut SimState, f: impl FnOnce(&mut R
 /// "Inventory", or a leveled pick), each pick made as the game makes it: at the level the
 /// reference reads leveled lists at in `sim`'s world, with its pick seed (a saved
 /// ResurrectActor roll included; `SimState::pick`, docs/spec-notes/actors.md §1.3).
-fn inventory_sources(data: &GameData, sim: &SimState, game: &Game<'_>) -> std::collections::BTreeMap<FormId, FormId> {
-    data.inventory_sources_at(sim.refs, |r| sim.pick(game, r))
+fn inventory_sources(_data: &GameData, sim: &SimState, game: &Game<'_>) -> std::collections::BTreeMap<FormId, FormId> {
+    sim.refs.refs.iter().filter(|(_, p)| matches!(&p.sig, b"ACHR" | b"ACRE")).filter_map(|(&r, p)| {
+        let (seed, at) = sim.pick(game, r);
+        game.runtime_template_source(p.base, seed, at, |d| d.template_inventory).map(|(source, _)| source).filter(|&source| source != p.base).map(|source| (r, source))
+    }).collect()
 }
 
 impl Runtime {
@@ -2788,7 +2797,7 @@ pub fn asks_nothing(buttons: usize) -> bool {
     buttons <= 1
 }
 
-#[cfg(any(test, feature = "report-test-support", feature = "test-fixtures"))]
+#[cfg(any(test, feature = "test-support", feature = "report-test-support", feature = "test-fixtures"))]
 impl ScriptState {
     /// A runtime over an empty load order, for tests of what works the open menu: nothing
     /// has run, no menu is open.
@@ -2797,8 +2806,9 @@ impl ScriptState {
         Self::over_plugins(&[])
     }
 
-    /// As [`ScriptState::over_no_plugins`], over these plugins.
-    pub(crate) fn over_plugins(plugins: &[fnv_esm::Plugin]) -> ScriptState {
+    /// [design, #2652] A runtime over authored plugins, without loading assets or
+    /// running scripts; available to downstream engine tests through `test-support`.
+    pub fn over_plugins(plugins: &[fnv_esm::Plugin]) -> ScriptState {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
         let lo = fnv_esm::LoadOrder::new(plugins).unwrap();
         let schema = fnv_esm::Schema::load_dir(root.join("fnv")).unwrap();
@@ -2981,3 +2991,6 @@ mod runtime_start_tests {
         assert!(!runtime_waits(false, false), "the menu is open, paused, or was never asked for");
     }
 }
+
+#[cfg(test)]
+mod clearance_tests;

@@ -541,3 +541,6 @@ name = "Русский"
 "How edges are smoothed: multisampling 2x, 4x or 8x (dearer at each step) or FXAA, SMAA or TAA afterwards. Shown while no upscaler is chosen." = "Как сглаживаются края: мультисэмплинг 2x, 4x или 8x (каждый шаг дороже) или FXAA, SMAA или TAA после отрисовки. Показано, пока масштабирование не выбрано."
 "Latency reduction" = "Снижение задержки"
 "The graphics driver keeps the game from preparing frames ahead (AMD Anti-Lag, NVIDIA low latency), meant to show what you do sooner. Not in the original." = "Драйвер видеокарты не даёт игре готовить кадры заранее (AMD Anti-Lag, NVIDIA low latency), чтобы ваши действия появлялись на экране раньше. Нет в оригинале."
+# [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+"Heat haze (experimental)" = "Марево (экспериментально)"
+"On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."

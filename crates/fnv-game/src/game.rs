@@ -588,6 +588,10 @@ impl FastTravel {
 /// SetQuestObject, SetCellOwnership, SetCellPublicFlag, SetItemValue, SetEnemy, SetAlly].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FormChanges {
+    /// Permanent actor-list entries (actor-list-additions.md), separate from
+    /// the session-only leveled-list edits in OtherState.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub actor_list_additions: BTreeMap<FormId, Vec<(u16, FormId)>>,
     /// Faction → other faction → group combat reaction (0 neutral, 1 enemy, 2 ally,
     /// 3 friend), over the FACT XNAM list.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
@@ -6587,6 +6591,7 @@ impl<'a> Game<'a> {
         g.time = s.time;
         g.pending_onload = s.pending_onload.clone();
         g.forms = s.forms.clone();
+        g.refresh_actor_inventory_sources(true);
         g.effects = s.effects.clone();
         g.next_effect = s.next_effect.max(1);
         g.image_modifiers = s.image_modifiers.clone();

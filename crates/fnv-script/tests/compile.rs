@@ -2,6 +2,9 @@
 //! (docs/spec-notes/script-compiler.md). The parity over the shipped units is the lab
 //! scenario L5.script.compile.vanilla.
 
+#[path = "compile/inline_surplus_operands.rs"]
+mod inline_surplus_operands;
+
 use fnv_script::compile::{compile, Compiled, Env, FormInfo, Seed, PLAYER};
 use fnv_script::unit::RefSlot;
 use fnv_script::{decode, Arg, Expr, FunctionTable, Op, Program, Stmt, Token, VarDecl, VarType};

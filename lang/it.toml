@@ -518,3 +518,6 @@ name = "Italiano"
 "Menus and Conversations" = "Menu e dialoghi"
 "Starting and Loading" = "Avvio e caricamento"
 "World and Items" = "Mondo e oggetti"
+# [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+"Heat haze (experimental)" = "Tremolio del calore (sperimentale)"
+"On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Attivo: il terreno lontano vicino all'orizzonte tremola leggermente nelle giornate calde e serene, secondo il sole e il meteo. Un prototipo. Non presente nell'originale."

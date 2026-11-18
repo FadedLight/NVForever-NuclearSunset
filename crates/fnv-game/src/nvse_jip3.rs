@@ -318,7 +318,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let pos_ray = name == "getraycastpos";
             let offset = if pos_ray { num(args, 3, 0.0) as f32 } else { 0.0 };
             let reach = if pos_ray { Some(num(args, 6, 0.0) as f32).filter(|r| *r > 0.0).unwrap_or(RAY_REACH) } else { RAY_REACH };
-            let base = [pos[0], pos[1], pos[2] + if actor { 64.0 } else { 0.0 }];
+            let base = [pos[0], pos[1], pos[2] + if actor { crate::ray::ACTOR_RAY_EYE_HEIGHT } else { 0.0 }];
             let o = [base[0] + dir[0] * offset, base[1] + dir[1] * offset, base[2] + dir[2] * offset];
             let to = [o[0] + dir[0] * reach, o[1] + dir[1] * reach, o[2] + dir[2] * reach];
             let hit = crate::ray::cast_hit(o, to, crate::ray::CastKind::World);

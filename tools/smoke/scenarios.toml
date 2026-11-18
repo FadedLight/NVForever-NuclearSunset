@@ -888,6 +888,45 @@ forbid = [
 ]
 
 [[scenario]]
+name = "heat-haze"
+source = "[design] docs/design/graphics-enhanced.md §3.15 (a prototype), engine/nvforever/src/heat_haze.rs and heat_haze.wesl: started with --graphics-only heat-haze at noon under a pinned clear weather (NVWastelandClear), the heat haze turns on with a strength above 0 from the sun and the weather, its pipeline (heat_haze.wesl) compiles and is ready and the pass draws, without a shader, pipeline or rendering error. The look is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/heat_haze*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/sky.rs", "engine/nvforever/src/tree.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVWastelandClear", "--graphics-only", "heat-haze"]
+run_seconds = 14
+expect = [
+  { re = 'heat haze: (?:on, )?strength (?P<n>\d+\.\d+), at most [\d.]+ px \(sun', range = [0.05, 1.0], label = "at noon in clear weather the heat haze has a strength above 0 and the pass is not skipped" },
+  { re = 'heat haze: pass drawn \(\d+x\d+, multisampled depth (?:yes|no)\)', label = "the pass ran (not only a strength above 0)" },
+]
+order = [[
+  { re = 'graphics: light glow, heat haze$', label = "the switch is on from the start" },
+  { re = 'pipeline \d+ ready after \d+ ms: heat_haze_pipeline', label = "heat_haze.wesl compiles: its pipeline is ready" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the heat haze" },
+  { re = 'pipeline \d+ failed after \d+ ms: heat_haze_pipeline', label = "the heat haze pipeline failed (heat_haze.wesl does not compile, or its bindings do not match)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good" },
+  { text = "failed to process shader", label = "a shader that does not build" },
+]
+
+[[scenario]]
+name = "heat-haze-interior"
+source = "[design] docs/design/graphics-enhanced.md §3.15 (a prototype), engine/nvforever/src/heat_haze.rs: with the heat haze switched on in an interior (OVNorthSewers01) its strength is 0 (indoors), so its pass does not run, without a rendering error"
+areas = ["renderer", "graphics"]
+paths = ["engine/nvforever/src/heat_haze*", "engine/nvforever/src/graphics.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "OVNorthSewers01", "--play", "--no-voice", "--no-messages", "--graphics-only", "heat-haze"]
+run_seconds = 12
+expect = [
+  { re = 'heat haze: (?:on, )?strength 0\.00, at most 0\.00 px, pass skipped \(indoors\)', label = "indoors the heat haze's strength is 0 and the pass skipped" },
+  { re = 'graphics: light glow, heat haze$', label = "the switch is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the heat haze on indoors" },
+]
+
+[[scenario]]
 name = "ambient-occlusion-gtao"
 source = "#2897 stage a, docs/design/graphics-enhanced.md §3.1: the ambient-occlusion switch runs the ground-truth estimate (engine/nvforever/src/ssao.wesl gtao_visibility, its plane-aware denoise) on the multisampled view, says so once, and its pipelines build and draw without a shader, pipeline or rendering error"
 areas = ["renderer", "graphics"]
@@ -19624,6 +19663,56 @@ expect = [
 manual = "on a failure, the chain's notes say what each step stands for; the stalls and data notes are in the walk4 main-quest/faction group's report (issue #918)"
 
 [[scenario]]
+name = "techatticup-hostage-alarm"
+kind = "tool"
+source = "issue #2926: the headless walkthrough crates/fnv-game/walkthrough/techatticup-hostages-2926.actions.json frees both Techatticup hostages through their message boxes; each one's SendAssaultAlarm Player CaesarsLegionTechMineFaction must not turn the hostage, and the second box must open"
+areas = ["quests", "scripts", "crime"]
+paths = ["crates/fnv-game/walkthrough/techatticup-hostages-2926.actions.json", "crates/fnv-game/src/crime.rs", "crates/fnv-game/src/runner.rs"]
+commands = [["script", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--actions", "crates/fnv-game/walkthrough/techatticup-hostages-2926.actions.json"]]
+expect = [
+  { json = "observations.?label=hostages: VTechatticup 10.stage", equals = 10, label = "techatticup-hostage-alarm: VTechatticup 10 from Renolds" },
+  { json = "events.?kind=message_shown.message", equals = "0x001231B8", count = 2, label = "techatticup-hostage-alarm: TecMineHostageMSG shown twice: the first hostage's box, then the second's (none skipped by a fight)" },
+  { json = "observations.?label=hostages: first hostage alarmed.value", equals = 0.0, label = "techatticup-hostage-alarm: the first hostage is not alarmed after its alarm on the Legion" },
+  { json = "observations.?label=hostages: player in combat after the first.value", equals = 0.0, label = "techatticup-hostage-alarm: the player is not in combat after the first" },
+  { json = "observations.?label=hostages: raider 5 alarmed before.value", equals = 0.0, label = "techatticup-hostage-alarm: raider 5 is not alarmed before the untie" },
+  { json = "observations.?label=hostages: raider 5 alarmed after the first.value", equals = 1.0, label = "techatticup-hostage-alarm: raider 5 (the faction's first member, 0x0011F654) is alarmed by the first hostage's alarm" },
+  { json = "events.?kind=assault_alarm.victim", equals = "0x0011F654", count = 2, label = "techatticup-hostage-alarm: both alarms pick TecLegionaryRaider5REF as the victim" },
+  { json = "observations.?label=hostages: raider 5 disabled.value", equals = 0.0, label = "techatticup-hostage-alarm: probe: raider 5 is enabled" },
+  { json = "observations.?label=hostages: raider 5 dead.value", equals = 0.0, label = "techatticup-hostage-alarm: probe: raider 5 is alive" },
+  { json = "observations.?label=hostages: raider 5 in the mine's faction.value", equals = 1.0, label = "techatticup-hostage-alarm: probe: raider 5 is in CaesarsLegionTechMineFaction" },
+  { json = "observations.?label=hostages: second hostage alarmed.value", equals = 0.0, label = "techatticup-hostage-alarm: the second hostage is not alarmed" },
+  { json = "observations.?label=hostages: VTechatticup 20.stage", equals = 20, label = "techatticup-hostage-alarm: both freed: stage 20" },
+  { json = "observations.?label=hostages: VTechatticup 20.var.NumHostages", equals = 2.0, label = "techatticup-hostage-alarm: both freed: NumHostages 2" },
+  { json = "steps.*.error", count = 0, label = "techatticup-hostage-alarm: no step fails" },
+  { json = "given_errors.*", count = 0, label = "techatticup-hostage-alarm: no given fails" },
+]
+manual = "#2926 probe: run once by hand with NVFOREVER_LOG=fnv_game::crime=info; each hostage's 'assault alarm: faction 0x001400F9 ...' line gives the victim and the members not present or dead"
+
+[[scenario]]
+name = "techatticup-hostage-alarm-cleared"
+kind = "tool"
+source = "issue #2926, the reporter's case: the headless walkthrough crates/fnv-game/walkthrough/techatticup-hostages-dead-2926.actions.json kills every actor of CaesarsLegionTechMineFaction in the hostages' cell, then frees both hostages; their SendAssaultAlarm Player CaesarsLegionTechMineFaction finds no member alive and must turn nobody (main turned the hostage)"
+areas = ["quests", "scripts", "crime"]
+paths = ["crates/fnv-game/walkthrough/techatticup-hostages-dead-2926.actions.json", "crates/fnv-game/src/crime.rs", "crates/fnv-game/src/runner.rs"]
+commands = [["script", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--actions", "crates/fnv-game/walkthrough/techatticup-hostages-dead-2926.actions.json"]]
+expect = [
+  { json = "observations.?label=hostages: VTechatticup 10.stage", equals = 10, label = "techatticup-hostage-alarm-cleared: VTechatticup 10 from Renolds" },
+  { json = "observations.?label=hostages: raiders killed.value", range = [1, 17], label = "techatticup-hostage-alarm-cleared: the mine's faction members in the cell killed (17 present in the load order)" },
+  { json = "observations.?label=hostages: raider 5 dead.value", equals = 1.0, label = "techatticup-hostage-alarm-cleared: raider 5 (the pick of the run without kills) is dead" },
+  { json = "events.?kind=assault_alarm.alive", equals = 0, count = 2, label = "techatticup-hostage-alarm-cleared: each alarm finds 0 members of the faction present and alive in the whole load order" },
+  { json = "events.?kind=assault_alarm.victim", null = true, count = 2, label = "techatticup-hostage-alarm-cleared: each alarm picks no victim" },
+  { json = "observations.?label=hostages: first hostage alarmed.value", equals = 0.0, label = "techatticup-hostage-alarm-cleared: the first hostage is not alarmed by its alarm on a faction with no member alive" },
+  { json = "observations.?label=hostages: player in combat after the first.value", equals = 0.0, label = "techatticup-hostage-alarm-cleared: the player is not in combat after the first" },
+  { json = "events.?kind=message_shown.message", equals = "0x001231B8", count = 2, label = "techatticup-hostage-alarm-cleared: TecMineHostageMSG shown twice: the first hostage's box, then the second's (none skipped by a fight)" },
+  { json = "observations.?label=hostages: second hostage alarmed.value", equals = 0.0, label = "techatticup-hostage-alarm-cleared: the second hostage is not alarmed" },
+  { json = "observations.?label=hostages: VTechatticup 20.stage", equals = 20, label = "techatticup-hostage-alarm-cleared: both freed: stage 20" },
+  { json = "observations.?label=hostages: VTechatticup 20.var.NumHostages", equals = 2.0, label = "techatticup-hostage-alarm-cleared: both freed: NumHostages 2" },
+  { json = "steps.*.error", count = 0, label = "techatticup-hostage-alarm-cleared: no step fails" },
+  { json = "given_errors.*", count = 0, label = "techatticup-hostage-alarm-cleared: no given fails" },
+]
+manual = "#2926: run by hand with NVFOREVER_LOG=fnv_game::crime=info; each hostage's 'assault alarm: faction 0x001400F9 ...' line reads victim none, 0 member(s) present and alive, and the members dead"
+
+[[scenario]]
 name = "mq-beggar"
 kind = "tool"
 source = "the headless side-quest walkthrough crates/fnv-game/walkthrough/beggar.actions.json, Don't Make a Beggar of Me (VMS04): Melissa (10), the suitcase (20), Chomps Lewis (30), Tyrone by Speech (40), Melissa (100)"
@@ -32352,6 +32441,38 @@ expect = [
   { re = 'vats mode summary: entered 1 times, 0 marks, 0 shots, 0 AP spent, 1 refused', label = "one stay, one refusal" },
 ]
 
+
+[[scenario]]
+name = "use-weapon-silo-mainframe"
+source = "[design, #2652] Player activation and button 1 give ED-E its mainframe package; its Always Hit / Do No Damage shot must run OnHit ED-E and set NVDLC04MQ01a 55. Record chain: #2652; launch-code preparation: crates/fnv-game/walkthrough/lonesome-road.actions.json."
+note = "[design] Start at quest 50 with the launch-code note and ED-E enabled beside its stand marker; only preparation uses aids. Activation, button choice, package arrival, UseWeapon and the harmless hit perform the unlock. The lonesome-road area skips this launch without LonesomeRoad.esm."
+areas = ["combat", "use-weapon", "lonesome-road"]
+paths = ["engine/nvforever/src/use_weapon.rs", "engine/nvforever/src/use_weapon/**", "engine/nvforever/src/npc_combat.rs", "engine/nvf-play/src/combat.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_UNSEEN = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "off", NVF_PLAY_TEST_SCRIPT = "5:start:NVDLC04MQ01a,5:stage:NVDLC04MQ01a:50,6:enable:NVDLC04EDEREF,7:moveto:player:NVDLC04Silo01MainframeREF:0:-200:0,7:moveto:NVDLC04EDEREF:NVDLC04Silo01MainframeMarkerREF,8:call:player:AddNote:NVDLC04Silo02LaunchCode,12:activate:NVDLC04Silo01MainframeREF,13:button:1" }
+args = ["--cell", "NVDLC04Silo01", "--play", "--no-voice", "--npc-packages", "all"]
+run_seconds = 70
+order = [[
+  { re = 'use weapon: NVDLC04EDEREF .* uses NVDLC04WeapEDEArcWelder on (NVDLC04Silo01MainframeREF|Hopeville Silo Mainframe Controls)', label = "ED-E fires at the mainframe through its package" },
+  { re = 'combat: a harmless shot by .* hits 0x[0-9A-F]{2}0075E5: its hit blocks ran, no damage', label = "the harmless zap runs the mainframe hit block" },
+  { text = 'script: NVDLC04MQ01a stage 55 set', label = "the mainframe unlock sets stage 55" },
+]]
+expect = [
+  { re = 'use weapon: NVDLC04EDEREF .* has fired its 1 shots at (NVDLC04Silo01MainframeREF|Hopeville Silo Mainframe Controls)', label = "the finite mainframe use ends" },
+]
+
+[[scenario]]
+name = "use-weapon-gi-blues-shelter"
+source = "[design, #2652, #2715 shooter half] The King's INFO 0x0012931B effect starts the staged NCR fight; VFSNCRBarker01REF's Repeat Fire package targets VFSPacerBusShelterREF (STAT 0x0011BD4E), as supplied in #2652's last comment."
+note = "[design, #2652 w4] MoveTo uses Pacer's cower marker 0x001293EC in FreesideNorthWorld, retaining player coordinates (-3961,4646,1133). The barker at grid (-2,1) is within the default two-cell loaded radius of player grid (-1,1). The King's effect starts the package; expectations are unchanged. Pacer's cover pose belongs to separate work."
+areas = ["combat", "use-weapon", "quests"]
+paths = ["engine/nvforever/src/use_weapon.rs", "engine/nvforever/src/use_weapon/**", "engine/nvforever/src/npc_combat.rs", "engine/nvf-play/src/combat.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_SCRIPT = "3:moveto:player:0x001293EC:-98:-588:84,5:start:VMS19,8:info:0x0012931B:VFSTheKingREF" }
+args = ["--world", "FreesideNorthWorld", "--play", "--hour", "12", "--no-voice", "--npc-packages", "all"]
+run_seconds = 70
+expect = [
+  { re = 'use weapon: VFSNCRBarker01REF .* uses .* on VFSPacerBusShelterREF.*on and on', label = "the barker repeats fire at the shelter", known_failing = "main 2026-11-16 (1790ab94a) and this branch: after the King's line 0x0012931B moves them, the barkers and the off-duty troopers choose no package at all in this aid-staged start (ai summary: 0 packages chosen), so the Use Weapon package never runs; the shooter change is covered by the engine tests" },
+  { re = 'use weapon summary: .*? (?P<n>\d+) shots \(', range = [1, 100000], label = "the staged fight fires shots", known_failing = "main 2026-11-16 (1790ab94a) and this branch: after the King's line 0x0012931B moves them, the barkers and the off-duty troopers choose no package at all in this aid-staged start (ai summary: 0 packages chosen), so the Use Weapon package never runs; the shooter change is covered by the engine tests" },
+]
 
 [[scenario]]
 name = "roy-say-pause-resume"

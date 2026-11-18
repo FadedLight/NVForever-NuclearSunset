@@ -515,3 +515,6 @@ name = "Français"
 "Menus and Conversations" = "Menus et conversations"
 "Starting and Loading" = "Démarrage et chargement"
 "World and Items" = "Monde et objets"
+# [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+"Heat haze (experimental)" = "Miroitement de chaleur (expérimental)"
+"On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Activé : le sol lointain près de l'horizon miroite légèrement par les journées chaudes et dégagées, selon le soleil et la météo. Un prototype. Absent de l'original."

@@ -1305,15 +1305,15 @@ pub fn embedded_node_index(names: &[Option<String>], node: &str) -> Option<usize
 /// state (`in_combat`, `State::in_combat`) that is any such use, as before #2120. In one
 /// it is a package's only when the package continues during combat (#2120), and then
 /// only while the shooter acts on it this frame (`use_weapon::acts_on`: in place, its
-/// target standing among the drawn people, `target_standing`): a marker target, one not
-/// drawn, or an actor still on its way leaves the actor to the ordinary attacks, which
-/// would otherwise hold it in Combat with neither acting (#2145 review). So the shooter
-/// and the ordinary attacks do not take turns on one actor; once the use is spent and
+/// target having a drawn or placed aim point, `target_available`): a missing target
+/// position or an actor still on its way leaves ordinary attacks in charge (#2145,
+/// #2652). So the shooter and the ordinary attacks do not take turns on one actor;
+/// once the use is spent and
 /// landed, or let go, the fight takes the actor back. `shoot` and `fight` are not
 /// ordered, so in the frame a use begins or ends one of them may still act on the state
 /// the other has just left [design].
-fn weapon_use_holds_fight(any: Option<&fnv_game::use_weapon::WeaponUse>, active: Option<&fnv_game::use_weapon::WeaponUse>, in_combat: bool, target_standing: bool, landing: bool) -> bool {
-    any.is_some_and(|w| w.source == fnv_game::use_weapon::Source::Script) || landing || active.is_some_and(|w| !in_combat || crate::use_weapon::acts_on(w, target_standing))
+fn weapon_use_holds_fight(any: Option<&fnv_game::use_weapon::WeaponUse>, active: Option<&fnv_game::use_weapon::WeaponUse>, in_combat: bool, target_available: bool, landing: bool) -> bool {
+    any.is_some_and(|w| w.source == fnv_game::use_weapon::Source::Script) || landing || active.is_some_and(|w| !in_combat || crate::use_weapon::acts_on(w, target_available))
 }
 
 /// Whether an actor a weapon use holds the fight for keeps its fight's state (its
@@ -1346,8 +1346,8 @@ enum UseHold {
 }
 
 /// [`UseHold`] from [`weapon_use_holds_fight`] and [`keeps_fight`] (#2145 review).
-fn use_hold(any: Option<&fnv_game::use_weapon::WeaponUse>, active: Option<&fnv_game::use_weapon::WeaponUse>, state: State, target_standing: bool, landing: bool) -> UseHold {
-    if weapon_use_holds_fight(any, active, state.in_combat(), target_standing, landing) {
+fn use_hold(any: Option<&fnv_game::use_weapon::WeaponUse>, active: Option<&fnv_game::use_weapon::WeaponUse>, state: State, target_available: bool, landing: bool) -> UseHold {
+    if weapon_use_holds_fight(any, active, state.in_combat(), target_available, landing) {
         if keeps_fight(active, state == State::Combat) {
             UseHold::Kept
         } else {
@@ -1543,10 +1543,10 @@ pub(crate) fn fight(
             // A weapon use being carried out fires instead (`use_weapon`), while the
             // shooter acts on it (`weapon_use_holds_fight`).
             let landing = g.weapon_use(me).is_some_and(|w| shooters.as_deref().is_some_and(|s| s.landing(id, w.seq)));
-            let target_standing = g.weapon_use(me).is_some_and(|w| places.contains_key(&w.target.0));
-            match use_hold(g.weapon_use(me), g.active_weapon_use(me), g.awareness.state(me), target_standing, landing) {
+            let target_available = g.weapon_use(me).is_some_and(|w| places.contains_key(&w.target.0) || crate::use_weapon::target_place(g, me, w.target).is_some());
+            match use_hold(g.weapon_use(me), g.active_weapon_use(me), g.awareness.state(me), target_available, landing) {
                 // The hand-over goes back and forth as the use's target comes and goes
-                // among the drawn people: its fight is kept as it is meanwhile.
+                // among the available targets: its fight is kept as it is meanwhile.
                 UseHold::Kept => {
                     if let Some(x) = f.fighters.get_mut(&id) {
                         hold_for_use(x);
@@ -3406,13 +3406,13 @@ mod tests {
         assert!(weapon_use_holds_fight(Some(&package), Some(&package), false, false, false));
         assert!(weapon_use_holds_fight(Some(&there), Some(&there), false, false, false));
         // Its package continues during combat: the attacks are off only while the shooter
-        // acts on it, in place with its target standing among the drawn people.
+        // acts on it, in place with a drawn or placed aim point [design, #2652].
         assert!(weapon_use_holds_fight(Some(&there), Some(&there), true, true, false));
         // Not yet at its stand (on its way, or never got there): the actor fights.
         assert!(!weapon_use_holds_fight(Some(&package), Some(&package), true, true, false), "on its way to its stand");
-        // At its stand, a target that is no actor (a marker: the Ultra-Luxe torchers') or
-        // one not drawn: nothing for the shooter, the actor fights.
-        assert!(!weapon_use_holds_fight(Some(&there), Some(&there), true, false, false), "a marker or undrawn target");
+        // [design, #2652] At its stand without any drawn or placed aim point,
+        // nothing for the shooter: ordinary attacks take over.
+        assert!(!weapon_use_holds_fight(Some(&there), Some(&there), true, false, false), "no drawn or placed target position");
         // Spent (kept, done, until the package changes) or let go: the actor fights again,
         // but not while the last blow of a melee use is still to land.
         let spent = WeaponUse { done: true, ..there.clone() };

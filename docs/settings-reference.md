@@ -1019,6 +1019,20 @@ below cover them all.
 - More: docs/design/graphics-enhanced.md
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `heat-haze`: Heat haze (experimental)
+
+- On the page: On: the far ground near the horizon shimmers slightly on hot, clear days, by
+  the sun and the weather. A prototype. Not in the original.
+- In full: On: beyond about 6,000 units, close to the horizon, the picture is moved a pixel
+  or two up and down by a slowly rising pattern that drifts with the wind; as strong as the
+  sun is high (a little stronger in the afternoon) and the weather's sunlight bright, its
+  air calm and free of haze; none at night, indoors or in rain or snow. The base game's
+  overcast is not told from clear yet. Near things, the weapon and the HUD stay sharp. Off
+  in both presets; not in the original.
+- Command-line switches: `--graphics-only`
+- More: docs/design/graphics-enhanced.md §3.15
+- Registered in `engine/nvforever/src/settings.rs`
+
 ### `bloom`: Bloom
 
 - On the page: On: light brighter than a sunlit white wall (the sun, lamps, windows) glows

@@ -1395,7 +1395,9 @@ buttons, `moved`, `activated`, `block_run`, `result_script`, `stub` (each distin
 once per unit), `unhandled`, `call_failed`, `script_error`, `skipped`,
 `undeclared_variable`, and from round 4 `menu_opened`, `menu_closed`, `line_started`,
 `line_ended`, `no_line`, and from the dialogue work `dialogue_started`, `response_said`,
-`choices_offered`, `choice_made`, `topic_added`, `dialogue_ended`); `final` (frames,
+`choices_offered`, `choice_made`, `topic_added`, `dialogue_ended`, and `assault_alarm`
+for SendAssaultAlarm with a faction: its victim and the members alive, absent and dead,
+#2926); `final` (frames,
 the running conversation `dialogue`, every touched quest with stages, objectives and
 named variables, the player state, reported references, unhandled and stubbed call
 counts).

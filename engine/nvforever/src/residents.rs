@@ -2532,7 +2532,12 @@ impl Core {
             let active = game.active_weapon_use(r.actor);
             let use_target = use_aim(active.map(|w| w.target), active.is_some_and(|w| w.taken));
             let Some(target) = aim_target(use_target, aw.combat_target().map(|(t, _)| t)) else { continue };
-            if let Some(p) = fnv_ai::goal::place_of_ref(game, target).filter(|p| p.space == a.walker.space) {
+            let at = if use_target.is_some() {
+                fnv_ai::goal::weapon_target_place(game, target, a.walker.space)
+            } else {
+                fnv_ai::goal::place_of_ref(game, target).filter(|p| p.space == a.walker.space)
+            };
+            if let Some(p) = at {
                 self.aims.insert(r.actor, p.pos);
                 if let Some(t) = use_target {
                     self.use_aims.insert(r.actor, t);

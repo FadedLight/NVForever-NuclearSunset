@@ -62,7 +62,7 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
         // [documented: GetUserTime; observed: a string map of the 8 keys] the computer's
         // local time.
         "getusertime" => {
-            let now = jiff::ZonedDateTime::now();
+            let now = jiff::Timestamp::now().to_zoned_datetime(crate::local_time::system_zone());
             let pairs: [(&str, u32); 8] = [
                 ("Year", now.year().max(0) as u32),
                 ("Month", now.month() as u32),

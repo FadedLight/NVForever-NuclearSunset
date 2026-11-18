@@ -431,6 +431,29 @@ pub fn place_of_ref(game: &Game, r: FormId) -> Option<Place> {
     Some(Place { space: space_of_cell(refs, cell?), pos })
 }
 
+/// [hypothesis, #2652; docs/spec-notes/use-weapon.md section 6, observer check 207]
+/// A Use Weapon target that is a non-actor placed reference in a sibling worldspace
+/// shares the shooter's coordinates. Actors and interiors still require the same
+/// space; worldspaces without a shared, nonempty immediate parent do not qualify.
+pub fn weapon_target_place(game: &Game, target: FormId, space: Space) -> Option<Place> {
+    let mut at = place_of_ref(game, target)?;
+    if at.space == space {
+        return Some(at);
+    }
+    let placed = game.world.placed.get(target)?;
+    if placed.sig != *b"REFR" || fnv_game::ai::is_actor_base(game.world.forms, placed.base) {
+        return None;
+    }
+    let (Space::World(shooter), Space::World(other)) = (space, at.space) else { return None };
+    let parents = &game.world.placed.world_parents;
+    let parent = parents.get(&FormId(shooter))?;
+    if parents.get(&FormId(other)) != Some(parent) {
+        return None;
+    }
+    at.space = space;
+    Some(at)
+}
+
 /// Where a reference was placed in the editor.
 pub fn editor_place(refs: &RefTable, r: FormId) -> Option<Place> {
     let p = refs.get(r)?;

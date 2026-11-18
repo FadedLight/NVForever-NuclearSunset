@@ -125,7 +125,7 @@ pub const SHOT_LEAST: f32 = 0.5;
 pub const SHOT_MOST: f32 = 10.0;
 /// How far the room about the actors is measured, units [design: past the largest
 /// distance the masters' paths compare with, 320, observed].
-pub const ROOM_REACH: f32 = 1024.0;
+pub const ROOM_REACH: f32 = fnv_game::vats::AREA_REACH;
 /// The camera keeps this far in front of what it would go into, units [design].
 pub const WALL_MARGIN: f32 = 8.0;
 /// The slowest the world's clock is taken [design].

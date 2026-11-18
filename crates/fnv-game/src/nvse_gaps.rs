@@ -301,6 +301,10 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
     let base = |g: &Game, f: FormId| crate::functions::base_of(g, f).unwrap_or(f);
     let zero = XVal::Num(0.0);
     let v = match name {
+        // Ordinary source calls use the current physical caster, never a stale
+        // CPTH room (vats-script-clearance.md). Generic receiver policy is unchanged.
+        name if crate::vats::handles_area_query(name) =>
+            XVal::Num(crate::vats::script_area(g, subject, name == "getvatsleftareafree")),
         // ---- magic items and effects ----
         // The item's effects in record order [observed: gaps2, the stimpak 4, the first
         // RestoreHealth, past the end 0].

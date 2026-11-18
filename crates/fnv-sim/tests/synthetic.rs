@@ -2466,6 +2466,33 @@ fn deleted_created_references_are_pruned_from_saves() {
     assert!(pruned * 4 < whole, "{pruned} vs {whole}");
 }
 
+#[test]
+fn rerolled_inventory_sources_replace_and_clear_the_created_source_without_changing_placed_lifetime() {
+    let f = fixture();
+    let mut w = World::new(&f.forms, &f.refs, SimConfig::default());
+    let made = w.place(id(SAFE), Some(id(CELL_A)), [0.0; 3], [0.0; 3], 1).unwrap();
+    w.give_items_of(made, id(LOCKER)).unwrap();
+    assert_eq!(w.item_count(made, id(PISTOL)).unwrap(), 1);
+    w.set_inventory_source(made, Some(id(SAFE)));
+    w.set_inventory_source(id(SAFE_REF), Some(id(LOCKER)));
+    assert!(w.reset_inventory(made).unwrap());
+    assert!(w.reset_inventory(id(SAFE_REF)).unwrap());
+    assert_eq!(w.item_count(made, id(PISTOL)).unwrap(), 0);
+    assert_eq!(w.item_count(id(SAFE_REF), id(PISTOL)).unwrap(), 1);
+    assert_eq!(w.snapshot().created_inventory_sources, [(made, id(SAFE))].into_iter().collect());
+    w.set_inventory_source(made, Some(id(LOCKER)));
+    assert!(w.reset_inventory(made).unwrap());
+    assert_eq!(w.item_count(made, id(PISTOL)).unwrap(), 1);
+    w.set_inventory_source(made, None);
+    w.set_inventory_source(id(SAFE_REF), None);
+    assert!(w.snapshot().created_inventory_sources.is_empty());
+    let mut back = World::restore(&f.forms, &f.refs, &w.snapshot()).unwrap();
+    for reference in [made, id(SAFE_REF)] {
+        assert!(back.reset_inventory(reference).unwrap());
+        assert_eq!(back.item_count(reference, id(PISTOL)).unwrap(), 0);
+    }
+}
+
 /// The run-time state a snapshot carries since #1084 (a created reference's inventory
 /// source, the power armour flag, carry bonuses and weight rules), and what it leaves
 /// to the session: game settings, leveled lists and base containers edited by script are

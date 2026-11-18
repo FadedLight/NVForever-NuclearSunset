@@ -16,7 +16,7 @@
 //!   other weapon, or none, swings (**Melee** below) [design]. Its drawn model is the one it was spawned with: a use
 //!   naming another weapon fires that weapon's shots from the model it holds (models are
 //!   not swapped live yet).
-//! - **Always Hit**: no spread at all, aimed straight at the target's chest [design: the
+//! - **Always Hit**: no spread at all, aimed at the chest or object aim point [design: the
 //!   shot can still meet cover between them]. **Do No Damage**: the shots are harmless
 //!   (`nvf_play::combat::ActorFire::harmless`). **Crouch To Reload**: it crouches
 //!   (`Game::sneaks`) while its weapon reloads.
@@ -63,6 +63,11 @@ use nvf_play::player::{Player, EYE_HEIGHT};
 use nvf_play::script::{with_world, ScriptState};
 use nvf_play::sim::SimState;
 use std::collections::{BTreeMap, HashMap};
+
+mod targets;
+pub(crate) use targets::target_place;
+#[cfg(test)]
+mod object_tests;
 
 /// A scripted weapon use swings only while its target is within this angle of straight
 /// ahead, radians (30°: the combat AI's arc before it held its gunmen to 3°, kept for
@@ -222,16 +227,14 @@ impl Shooters {
 }
 
 /// Whether [`shoot`] acts on the weapon use `w` this frame: the actor is in place
-/// (`WeaponUse::in_place`) and the use's target stands where the shooter aims at people
-/// (`target_standing`: a drawn actor neither dying nor a corpse, or the player; its
-/// `places`). A target that is no actor (a marker: the Ultra-Luxe kitchen's torchers
-/// aim at one) or is not drawn, and an actor not yet in place, get nothing from it.
+/// (`WeaponUse::in_place`) and its target has an aim point (`target_available`: drawn
+/// actor/player in `places`, else a present reference resolved by [`target_place`]).
 /// `npc_combat::fight` keeps its attacks off a package's use in a combat state only while
 /// this holds (`npc_combat::weapon_use_holds_fight`), so one of the two always has an
 /// actor in Combat, though either may still hold its fire (not facing, someone in the way)
 /// (#2145 review) [design].
-pub fn acts_on(w: &fnv_game::use_weapon::WeaponUse, target_standing: bool) -> bool {
-    w.in_place && target_standing
+pub fn acts_on(w: &fnv_game::use_weapon::WeaponUse, target_available: bool) -> bool {
+    w.in_place && target_available
 }
 
 #[derive(Default)]
@@ -359,7 +362,8 @@ pub(crate) fn shoot(
             }
             // Nothing to fire at, or not there yet: the test `npc_combat::fight` keeps its
             // attacks off by ([`acts_on`]).
-            let target_at = places.get(&w.target.0).copied();
+            let object_at = (!places.contains_key(&w.target.0)).then(|| target_place(g, me, w.target)).flatten();
+            let target_at = places.get(&w.target.0).copied().or(object_at.map(|(feet, _)| (feet, feet)));
             if !acts_on(&w, target_at.is_some()) {
                 continue;
             }
@@ -447,7 +451,7 @@ pub(crate) fn shoot(
                     shooter.reload_timed = true;
                 }
             }
-            let tchest = chests.get(&w.target.0).copied().unwrap_or([tfeet[0], tfeet[1], tfeet[2] + (teyes[2] - tfeet[2]) * CHEST]);
+            let tchest = object_at.map(|(_, aim)| aim).or_else(|| chests.get(&w.target.0).copied()).unwrap_or([tfeet[0], tfeet[1], tfeet[2] + (teyes[2] - tfeet[2]) * CHEST]);
             // What holds its fire this frame.
             let restrained = g.extra.get(&me).is_some_and(|e| e.restrained);
             let away = w.target_here.and_then(|r| fnv_ai::goal::place_of_ref(g, r)).is_some_and(|p| (p.pos[0] - tfeet[0]).hypot(p.pos[1] - tfeet[1]) > TARGET_HERE_RADIUS);
@@ -854,16 +858,18 @@ mod tests {
         assert_eq!(pull_wait(&WeaponStats { automatic: true, ..ws.clone() }, (1.0, 1.0), 0.5), 0.0);
     }
 
-    /// #2145 review: the shooter acts on a use only in place and with its target standing
-    /// among the drawn people; a marker target (never among them), a target not drawn, or
-    /// an actor still on its way get nothing from it, and the fight keeps the actor.
+    /// [design, #2652] Eligibility needs an aim point, including placed objects/markers;
+    /// an actor still walking to its stand leaves the fight in charge (#2145).
     #[test]
-    fn the_shooter_acts_only_in_place_on_a_standing_target() {
+    fn the_shooter_acts_only_in_place_on_an_available_target() {
         let walking = WeaponUse { source: Source::Package(FormId(0x9)), ..WeaponUse::of_script(None, None, FormId(0x7), 3, true, true, false, false, None) };
         let there = WeaponUse { in_place: true, ..walking.clone() };
-        assert!(acts_on(&there, true), "in place, its target drawn and standing");
-        assert!(!acts_on(&there, false), "a marker, or a target not drawn: nothing to fire at");
+        assert!(acts_on(&there, true), "in place with a drawn or placed target");
+        assert!(!acts_on(&there, false), "no target position");
         assert!(!acts_on(&walking, true), "still on its way to its stand");
         assert!(!acts_on(&walking, false));
     }
 }
+
+#[cfg(test)]
+mod critical_damage_hit_tests;

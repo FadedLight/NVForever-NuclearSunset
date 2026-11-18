@@ -519,3 +519,6 @@ name = "Deutsch"
 "Menus and Conversations" = "Menüs und Gespräche"
 "Starting and Loading" = "Start und Laden"
 "World and Items" = "Welt und Gegenstände"
+# [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
+"Heat haze (experimental)" = "Hitzeflimmern (experimentell)"
+"On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "An: Der ferne Boden nahe dem Horizont flimmert an heißen, klaren Tagen leicht, je nach Sonne und Wetter. Ein Prototyp. Nicht im Original."

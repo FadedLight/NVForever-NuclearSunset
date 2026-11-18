@@ -97,6 +97,7 @@ pub mod idles;
 pub mod intro;
 pub mod jip_ccc;
 pub mod jip_events;
+mod crosshair_events;
 mod jip_provenance;
 #[cfg(test)]
 mod handler_diagnostics_tests;
@@ -190,6 +191,7 @@ pub mod nvse_settings;
 pub mod nvse_tokens;
 pub mod nvse_handler_lists;
 pub mod nvse_debug;
+mod local_time;
 pub mod text_codes;
 pub mod script_input;
 pub mod levelup;

@@ -9,7 +9,9 @@ the APK via the native asset manager. No file is written into the player's data.
 AI-generated image supplied by the contributor for NVForever's Classic dialogue
 frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
 
-The decoder expects a 1447×1087 8-bit RGB or RGBA PNG.
+The bundled atlas is a 1774×887 (2:1) PNG. Local 8-bit RGB/RGBA overrides can
+use that layout or the previous 1447×1087 layout, with openings and controls
+in the corresponding positions.
 
 The real supplied casing, lamps, speaker and controls remain opaque and retain their
 original colours. A bounded connected-black mask clears the four actual rounded
@@ -21,23 +23,23 @@ content remover; different dimensions or absent apertures are refused.
 The casing is cut into four bands (header, world window, controls, dialogue screens)
 that meet in plain dark gaps. One uniform scale fits the whole picture into the safe
 canvas, so the tubes, grille, cables, speaker, lights, every rounded corner, the
-caps bezel ends, Review and Barter keep their native aspect at any window shape.
+caps bezel corners and Trade hardware keep their native aspect at any admitted window shape.
 Spare width or height goes only to flexible segments: the two plain dark gaps
 beside the header tubes and the straight bars and interiors of the openings. On a
 wide phone the dialogue screens take the extra width; in portrait the world window
 and screens take the extra height; the speech screen always keeps one 48-unit row.
 Under the safe-area insets, each band's outer four source pixels are repeated to
 the window edge, so no border of the world or clear colour shows; text, the caps
-readout and the Barter target remain inside the safe canvas.
+readout and the Trade target remain inside the safe canvas.
 
 The caps glyphs are sized from the counter opening's height (its interior less a
 small bezel margin), not from a fixed type size. The opening's plain interior widens
-only when the value shown needs it, including both softened-font overhangs, so 0
-and short values keep the native bezel while an extreme signed integer still fits
-unshortened. No cash value is shortened or silently replaced with zero. Unknown cash
-remains blank (the layout is sized for 0). A window too small for 12-logical-unit
-caps glyphs, a 48-unit speech row or 48-unit targets is refused instead of shrinking
-targets or silently making numbers unreadable.
+only when the value shown needs it, including both softened-font overhangs. If
+the wide template's counter would otherwise drop below 12 logical units, its
+straight center takes just enough height from the world opening; the caps bezel
+corners and Trade plate are not stretched. Extreme signed values fit unshortened.
+Unknown cash remains blank (the layout is sized for 0). A layout that cannot fit
+the readable counter, a 48-unit speech row and 48-unit targets is refused.
 
 The left aperture is the real world camera's viewport. The dialogue lease admits only
 a live perspective player camera on the current primary window and only an unowned
@@ -54,14 +56,16 @@ that actual text while responses are offered. Its independent scroll owner is no
 Skip action while choosing; during speech it uses the existing guarded Skip action.
 The lower-right screen uses the existing offered choices, requirements, selection,
 release guards, optional confirmation and scroll/reveal consumers. All interactive
-rows and the real Barter hit target retain 48-logical-unit minima. Wrapped text can
+rows and the Trade hit target retain 48-logical-unit minima. Wrapped text can
 make a row taller; the template does not promise that all choices fit without scrolling.
 
-Barter is published only when the canonical model provides a current merchant/list
-target. It uses the existing guarded release and action consumer, with no separate
-trade interface. Otherwise the small red button is dimmed and has no action. Review
-is decorative. The installed native Font 5 and existing dark-screen undercoat provide
-live content; no default-font stand-in is reported as a ready Classic view.
+The bundled plate's TRADE label and red button form one target. It is published
+only for a current merchant/list target and opens the existing barter menu
+through the guarded release and action consumer. Otherwise the red button is
+dimmed and has no action. The earlier override's Review label remains decorative;
+the retained spoken line and scroll behavior are unchanged. The installed native
+Font 5 and existing dark-screen undercoat provide live content; no default-font
+stand-in is reported as a ready Classic view.
 
 The old custom backing, tint, accent and frame-opacity choices remain stored for the
 configurable Field Notes treatment. They do not fade or recolour real hardware. Text
@@ -88,8 +92,11 @@ existence does not assert side framing or a Classic world lease, and it requires
 neither ScriptState nor a player camera merely to display ordinary dialogue. Foreign
 default-UI markers remain untouched.
 
-Source controls cover the decoder and runtime VFS, real font preparation, passive atlas
-pieces, geometry, camera lease cleanup/foreign ownership and raw-contact retirement.
+Source controls cover the four apertures in the bundled bytes, runtime VFS
+override, native-scale hardware and inset coverage, Taffy-painted text at 20:9,
+19.5:9, 16:9, 4:3 and portrait, caps fit, and raw Trade release into the real
+barter menu. Camera lease cleanup/foreign ownership and raw-contact retirement
+are covered separately.
 An ordered handoff control changes the actual Camera target, viewport or activity
 between Resolve and Admit and checks the real Classic/Normal painter selection. The
 CPU scene deliberately publishes authored `Camera.computed.target_info` for scheduling

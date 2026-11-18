@@ -4,20 +4,72 @@ use bevy::{image::ImageSampler,prelude::*,render::render_resource::TextureFormat
 use nvf_assets::GameData;
 
 pub(crate) const ASSET:&str="Textures/Interface/NVForever/Dialogue/classic.png";
-const WIDTH:u32=1447;
-const HEIGHT:u32=1087;
 
-/// Bounded black openings in the supplied blank template. The connected mask
-/// follows the actual rounded pixel boundary; it does not cut a rectangular hole
-/// through the metal corners. The source bytes remain untouched on disk.
-const CLEAR:[Rect;4]=[
-    Rect::new(38.,231.,587.,813.),
-    Rect::new(631.,235.,1409.,393.),
-    Rect::new(633.,440.,1409.,1020.),
-    Rect::new(38.,920.,130.,982.),
-];
-const SEEDS:[UVec2;4]=[UVec2::new(300,500),UVec2::new(1000,310),
-    UVec2::new(1000,700),UVec2::new(80,950)];
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(crate) enum Template {Wide, Legacy}
+
+struct Atlas {
+    size:UVec2,
+    clear:[Rect;4],
+    seeds:[UVec2;4],
+    header_x:[f32;6],
+    header_y:[f32;2],
+    world_x:[f32;4],
+    world_y:[f32;4],
+    controls_x:[f32;4],
+    controls_y:[f32;2],
+    right_x:[f32;4],
+    right_y:[f32;6],
+    speech:Rect,
+    responses:Rect,
+    caps:Rect,
+    red:Rect,
+    trade:Rect,
+}
+
+const fn rect(x0:f32,y0:f32,x1:f32,y1:f32)->Rect {
+    Rect {min:Vec2::new(x0,y0),max:Vec2::new(x1,y1)}
+}
+
+impl Template {
+    pub(crate) fn size(self)->UVec2 {self.atlas().size}
+
+    fn atlas(self)->&'static Atlas {
+        match self {Self::Wide=>&WIDE,Self::Legacy=>&LEGACY}
+    }
+}
+
+// Bounds and seeds identify the actual connected near-black openings, not a
+// rectangular cutout. Separate inset rectangles keep text off rounded corners.
+// Atlas cuts cross only the dark header gaps and straight bars of the openings.
+const WIDE:Atlas=Atlas {
+    size:UVec2::new(1774,887),
+    clear:[rect(42.,181.,554.,637.),rect(613.,181.,1737.,279.),
+        rect(620.,326.,1734.,821.),rect(45.,737.,121.,782.)],
+    seeds:[UVec2::new(283,390),UVec2::new(1188,230),UVec2::new(1170,549),UVec2::new(85,761)],
+    header_x:[0.,411.,420.,1224.,1230.,1774.], header_y:[0.,148.],
+    world_x:[0.,100.,495.,585.], world_y:[148.,235.,580.,672.],
+    controls_x:[0.,63.,100.,585.], controls_y:[672.,887.],
+    right_x:[585.,666.,1685.,1774.], right_y:[148.,204.,252.,360.,795.,887.],
+    speech:rect(630.,190.,1720.,268.), responses:rect(637.,341.,1717.,804.),
+    caps:rect(50.,744.,115.,775.), red:rect(447.,754.,484.,792.),
+    trade:rect(416.,713.,513.,801.),
+};
+
+// Keep the previously documented user-override format and its existing target.
+const LEGACY:Atlas=Atlas {
+    size:UVec2::new(1447,1087),
+    clear:[rect(38.,231.,587.,813.),rect(631.,235.,1409.,393.),
+        rect(633.,440.,1409.,1020.),rect(38.,920.,130.,982.)],
+    seeds:[UVec2::new(300,500),UVec2::new(1000,310),UVec2::new(1000,700),UVec2::new(80,950)],
+    header_x:[0.,140.,150.,392.,408.,1447.], header_y:[0.,194.],
+    world_x:[0.,110.,520.,610.], world_y:[194.,300.,745.,854.],
+    controls_x:[0.,60.,108.,610.], controls_y:[854.,1087.],
+    right_x:[610.,690.,1350.,1447.], right_y:[194.,262.,366.,490.,970.,1087.],
+    speech:rect(665.,249.,1373.,376.), responses:rect(666.,466.,1376.,994.),
+    caps:rect(42.,924.,126.,978.), red:rect(469.,950.,507.,982.),
+    trade:rect(469.,950.,507.,982.),
+};
 
 /// Asset preparation only; Loaded does not assert a rendered frame or working input.
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
@@ -42,7 +94,7 @@ impl Cache {
                 None => decode_bundled(),
             };
             match image {
-                Ok(image) => self.art = Some(LoadedArt { image: images.add(image) }),
+                Ok((image,template)) => self.art = Some(LoadedArt { image: images.add(image),template }),
                 Err(error) => {
                     warn!("classic dialogue casing: {error}");
                     self.error = Some(error);
@@ -62,30 +114,33 @@ impl Cache {
 pub(crate) fn install(app:&mut App) {app.init_resource::<Cache>();}
 
 #[cfg(not(target_os = "android"))]
-fn decode_bundled() -> Result<Image, String> {
+fn decode_bundled() -> Result<(Image,Template), String> {
     decode(include_bytes!("../../assets/dialogue/classic.png"))
 }
 
 #[cfg(target_os = "android")]
-fn decode_bundled() -> Result<Image, String> {
+fn decode_bundled() -> Result<(Image,Template), String> {
     let app = bevy::android::ANDROID_APP.get().ok_or("Android activity is unavailable")?;
     let mut asset = app.asset_manager().open(c"dialogue/classic.png")
         .ok_or("Bundled Classic dialogue casing is missing from the APK")?;
     decode(asset.buffer().map_err(|error| error.to_string())?)
 }
 
-fn decode(bytes:&[u8])->Result<Image,String> {
+fn decode(bytes:&[u8])->Result<(Image,Template),String> {
     let mut decoder=png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader=decoder.read_info().map_err(|e|e.to_string())?;
-    // This atlas's source rectangles are calibrated to this one layout. Reject a
-    // different picture before allocating its decoded pixel buffer.
-    if reader.info().width!=WIDTH || reader.info().height!=HEIGHT {
-        return Err(format!("expected {WIDTH}x{HEIGHT} casing atlas, got {}x{}",reader.info().width,reader.info().height));
+    // The source geometry only applies to these two atlas formats. Reject any
+    // other dimensions before allocating the decoded pixel buffer.
+    let size=UVec2::new(reader.info().width,reader.info().height);
+    let template=[Template::Wide,Template::Legacy].into_iter().find(|t|t.size()==size)
+        .ok_or_else(||format!("expected 1774x887 or 1447x1087 casing atlas, got {}x{}",size.x,size.y))?;
+    let buffer_size=reader.output_buffer_size().ok_or("PNG output size is unavailable")?;
+    let area=(size.x*size.y) as usize;
+    if buffer_size>area*4 {
+        return Err("casing PNG is not an 8-bit RGB/RGBA image".into());
     }
-    let size=reader.output_buffer_size().ok_or("PNG output size is unavailable")?;
-    if size>(WIDTH as usize*HEIGHT as usize*4) {return Err("casing PNG is not an 8-bit RGB/RGBA image".into());}
-    let mut pixels=vec![0;size];
+    let mut pixels=vec![0;buffer_size];
     let info=reader.next_frame(&mut pixels).map_err(|e|e.to_string())?;
     pixels.truncate(info.buffer_size());
     let mut rgba=match (info.color_type,info.bit_depth) {
@@ -93,30 +148,36 @@ fn decode(bytes:&[u8])->Result<Image,String> {
         (png::ColorType::Rgb,png::BitDepth::Eight)=>pixels.as_chunks::<3>().0.iter().flat_map(|p|[p[0],p[1],p[2],255]).collect(),
         _=>return Err("casing PNG is not an 8-bit RGB/RGBA image".into()),
     };
-    for (bounds,seed) in CLEAR.into_iter().zip(SEEDS) {
-        if clear_opening(&mut rgba,bounds,seed)<16 {return Err("casing template has no expected clear opening".into());}
+    let atlas=template.atlas();
+    let mut seen=vec![false;area];
+    let mut pending=Vec::new();
+    for (bounds,seed) in atlas.clear.into_iter().zip(atlas.seeds) {
+        if clear_opening(&mut rgba,size,bounds,seed,&mut seen,&mut pending)<16 {
+            return Err("casing template has no expected clear opening".into());
+        }
     }
-    let mut image=nvf_assets::texture::checked_image(WIDTH,HEIGHT,1,TextureFormat::Rgba8UnormSrgb,rgba)?;
+    let mut image=nvf_assets::texture::checked_image(size.x,size.y,1,TextureFormat::Rgba8UnormSrgb,rgba)?;
     image.sampler=ImageSampler::linear();
     image.texture_descriptor.label=Some("supplied classic dialogue casing");
-    Ok(image)
+    Ok((image,template))
 }
 
 // Four-neighbour fill stays inside each permitted aperture and clears only its
 // connected black/transparent pixels. Dark metal elsewhere is never selected.
-fn clear_opening(rgba:&mut [u8],bounds:Rect,seed:UVec2)->usize {
-    let mut pending=vec![seed];let mut seen=vec![false;(WIDTH*HEIGHT) as usize];let mut count=0;
+fn clear_opening(rgba:&mut [u8],size:UVec2,bounds:Rect,seed:UVec2,seen:&mut [bool],pending:&mut Vec<UVec2>)->usize {
+    pending.push(seed);
+    let mut count=0;
     while let Some(p)=pending.pop() {
-        if p.x>=WIDTH || p.y>=HEIGHT || !bounds.contains(p.as_vec2()+Vec2::splat(0.5)) {continue;}
-        let index=(p.y*WIDTH+p.x) as usize;
+        if p.x>=size.x || p.y>=size.y || !bounds.contains(p.as_vec2()+Vec2::splat(0.5)) {continue;}
+        let index=(p.y*size.x+p.x) as usize;
         if std::mem::replace(&mut seen[index],true) {continue;}
         let pixel=&mut rgba[index*4..index*4+4];
         if pixel[3]!=0 && pixel[..3].iter().any(|v|*v>8) {continue;}
         pixel.fill(0);count+=1;
         if p.x>0 {pending.push(UVec2::new(p.x-1,p.y));}
         if p.y>0 {pending.push(UVec2::new(p.x,p.y-1));}
-        if p.x+1<WIDTH {pending.push(UVec2::new(p.x+1,p.y));}
-        if p.y+1<HEIGHT {pending.push(UVec2::new(p.x,p.y+1));}
+        if p.x+1<size.x {pending.push(UVec2::new(p.x+1,p.y));}
+        if p.y+1<size.y {pending.push(UVec2::new(p.x,p.y+1));}
     }
     count
 }
@@ -125,24 +186,6 @@ fn clear_opening(rgba:&mut [u8],bounds:Rect,seed:UVec2)->usize {
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct Part {pub(crate) source:Rect,pub(crate) destination:Rect}
 
-// Atlas breakpoints. Segments between them are drawn at one uniform scale, so
-// tubes, grille, speaker, lights, caps bezel, Review and Barter keep their native
-// aspect. Only the listed flexible segments stretch: the two plain dark gaps
-// beside the header tubes, the straight bars and interiors of the world, caps,
-// speech and response openings. Bands meet in the dark gaps at y=194 and x=610.
-const HEADER_X:[f32;6]=[0.,140.,150.,392.,408.,1447.];
-const HEADER_Y:[f32;2]=[0.,194.];
-const WORLD_X:[f32;4]=[0.,110.,520.,610.];
-const WORLD_Y:[f32;4]=[194.,300.,745.,854.];
-const CONTROLS_X:[f32;4]=[0.,60.,108.,610.];
-const CONTROLS_Y:[f32;2]=[854.,1087.];
-const RIGHT_X:[f32;4]=[610.,690.,1350.,1447.];
-const RIGHT_Y:[f32;6]=[194.,262.,366.,490.,970.,1087.];
-const SPEECH_TEXT:Rect=Rect{min:Vec2::new(665.,249.),max:Vec2::new(1373.,376.)};
-const RESPONSES_TEXT:Rect=Rect{min:Vec2::new(666.,466.),max:Vec2::new(1376.,994.)};
-/// The counter's opening less a small bezel margin; glyphs are sized from its height.
-const CAPS_TEXT:Rect=Rect{min:Vec2::new(42.,924.),max:Vec2::new(126.,978.)};
-const RED:Rect=Rect{min:Vec2::new(469.,950.),max:Vec2::new(507.,982.)};
 /// [design] The smallest readable caps glyph, in logical units.
 pub(crate) const CAPS_MIN:f32=12.0;
 /// Source pixels at the art's outer edge repeated under a safe-area inset.
@@ -184,6 +227,31 @@ impl<const X:usize,const Y:usize> Band<X,Y> {
     }
 }
 
+#[derive(Clone,Copy,Debug,PartialEq)]
+enum Controls {
+    Native(Band<4,2>),
+    Taller {counter:Band<4,4>,panel:Band<2,4>},
+}
+
+impl Controls {
+    fn counter(&self,r:Rect)->Rect {
+        match self {Self::Native(b)=>b.map(r),Self::Taller {counter,..}=>counter.map(r)}
+    }
+
+    fn panel(&self,r:Rect)->Rect {
+        match self {Self::Native(b)=>b.map(r),Self::Taller {panel,..}=>panel.map(r)}
+    }
+
+    fn parts(&self)->impl Iterator<Item=Part>+'_ {
+        let (native,counter,panel)=match self {
+            Self::Native(b)=>(Some(b),None,None),
+            Self::Taller {counter,panel}=>(None,Some(counter),Some(panel)),
+        };
+        native.into_iter().flat_map(Band::parts).chain(counter.into_iter().flat_map(Band::parts))
+            .chain(panel.into_iter().flat_map(Band::parts))
+    }
+}
+
 /// Caps text metrics per unit of glyph size, for the exact value drawn.
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct CapsText {pub(crate) left:f32,pub(crate) width:f32,pub(crate) height:f32}
@@ -200,6 +268,7 @@ impl CapsText {
 /// reaches every window edge while text and targets stay inside the safe canvas.
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct Layout {
+    pub(crate) template:Template,
     pub(crate) size:Vec2,
     pub(crate) scale:f32,
     pub(crate) world:Rect,
@@ -209,64 +278,99 @@ pub(crate) struct Layout {
     pub(crate) caps_size:f32,
     pub(crate) wells:[Rect;3],
     pub(crate) red_button:Rect,
-    pub(crate) barter:Rect,
+    pub(crate) trade:Rect,
     bleed:[f32;4],
     header:Band<6,2>,
     world_band:Band<4,4>,
-    controls:Band<4,2>,
+    controls:Controls,
     right:Band<4,6>,
 }
 impl Layout {
     /// `bleed` is the left, top, right and bottom safe-area inset around `size`.
-    pub(crate) fn new(size:Vec2,bleed:[f32;4],caps:CapsText)->Option<Self> {
+    pub(crate) fn new(template:Template,size:Vec2,bleed:[f32;4],caps:CapsText)->Option<Self> {
         if !size.is_finite() || size.min_element()<=0. || bleed.iter().any(|b|!b.is_finite() || *b<0.)
             || !caps.width.is_finite() || caps.width<=0. || !caps.height.is_finite() || caps.height<=0. {return None;}
         // One scale fits the whole atlas; the spare length goes to flexible segments.
-        let s=(size.y/HEIGHT as f32).min(size.x/WIDTH as f32);
-        let spare=Vec2::new(size.x-WIDTH as f32*s,size.y-HEIGHT as f32*s).max(Vec2::ZERO);
+        let atlas=template.atlas();
+        let source=atlas.size.as_vec2();
+        let s=(size/source).min_element();
+        let spare=(size-source*s).max(Vec2::ZERO);
         // Glyphs follow the counter opening's height; a longer value widens the
         // opening (its plain interior) rather than shrinking or truncating digits.
-        let caps_size=(CAPS_TEXT.height()*s)/caps.height;
-        let caps_extra=(caps.needed(caps_size)-CAPS_TEXT.width()*s).max(0.);
-        let gaps=(HEADER_X[2]-HEADER_X[1])+(HEADER_X[4]-HEADER_X[3]);
+        let native_caps_height=atlas.caps.height()*s;
+        let native_caps_size=native_caps_height/caps.height;
+        // The wide sheet's counter is shallow on narrow screens. Borrow only
+        // the missing height from the world window's straight section.
+        let (caps_size,extra_height)=if template==Template::Wide && native_caps_size<CAPS_MIN {
+            (CAPS_MIN,CAPS_MIN*caps.height-native_caps_height)
+        } else {
+            (native_caps_size,0.)
+        };
+        let extra_width=(caps.needed(caps_size)-atlas.caps.width()*s).max(0.);
+        let [_,h1,h2,h3,h4,_]=atlas.header_x;
+        let gap_scale=s+spare.x/(h2-h1+h4-h3);
         let header=Band {
-            x:Axis::place(HEADER_X,0.,s,&[(1,(HEADER_X[2]-HEADER_X[1])*(s+spare.x/gaps)),
-                (3,(HEADER_X[4]-HEADER_X[3])*(s+spare.x/gaps))])?,
-            y:Axis::place(HEADER_Y,0.,s,&[])?,
+            x:Axis::place(atlas.header_x,0.,s,&[(1,(h2-h1)*gap_scale),(3,(h4-h3)*gap_scale)])?,
+            y:Axis::place(atlas.header_y,0.,s,&[])?,
         };
         let top=header.y.dst[1];
         let world_band=Band {
-            x:Axis::place(WORLD_X,0.,s,&[(1,(WORLD_X[2]-WORLD_X[1])*s+caps_extra)])?,
-            y:Axis::place(WORLD_Y,top,s,&[(1,(WORLD_Y[2]-WORLD_Y[1])*s+spare.y)])?,
+            x:Axis::place(atlas.world_x,0.,s,&[(1,(atlas.world_x[2]-atlas.world_x[1])*s+extra_width)])?,
+            y:Axis::place(atlas.world_y,top,s,&[(1,(atlas.world_y[2]-atlas.world_y[1])*s+spare.y-extra_height)])?,
         };
-        let controls=Band {
-            x:Axis::place(CONTROLS_X,0.,s,&[(1,(CONTROLS_X[2]-CONTROLS_X[1])*s+caps_extra)])?,
-            y:Axis::place(CONTROLS_Y,world_band.y.dst[3],s,&[])?,
+        let [x0,x1,x2,x3]=atlas.controls_x;
+        let [y0,y3]=atlas.controls_y;
+        let footer=world_band.y.dst[3];
+        let counter_width=(x2-x1)*s+extra_width;
+        let controls=if extra_height>0. {
+            // Split at the blank strip between the readout and vents. The
+            // counter stretches through its straight center; the rest of the
+            // footer takes the same height in blank metal below the controls.
+            const SEAM:f32=142.;
+            let counter=Band {
+                x:Axis::place([x0,x1,x2,SEAM],0.,s,&[(1,counter_width)])?,
+                y:Axis::place([y0,748.,771.,y3],footer,s,&[(1,23.*s+extra_height)])?,
+            };
+            let panel=Band {
+                x:Axis::place([SEAM,x3],counter.x.dst[3],s,&[])?,
+                y:Axis::place([y0,810.,821.,y3],footer,s,&[(1,11.*s+extra_height)])?,
+            };
+            Controls::Taller {counter,panel}
+        } else {
+            Controls::Native(Band {
+                x:Axis::place(atlas.controls_x,0.,s,&[(1,counter_width)])?,
+                y:Axis::place(atlas.controls_y,footer,s,&[])?,
+            })
         };
         let left=world_band.x.dst[3];
-        let fixed_right=(RIGHT_X[1]-RIGHT_X[0]+RIGHT_X[3]-RIGHT_X[2])*s;
+        let [rx0,rx1,rx2,rx3]=atlas.right_x;
+        let fixed_right=(rx1-rx0+rx3-rx2)*s;
         // Speech keeps one 48-unit row; responses take the rest of the column.
-        let fixed_column=(RIGHT_Y[1]-RIGHT_Y[0]+RIGHT_Y[3]-RIGHT_Y[2]+RIGHT_Y[5]-RIGHT_Y[4])*s;
-        let speech_fixed=(RIGHT_Y[1]-SPEECH_TEXT.min.y+SPEECH_TEXT.max.y-RIGHT_Y[2])*s;
-        let speech_open=((RIGHT_Y[2]-RIGHT_Y[1])*s+spare.y*0.25).max(48.-speech_fixed);
+        let [ry0,ry1,ry2,ry3,ry4,ry5]=atlas.right_y;
+        let fixed_column=(ry1-ry0+ry3-ry2+ry5-ry4)*s;
+        let speech_fixed=(ry1-atlas.speech.min.y+atlas.speech.max.y-ry2)*s;
+        let speech_open=((ry2-ry1)*s+spare.y*0.25).max(48.-speech_fixed);
         let right=Band {
-            x:Axis::place(RIGHT_X,left,s,&[(1,size.x-left-fixed_right)])?,
-            y:Axis::place(RIGHT_Y,top,s,&[(1,speech_open),(3,size.y-top-fixed_column-speech_open)])?,
+            x:Axis::place(atlas.right_x,left,s,&[(1,size.x-left-fixed_right)])?,
+            y:Axis::place(atlas.right_y,top,s,&[(1,speech_open),(3,size.y-top-fixed_column-speech_open)])?,
         };
-        let world=world_band.map(CLEAR[0]);
-        let speech=right.map(SPEECH_TEXT);
-        let responses=right.map(RESPONSES_TEXT);
-        let caps_rect=controls.map(CAPS_TEXT);
-        let red=controls.map(RED);
-        let barter=Rect::from_center_size(red.center(),Vec2::splat(48.));
-        let wells=[right.map(CLEAR[1]),right.map(CLEAR[2]),controls.map(CLEAR[3])];
+        let [portrait,speech_well,responses_well,counter_well]=atlas.clear;
+        let world=world_band.map(portrait);
+        let speech=right.map(atlas.speech);
+        let responses=right.map(atlas.responses);
+        let caps_rect=controls.counter(atlas.caps);
+        let red=controls.panel(atlas.red);
+        let plate=controls.panel(atlas.trade);
+        let minimum=Rect::from_center_size(red.center(),Vec2::splat(48.));
+        let trade=Rect::from_corners(plate.min.min(minimum.min),plate.max.max(minimum.max));
+        let wells=[right.map(speech_well),right.map(responses_well),controls.counter(counter_well)];
         let valid=|r:Rect|r.min.cmpge(Vec2::ZERO).all() && r.max.cmple(size+0.01).all();
-        if [world,speech,responses,caps_rect,barter].into_iter().any(|r|!valid(r))
+        if [world,speech,responses,caps_rect,trade].into_iter().any(|r|!valid(r))
             || world.size().min_element()<48. || speech.width()<48. || speech.height()<47.99
             || responses.width()<160. || responses.height()<96. || caps_size<CAPS_MIN
-            || caps_rect.width()<caps.needed(caps_size)-0.01 || barter.intersect(caps_rect).size().min_element()>0.
-            || [world,speech,responses].into_iter().any(|r|barter.intersect(r).size().min_element()>0.) {return None;}
-        Some(Self {size,scale:s,world,speech,responses,caps:caps_rect,caps_size,wells,red_button:red,barter,bleed,
+            || caps_rect.width()<caps.needed(caps_size)-0.01 || trade.intersect(caps_rect).size().min_element()>0.
+            || [world,speech,responses].into_iter().any(|r|trade.intersect(r).size().min_element()>0.) {return None;}
+        Some(Self {template,size,scale:s,world,speech,responses,caps:caps_rect,caps_size,wells,red_button:red,trade,bleed,
             header,world_band,controls,right})
     }
 
@@ -300,7 +404,7 @@ impl Layout {
     }
 }
 
-pub(crate) struct LoadedArt {image:Handle<Image>}
+pub(crate) struct LoadedArt {image:Handle<Image>,pub(crate) template:Template}
 impl LoadedArt {
     pub(crate) fn image_id(&self)->bevy::asset::AssetId<Image> {self.image.id()}
     /// Caller places the parent at the safe-canvas origin; bleed crops extend past
@@ -329,15 +433,16 @@ impl LoadedArt {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    pub(crate) fn authored_png()->Vec<u8> {
+    fn authored_png()->Vec<u8> {
+        let UVec2 {x:width,y:height}=LEGACY.size;
         let mut bytes=Vec::new();
         {
-            let mut encoder=png::Encoder::new(&mut bytes,WIDTH,HEIGHT);
+            let mut encoder=png::Encoder::new(&mut bytes,width,height);
             encoder.set_color(png::ColorType::Rgba);encoder.set_depth(png::BitDepth::Eight);
             let mut writer=encoder.write_header().unwrap();
-            let pixels:Vec<_>=(0..WIDTH*HEIGHT).flat_map(|index| {
-                let p=Vec2::new((index%WIDTH) as f32+0.5,(index/WIDTH) as f32+0.5);
-                if CLEAR.iter().any(|r|r.contains(p)) {[0,0,0,255]}else{[37,51,73,255]}
+            let pixels:Vec<_>=(0..width*height).flat_map(|index| {
+                let p=Vec2::new((index%width) as f32+0.5,(index/width) as f32+0.5);
+                if LEGACY.clear.iter().any(|r|r.contains(p)) {[0,0,0,255]}else{[37,51,73,255]}
             }).collect();
             writer.write_image_data(&pixels).unwrap();
         }
@@ -388,11 +493,13 @@ pub(super) mod tests {
     }
     #[test]
     fn supplied_image_decoder_removes_captured_content_and_keeps_hardware_pixels() {
-        let image=decode(&authored_png()).unwrap();assert_eq!(image.size(),UVec2::new(WIDTH,HEIGHT));
+        let (image,template)=decode(&authored_png()).unwrap();
+        assert_eq!(template,Template::Legacy);
+        assert_eq!(image.size(),LEGACY.size);
         let bytes=image.data.as_ref().unwrap();
-        for seed in SEEDS {let at=((seed.y*WIDTH+seed.x)*4) as usize;assert_eq!(&bytes[at..at+4],&[0,0,0,0]);}
+        for seed in LEGACY.seeds {let at=((seed.y*LEGACY.size.x+seed.x)*4) as usize;assert_eq!(&bytes[at..at+4],&[0,0,0,0]);}
         for (x,y) in [(100,100),(1200,100),(600,900),(400,1000)] {
-            let at=((y*WIDTH+x)*4) as usize;assert_eq!(&bytes[at..at+4],&[37,51,73,255]);
+            let at=((y*LEGACY.size.x+x)*4) as usize;assert_eq!(&bytes[at..at+4],&[37,51,73,255]);
         }
         assert!(decode(b"not a PNG").is_err());
         let mut short=Vec::new();{
@@ -400,6 +507,29 @@ pub(super) mod tests {
             encoder.write_header().unwrap().write_image_data(&[0;4]).unwrap();
         }
         assert!(decode(&short).is_err(),"a different atlas cannot use these source apertures");
+    }
+    #[test]
+    fn bundled_wide_atlas_clears_the_four_black_openings_and_keeps_rounded_hardware() {
+        let (image,template)=decode(include_bytes!("../../assets/dialogue/classic.png")).unwrap();
+        assert_eq!(template,Template::Wide);
+        assert_eq!(image.size(),UVec2::new(1774,887));
+        let bytes=image.data.as_ref().unwrap();
+        let pixel=|x:u32,y:u32| {let start=((y*1774+x)*4) as usize;&bytes[start..start+4]};
+        for (x,y) in [(42,395),(553,395),(297,181),(297,636)] {
+            assert_eq!(pixel(x,y),[0;4],"the portrait opens to the live camera at {x},{y}");
+        }
+        // All source pixels in the text rectangles are clear, not just their seeds.
+        for text in [WIDE.speech,WIDE.responses,WIDE.caps] {
+            for y in text.min.y as u32..text.max.y as u32 {
+                for x in text.min.x as u32..text.max.x as u32 {
+                    assert_eq!(pixel(x,y),[0;4],"text overlaps casing at {x},{y}");
+                }
+            }
+        }
+        for ((x,y),rgba) in [((43,182),[59,40,14,255]),((614,182),[27,21,16,255]),
+            ((621,327),[65,56,46,255]),((45,737),[11,9,3,255]),((465,773),[214,2,1,255])] {
+            assert_eq!(pixel(x,y),rgba,"rounded hardware/Trade remains at {x},{y}");
+        }
     }
     #[test]
     fn runtime_vfs_override_is_loaded_once_and_malformed_data_is_refused() {
@@ -425,13 +555,16 @@ pub(super) mod tests {
 
     #[test]
     fn reflow_preserves_content_openings_and_spawns_only_passive_atlas_parts() {
+        let mut images=Assets::<Image>::default();
+        let (image,template)=decode(include_bytes!("../../assets/dialogue/classic.png")).unwrap();
+        let handle=images.add(image);
         for width in [640.,800.] {for scale in [0.75,1.,1.5] {
-            let layout=Layout::new(Vec2::new(width,360.),[0.;4],caps(1)).unwrap();
+            let layout=Layout::new(Template::Wide,Vec2::new(width,360.),[0.;4],caps(1)).unwrap();
             assert!(layout.world.height()>=48. && layout.responses.height()>=48.);
-            assert_eq!(layout.barter.size(),Vec2::splat(48.));
-            assert!(Layout::new(Vec2::new(width,120.),[0.;4],caps(1)).is_none(),"no hidden target shrinking");
-            let mut app=App::new();let mut images=Assets::<Image>::default();
-            let art=LoadedArt {image:images.add(decode(&authored_png()).unwrap())};
+            assert!(layout.trade.size().min_element()>=47.99);
+            assert!(Layout::new(Template::Wide,Vec2::new(width,120.),[0.;4],caps(1)).is_none(),"no hidden target shrinking");
+            let mut app=App::new();
+            let art=LoadedArt {image:handle.clone(),template};
             app.insert_resource(Fixture {art,layout,scale}).add_systems(Update,paint);app.update();
             let mut pieces=app.world_mut().query::<(&Node,&ImageNode,&Pickable)>();let mut count=0;
             for (node,image,picking) in pieces.iter(app.world()) {
@@ -440,21 +573,19 @@ pub(super) mod tests {
                 assert!(x>=-0.01 && y>=-0.01 && w>0. && h>0.);
                 assert!((x+w)*scale<=width+0.01 && (y+h)*scale<=360.01);
                 let uv=image.rect.unwrap();assert!(uv.min.cmpge(Vec2::ZERO).all());
-                assert!(uv.max.cmple(Vec2::new(WIDTH as f32,HEIGHT as f32)).all());
+                assert!(uv.max.cmple(template.size().as_vec2()).all());
             }
             assert_eq!(count,layout.parts().count());
-            assert_eq!(count,5+9+3+15,"header, world, controls and dialogue bands without insets");
+            assert_eq!(count,5+9+12+15,"header, world, extended controls and dialogue bands without insets");
         }}
     }
 
-    /// Hardware that must keep its native aspect: corners and bars' fixed ends,
-    /// the tubes, grille, small tubes, cables, speaker, lights, caps bezel ends,
-    /// Review and Barter.
-    const HARDWARE:[Rect;8]=[
-        Rect{min:Vec2::new(0.,0.),max:Vec2::new(140.,194.)},Rect{min:Vec2::new(150.,0.),max:Vec2::new(392.,194.)},
-        Rect{min:Vec2::new(408.,0.),max:Vec2::new(1447.,194.)},Rect{min:Vec2::new(0.,854.),max:Vec2::new(60.,1087.)},
-        Rect{min:Vec2::new(108.,854.),max:Vec2::new(610.,1087.)},Rect{min:Vec2::new(0.,194.),max:Vec2::new(110.,300.)},
-        Rect{min:Vec2::new(520.,745.),max:Vec2::new(610.,854.)},Rect{min:Vec2::new(1350.,194.),max:Vec2::new(1447.,262.)},
+    /// Independently sampled identifiable hardware, including rounded corners.
+    const HARDWARE:[Rect;11]=[
+        rect(130.,12.,386.,140.),rect(425.,13.,1000.,139.),rect(1030.,22.,1205.,142.),
+        rect(1418.,10.,1580.,139.),rect(1610.,34.,1744.,142.),rect(415.,713.,513.,801.),
+        rect(33.,729.,61.,747.),rect(101.,772.,135.,797.),
+        rect(20.,154.,94.,229.),rect(501.,587.,579.,663.),rect(1692.,154.,1762.,202.),
     ];
 
     #[test]
@@ -469,7 +600,7 @@ pub(super) mod tests {
         let mut response_widths=Vec::new();
         for (window,[l,t,r,b]) in cases {
             let safe=window-Vec2::new(l+r,t+b);
-            let layout=Layout::new(safe,[l,t,r,b],caps(5)).unwrap_or_else(||panic!("Classic admitted at {window}"));
+            let layout=Layout::new(Template::Wide,safe,[l,t,r,b],caps(5)).unwrap_or_else(||panic!("Classic admitted at {window}"));
             let parts:Vec<_>=layout.parts().collect();
             // Every point of the window, insets included, lies under a casing crop.
             let mut y=0.5;
@@ -482,25 +613,26 @@ pub(super) mod tests {
                 }
                 y+=2.0;
             }
-            // Hardware inside the safe canvas is drawn at one uniform scale.
-            for part in parts.iter().filter(|p|p.destination.min.cmpge(Vec2::splat(-0.01)).all()
-                && p.destination.max.cmple(safe+0.01).all()) {
-                if HARDWARE.iter().any(|h|h.contains(part.source.min) && h.contains(part.source.max)) {
-                    let scale=part.destination.size()/part.source.size();
-                    assert!((scale.x-layout.scale).abs()<0.001 && (scale.y-layout.scale).abs()<0.001,
-                        "{:?} stretched to {scale} instead of {} at {window}",part.source,layout.scale);
-                }
+            // Each hardware witness is fully contained in one uniformly scaled crop.
+            for h in HARDWARE {
+                let part=parts.iter().find(|p|p.source.contains(h.min) && p.source.contains(h.max))
+                    .unwrap_or_else(||panic!("hardware cut by a flex seam: {h:?} at {window}"));
+                let scale=part.destination.size()/part.source.size();
+                assert!((scale.x-layout.scale).abs()<0.001 && (scale.y-layout.scale).abs()<0.001,
+                    "{:?} stretched to {scale} instead of {} at {window}",part.source,layout.scale);
             }
-            // Text, the counter and Barter stay inside the safe canvas and their openings.
+            let plate=layout.controls.panel(WIDE.trade);
+            assert!(layout.trade.contains(plate.min) && layout.trade.contains(plate.max));
             let inside=|r:Rect|r.min.cmpge(Vec2::splat(-0.01)).all() && r.max.cmple(safe+0.01).all();
-            assert!([layout.world,layout.speech,layout.responses,layout.caps,layout.barter].into_iter().all(inside));
+            assert!([layout.world,layout.speech,layout.responses,layout.caps,layout.trade].into_iter().all(inside));
             for (text,well) in [(layout.speech,layout.wells[0]),(layout.responses,layout.wells[1]),(layout.caps,layout.wells[2])] {
                 assert!(well.contains(text.min) && well.contains(text.max),"{text:?} outside {well:?} at {window}");
             }
             assert!(layout.speech.height()>=47.99 && layout.responses.height()>=96. && layout.responses.width()>=160.);
-            response_widths.push((window.x/window.y,layout.responses.width()/safe.x));
+            response_widths.push(layout.responses.width()/safe.x);
         }
-        // Wider screens give the extra width to the dialogue openings.
-        assert!(response_widths[0].1>response_widths[2].1 && response_widths[2].1>response_widths[3].1);
+        // Only canvases wider than the 2:1 sheet add horizontal space; 16:9
+        // and 4:3 instead add height while keeping native hardware shapes.
+        assert!(response_widths[0]>response_widths[2] && response_widths[1]>response_widths[3]);
     }
 }

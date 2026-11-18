@@ -94,6 +94,12 @@ jobs:
           gradle -p android --no-daemon --max-workers=2 -PnvfDiagnostics=true :app:lintDebug
           "$ANDROID_HOME/build-tools/35.0.1/apksigner" verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
           python3 tools/android/verify_apk.py android/app/build/outputs/apk/debug/app-debug.apk > android-apk-verification.json
+          expected=$(sha256sum engine/nvf-play/assets/dialogue/classic.png | cut -d ' ' -f 1)
+          actual=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["classicCasingSha256"])' < android-apk-verification.json)
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Packaged Classic artwork SHA-256 $actual does not match source $expected" >&2
+            exit 1
+          fi
       - name: Verify the packaged launcher JNI entry point
         shell: bash
         run: |

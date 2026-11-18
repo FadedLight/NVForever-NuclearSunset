@@ -57,10 +57,10 @@ fn caps_fit(face: &Face, text: &str) -> Option<CapsText> {
     (fit.width.is_finite() && fit.width > 0.0 && fit.height.is_finite()).then_some(fit)
 }
 
-fn geometry_with_budget(size:Vec2,safe:SafeInsets,caps:CapsText)->Option<(Vec2,Layout)> {
+fn geometry_with_budget(template:classic::Template,size:Vec2,safe:SafeInsets,caps:CapsText)->Option<(Vec2,Layout)> {
     let safe=SafeInsets::from_array([safe.left,safe.top,safe.right,safe.bottom])?;
     let origin=Vec2::new(safe.left,safe.top);
-    Some((origin,Layout::new(size-origin-Vec2::new(safe.right,safe.bottom),
+    Some((origin,Layout::new(template,size-origin-Vec2::new(safe.right,safe.bottom),
         [safe.left,safe.top,safe.right,safe.bottom],caps)?))
 }
 
@@ -97,7 +97,8 @@ fn prepare(menu: Res<DialogueMenu>, settings: Res<TouchDialogue>, appearance: Re
         menu.view.as_ref()?;
         let mut images=images?;
         cache.prepare(data.as_deref(),&mut images);
-        let casing=cache.loaded()?.image_id();
+        let art=cache.loaded()?;
+        let casing=art.image_id();
         let data=data.as_deref()?;
         let faces=fonts.faces.get_or_insert_with(||crate::terminal::screen::load_faces(Some(data),&mut images,
             crate::interface::bc_supported(formats.as_deref())));
@@ -110,7 +111,7 @@ fn prepare(menu: Res<DialogueMenu>, settings: Res<TouchDialogue>, appearance: Re
         // The counter is laid out for the value it shows (0 until one is known).
         let caps = caps_fit(&faces.text, &counter.caps.unwrap_or(0).to_string())?;
         let font=faces.text.image.as_ref()?.0.id();
-        let Some((origin,layout))=geometry_with_budget(size,*safe,caps) else {
+        let Some((origin,layout))=geometry_with_budget(art.template,size,*safe,caps) else {
             if !fonts.geometry_warned {warn!("Classic dialogue has no usable safe layout; using the normal dialogue view");fonts.geometry_warned=true;}
             return None;
         };
@@ -184,11 +185,11 @@ fn spawn(commands:&mut Commands,key:&Key,art:&classic::LoadedArt,face:&Face) {
                 });
             }
             if let Some(target)=&key.barter {
-                root.spawn((Button,native_barter(Some(target.list.clone())),node(layout.barter,scale),
-                    Name::new("Classic barter button")));
+                root.spawn((Button,native_barter(Some(target.list.clone())),node(layout.trade,scale),
+                    Name::new("Classic Trade button")));
             } else {
                 root.spawn((Pickable::IGNORE,node(layout.red_button,scale),
-                    BackgroundColor(Color::BLACK.with_alpha(0.65)),Name::new("Barter unavailable")));
+                    BackgroundColor(Color::BLACK.with_alpha(0.65)),Name::new("Trade unavailable")));
             }
 
         });
@@ -268,12 +269,12 @@ mod tests {
         }
     }
     fn scene(width:f32,density:f32,ui_scale:f32,font:bool)->(App,Entity,Entity,classic::tests::Files) {
-        scene_with_art(width, density, ui_scale, font, true)
+        scene_with_art(Vec2::new(width,360.), density, ui_scale, font, true)
     }
-    fn scene_with_art(width: f32, density: f32, ui_scale: f32, font: bool, override_art: bool)
+    fn scene_with_art(size: Vec2, density: f32, ui_scale: f32, font: bool, override_art: bool)
         -> (App, Entity, Entity, classic::tests::Files)
     {
-        let (mut app,window)=layout_scene(true,Vec2::new(width,360.0),density);
+        let (mut app,window)=layout_scene(true,size,density);
         let (files, data) = classic::tests::files_with_art(font, override_art);
         app.insert_resource(data).insert_resource(Assets::<Image>::default()).insert_resource(UiScale(ui_scale));
         app.configure_sets(Update,(crate::PlaySet::Input,crate::PlaySet::Physics,crate::PlaySet::Activation,
@@ -302,7 +303,8 @@ mod tests {
         (app,window,camera,files)
     }
     pub(crate) fn with_barter_surface(test: impl FnOnce(App, Entity)) {
-        let (app, window, _, _files) = scene(800., 1., 1., true);
+        let (app, window, _, _files) = scene_with_art(Vec2::new(800.,360.), 1., 1., true, false);
+        assert_eq!(lease(&app).prepared.layout.template,classic::Template::Wide);
         test(app, window);
     }
     fn lease(app:&App)->crate::dialogue_split::ClassicViewport {
@@ -315,21 +317,74 @@ mod tests {
     #[cfg(not(target_os = "android"))]
     #[test]
     fn classic_painter_uses_the_bundled_casing_unless_the_user_overrides_it() {
-        for (override_art, expected_pixel) in [
-            (false, [54, 45, 27, 255]),
-            (true, [37, 51, 73, 255]),
+        for (override_art, template, expected_pixel) in [
+            (false, classic::Template::Wide, [56, 40, 21, 255]),
+            (true, classic::Template::Legacy, [37, 51, 73, 255]),
         ] {
-            let (mut app, window, _, files) = scene_with_art(800., 1., 1., true, override_art);
+            let (mut app, window, _, files) = scene_with_art(Vec2::new(800.,360.), 1., 1., true, override_art);
             assert_eq!(files.0.join(classic::ASSET).exists(), override_art);
             let frame = *app.world().resource::<crate::dialogue_split::Frame>();
             assert!(ready_for(window, Some(app.world().resource::<Surface>()), &frame));
-            let atlas = lease(&app).prepared.casing;
+            let prepared = lease(&app).prepared;
+            assert_eq!(prepared.layout.template, template);
+            let atlas = prepared.casing;
             let mut nodes = app.world_mut().query::<&ImageNode>();
             assert!(nodes.iter(app.world()).any(|node| node.image.id() == atlas && node.rect.is_some()));
             let assets = app.world().resource::<Assets<Image>>();
-            let pixels = assets.get(atlas).unwrap().data.as_deref().unwrap();
-            let at = (100 * 1447 + 100) * 4;
+            let image = assets.get(atlas).unwrap();
+            assert_eq!(image.size(), template.size());
+            let pixels = image.data.as_deref().unwrap();
+            let at = (100 * template.size().x as usize + 100) * 4;
             assert_eq!(&pixels[at..at + 4], &expected_pixel);
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn bundled_classic_paints_speaker_choices_and_caps_inside_their_openings_at_phone_and_tablet_aspects() {
+        for size in [Vec2::new(880.,396.),Vec2::new(845.,390.),Vec2::new(800.,450.),
+            Vec2::new(1024.,768.),Vec2::new(393.,873.)] {
+            let density=2.0;
+            let (mut app,_,_,_files)=scene_with_art(size,density,1.5,true,false);
+            {
+                let mut state=app.world_mut().resource_mut::<classic_state::State>();
+                state.caps=Some(1234);
+                state.spoken=Some("Welcome".into());
+            }
+            settle(&mut app);
+            let prepared=lease(&app).prepared;
+            assert_eq!(prepared.layout.template,classic::Template::Wide);
+            let to_window=|r:Rect| Rect::from_corners((r.min+prepared.origin)*density,(r.max+prepared.origin)*density);
+            let wells=prepared.layout.wells.map(to_window);
+            let mut seen=[0;3];
+            let mut glyphs=app.world_mut().query::<(&ImageNode,&ComputedNode,&UiGlobalTransform,Option<&CalculatedClip>)>();
+            for (image,node,transform,clip) in glyphs.iter(app.world()) {
+                if image.image.id()!=prepared.font || node.is_empty() {continue;}
+                let half=node.size()*0.5;
+                let mut visible=Rect::from_corners(transform.transform_point2(-half),transform.transform_point2(half));
+                if let Some(clip)=clip {
+                    let Some(rects)=clip.rects() else {continue;};
+                    for rect in rects {
+                        // The fixture's UI nodes translate only, so the two
+                        // transformed corners are the screen-space clip bounds.
+                        let to_window=rect.world_to_clip_local.inverse();
+                        visible=visible.intersect(Rect::from_corners(to_window.transform_point2(rect.rect.min),
+                            to_window.transform_point2(rect.rect.max)));
+                    }
+                }
+                if visible.size().min_element()<=0. {continue;}
+                let index=wells.iter().position(|r| {
+                    let r=r.inflate(1.);
+                    r.contains(visible.min) && r.contains(visible.max)
+                }).unwrap_or_else(||panic!("visible glyph {visible:?} outside Classic openings at {size}"));
+                seen[index]+=1;
+            }
+            assert_eq!(seen[0],15,"speaker and retained spoken line at {size}");
+            assert!(seen[1]>=16,"at least the first choice at {size}");
+            assert_eq!(seen[2],4,"all four caps glyphs at {size}");
+            let first=rows(&mut app)[0].1;
+            assert!(first.height()>=48.*density-0.01);
+            assert!(wells[1].inflate(1.).contains(first.min) && wells[1].inflate(1.).contains(first.max));
         }
     }
 
@@ -429,13 +484,17 @@ mod tests {
         let (_files,data)=classic::tests::files(true);let mut images=Assets::<Image>::default();
         let faces=crate::terminal::screen::load_faces(Some(&data),&mut images,false);
         assert!(faces.text.image.is_some(),"real VFS Font5 path, not a default-font substitute");
-        // A 20:9 phone's safe canvas at 2.75 density and a 1080p desktop window (both logical).
-        for (size,bleed) in [(Vec2::new(810.,368.),[32.,0.,30.,24.]),(Vec2::new(1920.,1080.),[0.;4])] {
+        for (size,bleed) in [
+            (Vec2::new(810.,368.),[32.,0.,30.,24.]), (Vec2::new(813.,370.),[0.,0.,32.,20.]),
+            (Vec2::new(800.,450.),[0.;4]), (Vec2::new(1024.,748.),[0.,0.,0.,20.]),
+            (Vec2::new(393.,821.),[0.,28.,0.,24.]), (Vec2::new(1920.,1080.),[0.;4]),
+        ] {
+            let native_width = 65.0 * Layout::new(classic::Template::Wide,size,bleed,caps_fit(&faces.text,"0").unwrap()).unwrap().scale;
             let mut glyph_sizes=Vec::new();
             for value in [0,9999,i32::MAX,i32::MIN] {
                 let text=value.to_string();
                 let fit=caps_fit(&faces.text,&text).unwrap();
-                let layout=Layout::new(size,bleed,fit).unwrap();
+                let layout=Layout::new(classic::Template::Wide,size,bleed,fit).unwrap();
                 glyph_sizes.push(layout.caps_size);
                 assert!(layout.caps_size>=classic::CAPS_MIN,"readable at {size}: {}",layout.caps_size);
                 assert!(fit.height*layout.caps_size<=layout.caps.height()+0.01,"glyph cell fits the opening height");
@@ -452,14 +511,13 @@ mod tests {
                     assert!(x>=0.0 && x+g.width<=layout.caps.width()+0.01,"caps={value} glyph inside the opening");
                     assert!(baseline-g.ascent>=-0.01 && baseline-g.ascent+g.height<=layout.caps.height()+0.01);
                 }
-                let overlap=layout.caps.intersect(layout.barter);
-                assert!(overlap.width()<=0.0 || overlap.height()<=0.0,"cash and live Barter never share a target");
+                let overlap=layout.caps.intersect(layout.trade);
+                assert!(overlap.width()<=0.0 || overlap.height()<=0.0,"cash and live Trade never share a target");
                 if value==0 {
-                    // A short value keeps the counter at its native size instead of
-                    // reserving a full i32 on every screen.
-                    assert!((layout.caps.width()-84.0*layout.scale).abs()<0.01);
+                    // A short value keeps the counter at its native width.
+                    assert!((layout.caps.width()-native_width).abs()<0.01);
                 } else if value==i32::MIN {
-                    assert!(layout.caps.width()>84.0*layout.scale,"an extreme value widens the plain opening");
+                    assert!(layout.caps.width()>native_width,"an extreme value widens the plain opening");
                 }
             }
             assert!(glyph_sizes.iter().all(|s|(*s-glyph_sizes[0]).abs()<0.001),"glyph height depends on the opening, not the value");
@@ -470,7 +528,7 @@ mod tests {
     fn painted_classic_casing_reaches_every_window_edge_under_the_safe_insets() {
         // The fixture's safe insets are 12, 6, 10 and 8 logical units.
         for (width,density) in [(880.,1.),(800.,2.)] {
-            let (mut app,window,_,_files)=scene(width,density,1.,true);
+            let (mut app,window,_,_files)=scene_with_art(Vec2::new(width,360.),density,1.,true,false);
             let frame=*app.world().resource::<crate::dialogue_split::Frame>();
             assert!(ready_for(window,Some(app.world().resource::<Surface>()),&frame));
             let atlas=lease(&app).prepared.casing;

@@ -167,7 +167,7 @@ fn classic_barter_opens_the_vendor_stock_and_cancel_resumes_the_same_choices() {
 }
 
 #[test]
-fn classic_raw_barter_release_opens_trade_and_a_revoked_held_target_stays_closed() {
+fn classic_raw_trade_release_opens_barter_and_a_revoked_held_target_stays_closed() {
     use bevy::input::touch::{TouchInput, TouchPhase};
     use crate::dialogue_touch::classic_state::State as Classic;
     use fnv_game::dialogue::{Choice, Conversation};
@@ -198,8 +198,9 @@ fn classic_raw_barter_release_opens_trade_and_a_revoked_held_target_stays_closed
         let settle = |app: &mut App| { for _ in 0..6 { app.update(); } };
         let button = |app: &mut App| {
             let mut query = app.world_mut().query::<(&Name, &ComputedNode, &UiGlobalTransform)>();
-            let (_, node, transform) = query.iter(app.world()).find(|(name, _, _)| name.as_str() == "Classic barter button")
-                .expect("Classic painted the enabled barter button");
+            let mut buttons = query.iter(app.world()).filter(|(name, _, _)| name.as_str() == "Classic Trade button");
+            let (_, node, transform) = buttons.next().expect("Classic painted the enabled Trade button");
+            assert!(buttons.next().is_none(), "one Trade target");
             assert!(node.size().min_element() >= 47.99);
             transform.transform_point2(Vec2::ZERO)
         };

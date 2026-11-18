@@ -135,12 +135,11 @@ documentation. Neither tag there claims anything about the original game. The gr
   touch input ownership and cancellation, touch controls reaching scripts through
   `IsControlPressed` as their bound control without inventing physical keys, and the
   launcher's pages, read-only folder import and newest-save Continue.
-- Classic dialogue casing: the 1447 × 1087 template, its four apertures, band layout and
-  12-unit caps glyph minimum ([Classic runtime](dialogue-classic-runtime.md)) are measured
-  from the bundled picture, not from the game. The picture was supplied by the
-  contributor as an AI-generated image and is not taken or derived from game files. Its
-  REVIEW and BARTER labels are Fallout 2 interface words, not text New Vegas shows;
-  Review is decorative and Barter only reuses the existing barter action.
+- Classic dialogue casing: the 1774 × 887 frame, its four apertures, band layout and
+  12-unit caps glyph minimum ([Classic runtime](dialogue-classic-runtime.md)) are
+  project design, not original-game observations. The contributor supplied the
+  AI-generated image; it is not taken or derived from game files. Its TRADE
+  control opens the existing barter menu.
 - Engine library choices: the vendored Android `winit` and Rapier 0.36.1 query refresh
   ([query refresh](../spec-notes/query-refresh-island-lifecycle.md)), the DDS decode
   fallback when BC sampling is missing ([DDS](../spec-notes/dds.md)), NIF numeric

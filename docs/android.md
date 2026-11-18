@@ -250,8 +250,10 @@ practice explains the selected movement thumb, dead zone, walking/running and
 fixed or floating joystick without using ammo or sending game actions.
 
 Mobile > Dialogue offers Normal (default), Classic, Field Notes, Retro Console
-and Wrist Terminal. Classic fits the live world and dialogue into a bundled blank
-template unless the installation supplies `Textures/Interface/NVForever/Dialogue/classic.png`.
+and Wrist Terminal. Classic fits the live world and dialogue into the bundled
+2:1 frame. Its TRADE button opens the normal barter menu when a merchant is
+available. The installation can override the frame with
+`Textures/Interface/NVForever/Dialogue/classic.png`.
 Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
 with separate dialogue screens; Wrist Terminal draws the Pip-Boy the player is
 wearing, so a character without one ([hypothesis: such as a new character before

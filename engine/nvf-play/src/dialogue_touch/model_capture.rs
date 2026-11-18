@@ -489,7 +489,7 @@ pub fn ready(world: &mut World, theme: &str, scene: Scene, density: f32) -> bool
                 a.kind == Kind::Barter
                     && a.list.as_ref() == Some(&barter.list)
                     && c.get() == Some(ui_camera)
-                    && on_window(surface.layout.barter).contains(center)
+                    && on_window(surface.layout.trade).contains(center)
                     && n.size().min_element() + 0.5 >= 48.0 * density
                     && hit(n, *t, v, clip, center)
             }) {
@@ -530,7 +530,7 @@ pub fn ready(world: &mut World, theme: &str, scene: Scene, density: f32) -> bool
         if !world
             .resource::<Assets<Image>>()
             .get(atlas)
-            .is_some_and(|i| i.width() == 1447 && i.height() == 1087)
+            .is_some_and(|i| i.size() == surface.layout.template.size())
         {
             return false;
         }

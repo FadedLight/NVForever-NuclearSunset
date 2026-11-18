@@ -139,7 +139,9 @@ fn node(rect:Rect,scale:f32)->Node {
         width:px(rect.width()/scale),height:px(rect.height()/scale),..default()}
 }
 fn label(parent:&mut ChildSpawnerCommands,key:&Key,text:&str,size:f32,width:f32,face:&Face,color:Color) {
-    device_canvas::label_on(parent,text,face,size,width,key.surface.ui_scale,color,key.surface.size.y);
+    device_canvas::label_on(parent,text,face,size,color,device_canvas::LabelViewport {
+        width, ui_scale:key.surface.ui_scale, height:key.surface.size.y,
+    });
 }
 fn spawn(commands:&mut Commands,key:&Key,art:&classic::LoadedArt,face:&Face) {
     let surface=&key.surface;let layout=&surface.layout;let scale=surface.ui_scale;

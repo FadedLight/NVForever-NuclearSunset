@@ -361,7 +361,7 @@ mod tests {
         let _palette = crate::interface::colours_at([80, 100, 120], [30, 60, 90]);
         let mut app = App::new();
         app.edit_schedule(Update, |schedule| {
-            schedule.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+            schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
         app.insert_resource(Drawn { hud: [80, 100, 120], pipboy: [30, 60, 90] })
             .add_systems(Update, recolour);

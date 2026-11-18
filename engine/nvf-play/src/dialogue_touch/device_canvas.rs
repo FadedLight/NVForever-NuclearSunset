@@ -86,12 +86,18 @@ pub(super) fn usable(request:&Request,view:&DeviceView,menu:&DialogueMenu,
 /// logical UI units; original_units keeps glyph coordinates in the texture.
 fn label(parent: &mut ChildSpawnerCommands, text: &str, source: &Face,
     size: f32, width: f32, ui_scale: f32, color: Color) {
-    label_on(parent,text,source,size,width,ui_scale,color,960.0);
+    label_on(parent,text,source,size,color,LabelViewport {width, ui_scale, height:960.0});
+}
+
+pub(super) struct LabelViewport {
+    pub(super) width: f32,
+    pub(super) ui_scale: f32,
+    pub(super) height: f32,
 }
 
 pub(super) fn label_on(parent: &mut ChildSpawnerCommands, text: &str, source: &Face,
-    size: f32, width: f32, ui_scale: f32, color: Color, target_height: f32) {
-    let units = 960.0 / target_height;
+    size: f32, color: Color, LabelViewport {width, ui_scale, height}: LabelViewport) {
+    let units = 960.0 / height;
     let face = native::scaled_face(source,size*units/source.font.size.max(1.0));
     let lines = face.font.lines(text,Some(width.max(size)*units));
     let line_height = line_height(&face);
@@ -121,14 +127,20 @@ struct Key {
     publication: crate::dialogue_device::Publication,
 }
 
+pub(super) type DrawAssets<'w> = (
+    Option<Res<'w, GameData>>,
+    Option<ResMut<'w, Assets<Image>>>,
+    Option<Res<'w, bevy::image::CompressedImageFormatSupport>>,
+);
+type OwnedRoots<'w, 's> = Query<'w, 's, Entity, Or<(With<Content>, With<Display>)>>;
+
 #[allow(clippy::too_many_arguments)]
 fn draw(mut commands: Commands, menu: Res<DialogueMenu>, settings: Res<TouchDialogue>,
     appearance: Res<appearance::Appearance>, gestures: Res<Gestures>,
     request: Option<Res<Request>>, view: Option<Res<DeviceView>>,
-    roots: Query<Entity,Or<(With<Content>,With<Display>)>>,
+    roots: OwnedRoots<'_, '_>,
     scale: Option<Res<UiScale>>, split: Res<crate::dialogue_split::Frame>,
-    (data,images,formats): (Option<Res<GameData>>, Option<ResMut<Assets<Image>>>,
-        Option<Res<bevy::image::CompressedImageFormatSupport>>),
+    (data,images,formats): DrawAssets<'_>,
     (state,paused,script,creator): Availability<'_>,
     mut cache: ResMut<ArtCache>, mut shown: Local<Option<Key>>, mut reveal: ResMut<RevealRequest>,
 ) {

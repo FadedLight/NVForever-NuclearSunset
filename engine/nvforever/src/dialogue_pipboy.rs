@@ -305,7 +305,7 @@ fn prepare(
         bevy::core_pipeline::tonemapping::Tonemapping::Linear, Msaa::Sample4,
         AmbientLight {color:Color::WHITE,brightness:150.0,..default()}, camera_transform,
         layer.clone(), ChildOf(root))).id();
-    commands.spawn((DirectionalLight {illuminance:3000.0,shadows_enabled:false,..default()},
+    commands.spawn((DirectionalLight {illuminance:3000.0,shadow_maps_enabled:false,..default()},
         Transform::from_translation(camera_transform.translation).looking_at(glass.middle().unwrap_or(PLACE),Vec3::Y),
         layer, ChildOf(root)));
     let Some(screen_material) = screen_material else {

@@ -4,7 +4,7 @@ use bevy::asset::{AssetEventSystems, AssetPlugin};
 use bevy::camera::{CameraPlugin, CameraUpdateSystems};
 use bevy::ecs::system::RunSystemOnce;
 use bevy::mesh::MeshPlugin;
-use bevy::window::{ExitCondition, WindowPlugin};
+use bevy::window::{ExitCondition, PrimaryWindow, WindowPlugin};
 use nvf_play::dialogue_device::Stamp;
 
 const A: FormId = FormId(0x1001);

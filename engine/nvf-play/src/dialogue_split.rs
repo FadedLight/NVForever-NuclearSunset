@@ -118,8 +118,13 @@ fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {
     Some(if side==Side::Left {(left,right)}else{(right,left)})
 }
 
-#[allow(clippy::too_many_arguments)]
-type SplitResources<'w> = (Res<'w,Options>, Res<'w,SafeInsets>, Res<'w,TouchDialogue>, Res<'w,crate::dialogue_touch::appearance::Appearance>);
+type SplitResources<'w> = (
+    Res<'w, Options>,
+    Res<'w, SafeInsets>,
+    Res<'w, TouchDialogue>,
+    Res<'w, crate::dialogue_touch::appearance::Appearance>,
+    Option<Res<'w, crate::dialogue_touch::classic_presenter::Surface>>,
+);
 type SceneState<'w> = (Option<Res<'w,State<crate::PlayState>>>, Option<Res<'w,crate::pause::Paused>>, Option<Res<'w,crate::free_cam::FreeCam>>, Option<Res<'w,crate::control::PlayerControl>>, Option<Res<'w,crate::player::ViewDriven>>,Option<Res<'w,crate::creator::CreatorMenu>>);
 type SpeakerSources<'w> = (Option<Res<'w,crate::script::ScriptState>>, Option<Res<'w,crate::dialogue_look::SpeakerFace>>, Option<Res<'w,crate::phys::PhysState>>, Option<Res<'w,crate::sim::SimState>>);
 type ResolveQueries<'w,'s> = (
@@ -131,14 +136,13 @@ type ResolveQueries<'w,'s> = (
     Query<'w,'s,(Entity,&'static Camera),With<OverlayCamera>>,
     Query<'w,'s,(Entity,&'static Camera,&'static RenderTarget),Without<OverlayCamera>>,
 );
-type ResolveOutput<'w> = (ResMut<'w,DefaultPin>,ResMut<'w,Frame>,ResMut<'w,Target>,ResMut<'w,ClassicRequest>);
+type ResolveOutput<'w> = (ResMut<'w,DefaultPin>,ResMut<'w,Frame>,ResMut<'w,Target>,ResMut<'w,ClassicRequest>,ResMut<'w,ViewportLease>);
 fn resolve(
-    mut commands: Commands, (options,safe,touch,appearance): SplitResources<'_>,
+    mut commands: Commands, (options,safe,touch,appearance,surface): SplitResources<'_>,
     (state,paused,free,control,driven,creator): SceneState<'_>, menu: Res<DialogueMenu>,
     (script,face,phys,sim): SpeakerSources<'_>,
     (windows,world_cameras,default_ui,default_markers,own_markers,overlays,all_cameras): ResolveQueries<'_,'_>,
-    (mut pin,mut frame,mut target,mut request): ResolveOutput<'_>,
-    surface:Option<Res<crate::dialogue_touch::classic_presenter::Surface>>,mut lease:ResMut<ViewportLease>,
+    (mut pin,mut frame,mut target,mut request,mut lease): ResolveOutput<'_>,
 ) {
     let mut next=Frame::default();request.0=None;target.0=None;
     let foreign_change=pin.0.is_some_and(|p|!default_markers.contains(p) || default_markers.iter().any(|e|e!=p));

@@ -108,20 +108,25 @@ struct Key {
     labels: crate::pad::Labels,
 }
 
+type ModelSurfaces<'w> = (
+    Option<Res<'w, crate::dialogue_device::Request>>,
+    Option<Res<'w, crate::dialogue_device::DeviceView>>,
+    Option<Res<'w, classic_presenter::Surface>>,
+    Res<'w, crate::dialogue_split::Frame>,
+    Option<Res<'w, device_canvas::ArtCache>>,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands, menu: Res<DialogueMenu>, touch: Res<TouchDialogue>,
     appearance: Res<appearance::Appearance>, gestures: Res<Gestures>,
-    (data,images,formats): (Option<Res<GameData>>, Option<ResMut<Assets<Image>>>,
-        Option<Res<bevy::image::CompressedImageFormatSupport>>),
+    (data,images,formats): device_canvas::DrawAssets<'_>,
     windows: Query<(Entity,&Window),With<PrimaryWindow>>, roots: Query<Entity,With<TouchNativeRoot>>,
     (state,paused,script,creator): Availability<'_>,
     scale: Option<Res<UiScale>>, glyphs: Option<Res<crate::pad::PadGlyphs>>,
     mut kit: Local<Option<(bool,Kit)>>, mut shown: Local<Option<Key>>,
     mut reveal: ResMut<RevealRequest>,
-    (request,device,classic,split,art): (Option<Res<crate::dialogue_device::Request>>,
-        Option<Res<crate::dialogue_device::DeviceView>>,Option<Res<classic_presenter::Surface>>,
-        Res<crate::dialogue_split::Frame>,Option<Res<device_canvas::ArtCache>>),
+    (request,device,classic,split,art): ModelSurfaces<'_>,
 ) {
     let expected=match appearance.theme {
         appearance::Theme::RetroConsole=>Some(crate::dialogue_device::DeviceKind::Terminal),
@@ -197,7 +202,7 @@ mod tests {
         let _palette = crate::interface::colours_at([80,100,120], [30,60,90]);
         let (mut app, _) = layout_scene(true, Vec2::new(792.,363.), 1.);
         app.edit_schedule(Update, |schedule| {
-            schedule.set_executor_kind(bevy::ecs::schedule::ExecutorKind::SingleThreaded);
+            schedule.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
         app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>()
             .add_plugins(crate::ui_colour::UiColourPlugin);

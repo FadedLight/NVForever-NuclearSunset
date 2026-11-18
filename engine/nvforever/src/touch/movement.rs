@@ -171,8 +171,6 @@ pub(super) fn install(app: &mut App) {
 
 #[derive(Component)]
 pub(super) struct LockMarker;
-#[derive(Component)]
-struct LockCaption;
 fn spawn(mut commands: Commands) {
     commands
         .spawn((
@@ -190,6 +188,7 @@ fn spawn(mut commands: Commands) {
             Pickable::IGNORE,
         ))
         .with_children(|p| {
+            // The icon alone marks the target; Controls help explains it.
             p.spawn((
                 ImageNode::default(),
                 icons::TouchIcon(9),
@@ -200,34 +199,15 @@ fn spawn(mut commands: Commands) {
                 },
                 Pickable::IGNORE,
             ));
-            p.spawn((
-                LockCaption,
-                Text::new("Auto move"),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-                Node {
-                    position_type: PositionType::Absolute,
-                    top: percent(102.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
         });
 }
 fn show(
     options: Res<Options>,
     state: Res<TouchState>,
     layout: Res<Layout>,
-    (control, occlusion): (
-        Option<Res<PlayerControl>>,
-        Option<Res<super::hotbar::Occlusion>>,
-    ),
+    occlusion: Option<Res<super::hotbar::Occlusion>>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut markers: Query<(&mut Node, &mut Visibility), With<LockMarker>>,
-    mut captions: Query<&mut Text, With<LockCaption>>,
 ) {
     let size = window
         .single()
@@ -256,14 +236,6 @@ fn show(
             node.width = px(rect.width());
             node.height = px(rect.height());
         }
-    }
-    for mut text in &mut captions {
-        text.0 = if control.as_ref().is_some_and(|c| c.auto_move) {
-            "Stop auto move"
-        } else {
-            "Auto move"
-        }
-        .into();
     }
 }
 
@@ -309,5 +281,18 @@ mod tests {
         settings::apply_stored(restored.world_mut());
         assert_eq!(*restored.world().resource::<Options>(), expected);
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn auto_move_target_keeps_its_icon_without_a_text_label() {
+        let mut app = App::new();
+        app.add_systems(Startup, spawn);
+        app.update();
+        let world = app.world_mut();
+        let marker = world.query_filtered::<Entity, With<LockMarker>>().single(world).unwrap();
+        let children: Vec<Entity> = world.get::<Children>(marker).unwrap().iter().collect();
+        assert_eq!(children.len(), 1, "only the arrow icon");
+        assert!(world.get::<icons::TouchIcon>(children[0]).is_some());
+        assert!(world.query::<&Text>().iter(world).next().is_none(), "no visible Auto move text");
     }
 }

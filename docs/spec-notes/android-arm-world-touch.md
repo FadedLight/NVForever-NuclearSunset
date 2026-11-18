@@ -1,5 +1,7 @@
 # Direct arm gesture and world activation
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 [hypothesis: Android interaction design, requested 2026-11-14, issue #2436]
 The owned bottom handle controls the real first-person Pip-Boy raise pose while a
 finger moves vertically. Up and down are reversible. Release settles to the nearest

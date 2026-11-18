@@ -26,7 +26,7 @@ outstanding old request. That request's late completion retires it without apply
 its old bytes; only then may the new counter be requested. Malformed short results
 also retire their request without changing the counter baseline.
 
-[observed: private bounded R7 diagnostic archive, independent source investigation]
+[implementation evidence: private bounded R7 diagnostic archive, independent source investigation]
 A fresh R7 device-loss event follows a successful world load without a retained
 intervening resume. The archive has no retained in-flight readback counts or uniquely
 attributable new callback stack. This admission bound addresses a demonstrated

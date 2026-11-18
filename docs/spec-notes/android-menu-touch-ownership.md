@@ -1,5 +1,7 @@
 # Mobile menu touch ownership
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 - [documented] `nvforever/src/touch.rs::input` is the wrapper's sole raw touch
   reader. Existing touch actions change aggregate `ButtonInput`; controller menu
   translation in `nvf-play/src/pad.rs::menu_keys` also changes that aggregate

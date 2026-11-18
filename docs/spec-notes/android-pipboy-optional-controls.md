@@ -1,5 +1,7 @@
 # Optional Pip-Boy touch controls
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 [documented: engine/nvforever/src/touch/pipboy_drag.rs; engine/nvf-play/src/pipboy/gesture.rs] The existing bottom handle drives the actual first-person Pip-Boy clip through ArmGesture. Its release settles to an endpoint, cancellation returns to the original endpoint, and the existing menu consumer owns opening/closing. This path predates this extension.
 
 [documented: engine/nvforever/src/touch/pipboy_model.rs; engine/nvforever/src/pipboy_arm.rs] The physical ScrollKnob has a target derived from the current CPU-posed model. Its vertical drag already uses 20 logical pixels per line and the shared late-checked ListScrollRequest. No guessed wheel bone, mesh or fixed screen rectangle is introduced. An unavailable/malformed/unprojected wheel remains unavailable.

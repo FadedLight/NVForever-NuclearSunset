@@ -12,7 +12,7 @@ Status: source follow-up to the experimental Android app; device qualification p
   a disconnect is distinct from a neutral sample.
 - [documented] [gilrs 0.11.2 supported platforms](https://docs.rs/crate/gilrs/0.11.2)
   does not provide an Android backend.
-- [observed: pinned dependency source review] winit 0.30.13's Android
+- [implementation evidence: pinned dependency source review] winit 0.30.13's Android
   `handle_input_event` consumes NativeActivity's input queue. It treats motion as touch
   and keys as keyboard and normally returns Handled. Its android-activity 0.6.1 queue
   iterator is single-consumer and Android-main-thread-only. A second poller would race
@@ -76,7 +76,7 @@ must still be exercised on Android before support is claimed.
 
 ## Qualification packet
 
-[observed: source-only implementation checks] The metadata and activity Java sources
+[implementation evidence: source-only implementation checks] The metadata and activity Java sources
 compile against Android API 35 with JDK 17. Rust source has been parser-formatted, but
 its Android callback, locked dependency resolution, lint, App tests and physical-device
 routes remain unrun. The authored App fixtures include real queue-to-RawGamepadEvent

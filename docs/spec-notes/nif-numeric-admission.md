@@ -18,7 +18,7 @@
 
 ## Qualification and limits
 
-[observed: authored CPU controls in `engine/nvf-assets/src/nif_numeric_admission_tests.rs`] The 17 new tests pass individually and as part of the full 172-test asset library suite, with no failures or ignored tests. The 155 existing tests remain. These controls exercise the shared admission helper, material/color preparation and actual Bevy mesh/bind/bounds behavior using authored structures, without game files. The source files remained unchanged during execution. Compilation and discovery are recorded separately from test execution.
+[implementation evidence: authored CPU controls in `engine/nvf-assets/src/nif_numeric_admission_tests.rs`] The 17 new tests pass individually and as part of the full 172-test asset library suite, with no failures or ignored tests. The 155 existing tests remain. These controls exercise the shared admission helper, material/color preparation and actual Bevy mesh/bind/bounds behavior using authored structures, without game files. The source files remained unchanged during execution. Compilation and discovery are recorded separately from test execution.
 
 [hypothesis: remaining qualification] A supported same-oracle baseline/candidate behavioral comparison remains unrun. No compile failure, missing selector or static source comparison is counted as a behavioral baseline failure. The CPU controls do not execute whole-file loading through all three consumers, a graphics driver, or a phone. They do not identify the cause of the reported crash, gray actors or historical device loss.
 

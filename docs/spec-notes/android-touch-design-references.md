@@ -1,5 +1,7 @@
 # Android touch design references
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 - [documented] Activision's 2019 [Call of Duty: Mobile controls guide](https://blog.activision.com/call-of-duty/2019-10/Getting-a-Grip-on-the-Call-of-Duty-Mobile-Controls)
   describes a movement joystick, a mock-HUD editor with drag placement, size and
   opacity adjustment, and fixed versus floating joystick choices. It also documents

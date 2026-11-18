@@ -1,5 +1,7 @@
 # Mobile Pip-Boy model controls
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 [design] The three visible bottom controls get projected touch rectangles, at
 least 48 logical pixels, centered on their actual posed meshes. The overlay labels
 identify their sections and show a stronger border/fill while pressed. Overlapping

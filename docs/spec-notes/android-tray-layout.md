@@ -1,5 +1,7 @@
 # Profile-owned tray layout
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 - [documented] The owner requested tray movement/size editing, per-profile persistence,
   safe-area/orientation bounds, preview Save/Cancel, and shared drawn/hit geometry.
 - [documented] Existing `touch::layout::Config` preserves unknown JSON fields and profile

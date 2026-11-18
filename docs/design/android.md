@@ -72,7 +72,7 @@ Physical-device qualification is pending.
 
 ## Touch layout revision after initial device testing
 
-[observed: user test, 2026-11-13] The first device build reached the opening interior.
+[NVForever device test: user, 2026-11-13; not an original-game observation] The first device build reached the opening interior.
 The user found the invisible movement area unclear and the text-only action grid crowded.
 Leaving the interior exposed a Rapier arrival-query panic; that is under separate physics
 regression work, not evidence of a GPU or memory failure.
@@ -90,3 +90,69 @@ JSON in the engine's own home; write guards and atomic rename protect its previo
 Cancelling restores the original layout. Visual bounds and hit testing share geometry;
 action targets retain a minimum 48 logical-pixel diameter on a phone. Menu navigation
 remains separate from gameplay actions. Editing stays paused until the player resumes.
+
+## Clean-room classification of the port's constants and behaviour
+
+[design] Every number and rule the Android port adds is an NVForever engine/port design
+choice, not a claim about how Fallout: New Vegas behaves. None is backed by an
+observation of the original game, and none needs to be, because the original game has
+no touch, phone, launcher or Android behaviour to match. In the `docs/spec-notes/android-*.md`
+notes, `[hypothesis]` marks a port design proposal or pending device acceptance, and
+`[documented]` cites this repository's source, a pinned dependency or public platform
+documentation. Neither tag there claims anything about the original game. The groups are:
+
+- Touch geometry and gesture timing: 48-logical-unit minimum targets and rows (52 and 51
+  for hand-built workbench and repair rows), 12-unit drag/tap slop (`menu/normal_touch.rs`,
+  `pipboy/data/touch_map.rs`, `maintenance_touch.rs`, `menu/barter_touch.rs`,
+  `touch/world_activate.rs`), 0.35 s double tap (`touch/world_activate.rs`), 0.6 s hold
+  to activate (`activate/touch.rs`), 0.45 s VATS hold (`vats_mode/touch.rs`), the
+  0.1/0.18/0.25/0.35 stick dead zones (`touch/aiming.rs`), the Pip-Boy swipe directions
+  and distances, and the fixed, floating and legacy stick schemes.
+- Sizes and defaults: phone dialogue text base 16 logical units against 20 on desktop
+  (`dialogue_touch.rs`), 85% choice and 100% subtitle defaults on Android, 50–150% menu
+  text sizes, `hud-scale-v2` 25–250% in 5% steps (46 choices, `interface.rs`), 75–150%
+  lockpick sizes (`lockpick/touch.rs`), 0.85–1.35 Pip-Boy presentation scale
+  (`pipboy/touch_presentation.rs`), the 78-unit appearance preview and the eight-pixel
+  split gap, and the touch maintenance presentation On by default on Android only.
+- Bounds and limits: at most 128 queued menu-sheet edges and 32 owned contact IDs
+  (`touch/menu_sheets.rs`), 32 queued maintenance requests (`maintenance_touch.rs`),
+  16 retired VATS marks and 32 points (`vats_mode/touch.rs`), 16 touch-map edits, 8 layout
+  profile slots and 128 KiB profile files (`touch/profiles.rs`), 64 tray axis cells
+  (`touch/hotbar_layout.rs`), 512-pixel and 8 MiB SVG raster limits (`touch/icons.rs`),
+  a 4096-byte companion-wheel settings read, the controller event queue of 512
+  (`android_controller.rs`), the render admission limits (128 skins, 32 rigid bodies,
+  8 bursts, 8 idle frames, `android_render_admission.rs`), 32 render diagnostics reports,
+  16 Pip-Boy UV attempts (`dialogue_pipboy.rs`) and the eight NIF rejection samples
+  ([NIF numeric admission](../spec-notes/nif-numeric-admission.md)).
+- Timeouts and lifetimes: the Java diagnostics transport (3 s connect, 5 s read, 30 s
+  total), retry back-off (30 s first, 15 min maximum), archive and queue byte limits,
+  thermal sampling (10 s, 25 s stale), gyro sample gap and age (50 ms, 100 ms), and the
+  loading-cover ticket, lease and generation checks ([loading cover](android-loading-cover.md)).
+- Mode and layout policy: the Mobile settings tab and its placements
+  ([settings page](settings-page.md)), Battery/Balanced/Quality performance presets
+  with 30 or 60 FPS caps (`mobile_performance.rs`), borderless and one MSAA sample as
+  Android start defaults, the five dialogue styles, speaker side and safe-area framing,
+  touch input ownership and cancellation, touch controls reaching scripts through
+  `IsControlPressed` as their bound control without inventing physical keys, and the
+  launcher's pages, read-only folder import and newest-save Continue.
+- Classic dialogue casing: the 1447 × 1087 template, its four apertures, band layout and
+  12-unit caps glyph minimum ([Classic runtime](dialogue-classic-runtime.md)) are measured
+  from the bundled picture, not from the game. The picture was supplied by the
+  contributor as an AI-generated image and is not taken or derived from game files. Its
+  REVIEW and BARTER labels are Fallout 2 interface words, not text New Vegas shows;
+  Review is decorative and Barter only reuses the existing barter action.
+- Engine library choices: the vendored Android `winit` and Rapier 0.36.1 query refresh
+  ([query refresh](../spec-notes/query-refresh-island-lifecycle.md)), the DDS decode
+  fallback when BC sampling is missing ([DDS](../spec-notes/dds.md)), NIF numeric
+  admission, owned SVG icon families and the launcher icon adaptation.
+
+[hypothesis] One statement touches the original game: a character who is not wearing a
+Pip-Boy, such as a new character before Doc Mitchell gives one, cannot use Wrist
+Terminal and talks on Normal. Wrist Terminal reads the worn Pip-Boy from the live game
+state; why it did not present on the reporting phone was not observed.
+
+[design] No text the game shows is transcribed. Touch labels, help, launcher text and
+companion-wheel refusal messages are NVForever's own wording. Text from the game (dialogue,
+item names, menu settings) is read from the player's installation at run time, and the
+Terminal and Pip-Boy models and Font 5 come from that installation; the APK contains none
+of them.

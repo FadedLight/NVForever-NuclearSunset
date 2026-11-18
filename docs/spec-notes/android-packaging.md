@@ -1,5 +1,7 @@
 # Android launcher identity and diagnostics builds
 
+Clean-room scope: this note describes NVForever's own Android port design, not the original game. Here `[hypothesis]` marks a port design proposal or pending device acceptance, and `[documented]` cites repository source, an owner request, a pinned dependency or public platform documentation; neither is a claim about Fallout: New Vegas (see the [classification](../design/android.md#clean-room-classification-of-the-ports-constants-and-behaviour)).
+
 ## Sources and intended behavior
 
 - [documented] The project's own launcher artwork is

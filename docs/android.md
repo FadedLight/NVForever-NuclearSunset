@@ -254,8 +254,8 @@ and Wrist Terminal. Classic fits the live world and dialogue into a bundled blan
 template unless the installation supplies `Textures/Interface/NVForever/Dialogue/classic.png`.
 Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
 with separate dialogue screens; Wrist Terminal draws the Pip-Boy the player is
-wearing, so a character without one (such as a new character before receiving
-it) talks on Normal. If a model or template cannot safely present the
+wearing, so a character without one ([hypothesis: such as a new character before
+receiving it]) talks on Normal. If a model or template cannot safely present the
 conversation, Normal keeps dialogue playable, touch-scrollable and exitable with
 the on-screen controls still available, without changing the saved theme.
 Minimal, Classic Glass and Split Panel still load as Normal, Classic and Field

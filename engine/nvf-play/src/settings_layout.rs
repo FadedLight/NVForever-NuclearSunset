@@ -937,10 +937,10 @@ mod android_profile_tests {
     /// Generated frames row, the field of view rows, the menu scale and Physics rate rows,
     /// #2662's grass fires, #2550's terrain height blending, #2551's terrain anti-tiling,
     /// #2688's sound cover, #2149's smooth terrain and its Debug row terrain wireframe, the
-    /// overhaul's menu font, and the Advanced Movement rows of tech/movement-inertia, Weapon
-    /// Inertia and Camera Motion in place of weapon sway and head bob), by the group it
-    /// registers with.
-    const KNOWN: [(&str, &str); 197] = [
+    /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
+    /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
+    /// rows), by the group it registers with.
+    const KNOWN: [(&str, &str); 203] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -954,6 +954,12 @@ mod android_profile_tests {
         ("dialogue-goodbye-hint", "Gameplay"),
         ("reload-slows", "Gameplay"),
         ("grass-fire", "Gameplay"),
+        ("quick-loot", "Gameplay"),
+        ("quick-loot-scale", "Gameplay"),
+        ("quick-loot-background", "Gameplay"),
+        ("quick-loot-weight", "Gameplay"),
+        ("quick-loot-value", "Gameplay"),
+        ("quick-loot-value-per-weight", "Gameplay"),
         ("music", "Gameplay"),
         ("voice", "Gameplay"),
         ("dialogue-look", "Gameplay"),
@@ -1306,7 +1312,7 @@ mod android_profile_tests {
         assert_eq!(keys(&list, &l, "Controls")[..6], ["[Input]", "@device", "button-style", "@automatic-input", "@rumble", ""]);
         assert_eq!(
             keys(&list, &l, NVF_FEATURES_TAB),
-            ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire"]
+            ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire", "", "[Quick Loot]", "quick-loot", "quick-loot-scale", "quick-loot-background", "quick-loot-weight", "quick-loot-value", "quick-loot-value-per-weight"]
         );
         assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "scope-3d"]);
         assert!(keys(&list, &l, "Tweaks").is_empty(), "an empty tab is still a tab");
@@ -1316,6 +1322,7 @@ mod android_profile_tests {
         assert_eq!(at("upscaler"), "Display > Upscaling and Anti-Aliasing");
         assert_eq!(at("sky-clock"), "Graphics > World and Animation");
         assert_eq!(at("grass-fire"), "NVF Features > World Interaction");
+        assert_eq!(at("quick-loot"), "NVF Features > Quick Loot");
         assert_eq!(at("button-style"), "Controls > Input");
         assert_eq!(at("terrain-anti-tiling"), "Graphics > Detail and Distance", "beside terrain height blending (#2551)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");

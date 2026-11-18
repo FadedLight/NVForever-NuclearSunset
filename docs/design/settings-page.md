@@ -226,8 +226,9 @@ to this route; there is no second editor or new persistence schema.
 
 `settings_layout.rs::MOBILE_SECTIONS` supplies presentation overrides before the
 original sections claim their remaining rows. One row is resolved once, with its original
-registry index. The integrated fixture covers 197 fixed keys: 128 shared and 69 Android
-additions. There are 71 placement overrides, 67 in Mobile and four in Controls.
+registry index. The integrated fixture covers 203 fixed keys: 134 shared (Main's Quick
+Loot rows included) and 69 Android additions. There are 71 placement overrides, 67 in
+Mobile and four in Controls.
 The authored controls cover optional sections, actual page projection,
 search/Changed/device handoff, and a real Settings callback through its original index.
 Fresh Rust execution of the current merge and Android device acceptance remain

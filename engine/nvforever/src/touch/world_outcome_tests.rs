@@ -156,6 +156,10 @@ pub(super) fn scene(mode: &str) -> (App, Entity, FormId, Vec2) {
         .add_message::<nvf_play::pickpocket::OpenPickpocket>()
         .add_message::<nvf_play::pickpocket::Pickpocketed>()
         .add_message::<nvf_play::ui_sounds::UiSound>()
+        // Main's ActivatePlugin runs Quick Loot's `follow` before `activate`; the
+        // production QuickLootPlugin supplies its state and the crime plugin its message.
+        .init_resource::<nvf_play::quick_loot::QuickLoot>()
+        .add_message::<nvf_play::crime::ItemsTaken>()
         .add_plugins(nvf_play::activate::ActivatePlugin);
     app.update();
     (app, window, reference, point)

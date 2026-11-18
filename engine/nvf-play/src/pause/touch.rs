@@ -14,15 +14,17 @@ pub struct SettingsTouch {
 
 impl Default for SettingsTouch {
     fn default() -> Self {
-        Self { enabled: cfg!(target_os = "android"), frame: None, edges: Vec::new(), contact: None }
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 
 impl SettingsTouch {
+    fn for_platform(enabled: bool) -> Self { Self { enabled, frame: None, edges: Vec::new(), contact: None } }
+
     pub fn enabled(&self) -> bool { self.enabled }
 
     #[cfg(feature = "test-fixtures")]
-    pub(super) fn enabled_fixture() -> Self { Self { enabled: true, ..Self::default() } }
+    pub(super) fn enabled_fixture() -> Self { Self::for_platform(true) }
 
     pub fn publish(&mut self, frame: Option<Frame>, edges: &mut Vec<TouchInput>) {
         self.edges.clear();
@@ -328,11 +330,12 @@ impl Input<'_, '_> {
 
 type HitNode = (&'static ComputedNode, &'static UiGlobalTransform, &'static ComputedUiTargetCamera,
     &'static InheritedVisibility, Option<&'static CalculatedClip>, Option<&'static PauseButton>, Option<&'static Surface>);
+type HitFilter = Or<(With<PauseButton>, With<Surface>)>;
 
 #[derive(SystemParam)]
 struct Geometry<'w, 's> {
     stack: Option<Res<'w, UiStack>>,
-    nodes: Query<'w, 's, HitNode, Or<(With<PauseButton>, With<Surface>)>>,
+    nodes: Query<'w, 's, HitNode, HitFilter>,
 }
 
 impl Geometry<'_, '_> {

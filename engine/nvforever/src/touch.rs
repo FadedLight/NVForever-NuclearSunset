@@ -698,8 +698,9 @@ fn input(
                 }
             } else if sheets.tail(t) {
                 continue;
-            } else if t.phase == TouchPhase::Started && layout.config.opacity > 0.0
-                && let Some(Target::Button(i)) = layout.config.hit(t.position, size, false, false)
+            } else if let Some(i) = (t.phase == TouchPhase::Started && layout.config.opacity > 0.0)
+                .then(|| layout.config.hit(t.position, size, false, false)).flatten()
+                .and_then(|hit| match hit { Target::Button(i) => Some(i), _ => None })
             {
                 sheets.claim_overlay(t.id);
                 let p = t.position / size;
@@ -742,10 +743,11 @@ fn input(
                         state.contacts.remove(&t.id);
                     }
                 } else if !sheets.tail(t) && !modal.tail(t) {
-                    if t.phase == TouchPhase::Started && t.position.is_finite() && interactive
-                        && !state.ui_capture && layout.config.opacity > 0.0
-                        && let Some(Target::Button(i)) = layout.config.hit(t.position, size, false, false)
-                    {
+                    let overlay = (t.phase == TouchPhase::Started && t.position.is_finite() && interactive
+                        && !state.ui_capture && layout.config.opacity > 0.0)
+                        .then(|| layout.config.hit(t.position, size, false, false)).flatten()
+                        .and_then(|hit| match hit { Target::Button(i) => Some(i), _ => None });
+                    if let Some(i) = overlay {
                         sheets.claim_overlay(t.id);
                         let p = t.position / size;
                         state.contacts.insert(t.id, Contact { origin: p, position: p,

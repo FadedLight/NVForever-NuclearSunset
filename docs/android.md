@@ -267,9 +267,18 @@ frame; not taken or derived from game files; licensed GPL-3.0-or-later with the 
 Field Notes uses the speaker-side and backing/accent settings. Retro Console and
 Wrist Terminal place their model on the half opposite the chosen speaker side
 (the whole safe area in portrait, with Standard, or when the side is too small to
-read); the real device and Classic surfaces keep their own palettes. Text size and
-confirmation remain separate. Show dialogue hints and Show lockpicking hints
+read); the real device and Classic surfaces keep their own palettes. Mobile >
+Dialogue's choice and subtitle text sliders size the text in every style; on phones
+100% is a smaller base (85% choices by default) and rows stay at least 48 units.
+Confirmation remains separate. Show dialogue hints and Show lockpicking hints
 hide explanatory captions without disabling the interaction.
+
+Opening an in-game text field (the character name, the settings search and forms,
+the console when open) shows the phone keyboard; a tap while the field is open shows
+it again after it was put away. Typed text, Backspace and Enter go to the field as before, and
+the keyboard hides on Done, confirm, cancel or when the game loses focus. Desktop
+and a physical keyboard are unchanged. The auto-move target above the stick shows
+its arrow icon only; Controls help still explains it.
 
 Mobile > Inventory and quick access offers optional left/right downward dismissal,
 an explicit Close control and touch use of the physical model wheel. Hiding

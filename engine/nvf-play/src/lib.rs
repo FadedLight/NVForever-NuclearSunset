@@ -29,6 +29,7 @@ pub mod combat;
 pub mod compass;
 pub mod compass_strip;
 pub mod console;
+pub mod soft_keyboard;
 pub mod editor;
 pub mod container_anim;
 pub mod control;
@@ -437,7 +438,7 @@ impl Plugin for PlayPlugin {
             .add_plugins(caravan::CaravanPlugin)
             .add_plugins(poker::PokerPlugin)
             .add_plugins((crime::CrimePlugin, reputation::ReputationPlugin, knockouts::KnockoutsPlugin, after_combat::AfterCombatPlugin))
-            .add_plugins(console::ConsolePlugin)
+            .add_plugins((console::ConsolePlugin, soft_keyboard::SoftKeyboardPlugin))
             .add_plugins(editor::EditorPlugin)
             .add_plugins(location_markers::LocationMarkersPlugin)
             .add_plugins(collision_view::CollisionViewPlugin)

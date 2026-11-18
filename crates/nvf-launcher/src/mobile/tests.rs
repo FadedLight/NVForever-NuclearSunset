@@ -1,0 +1,145 @@
+use super::*;
+use std::{fs, sync::atomic::{AtomicUsize, Ordering}};
+
+struct Fixture(PathBuf);
+impl Fixture {
+    fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("nvf-mobile-launcher-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir(&root).unwrap();
+        Self(root)
+    }
+    fn home(&self) -> PathBuf { self.0.join("home") }
+    fn call(&self, request_json: Value) -> Value {
+        serde_json::from_str(&request(&self.home(), &request_json.to_string(), |url| panic!("unexpected request to {url}"))).unwrap()
+    }
+    fn copy(&self) -> PathBuf {
+        let root = self.0.join("imported copy");
+        let data = root.join("Data");
+        fs::create_dir_all(&data).unwrap();
+        for name in fnv_install::REQUIRED_DATA_FILES {
+            fs::write(data.join(name.to_lowercase()), [1]).unwrap();
+        }
+        root
+    }
+    fn ini(&self, text: &str) {
+        fs::create_dir_all(self.home()).unwrap();
+        fs::write(self.home().join(fnv_install::CONFIG_FILE), text).unwrap();
+    }
+    fn select(&self, root: &Path) { self.ini(&format!("[Game]\nPath={}\n", root.display())); }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) { fs::remove_dir_all(&self.0).unwrap(); }
+}
+
+#[test]
+fn play_and_continue_recheck_the_import_and_continue_selects_the_newest_save() {
+    let fixture = Fixture::new();
+    let start = |resume| fixture.call(json!({"action": "start", "resume": resume}));
+    fixture.ini("[Settings]\nhardcore=1\n");
+    assert_eq!(start(false)["error"], IMPORT_FIRST);
+    assert_eq!(start(true)["error"], IMPORT_FIRST);
+    assert!(fixture.call(json!({"action":"state"}))["data"]["folder"].is_null());
+
+    let root = fixture.copy();
+    fixture.select(&root);
+    assert_eq!(start(false)["data"], json!(["--play", "--menu", "--android-player-start"]));
+    assert_eq!(start(true)["error"], "No NVForever save is available to continue.");
+    let saves = EngineHome::new(fixture.home()).saves();
+    fs::create_dir_all(&saves).unwrap();
+    for (name, time) in [("Earlier", 2), ("Latest", 8)] {
+        let mut header = fnv_save::SaveHeader::new(fnv_save::SaveKind::Manual);
+        header.player_name = name.into();
+        header.saved_unix = time;
+        fnv_save::write(&saves.join(format!("{name}.{}", fnv_save::EXTENSION)), &header, &[], b"{}", false).unwrap();
+    }
+    let latest = saves.join(format!("Latest.{}", fnv_save::EXTENSION));
+    assert_eq!(start(true)["data"], json!(["--play", "--load", latest.to_str().unwrap(), "--android-player-start"]));
+    assert_eq!(fixture.call(json!({"action":"state"}))["data"]["continue"], "Latest");
+    fs::remove_file(root.join("Data/update.bsa")).unwrap();
+    assert_eq!(start(false)["error"], IMPORT_FIRST);
+    assert_eq!(start(true)["error"], IMPORT_FIRST);
+}
+
+#[test]
+fn saf_copy_validation_requires_nonempty_archives_before_path_commit() {
+    let fixture = Fixture::new();
+    let root = fixture.copy();
+    let check = |path: &Path| fixture.call(json!({"action": "validate_import", "path": path}));
+    fixture.ini("[Game]\nPath=/previous\n[Settings]\nhardcore=1\n");
+    assert_eq!(check(&root)["data"], Value::Null);
+    assert!(check(&root.join("Data"))["error"].as_str().unwrap().contains("own Data"));
+    fs::write(root.join("Data/update.bsa"), []).unwrap();
+    assert!(check(&root)["error"].as_str().unwrap().contains("Update.bsa"));
+    let ini = fs::read_to_string(fixture.home().join(fnv_install::CONFIG_FILE)).unwrap();
+    assert_eq!(ini_get(&ini, "Game", "Path").as_deref(), Some("/previous"));
+    assert_eq!(ini_get(&ini, "Settings", "hardcore").as_deref(), Some("1"));
+}
+
+#[test]
+fn settings_read_and_save_use_player_catalogue_without_overwriting_the_export_or_other_keys() {
+    let fixture = Fixture::new();
+    fixture.ini("[Game]\nPath=/keep\n[Settings]\nframe-cap=0.20\n");
+    let row = |key: &str| menu::Row { key: key.into(), label: key.into(), note: "engine export".into(), kind: menu::Kind::Switch, default: "0".into(), shown_with: None, needs: vec![] };
+    let menu = menu::Menu {
+        version: env!("CARGO_PKG_VERSION").into(), layout: nvf_settings_layout::layout_stamp(),
+        tabs: vec![
+            menu::Tab { name: "Mobile".into(), label: "Mobile".into(), categories: vec![menu::Category { group: None, heading: Some("Movement".into()), rows: vec![row("touch-gyro-v1"), row("touch-layout-editor-v1")] }] },
+            menu::Tab { name: "Display".into(), label: "Display".into(), categories: vec![menu::Category { group: None, heading: None, rows: vec![row("borderless"), row("resolution"), row("dlss-model")] }] },
+        ],
+    }.to_text();
+    let export = fixture.home().join(menu::MENU_FILE);
+    fs::write(&export, &menu).unwrap();
+    let rows = fixture.call(json!({"action": "settings", "edits": {"touch-gyro-v1": "1"}}))["data"]["rows"].as_array().unwrap().clone();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["tab"], "Mobile");
+    assert_eq!(rows[0]["value"], "1");
+    assert_eq!(rows[0]["control"]["type"], "switch");
+    let config = fixture.home().join(fnv_install::CONFIG_FILE);
+    assert!(ini_get(&fs::read_to_string(&config).unwrap(), "Settings", "touch-gyro-v1").is_none());
+    fixture.ini("; Changed after viewing\n[Game]\nPath=/keep\n[Settings]\nframe-cap=0.60\n");
+    let reply = fixture.call(json!({"action":"save_settings", "edits":{"touch-gyro-v1":"1"}}));
+    assert_eq!(reply, json!({"data":null}));
+    let ini = fs::read_to_string(&config).unwrap();
+    assert!(ini.starts_with("; Changed after viewing\n"));
+    assert_eq!(ini_get(&ini, "Game", "Path").as_deref(), Some("/keep"));
+    assert_eq!(ini_get(&ini, "Settings", "frame-cap").as_deref(), Some("0.60"));
+    assert_eq!(ini_get(&ini, "Settings", "touch-gyro-v1").as_deref(), Some("1"));
+    assert_eq!(fs::read_to_string(export).unwrap(), menu);
+    assert!(fixture.call(json!({"action":"save_settings", "edits":{"borderless":"1"}}))["error"].is_string());
+    assert_eq!(fs::read_to_string(&config).unwrap(), ini);
+}
+
+#[test]
+fn android_lists_omit_dlss_and_news_off_never_requests_a_url() {
+    let fixture = Fixture::new();
+    fixture.ini("[Launcher]\nNews=0\n");
+    let model = fixture.call(json!({"action":"settings", "edits":{}}));
+    let rows = model["data"]["rows"].as_array().unwrap();
+    for key in ["upscaler", "frame-generation"] {
+        let row = rows.iter().find(|r| r["key"] == key).unwrap();
+        let choices = row["control"]["choices"].as_array().unwrap();
+        assert_eq!(choices.len(), 2);
+        assert!(choices.iter().all(|choice| !choice["name"].as_str().unwrap().to_ascii_lowercase().contains("dlss")));
+        assert!(fixture.call(json!({"action":"save_settings", "edits": {(key): "DLSS"}}))["error"].is_string());
+    }
+    assert_eq!(fixture.call(json!({"action":"fetch_news"}))["data"]["posts"], json!([]));
+}
+
+#[test]
+fn mods_edit_the_real_plugin_list_and_shared_new_game_fields() {
+    let fixture = Fixture::new();
+    let root = fixture.copy();
+    fixture.select(&root);
+    fs::write(root.join("Data/TaleOfTwoWastelands.esm"), [1]).unwrap();
+    fs::write(root.join("Data/Mod.esp"), [1]).unwrap();
+    let mods = || fixture.call(json!({"action":"mods"}))["data"].clone();
+    let model = mods();
+    assert_eq!(model["ttw"], false);
+    assert_eq!(model["entries"][0]["name"], "falloutnv.esm");
+    assert_eq!(fixture.call(json!({"action":"plugin", "name":"TaleOfTwoWastelands.esm", "change":"toggle"})), json!({"data":null}));
+    assert_eq!(mods()["ttw"], true);
+    assert_eq!(fixture.call(json!({"action":"save_start", "fields":model["ttwDefaults"]})), json!({"data":null}));
+    let fields: start::Fields = serde_json::from_value(mods()["fields"].clone()).unwrap();
+    assert_eq!(fields, start::ttw());
+}

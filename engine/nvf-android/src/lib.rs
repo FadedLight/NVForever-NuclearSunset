@@ -4,3 +4,6 @@
 fn main() {
     nvforever::run_android();
 }
+
+#[cfg(target_os = "android")]
+mod launcher;

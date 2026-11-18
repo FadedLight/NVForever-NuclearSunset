@@ -19,16 +19,7 @@ import java.util.Set;
 
 /** Imports a copy through the directory picker; never writes to the source tree. */
 public final class LauncherActivity extends Activity {
-    private TextView status;
-    private Button start, select;
-    private Button diagnostics;
-    private final android.os.Handler diagnosticsUi = new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable refreshDiagnostics = new Runnable() { @Override public void run() {
-        if (diagnostics != null) {
-            diagnostics.setText("LAN test logs · " + LanDiagnostics.launcher(LauncherActivity.this).status());
-            diagnosticsUi.postDelayed(this, 2000);
-        }
-    }};
+    private MobileLauncher launcher;
     private boolean busy;
     private static final int PICK_GAME = 1;
     private static final int PICK_LOG_PAIRING = 2;
@@ -36,44 +27,36 @@ public final class LauncherActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL); layout.setPadding(32, 32, 32, 32);
-        TextView title = new TextView(this);
-        title.setText("NVForever for Android · experimental"); title.setTextSize(25); layout.addView(title);
-        TextView intro = new TextView(this);
-        intro.setText("Import the Fallout: New Vegas folder (or Data folder) from your own copy. This makes a full local copy and needs enough free space. The source is never changed. Saves and settings are stored separately. Uninstalling removes app files.\n\nUse touch controls or a keyboard and mouse. Device performance is still being tested.");
-        layout.addView(intro);
-        select = new Button(this); select.setText("Import game folder");
-        select.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), PICK_GAME)); layout.addView(select);
-        start = new Button(this); start.setText("Start NVForever");
-        start.setOnClickListener(v -> prepareAndStart()); layout.addView(start);
-        status = new TextView(this); layout.addView(status); setContentView(layout);
-        if (LanDiagnostics.available(this)) {
-            LanDiagnostics.launcher(this);
-            diagnostics = new Button(this); diagnostics.setText("LAN test logs");
-            diagnostics.setOnClickListener(v -> showDiagnostics()); layout.addView(diagnostics);
+        if (android.os.Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        try {
+            launcher = new MobileLauncher(this);
+        } catch (IOException | org.json.JSONException | LinkageError e) {
+            new android.app.AlertDialog.Builder(this).setTitle("NVForever launcher")
+                .setMessage("Could not open the launcher: " + e.getMessage())
+                .setPositiveButton("Close", (dialog, which) -> finish()).setCancelable(false).show();
         }
+        if (LanDiagnostics.available(this)) LanDiagnostics.launcher(this);
     }
     @Override public void onResume() {
         super.onResume();
-        if (diagnostics != null) {
-            diagnosticsUi.removeCallbacks(refreshDiagnostics);
-            diagnosticsUi.post(refreshDiagnostics);
-        }
+        if (launcher == null) return;
         String error = getIntent().getStringExtra("error");
-        if (error != null && !error.isEmpty()) { status.setText(error); getIntent().removeExtra("error"); }
-        if (!busy) {
-            start.setEnabled(new File(getFilesDir(), "home/NVForever.ini").isFile());
-            select.setEnabled(!runningGame());
-        }
+        getIntent().removeExtra("error");
+        launcher.refresh(busy, runningGame(), error);
+        launcher.resume();
     }
     @Override protected void onPause() {
-        diagnosticsUi.removeCallbacks(refreshDiagnostics);
+        if (launcher != null) launcher.pause();
         super.onPause();
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); }
-    private void showDiagnostics() { showDiagnostics(null, null); }
+    void pickGame() {
+        if (busy || runningGame()) return;
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), PICK_GAME);
+    }
+    void showDiagnostics() { showDiagnostics(null, null); }
     private void showDiagnostics(String importedEndpoint, String importedToken) {
         if (!LanDiagnostics.available(this)) return;
         LanDiagnostics support = LanDiagnostics.launcher(this);
@@ -116,13 +99,13 @@ public final class LauncherActivity extends Activity {
             dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 try {
                     support.configure(enabled.isChecked(), endpoint.getText().toString().trim(), token.getText().toString().trim());
-                    diagnostics.setText("LAN test logs · " + support.status()); dialog.dismiss();
+                    dialog.dismiss();
                 } catch (Exception error) { state.setText("Check the private PC URL and pairing token; settings could not be applied."); }
             });
         });
         dialog.show();
     }
-    private boolean runningGame() {
+    boolean runningGame() {
         android.app.ActivityManager manager = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
         var processes = manager.getRunningAppProcesses();
         if (processes != null) for (var p : processes)
@@ -130,18 +113,19 @@ public final class LauncherActivity extends Activity {
         return false;
     }
     private void working(boolean value, String message) {
-        busy = value; select.setEnabled(!value && !runningGame());
-        start.setEnabled(!value && new File(getFilesDir(), "home/NVForever.ini").isFile()); status.setText(message);
+        busy = value;
+        if (!isDestroyed()) launcher.refresh(value, runningGame(), message);
     }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (launcher == null) return;
         if ((request == EXPORT_LOGS || request == PICK_LOG_PAIRING) && !LanDiagnostics.available(this)) return;
         if (request == EXPORT_LOGS) {
             if (result == RESULT_OK && data != null && data.getData() != null) {
                 Uri destination = data.getData();
-                status.setText("Collecting filtered logs for local export…");
+                launcher.message("Collecting filtered logs for local export…");
                 LanDiagnostics.launcher(this).export(() -> getContentResolver().openOutputStream(destination, "w"),
-                    success -> runOnUiThread(() -> status.setText(success ? "Filtered logs exported; originals and pending reports kept"
+                    success -> runOnUiThread(() -> launcher.message(success ? "Filtered logs exported; originals and pending reports kept"
                         : "Export failed; originals and pending reports kept")));
             }
             return;
@@ -152,7 +136,7 @@ public final class LauncherActivity extends Activity {
         }
         if (request != PICK_GAME || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri tree = data.getData();
-        if (runningGame()) { status.setText("Close the game before importing another install."); return; }
+        if (busy || runningGame()) { launcher.message("Close the game before importing another install."); return; }
         working(true, "Copying game files. Keep NVForever open until this finishes…");
         new Thread(() -> {
             File imported = null;
@@ -171,12 +155,7 @@ public final class LauncherActivity extends Activity {
                     if (findChild(tree, dataRoot, required) == null) throw new IOException("The selected game is incomplete: missing " + required);
                 }
                 copyDirectory(tree, dataRoot, new File(imported, "Data"), new HashSet<>(), 0);
-                for (String required : InstallConfig.REQUIRED) {
-                    File[] files = new File(imported, "Data").listFiles();
-                    boolean present = false;
-                    if (files != null) for (File file : files) if (file.isFile() && file.length() > 0 && file.getName().equalsIgnoreCase(required)) present = true;
-                    if (!present) throw new IOException("The imported file is missing or empty: " + required);
-                }
+                launcher.validateImport(imported.getAbsolutePath());
                 if (child != null) {
                     String ini = findChild(tree, root, "Fallout_default.ini");
                     if (ini != null) copyFile(tree, ini, new File(imported, "Fallout_default.ini"));
@@ -222,7 +201,7 @@ public final class LauncherActivity extends Activity {
                 if (endpoint.length() > 256 || !token.matches("[A-Za-z0-9_-]{32,128}")) throw new IOException("Invalid pairing settings");
                 runOnUiThread(() -> showDiagnostics(endpoint, token));
             } catch (Exception error) {
-                runOnUiThread(() -> status.setText("Could not read pairing settings. Choose the private JSON file from your PC."));
+                runOnUiThread(() -> launcher.message("Could not read pairing settings. Choose the private JSON file from your PC."));
             }
         }, "nvf-log-pairing-import").start();
     }
@@ -273,13 +252,26 @@ public final class LauncherActivity extends Activity {
             while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
         }
     }
-    private void prepareAndStart() {
+    void prepareAndStart(boolean resume) {
+        if (busy || runningGame()) return;
+        final String args;
+        try {
+            args = launcher.startArgs(resume);
+        } catch (IOException | org.json.JSONException e) {
+            launcher.startRefused(e.getMessage());
+            return;
+        }
         working(true, "Preparing engine schemas…");
         new Thread(() -> {
             try {
                 copyAsset("schemas", new File(getFilesDir(), "runtime/schemas"));
                 copyAsset("lang", new File(getFilesDir(), "home/lang"));
-                runOnUiThread(() -> { working(false, "Starting…"); startActivity(new Intent(this, GameActivity.class)); });
+                runOnUiThread(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    busy = false;
+                    launcher.message("");
+                    startActivity(new Intent(this, GameActivity.class).putExtra("args", args));
+                });
             } catch (Exception e) { runOnUiThread(() -> working(false, "Startup failed: " + e.getMessage())); }
         }, "nvf-setup").start();
     }

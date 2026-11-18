@@ -4648,6 +4648,8 @@ name = "nvf-android"
 version = "0.7.0"
 dependencies = [
  "bevy",
+ "jni 0.21.1",
+ "nvf-launcher",
  "nvforever",
 ]
 
@@ -4673,6 +4675,18 @@ dependencies = [
  "tracing",
  "ureq",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nvf-launcher"
+version = "0.7.0"
+dependencies = [
+ "fnv-install",
+ "fnv-save",
+ "fnv-util",
+ "nvf-settings-layout",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

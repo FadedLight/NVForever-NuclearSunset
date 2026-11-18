@@ -3,9 +3,10 @@
 These additional rows and compatibility notes belong to the Android-integrated
 engine. The shared desktop reference remains [settings-reference.md](settings-reference.md);
 the desktop launcher's four editable tabs and its built-in table are unchanged.
-This document does not add Mobile settings editing to the launcher. Android rows
-keep their existing in-game placements in desktop builds; selecting a physical
-input device does not change the Android build's Mobile grouping.
+The Android launcher reads the Mobile catalogue exported by a normal player launch;
+actions such as layout editing and practice still open in the game. Android rows keep
+their existing in-game placements in desktop builds; selecting a physical input
+device does not change the Android build's Mobile grouping.
 
 ## Mobile › Touch layout and guide
 

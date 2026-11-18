@@ -43,9 +43,22 @@ or `adb install -r <apk>`, then use **Import game folder**. Select a folder copi
 own lawful game installation. The importer needs enough space for the full Data directory
 and leaves source files untouched. No game assets are downloaded or included in the APK.
 
+The touch launcher uses the desktop launcher's news feed, release countdown, save selection,
+settings catalogue and new-game start fields. Home, Settings, Mods and Game folder work in
+portrait or landscape inside the system insets. Play requires a complete imported game;
+Continue additionally requires an NVForever save. Settings writes only edited INI keys and
+never writes the engine's settings catalogue: a normal player launch publishes it, including
+the Mobile tab. Practice and layout customization still open in the game. The Android
+launcher does not offer DLSS, desktop window controls or the desktop self-updater.
+Project news uses HTTPS and can be turned off on Home. When enabled in a diagnostic build,
+the existing LAN test logs dialog is under Game folder. The application ID, APK version and
+signing configuration are unchanged; an upgrade still requires the same signer as the
+installed APK.
+
 Developer checks without game data:
 
 ```sh
+cargo test -p nvf-launcher --no-default-features --features mobile --lib --locked mobile::tests
 python -m unittest discover -s tools/android/tests
 javac -d <temporary-output> android/app/src/main/java/org/nvforever/android/InstallConfig.java android/app/src/test/java/org/nvforever/android/InstallConfigTest.java
 java -cp <temporary-output> org.nvforever.android.InstallConfigTest
@@ -55,8 +68,9 @@ The existing desktop checks in CONTRIBUTING.md still apply to engine changes. A 
 cross-check or Java compilation does not replace desktop regressions or device acceptance.
 
 The `android-test-apk` workflow cross-checks the engine and authored input test source,
-builds a development APK, verifies ARM64 ELF/runtime contents and its signature, and
-uploads the APK as an artifact. It does not run Android gameplay or input tests on a
+tests the mobile launcher consumer on the host, builds a development APK, verifies ARM64
+ELF/runtime contents, the packaged launcher JNI symbol and the signature, and uploads the
+APK as an artifact. It does not run Android gameplay or input tests on a
 device. CI debug signing keys are temporary; an APK from another run may require an
 uninstall, which deletes app saves. Keep your own development signing key for updates
 and export saves before replacing an installation signed by a different key.

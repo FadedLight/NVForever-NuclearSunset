@@ -1147,6 +1147,7 @@ mod tests {
         event(&mut app, w, 2, TouchPhase::Ended, 200.0, 100.0);
         app.update();
         assert_eq!(asked(&app).pick, None);
+        app.update(); // Resolve publishes the reopened overlay before admitting a fresh touch.
         tap(&mut app, w, 3, 100.0);
         assert_eq!(asked(&app).pick, Some(2));
     }
@@ -1182,6 +1183,7 @@ mod tests {
                 ..default()
             },
             UiGlobalTransform::from_xy(200.0, 650.0),
+            ChildOf(viewport),
         ));
         app.world_mut().resource_mut::<DialogueMenu>().selected = 2;
         app.update();

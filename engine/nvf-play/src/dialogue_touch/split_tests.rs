@@ -24,10 +24,14 @@ fn scene(side:Side,density:f32)->(App,Entity,Entity) {
         .insert_resource(Options {side})
         .insert_resource(SafeInsets {left:24.0,top:12.0,right:10.0,bottom:18.0})
         .add_systems(Update,publish_window_targets.after(crate::PlaySet::Sync));
-    let world=app.world_mut().spawn((
-        crate::PlayerCamera,Camera3d::default(),Camera {order:1,..default()},
+    // Turn the fixture's existing default camera into the player camera rather
+    // than testing a default-owner handoff in the speaker-framing case.
+    let world = default_camera(&mut app).expect("ordinary camera before speaker framing");
+    app.world_mut().entity_mut(world).remove::<Camera2d>().insert((
+        crate::PlayerCamera, Camera3d::default(), Camera {order:1,..default()},
+        Projection::Perspective(PerspectiveProjection::default()),
         Transform::from_xyz(0.0,112.0,0.0),
-    )).id();
+    ));
     settle(&mut app);
     (app,window,world)
 }

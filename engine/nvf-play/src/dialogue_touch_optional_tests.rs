@@ -21,6 +21,7 @@ fn registered_dialogue_off_retires_old_answer_and_preserves_independent_text_pre
     assert_eq!(crate::settings::flip(app.world_mut(), index), Some(true));
     app.update();
     app.world_mut().resource_mut::<crate::touch_ui_options::Retirements>().take();
+    app.update(); // Consume the reopened overlay identity before starting a contact.
     tap(&mut app, window, 813, 100.0);
     assert_eq!(asked(&app).pick, Some(2), "fresh returned contact reaches real offered-index consumer");
 }

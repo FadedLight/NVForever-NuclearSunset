@@ -233,7 +233,9 @@ pub(super) mod tests {
             std::fs::write(path,bytes).unwrap();
             let texture=files.0.join("textures/fonts/classicfixture.tex");std::fs::create_dir_all(texture.parent().unwrap()).unwrap();
             let mut pixels=8_u32.to_le_bytes().to_vec();pixels.extend(8_u32.to_le_bytes());pixels.extend([255;8*8*4]);
-            std::fs::write(texture,pixels).unwrap();
+            std::fs::write(&texture,pixels).unwrap();
+            // Main admits TEX only when its companion DDS also exists.
+            std::fs::write(texture.with_extension("dds"), []).unwrap();
         }
         let data=GameData {vfs:std::sync::Arc::new(fnv_vfs::Vfs::open(&files.0,&[]).unwrap()),
             schema:std::sync::Arc::new(fnv_nif::Schema::load_dir(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"),"/../../schemas/nif"))).unwrap())};

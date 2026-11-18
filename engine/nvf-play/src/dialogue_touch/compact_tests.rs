@@ -15,6 +15,16 @@ use bevy::ui::{
     widget::measure_text_system,
 };
 
+fn publish_ui_targets(windows: Query<&Window, With<PrimaryWindow>>, mut cameras: Query<&mut Camera>) {
+    let window = windows.single().unwrap();
+    for mut camera in &mut cameras {
+        camera.computed.target_info = Some(RenderTargetInfo {
+            physical_size: UVec2::new(window.physical_width(), window.physical_height()),
+            scale_factor: window.scale_factor(),
+        });
+    }
+}
+
 pub(super) fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins((
@@ -52,6 +62,7 @@ pub(super) fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Ent
         PostUpdate,
         (
             ApplyDeferred,
+            publish_ui_targets,
             propagate_ui_target_cameras,
             sync_font_size_to_em_size,
             measure_text_system,

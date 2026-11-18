@@ -36,7 +36,11 @@ mod tray_layout_regressions {
         let row=app.world().resource::<settings::Settings>().index("touch-hotbar-size").unwrap();
         let slider=app.world().resource::<settings::Settings>().list()[row].slider.unwrap();
         assert_eq!(slider.text((slider.get)(app.world())),"100%");
-        assert!(settings::set_slider(app.world_mut(),row,settings::choice_part(7,13)).is_some());
+        let size = settings::choice_part(7, 13);
+        assert_eq!(settings::set_slider(app.world_mut(), row, size), None);
+        let hotbar = app.world().resource::<settings::Settings>().index("touch-hotbar").unwrap();
+        assert_eq!(settings::flip(app.world_mut(), hotbar), Some(true));
+        assert!(settings::set_slider(app.world_mut(), row, size).is_some());
         assert_eq!(app.world().resource::<super::super::super::Layout>().config.tray.scale,1.3);
         let saved:serde_json::Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(saved["tray"]["scale"],serde_json::json!(1.3_f32));

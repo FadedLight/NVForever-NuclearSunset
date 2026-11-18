@@ -58,13 +58,17 @@ fn both_inversion_preferences_default_off_and_round_trip_independently_through_i
             assert!(!app.world().resource::<Options>().invert_x);
             assert!(!app.world().resource::<Options>().invert_y);
             app.insert_resource(settings::SettingsFile(Some(path.clone())));
+            for key in [KEYS[6], KEYS[7]] {
+                let index = app.world().resource::<settings::Settings>().index(key).unwrap();
+                assert_eq!(settings::flip(app.world_mut(), index), None);
+            }
+            // Enabling Gyro admits its child rows and writes the INI even for false/false.
+            let index = app.world().resource::<settings::Settings>().index(KEYS[0]).unwrap();
+            assert_eq!(settings::flip(app.world_mut(), index), Some(true));
             for (key, value) in [(KEYS[6], x), (KEYS[7], y)] {
                 let index = app.world().resource::<settings::Settings>().index(key).unwrap();
                 if value { assert_eq!(settings::flip(app.world_mut(), index), Some(true)); }
             }
-            // Ensure even false/false writes the production INI path.
-            let index = app.world().resource::<settings::Settings>().index(KEYS[0]).unwrap();
-            settings::flip(app.world_mut(), index);
             let stored = std::fs::read_to_string(&path).unwrap();
             assert!(stored.contains(&format!("{}={}", KEYS[6], if x { 1 } else { 0 })));
             assert!(stored.contains(&format!("{}={}", KEYS[7], if y { 1 } else { 0 })));

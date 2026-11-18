@@ -41,6 +41,7 @@ pub mod dialogue;
 pub mod dialogue_look;
 pub mod dialogue_zoom;
 pub mod dialogue_menu;
+pub mod dialogue_device;
 pub mod dialogue_touch;
 pub mod dialogue_split;
 pub mod touch_safe_area;

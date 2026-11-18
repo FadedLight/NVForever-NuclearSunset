@@ -325,7 +325,7 @@ pub(crate) fn glow_lit(pip: &PipBoy, page: Page) -> bool {
 /// there: the arms' depth is squeezed in front of the world (`NifSurface::first_person`),
 /// and a plain material's fragments would all fall behind the screen. Faded by nothing: the
 /// sheet lies 0.47 units off the screen, and its soft intersection would thin it.
-fn glare_material(own: &NifMaterial) -> NifMaterial {
+pub(crate) fn glare_material(own: &NifMaterial) -> NifMaterial {
     let mut m = own.clone();
     let [r, g, b] = GLARE_LINEAR_SCALE;
     m.base.base_color = Color::linear_rgb(r, g, b);
@@ -344,7 +344,7 @@ fn glare_material(own: &NifMaterial) -> NifMaterial {
 }
 
 /// The screen's material with the menus' image on it, from the shape's own.
-fn menus_material(own: &NifMaterial, image: Handle<Image>) -> NifMaterial {
+pub(crate) fn menus_material(own: &NifMaterial, image: Handle<Image>) -> NifMaterial {
     let mut m = own.clone();
     let scale = (CANVAS / TARGET.as_vec2()) / UV_EXTENT;
     let [r, g, b] = SCREEN_TINT;
@@ -634,7 +634,7 @@ impl Posed {
 /// posed as the arm's bones hold them this frame. The test aid's target (`PipBoyAid`)
 /// stands in for the window's pointer. A window pointer asleep under the controller
 /// (`nvf_play::pad::pointer`, #2310) is on nothing.
-fn pointer_pose(mesh: &Mesh, joints: Option<&[Mat4]>, world: Mat4) -> Option<Posed> {
+pub(crate) fn pointer_pose(mesh: &Mesh, joints: Option<&[Mat4]>, world: Mat4) -> Option<Posed> {
     if mesh.primitive_topology()!=bevy::render::render_resource::PrimitiveTopology::TriangleList || !world.is_finite() || !world.row(3).abs_diff_eq(Vec4::W,1e-6) {return None;}
     let Some(VertexAttributeValues::Float32x3(positions))=mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {return None};
     let Some(VertexAttributeValues::Float32x2(uvs))=mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {return None};

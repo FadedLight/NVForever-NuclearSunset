@@ -63,6 +63,25 @@ pub const AMBER_RGB: [u8; 3] = [255, 182, 66];
 static HUD_RGB: AtomicU32 = AtomicU32::new(pack(AMBER_RGB));
 static PIPBOY_RGB: AtomicU32 = AtomicU32::new(pack(AMBER_RGB));
 
+#[cfg(test)]
+std::thread_local! {
+    static TEST_COLOURS: std::cell::Cell<Option<([u8; 3], [u8; 3])>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Isolate authored palette changes from other test apps.
+/// Systems that consume the override must run on this thread.
+#[cfg(test)]
+pub(crate) fn colours_at(hud: [u8; 3], pipboy: [u8; 3]) -> impl Drop {
+    struct Restore(Option<([u8; 3], [u8; 3])>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_COLOURS.set(self.0);
+        }
+    }
+    Restore(TEST_COLOURS.replace(Some((hud, pipboy))))
+}
+
 const fn pack([r, g, b]: [u8; 3]) -> u32 {
     (r as u32) << 16 | (g as u32) << 8 | b as u32
 }
@@ -73,19 +92,37 @@ fn unpack(v: u32) -> [u8; 3] {
 
 /// The HUD's and the menus' colour.
 pub fn hud_rgb() -> [u8; 3] {
+    #[cfg(test)]
+    if let Some((hud, _)) = TEST_COLOURS.get() {
+        return hud;
+    }
     unpack(HUD_RGB.load(Ordering::Relaxed))
 }
 
 pub fn set_hud_rgb(rgb: [u8; 3]) {
+    #[cfg(test)]
+    if let Some((_, pipboy)) = TEST_COLOURS.get() {
+        TEST_COLOURS.set(Some((rgb, pipboy)));
+        return;
+    }
     HUD_RGB.store(pack(rgb), Ordering::Relaxed);
 }
 
 /// The Pip-Boy screens' colour.
 pub fn pipboy_rgb() -> [u8; 3] {
+    #[cfg(test)]
+    if let Some((_, pipboy)) = TEST_COLOURS.get() {
+        return pipboy;
+    }
     unpack(PIPBOY_RGB.load(Ordering::Relaxed))
 }
 
 pub fn set_pipboy_rgb(rgb: [u8; 3]) {
+    #[cfg(test)]
+    if let Some((hud, _)) = TEST_COLOURS.get() {
+        TEST_COLOURS.set(Some((hud, rgb)));
+        return;
+    }
     PIPBOY_RGB.store(pack(rgb), Ordering::Relaxed);
 }
 

@@ -10,6 +10,7 @@ fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_a
         assert_eq!(crate::settings::flip(app.world_mut(),enabled),Some(true));
     }
     let row=app.world().resource::<Settings>().index(crate::dialogue_touch::appearance::THEME_KEY).unwrap();
+    assert!(crate::settings::pick(app.world_mut(),row,"Field Notes"));
     *app.world_mut().resource_mut::<Page>()=Page::Settings{selected:Some(RowId::Setting(row))};
     app.update();app.update();
     let preview=app.world_mut().query_filtered::<Entity,With<crate::dialogue_touch::appearance::Preview>>().single(app.world()).unwrap();
@@ -20,9 +21,11 @@ fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_a
     }
     assert!(entities.iter().all(|e|app.world().get::<Button>(*e).is_none()&&app.world().get::<PauseButton>(*e).is_none()));
     assert!(entities.iter().all(|e|app.world().get::<bevy::picking::Pickable>(*e)==Some(&bevy::picking::Pickable::IGNORE)));
+    assert_eq!(app.world().get::<Node>(preview).unwrap().display,Display::Flex);
     assert!(app.world().get::<Node>(preview).unwrap().overflow==Overflow::clip());
     let notes:Vec<_>=app.world_mut().query_filtered::<&Text,With<SwitchNote>>().iter(app.world()).map(|t|t.0.clone()).collect();
-    assert!(notes.iter().any(|n|n.contains("Unframed choices")));
+    let registered=app.world().resource::<Settings>().list()[row].note;
+    assert!(notes.iter().any(|n|n.contains(registered)));
     let mut before:Vec<_>=app.world_mut().query::<&PauseButton>().iter(app.world()).map(|b|format!("{b:?}")).collect();before.sort();
     assert!(app.world_mut().query::<&PauseButton>().iter(app.world()).any(|b|*b==PauseButton::Row(RowId::Setting(row))));
     assert_eq!(app.world().get::<BackgroundColor>(preview).unwrap().0.alpha(),0.,"preview enclosing surface is intentionally unframed");
@@ -34,6 +37,16 @@ fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_a
     assert_eq!(q.single(app.world()).unwrap().0.alpha(),0.);
     let mut after:Vec<_>=app.world_mut().query::<&PauseButton>().iter(app.world()).map(|b|format!("{b:?}")).collect();after.sort();
     assert_eq!(after,before);
+    for name in ["Normal","Classic","Retro Console","Wrist Terminal","Field Notes"] {
+        assert!(crate::settings::pick(app.world_mut(),row,name));
+        app.update();app.update();
+        let mut samples=app.world_mut().query_filtered::<&Node,With<crate::dialogue_touch::appearance::Preview>>();
+        if name=="Field Notes" {
+            assert_eq!(samples.single(app.world()).unwrap().display,Display::Flex);
+        } else {
+            assert!(samples.iter(app.world()).all(|n|n.display==Display::None));
+        }
+    }
     *app.world_mut().resource_mut::<Page>()=Page::Settings{selected:Some(RowId::Setting(0))};app.update();
     assert_eq!(app.world_mut().query_filtered::<Entity,With<crate::dialogue_touch::appearance::Preview>>().iter(app.world()).count(),0);
 }
@@ -78,10 +91,11 @@ fn selected_appearance_note_and_real_unavailable_reason_keep_the_visible_uncut_w
         }
         app.insert_resource(RequiredWord(word.into()));
         if required_reason {crate::settings::set_choice_unavailable(&mut app,crate::dialogue_touch::appearance::THEME_KEY,|w,_|Some(w.resource::<RequiredWord>().0.clone()));}
+        app.world_mut().resource_mut::<crate::dialogue_touch::appearance::Appearance>().theme=crate::dialogue_touch::appearance::Theme::SplitPanel;
         let settings=app.world().resource::<Settings>();let row=settings.index(crate::dialogue_touch::appearance::THEME_KEY).unwrap();
         let choices=settings.choices(row).expect("actual theme ChoiceList must be installed, not an ordinary same-key row");let names=(choices.names)(app.world());let chosen=(choices.chosen)(app.world());
-        assert_eq!(names,["Minimal","Classic Glass","Field Notes","Retro Console","Wrist Terminal"]);
-        assert_eq!(chosen,"Minimal");
+        assert_eq!(names,["Normal","Classic","Field Notes","Retro Console","Wrist Terminal"]);
+        assert_eq!(chosen,"Field Notes");
         let looks=ListLooks{labels:names.clone(),reasons:names.iter().map(|name|settings.choice_unavailable(app.world(),row,name)).collect(),chosen:(chosen.clone(),settings.choice_unavailable(app.world(),row,&chosen))};
         let mut entries:Vec<_>=(0..settings.list().len()).filter(|i|*i!=row).map(|i|ViewEntry::Row(RowId::Setting(i))).collect();entries.push(ViewEntry::Row(RowId::Setting(row)));
         assert_eq!(entries.len(),12);

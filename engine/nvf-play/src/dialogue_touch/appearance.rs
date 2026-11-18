@@ -17,7 +17,7 @@ pub(crate) enum Theme {
 impl Theme {
     const ALL: [Self; 5] = [Self::Minimal, Self::ClassicGlass, Self::SplitPanel, Self::RetroConsole, Self::WristTerminal];
     fn name(self) -> &'static str {
-        match self { Self::Minimal => "Minimal", Self::ClassicGlass => "Classic Glass", Self::SplitPanel => "Field Notes", Self::RetroConsole => "Retro Console", Self::WristTerminal => "Wrist Terminal" }
+        match self { Self::Minimal => "Normal", Self::ClassicGlass => "Classic", Self::SplitPanel => "Field Notes", Self::RetroConsole => "Retro Console", Self::WristTerminal => "Wrist Terminal" }
     }
 }
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
@@ -44,12 +44,12 @@ fn shown(value: f32) -> String { format!("{:.0}%", opacity(value) * 100.0) }
 fn shown_backing(value: f32) -> String { shown(opacity(value)*0.80) }
 fn chosen(world: &World) -> String { world.resource::<Appearance>().theme.name().into() }
 fn pick(world: &mut World, name: &str) -> bool {
-    let name=if name=="Split Panel" {"Field Notes"}else{name};
+    let name=match name {"Split Panel"=>"Field Notes","Minimal"=>"Normal","Classic Glass"=>"Classic",_=>name};
     let Some(theme) = Theme::ALL.into_iter().find(|t| t.name() == name) else { return false; };
     world.resource_mut::<Appearance>().theme = theme;
     true
 }
-const THEME_NOTE: &str = "Unframed choices over the world: quiet underline, classic highlight, editorial rule, terminal cursor or wrist-computer ticks. Uses your HUD colour.";
+const THEME_NOTE: &str = "Normal uses the standard dialogue style. Classic needs a local template. Field Notes uses borderless side choices; Retro Console and Wrist Terminal use the installed terminal and Pip-Boy models.";
 fn theme_setting(note: &'static str) -> Setting {
     Setting { key: THEME_KEY, group: crate::pause::GROUP_MENUS, label: "Dialogue theme",
         note, switches: "", get: |_|false, set: |_,_|{}, slider: None }
@@ -65,7 +65,7 @@ pub(crate) fn register_theme_note(app: &mut App, note: &'static str) {
     add_choice_list(app, theme_setting(note), theme_choices());
 }
 pub(super) fn install(app: &mut App) {
-    app.init_resource::<Appearance>().add_systems(Update, (paint, markers, instrument).chain().after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync));
+    app.init_resource::<Appearance>().add_systems(Update, (paint, markers, instrument, preview_visibility).chain().after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync));
     add_choice_list(app, theme_setting(THEME_NOTE), theme_choices());
     add_choice_list(app, Setting {key:TINT_KEY,group:crate::pause::GROUP_MENUS,label:"Dialogue background tint",
         note:"Tint the translucent choice backing. Text and selection still use your preferred HUD colour.",switches:"",get:|_|false,set:|_,_|{},slider:None},
@@ -252,6 +252,12 @@ pub(super) fn decoration(parent:&mut ChildSpawnerCommands) {
         (7,Node{left:px(24.),top:px(6.),width:px(6.),height:px(1.),..default()}),
     ] {
         parent.spawn((Paint::Trim(n),bevy::picking::Pickable::IGNORE,Node{position_type:PositionType::Absolute,..node},BackgroundColor(Color::NONE)));
+    }
+}
+
+fn preview_visibility(appearance:Res<Appearance>,mut roots:Query<&mut Node,With<Preview>>) {
+    for mut node in &mut roots {
+        node.display=if appearance.theme==Theme::SplitPanel {Display::Flex}else{Display::None};
     }
 }
 

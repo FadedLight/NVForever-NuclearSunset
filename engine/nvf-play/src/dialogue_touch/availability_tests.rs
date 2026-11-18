@@ -39,6 +39,16 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
     let file = AvailabilityFile::new("[Settings]\n[Unrelated]\nkeep=yes\n");
     let mut app = availability_app(&file);
     availability_enabled(&mut app, true);
+    let theme_row=availability_row(&app, "dialogue-theme-v1");
+    assert_eq!(app.world().resource::<appearance::Appearance>().theme,appearance::Theme::Minimal);
+    for name in ["Normal","Classic","Retro Console","Wrist Terminal"] {
+        assert_eq!(crate::settings::pick(app.world_mut(),theme_row,name),name!="Normal");
+        for key in ["dialogue-speaker-side","dialogue-background-opacity-v1","dialogue-background-tint-v1","dialogue-frame-opacity-v1","dialogue-hints-v1"] {
+            let settings=app.world().resource::<crate::settings::Settings>();
+            assert_eq!(settings.disabled_status(app.world(),settings.index(key).unwrap()),Some("Available with the Field Notes theme."),"{name}: {key}");
+        }
+    }
+    assert!(crate::settings::pick(app.world_mut(),theme_row,"Field Notes"));
     for key in availability_children() {
         let settings = app.world().resource::<crate::settings::Settings>();
         assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), None, "{key}");
@@ -56,7 +66,7 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
         let settings = app.world().resource::<crate::settings::Settings>();
         assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), Some("Enable Touch dialogue."), "{key}");
     }
-    for (key, name) in [("dialogue-theme-v1", "Classic Glass"),
+    for (key, name) in [("dialogue-theme-v1", "Classic"),
         ("dialogue-background-tint-v1", "Warm amber"), ("dialogue-touch-choice", "Direct tap"),
         ("dialogue-speaker-side", "Speaker right")] {
         let row = availability_row(&app, key);
@@ -75,7 +85,7 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
     assert_eq!(std::fs::read(&file.0).unwrap(), bytes, "refused edits never save a new value");
     availability_enabled(&mut app, true);
     let row = availability_row(&app, "dialogue-theme-v1");
-    assert!(crate::settings::pick(app.world_mut(), row, "Classic Glass"));
+    assert!(crate::settings::pick(app.world_mut(), row, "Classic"));
     assert_eq!(app.world().resource::<appearance::Appearance>().theme, appearance::Theme::ClassicGlass);
 }
 
@@ -97,12 +107,15 @@ fn enhanced_dialogue_disabled_children_load_and_roundtrip_then_on_edits_and_off_
     availability_enabled(&mut app, true);
     let row = availability_row(&app, "dialogue-touch-choice");
     assert!(crate::settings::pick(app.world_mut(), row, "Select then confirm"));
+    let theme_row = availability_row(&app,"dialogue-theme-v1");
+    assert!(crate::settings::pick(app.world_mut(),theme_row,"Field Notes"));
     let row = availability_row(&app, "dialogue-background-opacity-v1");
     assert!(crate::settings::set_slider(app.world_mut(), row, 0.7).is_some());
     let row = availability_row(&app, "dialogue-speaker-side");
     assert!(crate::settings::pick(app.world_mut(), row, "Speaker right"));
     let row = availability_row(&app, "dialogue-hints-v1");
     assert_eq!(crate::settings::flip(app.world_mut(), row), Some(false));
+    assert!(crate::settings::pick(app.world_mut(),theme_row,"Wrist Terminal"));
     availability_enabled(&mut app, false);
     let appearance = *app.world().resource::<appearance::Appearance>();
     let dialogue = *app.world().resource::<TouchDialogue>();

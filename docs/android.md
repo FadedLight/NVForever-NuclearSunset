@@ -227,13 +227,18 @@ ordinary touch/menu and controller routes available. Controls help / gesture
 practice explains the selected movement thumb, dead zone, walking/running and
 fixed or floating joystick without using ammo or sending game actions.
 
-Mobile > Dialogue adds Minimal, Classic Glass, Split Panel, Retro Console and
-Wrist Terminal themes. Background opacity (up to 80%) and frame opacity are
-independent; text, required feedback and selection cues keep their contrast.
-The existing conversation text-size, confirmation and speaker-side settings stay
-separate. Show dialogue hints and Show lockpicking hints hide explanatory captions
-without disabling the interaction. The palette follows the live HUD/interface
-colour; Pip-Boy overlays follow the independently selected Pip-Boy colour.
+Mobile > Dialogue offers Normal (default), Classic, Field Notes, Retro Console
+and Wrist Terminal. Classic fits the live world and dialogue into a locally
+supplied blank template. Retro Console and Wrist Terminal use the installed
+Terminal and Pip-Boy models with separate dialogue screens. If a model or
+template cannot safely present the conversation, Normal keeps dialogue playable
+without changing the saved theme. Minimal, Classic Glass and Split Panel still
+load as Normal, Classic and Field Notes, respectively.
+
+Field Notes uses the speaker-side and backing/accent settings; the real device
+and Classic surfaces keep their own palettes and geometry. Text size and
+confirmation remain separate. Show dialogue hints and Show lockpicking hints
+hide explanatory captions without disabling the interaction.
 
 Mobile > Inventory and quick access offers optional left/right downward dismissal,
 an explicit Close control and touch use of the physical model wheel. Hiding

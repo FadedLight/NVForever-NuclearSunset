@@ -1381,3 +1381,6 @@ mod preactivation_tests;
 
 #[cfg(test)]
 mod preactivation_mutation_tests;
+
+#[cfg(test)]
+mod classic_dialogue_tests;

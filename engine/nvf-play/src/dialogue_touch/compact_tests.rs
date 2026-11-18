@@ -40,6 +40,8 @@ pub(super) fn layout_scene(android: bool, size: Vec2, density: f32) -> (App, Ent
     .init_resource::<UiScale>()
     .init_resource::<UiSurface>();
     install(&mut app);
+    // This fixture measures the full-width Field Notes panel in Taffy.
+    app.world_mut().resource_mut::<appearance::Appearance>().theme = appearance::Theme::SplitPanel;
     app.insert_resource(TouchLayout::for_platform(android));
     app.insert_resource(TouchDialogue {
         enabled: true,

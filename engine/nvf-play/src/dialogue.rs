@@ -305,6 +305,10 @@ fn response_text(g: &Game) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+pub(crate) fn observe_classic(state: &mut crate::dialogue_touch::classic_state::State, game: &Game) {
+    state.observe(game, response_text);
+}
+
 /// The subtitle of the response being said in the conversation: "Speaker: text".
 pub fn subtitle(g: &Game, sim: &SimState) -> Option<String> {
     let c = g.dialogue.as_ref()?;
@@ -768,13 +772,17 @@ pub(crate) fn input(
     mut sim: ResMut<SimState>,
     mut view_input: ResMut<ViewInput>,
     touch: Option<ResMut<crate::dialogue_touch::TouchFrame>>,
+    classic: Option<ResMut<crate::dialogue_touch::classic_state::State>>,
+    classic_menus: crate::dialogue_touch::classic_state::Menus,
 ) {
     let keys = keys.snapshot();
     use KeyCode::*;
     // Taken whatever happens below: what a view asked is for this frame only.
     let mut asked = std::mem::take(&mut *view_input);
     let touch_active = touch.as_ref().is_some_and(|t| t.active);
+    let mut barter = false;
     if let Some(mut touch) = touch.filter(|t| t.active) {
+        barter = std::mem::take(&mut touch.barter);
         asked = std::mem::take(&mut touch.asked);
     }
     // Like the scripts: not under the pause menu, not before the player stands in the
@@ -786,7 +794,19 @@ pub(crate) fn input(
     let st = &mut *script;
     // The aids' clock: it goes on while the picture stands still (`crate::pause`).
     let now = time.0.elapsed_secs();
+    if barter && st.held {
+        return;
+    }
     let Some(rt) = st.rt.as_mut() else { return };
+    if let Some(mut classic) = classic {
+        observe_classic(&mut classic, &rt.game);
+    }
+    if barter {
+        if *state.get() == PlayState::Dialogue && !classic_menus.blocked() {
+            with_world(rt, &mut sim, |rt| crate::dialogue_touch::classic_state::request(&mut rt.game, asked.list.as_ref()));
+        }
+        return;
+    }
     let mut notes: Vec<serde_json::Value> = Vec::new();
 
     // The aid's conversations whose time has come, on the world aids' clock
@@ -1066,6 +1086,16 @@ fn draw(script: Option<Res<ScriptState>>, sim: Res<SimState>, screen: Res<Dialog
     if menu.list != list {
         menu.list = list;
     }
+}
+
+#[cfg(test)]
+pub(crate) fn install_classic_input_fixture(app: &mut App) {
+    app.init_resource::<DialogueScreen>()
+        .init_resource::<ViewInput>()
+        .init_resource::<Paused>()
+        .init_resource::<crate::pause::PlayClock>()
+        .add_systems(Update, input.in_set(PlaySet::Scripts))
+        .add_systems(Update, draw.in_set(PlaySet::Ui).before(crate::dialogue_menu::DrawMenu));
 }
 
 #[cfg(test)]

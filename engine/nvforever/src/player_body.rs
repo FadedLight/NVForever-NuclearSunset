@@ -1285,6 +1285,16 @@ impl PlayerBody {
         }
     }
 
+    /// Build the actual player rigs through the owning resolver/asset path for
+    /// dialogue-provider controls; no ready state or private worn vector is seeded.
+    #[cfg(test)]
+    pub(crate) fn dialogue_fixture_body(
+        commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut ActorCtx,
+        worn: &[FormId], look: Option<&fnv_actor::Look>,
+    ) -> Result<Self, String> {
+        Ok(Self { body: Some(build(commands,parent,world,ctx,worn,look)?), ..Self::default() })
+    }
+
     /// The clips heard (`anim_sounds.rs`): the animator of the rig in view (the
     /// first-person rig while it is shown, else the body), whether that is the
     /// first-person rig, and the armour worn.

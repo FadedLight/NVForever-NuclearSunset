@@ -3,6 +3,11 @@
 #[path = "dialogue_touch/split_tests.rs"]
 mod split_tests;
 pub(crate) mod appearance;
+mod native;
+mod device_canvas;
+mod classic;
+pub(crate) mod classic_presenter;
+pub(crate) mod classic_state;
 use crate::dialogue::{ListId, ViewInput};
 use crate::dialogue_menu::DialogueMenu;
 use crate::ui_pointer::{Button, PointerState};
@@ -26,7 +31,7 @@ impl Default for TouchDialogue {
 }
 impl TouchDialogue {
     fn for_platform(android: bool) -> Self {
-        Self { enabled: android, choice_scale: if android { 0.85 } else { 1.0 }, subtitle_scale: 1.0, confirm: true }
+        Self { enabled: android, choice_scale: if android { 0.85 } else { 1.0 }, subtitle_scale: 1.0, confirm: !android }
     }
     /// The conversation owns raw touches; the underlying virtual menu keys must sleep.
     pub fn captures(&self, state: crate::PlayState) -> bool {
@@ -107,14 +112,19 @@ fn set_enabled(world: &mut World, enabled: bool) {
         gestures.contacts.clear();
         owned
     } else { (None, Vec::new()) };
-    if let Some(mut frame) = world.get_resource_mut::<TouchFrame>() { frame.active = false; frame.asked = ViewInput::default(); }
+    if let Some(mut frame) = world.get_resource_mut::<TouchFrame>() { frame.active = false; frame.asked = ViewInput::default(); frame.barter = false; }
     crate::touch_ui_options::retire(world, crate::touch_ui_options::Feature::Dialogue, window, &ids);
 }
 
 pub(crate) fn install(app: &mut App) {
     crate::dialogue_split::install(app);
+    crate::dialogue_device::install(app);
     crate::touch_ui_options::install(app);
     appearance::install(app);
+    native::install(app);
+    device_canvas::install(app);
+    classic_presenter::install(app);
+    classic_state::install(app);
     app.init_resource::<TouchDialogue>()
         .init_resource::<TouchLayout>()
         .init_resource::<TouchFrame>()
@@ -158,11 +168,18 @@ pub(crate) fn install(app: &mut App) {
     // These rows configure the enhanced consumer only. Keep their stored requests
     // and normal INI loaders while the page explains why they cannot apply now.
     for key in ["dialogue-choice-text-size", "dialogue-subtitle-text-size",
-        "dialogue-touch-choice", crate::dialogue_split::KEY, appearance::THEME_KEY,
-        appearance::BACKGROUND_KEY, appearance::TINT_KEY, appearance::FRAME_KEY,
-        appearance::HINTS_KEY] {
+        "dialogue-touch-choice", appearance::THEME_KEY] {
         crate::settings::set_disabled_status(app, key, |world| {
             (!world.resource::<TouchDialogue>().enabled).then_some("Enable Touch dialogue.")
+        });
+    }
+    for key in [crate::dialogue_split::KEY, appearance::BACKGROUND_KEY,
+        appearance::TINT_KEY, appearance::FRAME_KEY, appearance::HINTS_KEY] {
+        crate::settings::set_disabled_status(app,key,|world| {
+            if !world.resource::<TouchDialogue>().enabled {Some("Enable Touch dialogue.")}
+            else if world.resource::<appearance::Appearance>().theme!=appearance::Theme::SplitPanel {
+                Some("Available with the Field Notes theme.")
+            } else {None}
         });
     }
 }
@@ -171,18 +188,25 @@ pub(crate) fn install(app: &mut App) {
 pub(crate) struct TouchFrame {
     pub active: bool,
     pub asked: ViewInput,
+    pub barter: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Choice(usize),
     Confirm,
     Skip,
+    Barter,
 }
 #[derive(Component)]
 struct Action {
     kind: Kind,
     list: Option<ListId>,
 }
+/// Actual hardware and screen owners paint their own palettes. Generic HUD
+/// recolouring must not tint their casing or reinterpret Pip-Boy text as HUD ink.
+#[derive(Component)]
+pub(crate) struct PaletteRoot;
+
 #[derive(Component)]
 struct Root;
 #[derive(Component)]
@@ -194,6 +218,14 @@ struct Row {
 }
 #[derive(Component)]
 struct ConfirmCaption;
+
+pub(crate) fn native_choice(index: usize, list: Option<ListId>, short: bool) -> impl Bundle {
+    (Action {kind:Kind::Choice(index),list}, Row {index,short})
+}
+pub(crate) fn native_skip(list: Option<ListId>) -> impl Bundle {Action {kind:Kind::Skip,list}}
+pub(crate) fn native_confirm(list: Option<ListId>) -> impl Bundle {Action {kind:Kind::Confirm,list}}
+pub(crate) fn native_barter(list: Option<ListId>) -> impl Bundle {Action {kind:Kind::Barter,list}}
+pub(crate) fn native_viewport() -> impl Bundle {(Viewport,ScrollPosition::default())}
 #[derive(Resource, Default)]
 struct RevealRequest(bool);
 #[derive(Clone, PartialEq)]
@@ -208,6 +240,10 @@ struct Guard {
     side: crate::dialogue_split::Side,
     safe: crate::touch_safe_area::SafeInsets,
     hints: bool,
+    theme: appearance::Theme,
+    device_publication: Option<crate::dialogue_device::Publication>,
+    barter: Option<classic_state::BarterTarget>,
+    normal: bool,
 }
 struct Gesture {
     id: u64,
@@ -215,7 +251,7 @@ struct Gesture {
     last: Vec2,
     target: Option<Kind>,
     scrolling: bool,
-    in_view: bool,
+    viewport: Option<Entity>,
     selection: usize,
 }
 #[derive(Resource)]
@@ -239,7 +275,7 @@ impl Default for Gestures {
         }
     }
 }
-fn available(
+pub(crate) fn available(
     state: Option<&State<crate::PlayState>>,
     paused: Option<&crate::pause::Paused>,
     script: Option<&crate::script::ScriptState>,
@@ -308,6 +344,7 @@ fn read(
     pointers: Query<(Entity, Ref<PointerState>)>,
     mut viewport: Query<
         (
+            Entity,
             &ComputedNode,
             &UiGlobalTransform,
             &mut ScrollPosition,
@@ -320,7 +357,13 @@ fn read(
     mut gestures: ResMut<Gestures>,
     mut frame: ResMut<TouchFrame>,
     cameras: Query<&Camera>,
-    (split, split_options, safe, appearance): (Res<crate::dialogue_split::Frame>, Res<crate::dialogue_split::Options>, Res<crate::touch_safe_area::SafeInsets>, Res<appearance::Appearance>),
+    device: (Option<Res<crate::dialogue_device::Request>>, Option<Res<crate::dialogue_device::DeviceView>>,
+        Option<Res<device_canvas::ArtCache>>),
+    mouse: crate::pad::ActionButtons<MouseButton>,
+    (split, split_options, safe, appearance, classic_surface, classic_state): (
+        Res<crate::dialogue_split::Frame>, Res<crate::dialogue_split::Options>,
+        Res<crate::touch_safe_area::SafeInsets>, Res<appearance::Appearance>,
+        Option<Res<classic_presenter::Surface>>, Option<Res<classic_state::State>>),
 ) {
     *frame = TouchFrame::default();
     let Ok((window_id, window)) = windows.single() else {
@@ -348,6 +391,18 @@ fn read(
             _ => {}
         }
     }
+    let expected_device = match appearance.theme {
+        appearance::Theme::RetroConsole=>Some(crate::dialogue_device::DeviceKind::Terminal),
+        appearance::Theme::WristTerminal=>Some(crate::dialogue_device::DeviceKind::PipBoy),_=>None,
+    };
+    let requested_device = expected_device.is_some();
+    let projection = device.0.as_deref().zip(device.1.as_deref())
+        .filter(|(request, view)| request.stamp.window == window_id
+            && Some(request.stamp.kind)==expected_device && view.matches(request)
+            && device_canvas::usable(request,view,&menu,&settings,device.2.as_deref()));
+    let on_device=requested_device && projection.is_some();
+    let classic_ready=classic_presenter::ready_for(window_id,classic_surface.as_deref(),&split);
+    let normal=native::uses_normal(appearance.theme,projection.is_some(),classic_ready);
     let enabled = settings.enabled
         && available(
             state.as_deref(),
@@ -371,6 +426,11 @@ fn read(
         side: split_options.side,
         safe: *safe,
         hints: appearance.hints,
+        theme: appearance.theme,
+        device_publication: projection.map(|(_,view)|view.publication()),
+        barter: classic_state.as_deref().filter(|_|appearance.theme==appearance::Theme::ClassicGlass)
+            .and_then(|state|state.barter.clone()),
+        normal,
     };
     let fresh = gestures.guard.as_ref() != Some(&guard);
     gestures.guard = Some(guard);
@@ -426,9 +486,18 @@ fn read(
     }
     frame.asked.list = menu.list.clone();
     let density = window.scale_factor();
+    let projected_point = |p: Vec2, camera: Option<&ComputedUiTargetCamera>| {
+        if on_device {
+            let (request, view) = projection?;
+            (camera.and_then(|c| c.get()) == Some(request.camera))
+                .then(|| view.canvas_at(request, p * density)).flatten()
+        } else {
+            Some(ui_point(p * density, camera, &cameras))
+        }
+    };
     let target_at = |p: Vec2| {
         targets.iter().find_map(|(_, (a, n, t, v, c, camera))| {
-            (a.list == menu.list && hit(n, *t, v, c, ui_point(p * density, camera, &cameras)))
+            (a.list == menu.list && projected_point(p, camera).is_some_and(|point| hit(n, *t, v, c, point)))
                 .then_some(a.kind)
         })
     };
@@ -464,8 +533,9 @@ fn read(
                     gestures.gesture = None;
                     continue;
                 }
-                let in_view = viewport.iter().any(|(n, t, _, camera)| {
-                    n.contains_point(*t, ui_point(event.position * density, camera, &cameras))
+                let scroll_owner = viewport.iter().find_map(|(entity,n,t,_,camera)| {
+                    projected_point(event.position,camera)
+                        .is_some_and(|point|n.contains_point(*t,point)).then_some(entity)
                 });
                 gestures.gesture = Some(Gesture {
                     id: event.id,
@@ -473,7 +543,7 @@ fn read(
                     last: event.position,
                     target: target_at(event.position),
                     scrolling: false,
-                    in_view,
+                    viewport: scroll_owner,
                     selection: menu.selected,
                 });
             }
@@ -484,10 +554,12 @@ fn read(
                 if event.position.distance(g.origin) > 8.0 {
                     g.scrolling = true;
                 }
-                if g.scrolling && g.in_view {
-                    for (node, _, mut position, _) in &mut viewport {
-                        position.y +=
-                            (g.last.y - event.position.y) * density * node.inverse_scale_factor();
+                if g.scrolling {
+                    if let Some((_,node,_,mut position,camera)) = g.viewport.and_then(|owner|viewport.get_mut(owner).ok()) {
+                        if let Some((previous, current)) = projected_point(g.last, camera)
+                            .zip(projected_point(event.position, camera)) {
+                            position.y += (previous.y - current.y) * node.inverse_scale_factor();
+                        }
                         clamp_scroll(node, &mut position);
                     }
                 }
@@ -520,7 +592,7 @@ fn read(
                             || (gestures.armed == Some(menu.selected)
                                 && g.selection == menu.selected)
                         {
-                            activate(kind, true, &settings, &menu, &mut frame.asked);
+                            activate(kind, true, &settings, &menu, &mut frame);
                             if let Kind::Choice(i) = kind {
                                 gestures.armed = Some(i);
                             }
@@ -537,6 +609,18 @@ fn read(
     }
     // Mouse feedback stays on the original press edge; touches use only the guarded release route.
     if !touched && gestures.gesture.is_none() && gestures.contacts.is_empty() {
+        if on_device {
+            if let Some(position) = window.physical_cursor_position().map(|p| p / density) {
+                if let Some(kind) = target_at(position) {
+                    if mouse.physical_just_pressed(MouseButton::Left) {
+                        activate(kind, false, &settings, &menu, &mut frame);
+                    } else if let Kind::Choice(index) = kind {
+                        frame.asked.hover = Some(index);
+                    }
+                }
+            }
+            return;
+        }
         for (entity, pointer) in &pointers {
             if !pointer.is_changed() {
                 continue;
@@ -549,7 +633,7 @@ fn read(
             }
             match *pointer {
                 PointerState::Pressed => {
-                    activate(action.kind, false, &settings, &menu, &mut frame.asked)
+                    activate(action.kind, false, &settings, &menu, &mut frame)
                 }
                 PointerState::Hovered => {
                     if let Kind::Choice(i) = action.kind {
@@ -566,9 +650,10 @@ fn activate(
     touch: bool,
     settings: &TouchDialogue,
     menu: &DialogueMenu,
-    asked: &mut ViewInput,
+    frame: &mut TouchFrame,
 ) {
-    if asked.pick.is_some() || asked.skip {
+    let asked=&mut frame.asked;
+    if asked.pick.is_some() || asked.skip || frame.barter {
         return;
     }
     match kind {
@@ -587,6 +672,7 @@ fn activate(
             asked.pick = Some(menu.selected)
         }
         Kind::Skip => asked.skip = true,
+        Kind::Barter => frame.barter = true,
         _ => {}
     }
 }
@@ -628,7 +714,7 @@ fn draw(
     settings: Res<TouchDialogue>,
     layout: Res<TouchLayout>,
     roots: Query<Entity, With<Root>>,
-    mut rows: Query<(&Row, &mut BorderColor, &mut BackgroundColor)>,
+    mut rows: Query<(&Row, &mut BorderColor, &mut BackgroundColor), With<appearance::Paint>>,
     mut shown: Local<Option<DrawKey>>,
     state: Option<Res<State<crate::PlayState>>>,
     paused: Option<Res<crate::pause::Paused>>,
@@ -649,6 +735,7 @@ fn draw(
         .as_ref()
         .filter(|_| {
             settings.enabled
+                && appearance.theme == appearance::Theme::SplitPanel
                 && available(
                     state.as_deref(),
                     paused.as_deref(),
@@ -855,20 +942,25 @@ fn reveal_selected(
     menu: Res<DialogueMenu>,
     mut previous: Local<Option<(Option<ListId>, usize)>>,
     mut reveal: ResMut<RevealRequest>,
-    rows: Query<(&Row, &ComputedNode, &UiGlobalTransform)>,
+    rows: Query<(Entity, &Row, &ComputedNode, &UiGlobalTransform)>,
+    parents: Query<&ChildOf>,
     mut viewport: Query<(&ComputedNode, &UiGlobalTransform, &mut ScrollPosition), With<Viewport>>,
 ) {
     let key = (menu.list.clone(), menu.selected);
     if !reveal.0 && previous.as_ref() == Some(&key) {
         return;
     }
-    let Some((_, row, transform)) = rows
-        .iter()
-        .find(|(r, n, _)| r.index == menu.selected && !n.is_empty())
+    let Some((entity, _, row, transform)) = rows.iter()
+        .find(|(_, row, node, _)| row.index == menu.selected && !node.is_empty())
     else {
         return;
     };
-    for (view, t, mut scroll) in &mut viewport {
+    let mut ancestor = entity;
+    // The owned tree is shallow; never walk an unbounded foreign hierarchy.
+    for _ in 0..256 {
+        let Ok(parent) = parents.get(ancestor) else { break; };
+        ancestor = parent.parent();
+        let Ok((view, t, mut scroll)) = viewport.get_mut(ancestor) else { continue; };
         let top = t.transform_point2(Vec2::ZERO).y - view.size().y * 0.5;
         let bottom = top + view.size().y;
         let row_top = transform.transform_point2(Vec2::ZERO).y - row.size().y * 0.5;
@@ -879,10 +971,14 @@ fn reveal_selected(
         };
         scroll.y += delta * view.inverse_scale_factor();
         clamp_scroll(view, &mut scroll);
+        *previous = Some(key);
+        reveal.0 = false;
+        return;
     }
-    *previous = Some(key);
-    reveal.0 = false;
 }
+
+#[cfg(feature = "test-fixtures")]
+pub mod model_capture;
 
 #[cfg(test)]
 mod tests {
@@ -1279,6 +1375,7 @@ mod tests {
     #[test]
     fn renderer_keeps_full_choice_text_order_and_independent_sizes() {
         let (mut app, _, _) = scene(true);
+        app.world_mut().resource_mut::<appearance::Appearance>().theme = appearance::Theme::SplitPanel;
         let long =
             "A long offered choice that must remain complete and wrap within the full-width row. "
                 .repeat(6);

@@ -13,6 +13,7 @@ fn publish_window_targets(windows:Query<&Window,With<PrimaryWindow>>,mut cameras
 }
 fn scene(side:Side,density:f32)->(App,Entity,Entity) {
     let (mut app,window)=layout_scene(true,Vec2::new(792.0,363.0),density);
+    app.world_mut().resource_mut::<appearance::Appearance>().theme=appearance::Theme::SplitPanel;
     app.configure_sets(Update,(crate::PlaySet::Input,crate::PlaySet::Physics,crate::PlaySet::Activation,crate::PlaySet::Scripts,crate::PlaySet::Ui,crate::PlaySet::Sync).chain());
     let mut script=crate::script::ScriptState::over_no_plugins();
     script.rt.as_mut().unwrap().game.dialogue=Some(fnv_game::dialogue::Conversation {
@@ -97,7 +98,10 @@ fn current_speaker_changes_reframe_and_menu_pause_free_camera_restore_prior_came
         app.update();
         assert!(app.world().get::<Camera>(world).unwrap().viewport.is_none());
         assert_eq!(app.world().get::<Transform>(world).unwrap().rotation,Quat::IDENTITY);
-        assert!(app.world().resource::<crate::dialogue_split::Frame>().ui_camera.is_none());
+        // The shared full-window UI camera may remain for ordinary dialogue;
+        // this assertion owns side framing, not the lifetime of every UI painter.
+        let frame=app.world().resource::<crate::dialogue_split::Frame>();
+        assert!(frame.panel.is_none() && frame.classic.is_none());
     }
 }
 #[test]
@@ -129,6 +133,7 @@ fn split_choice_persists_standard_and_both_sides_without_touching_text_preferenc
     for name in ["Standard","Speaker left","Speaker right"] {
         let mut app=App::new();
         install(&mut app);
+        app.world_mut().resource_mut::<appearance::Appearance>().theme=appearance::Theme::SplitPanel;
         app.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
         let index=app.world().resource::<crate::settings::Settings>().index(crate::dialogue_split::KEY).unwrap();
         let parent=app.world().resource::<crate::settings::Settings>().index("touch-dialogue").unwrap();
@@ -142,6 +147,7 @@ fn split_choice_persists_standard_and_both_sides_without_touching_text_preferenc
         assert!(!crate::settings::pick(app.world_mut(),index,name),"already-selected choice remains a no-op");
         let mut loaded=App::new();
         install(&mut loaded);
+        loaded.world_mut().resource_mut::<appearance::Appearance>().theme=appearance::Theme::SplitPanel;
         loaded.insert_resource(crate::settings::SettingsFile(Some(path.clone())));
         crate::settings::apply_stored(loaded.world_mut());
         assert_eq!(loaded.world().resource::<Options>().side,match name {"Speaker left"=>Side::Left,"Speaker right"=>Side::Right,_=>Side::Standard});

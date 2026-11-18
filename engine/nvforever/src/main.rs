@@ -118,6 +118,8 @@ mod lockpick_view;
 mod roulette_view;
 mod blackjack_view;
 mod body_weapons;
+#[cfg(feature = "dialogue-model-capture")]
+pub mod dialogue_capture;
 mod terminal_view;
 mod scope_lens;
 mod scope_view;
@@ -142,6 +144,7 @@ mod object_anims;
 mod outfits;
 mod own_sounds;
 mod pipboy_arm;
+mod dialogue_pipboy;
 mod pipboy_controls;
 mod pipboy_ready;
 mod player_body;
@@ -1873,7 +1876,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         // The blackjack table (blackjack_view.rs).
         app.add_plugins(blackjack_view::BlackjackViewPlugin);
         // The terminal's monitor (terminal_view.rs).
-        app.add_plugins(terminal_view::TerminalViewPlugin);
+        app.add_plugins((terminal_view::TerminalViewPlugin, terminal_view::DialogueTerminalPlugin));
+        dialogue_pipboy::install(&mut app);
         // A weapon's scope: its picture, night vision and sway (scope_view.rs).
         app.add_plugins(scope_view::ScopeViewPlugin);
         // The poker table (poker_view.rs).

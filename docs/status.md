@@ -44,6 +44,12 @@ not qualify this failed cycle, whose artifact was not downloaded or delivered.
 R10 remains the last delivered TEST build; phone acceptance remains open.
 [Current validation and remaining acceptance](android.md#r43-touch-menu-validation).
 
+Enhanced dialogue now has [separate device and template presenters](design/android-dialogue-accessibility.md#dialogue-appearance-design):
+Retro Console and Wrist Terminal render onto the installed models, Classic uses
+a local blank template, and unavailable surfaces fall back to Normal without
+overwriting the saved theme. Field Notes retains full-world side framing.
+GPU rendering, installed-asset appearance and handset acceptance remain unrun.
+
 Controller switching, independent look/ADS scales, dead zone and hold/toggle choices,
 four original SVG icon families, adaptive Aim/Block/Scope captions and individual HUD
 scales are implemented. Optional [touch practice](design/android-touch-practice.md)

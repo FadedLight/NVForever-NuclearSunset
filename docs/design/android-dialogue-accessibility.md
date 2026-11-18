@@ -69,36 +69,36 @@ filter is a separate integration change. Native/device rendering remains unquali
 
 ## Dialogue appearance [design]
 
-Enhanced dialogue keeps its own on/off switch, text scales, confirmation and
-speaker-side framing. Minimal uses a quiet underline; Classic Glass a soft selected
-row and vertical accent; Field Notes uses numbered responses and a short rule;
-Retro Console uses prompt characters, a terminal cursor and faint scanlines;
-Wrist Terminal uses instrument ticks and a selection rail. The enclosing panel
-and all response borders are transparent. These treatments share the same wrapped
-text, scrolling and minimum 48 UI-unit Android targets, scaled by UiScale.
+Enhanced dialogue keeps its own on/off switch, text sizes and confirmation mode.
+Normal reuses the native dialogue kit and is the fallback when a requested
+surface cannot be admitted. [Classic](dialogue-classic-runtime.md) uses a locally
+supplied template. Retro Console and Wrist Terminal render into separate
+dialogue-owned screen canvases on the actual Terminal and resolved Pip-Boy
+models. Targets are mapped from the projected glass back into these canvases;
+housing, switches, stale presentation stamps and unavailable assets cannot act
+as dialogue buttons. The ordinary terminal and Pip-Boy sessions stay separate.
+No game assets are distributed.
 
-Text and functional selection cues use the preferred HUD palette. A subtle text
-shadow keeps lettering readable over the world without an enclosing panel. Background
-opacity (default 18%, capped at 80%) and accent opacity (default 60%, persisted
-under the existing frame-opacity key) remain independent. Background tint is saved
-as HUD colour, Neutral or Warm amber. Semantic unmet-check feedback stays red.
-The wrist cursor optionally uses the installed game's scrollbar marker through
-`interface::Pictures`, including its normal atlas/loose-file lookup; absent data
-or texture keeps the procedural cue. No game assets are distributed.
+Field Notes retains the full-world side-framing and borderless choices.
+Background opacity (default 18%, capped at 80%), tint (HUD colour, Neutral or
+Warm amber), and accent opacity (default 60%) remain independent on this
+surface. Semantic unmet-check feedback remains distinct from the HUD palette.
+Minimal, Classic Glass and Split Panel load as Normal, Classic and Field Notes.
+The saved Retro Console and Wrist Terminal names now select the model views.
 
 Hints default off. The switch affects only explanatory gesture captions, never
 speech, choices, requirements or confirmation. Existing saved hint preferences
-remain authoritative. Theme/tint/opacity changes repaint the existing entities
-without changing target geometry, selection or scroll position. Decorations ignore
-picking. Changing hint geometry invalidates an old contact before a fresh release.
+remain authoritative. Field Notes' tint and opacity repaint existing entities
+without changing target geometry, selection or scroll position. Decorative
+elements ignore picking. Changing a presentation or its hit geometry retires
+old contacts before they can act on a replacement surface.
 
-Speaker left/right now rotates the actual perspective camera using the current
-vertical FOV and full-window aspect so the face projects into the open half beside
-the choices. The world retains its ordinary full viewport, projection and camera
-position. There is no separate portrait render or black strip. Speaker changes
-recompute framing; Standard, disable, exit, pause and competing camera ownership
-release only the rotation this feature still owns. A foreign viewport is preserved
-and suspends this layout.
+Field Notes' Speaker left/right rotates the actual perspective camera using the
+current vertical FOV and full-window aspect so the face projects into the open
+half beside the choices. The world retains its ordinary full viewport,
+projection and position. Speaker changes recompute framing; Standard, disable,
+exit, pause and competing camera ownership release only the rotation this
+feature still owns. A foreign viewport is preserved and suspends this layout.
 
 [qualification] Updated full-world projection, aspect/FOV, restoration and appearance
 consumer regressions are authored but not yet executed against this source. Earlier

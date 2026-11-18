@@ -42,16 +42,18 @@ Gameplay > Dialogue/Inventory menus and Controls > Touch.
 | Inventory and quick access | `touch-pipboy-button-graphics` | Show overlay paint; Off keeps the same active targets and dispatch. DefaultOn. |
 | Inventory and quick access | `touch-pipboy-model-wheel` | Touch the physical model wheel to scroll; on by default, independent of mouse/pad scrolling. |
 | Movement and gestures | `touch-vats-targeting-v1` | Off (default), Tap or Hold; body selection queues, separate Fire confirms. |
-| Dialogue | `dialogue-theme-v1` | Minimal (default), Classic Glass, Field Notes, Retro Console or Wrist Terminal. The older Split Panel value still loads. |
+| Dialogue | `dialogue-theme-v1` | Normal (default), Classic, Field Notes, Retro Console or Wrist Terminal. Minimal, Classic Glass and Split Panel load as Normal, Classic and Field Notes. |
 | Dialogue | `dialogue-background-tint-v1` | HUD colour (default), Neutral or Warm amber backing; text and selection retain the chosen HUD colour. |
 | Dialogue | `dialogue-background-opacity-v1` | Backing opacity, default 18%, maximum 80%; the stored slider is normalized. |
 | Dialogue | `dialogue-frame-opacity-v1` | Accent opacity, default 60%; independent of backing and full-contrast text/feedback. |
 | Dialogue | `dialogue-hints-v1` | Show explanatory dialogue hints, off by default; choices, speech and requirements stay. |
 | Lockpicking | `lockpick-touch-hints` | Show lockpicking hints, on by default; scheme, Turn, status and errors stay. |
 
-Appearance updates existing UI; it does not change choice words/order, semantic
-actions or input bindings. New controls are authored but uncompiled/unrun until
-separately qualified; their registration is not device acceptance.
+The backing, tint and accent controls apply to Field Notes. Classic uses a
+locally supplied template; Retro Console and Wrist Terminal use the installed
+models. When their presentation is unavailable, Normal preserves access to the
+same conversation without overwriting the selected theme. These choices do not
+change dialogue words, offered order or actions. Registration is not device acceptance.
 
 ## Input preferences alongside Tweaks
 

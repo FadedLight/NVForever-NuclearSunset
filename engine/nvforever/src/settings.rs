@@ -1998,6 +1998,51 @@ mod fsr_settings_tests {
         app
     }
 
+    #[test]
+    fn android_player_defaults_allow_the_settings_export_but_explicit_overrides_do_not() {
+        use clap::Parser;
+        use nvf_play::settings_menu::write_menu;
+        use window_mode::WindowChoice::{Borderless, Windowed};
+
+        let _offer_probe = crate::dlss_download::TestOfferProbe::new(Some(false));
+        let dir = std::env::temp_dir().join(format!("nvf-android-start-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = rows_app();
+        app.insert_resource(SettingsFile(Some(dir.join("NVForever.ini"))));
+        let export = dir.join("settings-menu.json");
+
+        let line = crate::android_startup_line(Vec::new());
+        let mut restart = crate::restart_args(&line[1..]);
+        restart.extend(["--load", "quicksave"].map(String::from));
+        for line in [line, crate::android_startup_line(restart)] {
+            let args = Args::try_parse_from(&line).unwrap();
+            assert!(args.play);
+            assert_eq!(args.msaa, 1);
+            assert!(args.window == Borderless);
+            app.insert_resource(given_switches(&args, &line));
+            write_menu(app.world());
+            assert!(export.is_file(), "a normal Android start publishes the settings catalogue");
+            std::fs::remove_file(&export).unwrap();
+        }
+
+        let explicit = crate::android_startup_line(["--play", "--msaa=1", "--window=borderless"].map(String::from).to_vec());
+        let args = Args::try_parse_from(&explicit).unwrap();
+        assert_eq!(args.msaa, 1);
+        assert!(args.window == Borderless);
+        let given = given_switches(&args, &explicit);
+        assert!(given.given.iter().any(|flag| flag == "--window"));
+        app.insert_resource(given);
+        write_menu(app.world());
+        assert!(!export.exists(), "an explicit switch setting the same value still blocks export");
+
+        let custom = crate::android_startup_line(vec!["--play".into()]);
+        let args = Args::try_parse_from(&custom).unwrap();
+        assert_eq!(args.msaa, 4);
+        assert!(args.window == Windowed);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     fn row(app: &App, key: &str) -> usize {
         app.world().resource::<Settings>().index(key).unwrap()
     }

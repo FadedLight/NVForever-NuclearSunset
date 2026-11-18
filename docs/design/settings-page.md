@@ -6,6 +6,11 @@ setting (`engine/nvf-play/src/settings.rs`) and the controls of
 from a table that only says where each row is drawn. This note is the page's model; the
 code's module notes say the same at their own level.
 
+On a normal Android launcher start, borderless and one MSAA sample are platform
+defaults, not command-line overrides of settings rows. The defaults carry across
+in-app restarts. Explicit row switches still prevent exporting `settings-menu.json`,
+as does a reduced registry when a full export from the same build already exists.
+
 ## 0. Adding or changing a row: the rules (the menu overhaul, 2026-11-15)
 
 The owner reorganised the page on 2026-11-15, tab by tab (the menu overhaul). Every row

@@ -52,16 +52,9 @@ pub fn prepare() -> Result<Vec<String>, String> {
         files.join("runtime/schemas/script/functions.json"),
     );
     crate::android_controller::install();
-    let mut args = vec!["nvforever".into()];
     let extra: Vec<String> =
         serde_json::from_str(&activity_string("startupArgs", None)?).map_err(|e| e.to_string())?;
-    if extra.is_empty() {
-        args.extend(
-            ["--play", "--menu", "--msaa", "1", "--window", "borderless"].map(String::from),
-        );
-    } else {
-        args.extend(extra);
-    }
+    let mut args = crate::android_startup_line(extra);
     for (flag, path) in [
         ("--esm-schema", "runtime/schemas/fnv"),
         ("--nif-schema", "runtime/schemas/nif"),

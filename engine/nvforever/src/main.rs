@@ -251,6 +251,10 @@ const MASTERS: [&str; 10] = [
 #[derive(Parser, Clone, Resource)]
 #[command(name = "nvforever", version)]
 struct Args {
+    /// Carries the Android launcher's renderer defaults across an in-app restart.
+    #[cfg(any(target_os = "android", test))]
+    #[arg(id = "android_player_start", long = "android-player-start", hide = true)]
+    _android_player_start: bool,
     /// The game's folder or its Data folder (read-only). Defaults to $NVFOREVER_DATA, else
     /// the folder stored in NVForever.ini, else it is asked for (setup.rs). After start-up
     /// it is always the Data folder.
@@ -393,6 +397,7 @@ struct Args {
     /// alpha-tested shapes (plants, fences, hair, grass) are smoothed with it too, like
     /// the game's transparency multisampling; with 1 they are tested per pixel.
     #[arg(long, default_value_t = 4)]
+    #[cfg_attr(any(target_os = "android", test), arg(default_value_if("android_player_start", "true", "1")))]
     msaa: u32,
     /// Do not grow grass on the landscape (docs/spec-notes/grass.md).
     #[arg(long)]
@@ -442,6 +447,7 @@ struct Args {
     /// display chosen in Display settings, the first display until one is chosen). With
     /// --play the settings page's Display group switches it too.
     #[arg(long, value_enum, default_value_t = window_mode::WindowChoice::Windowed)]
+    #[cfg_attr(any(target_os = "android", test), arg(default_value_if("android_player_start", "true", "borderless")))]
     window: window_mode::WindowChoice,
     /// The game's field-of-view setting in degrees (fDefaultFOV, default 75): the horizontal
     /// angle at 4:3; other aspects keep its vertical angle, so 16:9 is wider (75 → 91.3°
@@ -981,6 +987,15 @@ fn with_default_mode(mut args: Vec<String>) -> Vec<String> {
         args.extend(["--play".to_string(), "--menu".to_string()]);
     }
     args
+}
+
+#[cfg(any(target_os = "android", test))]
+fn android_startup_line(mut extra: Vec<String>) -> Vec<String> {
+    if extra.is_empty() {
+        extra.extend(["--play", "--menu", "--android-player-start"].map(String::from));
+    }
+    extra.insert(0, "nvforever".into());
+    extra
 }
 
 /// `--esm-schema` and `--nif-schema` from beside the program (the release archive:

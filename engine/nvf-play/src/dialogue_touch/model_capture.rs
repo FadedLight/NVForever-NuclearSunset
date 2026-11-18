@@ -300,47 +300,6 @@ fn fully_visible(
     })
 }
 
-/// Independent expected atlas cuts and their layout in safe-canvas logical units.
-fn casing_parts(layout: &super::classic::Layout) -> [(Rect, Rect); 8] {
-    let (w, h) = (layout.size.x, layout.size.y);
-    let top = 48.0_f32.min(h * 0.15);
-    let foot = h - 90.0;
-    let cash = layout.caps.width() * 154.0 / 72.0;
-    let left = (w * 610.0 / 1447.0).max(cash + 152.0);
-    let split = top + 48.0 * 207.0 / 127.0;
-    [
-        (Rect::new(0., 0., 610., 209.), Rect::new(0., 0., left, top)),
-        (
-            Rect::new(610., 0., 1447., 209.),
-            Rect::new(left, 0., w, top),
-        ),
-        (
-            Rect::new(0., 209., 610., 854.),
-            Rect::new(0., top, left, foot),
-        ),
-        (
-            Rect::new(0., 854., 154., 1087.),
-            Rect::new(0., foot, cash, h),
-        ),
-        (
-            Rect::new(154., 854., 428., 1087.),
-            Rect::new(cash, foot, left - 80., h),
-        ),
-        (
-            Rect::new(428., 854., 610., 1087.),
-            Rect::new(left - 80., foot, left, h),
-        ),
-        (
-            Rect::new(610., 209., 1447., 416.),
-            Rect::new(left, top, w, split),
-        ),
-        (
-            Rect::new(610., 416., 1447., 1087.),
-            Rect::new(left, split, w, h),
-        ),
-    ]
-}
-
 /// Last runs after layout, camera projection and the renderer's stamped publication.
 pub fn ready(world: &mut World, theme: &str, scene: Scene, density: f32) -> bool {
     let mut line_anchors = world.query::<&Children>();
@@ -575,34 +534,29 @@ pub fn ready(world: &mut World, theme: &str, scene: Scene, density: f32) -> bool
         {
             return false;
         }
-        let parts = casing_parts(&surface.layout);
-        let mut seen = [false; 8];
+        // Every banded crop and its safe-area bleed is painted once, at its place,
+        // and the casing reaches every window edge.
+        let parts: Vec<_> = surface.layout.parts().collect();
+        let mut seen = vec![false; parts.len()];
+        let window_rect = on_window(Rect::from_corners(-surface.origin, surface.size - surface.origin));
         for (picture, node, t, clip, camera, visible) in pictures
             .iter(world)
             .filter(|(p, _, _, _, c, _)| p.image.id() == atlas && c.get() == Some(ui_camera))
         {
-            let Some(index) = parts
-                .iter()
-                .position(|(crop, _)| Some(*crop) == picture.rect)
-            else {
-                return false;
-            };
-            let expected = on_window(parts[index].1);
             let a = t.transform_point2(-node.size() * 0.5);
             let b = t.transform_point2(node.size() * 0.5);
-            if seen[index]
-                || visible.is_some_and(|v| !v.get())
+            let Some(index) = parts.iter().enumerate().position(|(i, part)| {
+                let expected = on_window(part.destination);
+                !seen[i] && Some(part.source) == picture.rect
+                    && a.abs_diff_eq(expected.min, 1.0) && b.abs_diff_eq(expected.max, 1.0)
+            }) else {
+                return false;
+            };
+            if visible.is_some_and(|v| !v.get())
                 || camera.get() != Some(ui_camera)
                 || node.is_empty()
                 || picture.color.alpha() != 1.0
-                || !a.abs_diff_eq(expected.min, 1.0)
-                || !b.abs_diff_eq(expected.max, 1.0)
-                || !fully_visible(
-                    node,
-                    t,
-                    clip,
-                    on_window(Rect::from_corners(Vec2::ZERO, surface.canvas_size)),
-                )
+                || !fully_visible(node, t, clip, window_rect)
             {
                 return false;
             }

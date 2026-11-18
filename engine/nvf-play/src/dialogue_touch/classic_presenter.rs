@@ -1,6 +1,6 @@
 //! Supplied Classic hardware around live dialogue, never captured scene or text.
 use super::*;
-use super::classic::{Cache, Layout};
+use super::classic::{Cache, CapsText, Layout};
 use crate::{interface::Face, touch_safe_area::SafeInsets};
 use nvf_assets::GameData;
 
@@ -17,7 +17,7 @@ pub(crate) struct Prepared {
     pub origin: Vec2,
     pub canvas_size: Vec2,
     pub layout: Layout,
-    caps: CapsFit,
+    caps: CapsText,
 }
 #[derive(Resource, Default)]
 pub(crate) struct Surface(pub Option<Prepared>);
@@ -35,38 +35,33 @@ pub(super) fn install(app: &mut App) {
             .after(crate::dialogue_menu::DrawMenu).before(super::draw));
 }
 
-const CAPS_SIZE:f32=12.0;
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct CapsFit {
-    left: f32,
-    width: f32,
-    height: f32,
-}
-
-fn caps_fit(face: &Face) -> Option<CapsFit> {
-    let scale = CAPS_SIZE / face.font.size;
-    if !scale.is_finite() || scale <= 0.0 { return None; }
-    let (mut digit, mut left, mut right, mut descent) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
+/// The counter's metrics for `text`, per unit of glyph size. The layout sizes the
+/// glyphs from the counter opening's height and widens the opening to the value.
+fn caps_fit(face: &Face, text: &str) -> Option<CapsText> {
+    let size = face.font.size;
+    if !size.is_finite() || size <= 0.0 { return None; }
+    let (mut advance, mut left, mut right, mut descent) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
     let baseline = crate::interface::line_base(face);
-    for &c in b"0123456789-" {
+    for &c in text.as_bytes() {
         let glyph = face.font.glyph(c);
-        let advance = glyph.advance();
-        if !glyph.drawn() || !advance.is_finite() || advance <= 0.0 { return None; }
-        if c != b'-' { digit = digit.max(advance); }
+        let step = glyph.advance();
+        if !glyph.drawn() || !step.is_finite() || step <= 0.0 { return None; }
+        advance += step;
         // The softened atlas extends beyond the original advance at both ends.
         left = left.max(-glyph.before);
         right = right.max(-glyph.after);
         descent = descent.max(glyph.height - glyph.ascent);
     }
-    let width = (left + digit * 10.0 + face.font.glyph(b'-').advance() + right) * scale + 4.0;
-    let height = (baseline + descent).max(face.font.size * 1.2) * scale;
-    (width.is_finite() && height.is_finite()).then_some(CapsFit { left: left * scale + 1.0, width, height })
+    let fit = CapsText { left: left / size, width: (left + advance + right) / size,
+        height: (baseline + descent).max(size * 1.2) / size };
+    (fit.width.is_finite() && fit.width > 0.0 && fit.height.is_finite()).then_some(fit)
 }
 
-fn geometry_with_budget(size:Vec2,safe:SafeInsets,caps_width:f32)->Option<(Vec2,Layout)> {
+fn geometry_with_budget(size:Vec2,safe:SafeInsets,caps:CapsText)->Option<(Vec2,Layout)> {
     let safe=SafeInsets::from_array([safe.left,safe.top,safe.right,safe.bottom])?;
     let origin=Vec2::new(safe.left,safe.top);
-    Some((origin,Layout::new(size-origin-Vec2::new(safe.right,safe.bottom),caps_width)?))
+    Some((origin,Layout::new(size-origin-Vec2::new(safe.right,safe.bottom),
+        [safe.left,safe.top,safe.right,safe.bottom],caps)?))
 }
 
 /// This is the one effective-presentation predicate used by the parent input,
@@ -89,7 +84,7 @@ fn prepare(menu: Res<DialogueMenu>, settings: Res<TouchDialogue>, appearance: Re
     safe: Res<SafeInsets>, gestures: Res<Gestures>, windows: Query<(Entity,&Window),With<PrimaryWindow>>,
     scale: Option<Res<UiScale>>, (data,images,formats): AssetInputs<'_>,
     (state,paused,script,creator): Availability<'_>, mut cache: ResMut<Cache>,
-    mut fonts: ResMut<FontCache>, mut surface: ResMut<Surface>) {
+    mut fonts: ResMut<FontCache>, mut surface: ResMut<Surface>, counter: Res<classic_state::State>) {
     let next=(|| {
         if appearance.theme!=appearance::Theme::ClassicGlass || !settings.enabled
             || !gestures.focused || !gestures.running
@@ -112,10 +107,10 @@ fn prepare(menu: Res<DialogueMenu>, settings: Res<TouchDialogue>, appearance: Re
             return None;
         }
         let size=Vec2::new(window.width(),window.height());
-        let caps = caps_fit(&faces.text)?;
+        // The counter is laid out for the value it shows (0 until one is known).
+        let caps = caps_fit(&faces.text, &counter.caps.unwrap_or(0).to_string())?;
         let font=faces.text.image.as_ref()?.0.id();
-        let Some((origin,layout))=geometry_with_budget(size,*safe,caps.width)
-            .filter(|(_, layout)| layout.caps.height() >= caps.height) else {
+        let Some((origin,layout))=geometry_with_budget(size,*safe,caps) else {
             if !fonts.geometry_warned {warn!("Classic dialogue has no usable safe layout; using the normal dialogue view");fonts.geometry_warned=true;}
             return None;
         };
@@ -162,10 +157,10 @@ fn label(parent:&mut ChildSpawnerCommands,key:&Key,text:&str,size:f32,width:f32,
 }
 fn spawn(commands:&mut Commands,key:&Key,art:&classic::LoadedArt,face:&Face) {
     let surface=&key.surface;let layout=&surface.layout;let scale=surface.ui_scale;
-    // The root covers only the safe canvas. Hardware children are passive and
-    // do not add touch targets over the upper live world opening.
-    let mut root_node=node(Rect::from_corners(surface.origin,surface.origin+surface.canvas_size),scale);
-    root_node.overflow=Overflow::clip();
+    // The root sits at the safe canvas. Its casing crops bleed past it to the
+    // window edges; text and targets stay inside. Hardware children are passive
+    // and do not add touch targets over the upper live world opening.
+    let root_node=node(Rect::from_corners(surface.origin,surface.origin+surface.canvas_size),scale);
     commands.spawn((ClassicRoot,PaletteRoot,Pickable::IGNORE,GlobalZIndex(2400),UiTargetCamera(key.camera),root_node))
         .with_children(|root| {
             for rect in layout.wells {
@@ -177,14 +172,14 @@ fn spawn(commands:&mut Commands,key:&Key,art:&classic::LoadedArt,face:&Face) {
             responses(root,key,face);
             if let Some(caps)=key.caps {
                 let text=caps.to_string();
-                // Layout already reserves the actual font's complete i32 width.
-                // Never shrink below the readable minimum or truncate a value.
+                // Glyphs follow the counter opening's height; the layout widened the
+                // opening for this value, so nothing is shrunk or truncated.
                 root.spawn((Pickable::IGNORE,node(layout.caps,scale))).with_children(|p| {
                     let units = 960.0 / surface.size.y;
-                    let face = native::scaled_face(face, CAPS_SIZE * units / face.font.size);
+                    let face = native::scaled_face(face, layout.caps_size * units / face.font.size);
                     let line = &face.font.lines(&text, None)[0];
                     let _units = crate::interface::original_units();
-                    crate::interface::set_line(p, &face, line, surface.caps.left * units,
+                    crate::interface::set_line(p, &face, line, surface.caps.left(layout.caps_size) * units,
                         crate::interface::line_base(&face), crate::terminal::screen::bright());
                 });
             }
@@ -430,31 +425,72 @@ mod tests {
         }
     }
     #[test]
-    fn complete_zero_four_digit_and_extreme_caps_keep_readable_native_glyphs_inside_the_reflowed_bezel() {
+    fn caps_glyphs_follow_the_counter_opening_and_the_opening_widens_for_zero_four_digit_and_extreme_values() {
         let (_files,data)=classic::tests::files(true);let mut images=Assets::<Image>::default();
         let faces=crate::terminal::screen::load_faces(Some(&data),&mut images,false);
         assert!(faces.text.image.is_some(),"real VFS Font5 path, not a default-font substitute");
-        let fit=caps_fit(&faces.text).unwrap();
-        let font=native::scaled_face(&faces.text,CAPS_SIZE/faces.text.font.size);
-        for width in [640.,800.] {
-            let layout=Layout::new(Vec2::new(width,360.),fit.width).unwrap();
-            assert!(layout.caps.height()>=font.font.size*1.2);
-            assert!(layout.caps.height()>=fit.height);
+        // A 20:9 phone's safe canvas at 2.75 density and a 1080p desktop window (both logical).
+        for (size,bleed) in [(Vec2::new(810.,368.),[32.,0.,30.,24.]),(Vec2::new(1920.,1080.),[0.;4])] {
+            let mut glyph_sizes=Vec::new();
             for value in [0,9999,i32::MAX,i32::MIN] {
-                let text=value.to_string();let lines=font.font.lines(&text,Some(layout.caps.width()));
-                assert_eq!(lines.len(),1,"caps={value} width={width}");
+                let text=value.to_string();
+                let fit=caps_fit(&faces.text,&text).unwrap();
+                let layout=Layout::new(size,bleed,fit).unwrap();
+                glyph_sizes.push(layout.caps_size);
+                assert!(layout.caps_size>=classic::CAPS_MIN,"readable at {size}: {}",layout.caps_size);
+                assert!(fit.height*layout.caps_size<=layout.caps.height()+0.01,"glyph cell fits the opening height");
+                assert!(layout.caps.contains(layout.caps.center()) && layout.wells[2].contains(layout.caps.min)
+                    && layout.wells[2].contains(layout.caps.max),"text stays in the counter opening");
+                let font=native::scaled_face(&faces.text,layout.caps_size/faces.text.font.size);
+                let lines=font.font.lines(&text,Some(layout.caps.width()));
+                assert_eq!(lines.len(),1,"caps={value} size={size}");
                 assert_eq!(lines[0].text(),text,"complete exact value, never a compact/truncated amount");
-                assert!(lines[0].width<=layout.caps.width());
                 let baseline=crate::interface::line_base(&font);
                 for placed in &lines[0].glyphs {
                     let g=font.font.glyph(placed.code);
-                    let x = fit.left + placed.x + g.before;
-                    assert!(x >= 0.0 && x + g.width <= layout.caps.width());
+                    let x=fit.left(layout.caps_size)+placed.x+g.before;
+                    assert!(x>=0.0 && x+g.width<=layout.caps.width()+0.01,"caps={value} glyph inside the opening");
                     assert!(baseline-g.ascent>=-0.01 && baseline-g.ascent+g.height<=layout.caps.height()+0.01);
                 }
+                let overlap=layout.caps.intersect(layout.barter);
+                assert!(overlap.width()<=0.0 || overlap.height()<=0.0,"cash and live Barter never share a target");
+                if value==0 {
+                    // A short value keeps the counter at its native size instead of
+                    // reserving a full i32 on every screen.
+                    assert!((layout.caps.width()-84.0*layout.scale).abs()<0.01);
+                } else if value==i32::MIN {
+                    assert!(layout.caps.width()>84.0*layout.scale,"an extreme value widens the plain opening");
+                }
             }
-            let overlap=layout.caps.intersect(layout.barter);
-            assert!(overlap.width()<=0.0 || overlap.height()<=0.0,"cash and live Barter never share a target");
+            assert!(glyph_sizes.iter().all(|s|(*s-glyph_sizes[0]).abs()<0.001),"glyph height depends on the opening, not the value");
+        }
+    }
+
+    #[test]
+    fn painted_classic_casing_reaches_every_window_edge_under_the_safe_insets() {
+        // The fixture's safe insets are 12, 6, 10 and 8 logical units.
+        for (width,density) in [(880.,1.),(800.,2.)] {
+            let (mut app,window,_,_files)=scene(width,density,1.,true);
+            let frame=*app.world().resource::<crate::dialogue_split::Frame>();
+            assert!(ready_for(window,Some(app.world().resource::<Surface>()),&frame));
+            let atlas=lease(&app).prepared.casing;
+            let mut pieces=app.world_mut().query::<(&ImageNode,&ComputedNode,&UiGlobalTransform)>();
+            let painted:Vec<Rect>=pieces.iter(app.world()).filter(|(image,..)|image.image.id()==atlas)
+                .map(|(_,node,t)|Rect::from_center_size(t.transform_point2(Vec2::ZERO),node.size()).inflate(0.5)).collect();
+            let size=Vec2::new(width,360.)*density;
+            let mut y=0.5;
+            while y<size.y {
+                let mut x=0.5;
+                while x<size.x {
+                    assert!(painted.iter().any(|r|r.contains(Vec2::new(x,y))),"no casing at {x},{y} of {size}");
+                    x+=3.0;
+                }
+                y+=3.0;
+            }
+            // The first response row (the rest scroll inside its clip) stays in the safe canvas.
+            let safe=Rect::new(12.,6.,width-10.,352.);
+            let row=rows(&mut app)[0].1;
+            assert!(safe.contains(row.min/density) && safe.contains(row.max/density));
         }
     }
 

@@ -18,14 +18,26 @@ response screen and lower-left caps readout. The original PNG is never edited an
 transformed image is saved. This is a blank-template route, not a general screenshot
 content remover; different dimensions or absent apertures are refused.
 
-Eight source bands reflow the actual hardware for a landscape safe canvas. The caps
-bezel is widened using the installed Font 5's complete signed-integer width at a
-12-logical-unit minimum, with separate Review/grille and Barter pieces. The width
-includes both softened-font overhangs; the glyph origin is inset so the first
-glyph does not bleed outside the bezel. No cash value is shortened or silently
-replaced with zero. Unknown cash remains blank. A small canvas or unsuitable
-font that cannot accommodate these regions is refused instead
-of shrinking targets or silently making numbers unreadable.
+The casing is cut into four bands (header, world window, controls, dialogue screens)
+that meet in plain dark gaps. One uniform scale fits the whole picture into the safe
+canvas, so the tubes, grille, cables, speaker, lights, every rounded corner, the
+caps bezel ends, Review and Barter keep their native aspect at any window shape.
+Spare width or height goes only to flexible segments: the two plain dark gaps
+beside the header tubes and the straight bars and interiors of the openings. On a
+wide phone the dialogue screens take the extra width; in portrait the world window
+and screens take the extra height; the speech screen always keeps one 48-unit row.
+Under the safe-area insets, each band's outer four source pixels are repeated to
+the window edge, so no border of the world or clear colour shows; text, the caps
+readout and the Barter target remain inside the safe canvas.
+
+The caps glyphs are sized from the counter opening's height (its interior less a
+small bezel margin), not from a fixed type size. The opening's plain interior widens
+only when the value shown needs it, including both softened-font overhangs, so 0
+and short values keep the native bezel while an extreme signed integer still fits
+unshortened. No cash value is shortened or silently replaced with zero. Unknown cash
+remains blank (the layout is sized for 0). A window too small for 12-logical-unit
+caps glyphs, a 48-unit speech row or 48-unit targets is refused instead of shrinking
+targets or silently making numbers unreadable.
 
 The left aperture is the real world camera's viewport. The dialogue lease admits only
 a live perspective player camera on the current primary window and only an unowned
@@ -34,8 +46,8 @@ pausing, focus loss, disabled touch dialogue, camera replacement and unavailable
 retire the lease. Restoration changes only the viewport still owned by this lease;
 a foreign viewport, explicit reset, transform or default-UI marker is preserved. A
 foreign takeover is not immediately reacquired while the same Classic view stays open.
-Field Notes retains its separate side-framing policy; the stored side setting does
-not move Classic, Normal or the actual device presentations.
+The stored speaker side places Field Notes and the device models (Retro Console,
+Wrist Terminal); it does not move Classic or Normal.
 
 The upper-right screen consumes the authoritative last-spoken-line state, retaining
 that actual text while responses are offered. Its independent scroll owner is not a

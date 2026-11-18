@@ -232,7 +232,8 @@ pub(super) mod tests {
             }
             std::fs::write(path,bytes).unwrap();
             let texture=files.0.join("textures/fonts/classicfixture.tex");std::fs::create_dir_all(texture.parent().unwrap()).unwrap();
-            let mut pixels=8_u32.to_le_bytes().to_vec();pixels.extend(8_u32.to_le_bytes());pixels.extend([255;8*8*4]);
+            // Use an atlas tile large enough to model the softened bezel glyphs at 12 units.
+            let mut pixels=32_u32.to_le_bytes().to_vec();pixels.extend(32_u32.to_le_bytes());pixels.extend([255;32*32*4]);
             std::fs::write(&texture,pixels).unwrap();
             // Main admits TEX only when its companion DDS also exists.
             std::fs::write(texture.with_extension("dds"), []).unwrap();

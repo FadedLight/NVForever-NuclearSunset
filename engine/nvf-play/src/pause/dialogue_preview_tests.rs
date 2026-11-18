@@ -3,6 +3,7 @@ use bevy::ecs::system::RunSystemOnce;
 #[test]
 fn actual_settings_note_region_preview_is_live_passive_and_keeps_original_note_and_actions() {
     let mut app=settings_app(&[("difficulty","Gameplay")],Page::Settings{selected:None});
+    app.add_plugins(bevy::input::InputPlugin);
     app.init_resource::<crate::dialogue_menu::DialogueMenu>();
     crate::dialogue_touch::install(&mut app);
     let enabled=app.world().resource::<Settings>().index("touch-dialogue").unwrap();

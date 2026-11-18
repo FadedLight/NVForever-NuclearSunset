@@ -121,12 +121,8 @@ The new appearance and preview regressions still await actual engine-test
 execution. Phone pixels and installed mod/version/profile behavior remain
 unqualified.
 
-[qualification] The `0c8ffbfc` hosted cycle failed during engine test code
-generation at two preview fixtures (`dialogue_preview_tests.rs`): Bevy's
-cached-system API rejects their capturing drawing closures with `E0080`.
-The earlier cross-check did not instantiate that code-generation boundary, and
-no engine Rust tests executed in the failed cycle. The source correction uses
-the existing one-shot API for these one-off calls; the real `settings_page`
-painter, captures, typed `Drawn` input, deferred commands and all three tests'
-word/reason/preview assertions remain. Corrected code generation and execution
-remain pending; native APK construction is not a preview or phone-layout pass.
+[qualification] The earlier `0c8ffbfc` cycle stopped at `E0080`: Bevy's
+cached-system API rejects the capturing preview fixture closures. Those
+fixtures now use the one-shot API and retain the original word, reason and
+preview assertions. The live settings fixture installs the regular input plugin
+because it runs the same dialogue systems as gameplay, including mouse input.

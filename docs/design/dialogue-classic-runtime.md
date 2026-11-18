@@ -14,9 +14,11 @@ content remover; different dimensions or absent apertures are refused.
 
 Eight source bands reflow the actual hardware for a landscape safe canvas. The caps
 bezel is widened using the installed Font 5's complete signed-integer width at a
-12-logical-unit minimum, with separate Review/grille and Barter pieces. No cash value
-is shortened or silently replaced with zero. Unknown cash remains blank. A small
-canvas or unsuitable font that cannot accommodate these regions is refused instead
+12-logical-unit minimum, with separate Review/grille and Barter pieces. The width
+includes both softened-font overhangs; the glyph origin is inset so the first
+glyph does not bleed outside the bezel. No cash value is shortened or silently
+replaced with zero. Unknown cash remains blank. A small canvas or unsuitable
+font that cannot accommodate these regions is refused instead
 of shrinking targets or silently making numbers unreadable.
 
 The left aperture is the real world camera's viewport. The dialogue lease admits only

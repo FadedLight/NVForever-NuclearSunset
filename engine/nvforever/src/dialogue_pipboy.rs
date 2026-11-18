@@ -44,7 +44,7 @@ impl Sources<'_> {
     }
 
     fn look(&self) -> Option<&fnv_game::chargen::Look> {
-        self.body.as_ref().and_then(|_| self.script.as_deref())
+        self.body.as_ref().and(self.script.as_deref())
             .and_then(|s| s.rt.as_ref()).and_then(|rt| rt.game.player.look.as_ref())
     }
 }
@@ -126,11 +126,13 @@ fn remove_view(commands: &mut Commands, request: &Request) {
     });
 }
 
+type RetireAssets<'w> = (Option<ResMut<'w, Assets<Image>>>, Option<ResMut<'w, Assets<NifMaterial>>>);
+
 fn retire(
     mut commands: Commands, request: Option<Res<Request>>, sources: Sources,
     mut owned: ResMut<Owned>,
     cameras: Query<(&Camera,&GlobalTransform,&RenderTarget)>, windows: Query<&Window>,
-    (mut images, mut materials): (Option<ResMut<Assets<Image>>>, Option<ResMut<Assets<NifMaterial>>>),
+    (mut images, mut materials): RetireAssets<'_>,
 ) {
     let current = request.as_deref().filter(|r| r.valid() && r.stamp.kind == DeviceKind::PipBoy);
     let changed = match (owned.request.as_ref(), current) {

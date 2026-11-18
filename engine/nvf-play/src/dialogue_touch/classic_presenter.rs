@@ -17,6 +17,7 @@ pub(crate) struct Prepared {
     pub origin: Vec2,
     pub canvas_size: Vec2,
     pub layout: Layout,
+    caps: CapsFit,
 }
 #[derive(Resource, Default)]
 pub(crate) struct Surface(pub Option<Prepared>);
@@ -35,16 +36,31 @@ pub(super) fn install(app: &mut App) {
 }
 
 const CAPS_SIZE:f32=12.0;
-fn caps_width(face:&Face)->Option<f32> {
-    if !face.font.size.is_finite() || face.font.size<=0.0 {return None;}
-    let mut digit=0.0_f32;
-    for c in b'0'..=b'9' {
-        let advance=face.font.glyph(c).advance();
-        if !advance.is_finite() || advance<=0.0 {return None;}
-        digit=digit.max(advance);
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CapsFit {
+    left: f32,
+    width: f32,
+    height: f32,
+}
+
+fn caps_fit(face: &Face) -> Option<CapsFit> {
+    let scale = CAPS_SIZE / face.font.size;
+    if !scale.is_finite() || scale <= 0.0 { return None; }
+    let (mut digit, mut left, mut right, mut descent) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
+    let baseline = crate::interface::line_base(face);
+    for c in (b'0'..=b'9').chain([b'-']) {
+        let glyph = face.font.glyph(c);
+        let advance = glyph.advance();
+        if !glyph.drawn() || !advance.is_finite() || advance <= 0.0 { return None; }
+        if c != b'-' { digit = digit.max(advance); }
+        // The softened atlas extends beyond the original advance at both ends.
+        left = left.max(-glyph.before);
+        right = right.max(-glyph.after);
+        descent = descent.max(glyph.height - glyph.ascent);
     }
-    let width=(digit*10.0+face.font.glyph(b'-').advance())*CAPS_SIZE/face.font.size+4.0;
-    (width.is_finite() && width>0.0).then_some(width)
+    let width = (left + digit * 10.0 + face.font.glyph(b'-').advance() + right) * scale + 4.0;
+    let height = (baseline + descent).max(face.font.size * 1.2) * scale;
+    (width.is_finite() && height.is_finite()).then_some(CapsFit { left: left * scale + 1.0, width, height })
 }
 
 fn geometry_with_budget(size:Vec2,safe:SafeInsets,caps_width:f32)->Option<(Vec2,Layout)> {
@@ -96,14 +112,15 @@ fn prepare(menu: Res<DialogueMenu>, settings: Res<TouchDialogue>, appearance: Re
             return None;
         }
         let size=Vec2::new(window.width(),window.height());
-        let cap_budget=caps_width(&faces.text)?;
+        let caps = caps_fit(&faces.text)?;
         let font=faces.text.image.as_ref()?.0.id();
-        let Some((origin,layout))=geometry_with_budget(size,*safe,cap_budget) else {
+        let Some((origin,layout))=geometry_with_budget(size,*safe,caps.width)
+            .filter(|(_, layout)| layout.caps.height() >= caps.height) else {
             if !fonts.geometry_warned {warn!("Classic dialogue has no usable safe layout; using the normal dialogue view");fonts.geometry_warned=true;}
             return None;
         };
         Some(Prepared {window:entity,size,density,ui_scale,font,casing,origin,
-            canvas_size:size-origin-Vec2::new(safe.right,safe.bottom),layout})
+            canvas_size:size-origin-Vec2::new(safe.right,safe.bottom),layout,caps})
     })();
     if surface.0!=next {surface.0=next;}
 }
@@ -162,8 +179,14 @@ fn spawn(commands:&mut Commands,key:&Key,art:&classic::LoadedArt,face:&Face) {
                 let text=caps.to_string();
                 // Layout already reserves the actual font's complete i32 width.
                 // Never shrink below the readable minimum or truncate a value.
-                root.spawn((Pickable::IGNORE,node(layout.caps,scale))).with_children(|p|
-                    label(p,key,&text,CAPS_SIZE,layout.caps.width(),face,crate::terminal::screen::bright()));
+                root.spawn((Pickable::IGNORE,node(layout.caps,scale))).with_children(|p| {
+                    let units = 960.0 / surface.size.y;
+                    let face = native::scaled_face(face, CAPS_SIZE * units / face.font.size);
+                    let line = &face.font.lines(&text, None)[0];
+                    let _units = crate::interface::original_units();
+                    crate::interface::set_line(p, &face, line, surface.caps.left * units,
+                        crate::interface::line_base(&face), crate::terminal::screen::bright());
+                });
             }
             if let Some(target)=&key.barter {
                 root.spawn((Button,native_barter(Some(target.list.clone())),node(layout.barter,scale),
@@ -265,8 +288,16 @@ mod tests {
             .add_systems(Update,publish_targets.before(crate::dialogue_split::Resolve));
         app.world_mut().resource_mut::<appearance::Appearance>().theme=appearance::Theme::ClassicGlass;
         app.world_mut().resource_mut::<TouchDialogue>().confirm=false;
-        let camera=app.world_mut().spawn((crate::PlayerCamera,Camera3d::default(),
-            Camera {order:1,..default()},Transform::from_xyz(0.0,112.0,0.0))).id();
+        // Preserve the fixture's pre-dialogue default camera through Classic.
+        let camera = {
+            let mut query = bevy::ecs::system::SystemState::<bevy::ui::DefaultUiCamera>::new(app.world_mut());
+            query.get(app.world()).unwrap().get().unwrap()
+        };
+        app.world_mut().entity_mut(camera).remove::<Camera2d>().insert((
+            crate::PlayerCamera, Camera3d::default(), Camera {order:1,..default()},
+            Projection::Perspective(PerspectiveProjection::default()),
+            Transform::from_xyz(0.0,112.0,0.0),
+        ));
         settle(&mut app);
         (app,window,camera,files)
     }
@@ -377,11 +408,12 @@ mod tests {
         let (_files,data)=classic::tests::files(true);let mut images=Assets::<Image>::default();
         let faces=crate::terminal::screen::load_faces(Some(&data),&mut images,false);
         assert!(faces.text.image.is_some(),"real VFS Font5 path, not a default-font substitute");
-        let budget=caps_width(&faces.text).unwrap();
+        let fit=caps_fit(&faces.text).unwrap();
         let font=native::scaled_face(&faces.text,CAPS_SIZE/faces.text.font.size);
         for width in [640.,800.] {
-            let layout=Layout::new(Vec2::new(width,360.),budget).unwrap();
+            let layout=Layout::new(Vec2::new(width,360.),fit.width).unwrap();
             assert!(layout.caps.height()>=font.font.size*1.2);
+            assert!(layout.caps.height()>=fit.height);
             for value in [0,9999,i32::MAX,i32::MIN] {
                 let text=value.to_string();let lines=font.font.lines(&text,Some(layout.caps.width()));
                 assert_eq!(lines.len(),1,"caps={value} width={width}");
@@ -390,7 +422,8 @@ mod tests {
                 let baseline=crate::interface::line_base(&font);
                 for placed in &lines[0].glyphs {
                     let g=font.font.glyph(placed.code);
-                    assert!(placed.x+g.before>=0.0 && placed.x+g.before+g.width<=layout.caps.width());
+                    let x = fit.left + placed.x + g.before;
+                    assert!(x >= 0.0 && x + g.width <= layout.caps.width());
                     assert!(baseline-g.ascent>=-0.01 && baseline-g.ascent+g.height<=layout.caps.height()+0.01);
                 }
             }

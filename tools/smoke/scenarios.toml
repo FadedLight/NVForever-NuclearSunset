@@ -33988,3 +33988,21 @@ expect = [
   { re = 'vwindow01\.nif: 1 shape\(s\) with a window environment map \(textures.effects.ShinyBright_e\.dds, scale 1\.00, over the blend\): VWindow01:0', label = "the pane is drawn with its environment map, added over its blend" },
   { re = 'test aid: screenshot .*glass_mccarran_north\.png', label = "the interrogation-side frame is saved" },
 ]
+
+[[scenario]]
+name = "new-game-start-quest-missing"
+source = "issue #3229 (player report R-PEZL695T, 0.8.1): NVForever.ini kept Tale of Two Wastelands' SCharGenQuest=001FFFF8 and empty SIntroMovie with TTW not loaded; New Game started nothing and said so only in the log"
+note = "the fixture home's NVForever.ini has TTW's two lines; vanilla load order. New Game falls back to VCG00, whose stage 0 PlayBink then plays the New Vegas film, and a corner message names the setting"
+areas = ["scripts", "ui"]
+paths = ["engine/nvf-play/src/game_start.rs", "engine/nvf-play/src/script.rs", "tools/smoke/fixtures/start-quest-missing-home/"]
+env = { NVFOREVER_HOME = "{repo}/tools/smoke/fixtures/start-quest-missing-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--play", "--new-game", "--no-voice", "--no-messages"]
+run_seconds = 25
+expect = [
+  { re = 'game start: sCharGenQuest=001FFFF8 sIntroMovie=\(none\) \(.*start-quest-missing-home.NVForever\.ini\)', label = "the home's INI is read, with TTW's lines" },
+  { re = 'new game: sCharGenQuest=001FFFF8: 001FFFF8 \(0x001FFFF8\) is not a quest in the load order; New Game starts the New Vegas opening \(VCG00\) instead', label = "the warning says what happens instead" },
+  "new game: falling back to VCG00: the New Vegas opening starts",
+  "new game notice: The start quest 001FFFF8 (sCharGenQuest in NVForever.ini) is not in the load order: the New Vegas opening starts instead.",
+  { re = 'no opening quest started', count = 0, label = "never a silent empty start" },
+]
+order = [["new game: falling back to VCG00: the New Vegas opening starts", "new game notice: The start quest 001FFFF8"]]

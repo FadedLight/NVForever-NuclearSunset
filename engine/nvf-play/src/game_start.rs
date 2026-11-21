@@ -41,6 +41,9 @@ pub const INTRO_KEY: &str = "sIntroMovie";
 /// The quest New Game starts without `sCharGenQuest` (the original's default names it by
 /// FormID, `00102037`).
 pub const DEFAULT_CHARGEN_QUEST: &str = "VCG00";
+/// Test aid: `key=value` lines of `[General]`, `;`-separated, read in place of the INI's
+/// in an unattended run (`sCharGenQuest=001FFFF8;sIntroMovie=`).
+pub const TEST_AID_ENV: &str = "NVF_PLAY_TEST_GAME_START";
 /// The intro film without `sIntroMovie` [owner, 2026-10-15].
 pub const DEFAULT_INTRO: &str = "video\\fnvintro.bik";
 
@@ -77,12 +80,19 @@ impl GameStart {
     pub fn for_run(unattended: bool) -> GameStart {
         let file = SettingsFile::for_run(unattended).0;
         let text = file.as_deref().and_then(|p| std::fs::read_to_string(p).ok());
-        let s = text.as_deref().map(GameStart::parse).unwrap_or_default();
-        let from = match (&file, &text) {
+        let mut s = text.as_deref().map(GameStart::parse).unwrap_or_default();
+        let mut from = match (&file, &text) {
             (Some(p), Some(_)) => p.display().to_string(),
             (Some(p), None) => format!("defaults, no {}", p.display()),
             (None, _) => "defaults, unattended run".into(),
         };
+        // Test aid: `[General]` lines in place of the INI's, for an unattended run (the
+        // game writes its own rows into the home's INI, so a fixture INI would not stay
+        // as committed).
+        if let Some(lines) = unattended.then(|| std::env::var(TEST_AID_ENV).ok()).flatten() {
+            s = GameStart::parse(&format!("[{SECTION}]\n{}\n", lines.replace(';', "\n")));
+            from = format!("test aid {TEST_AID_ENV}");
+        }
         info!("game start: {CHARGEN_KEY}={} {INTRO_KEY}={} ({from})", s.chargen_quest, s.intro.as_deref().unwrap_or("(none)"));
         s
     }

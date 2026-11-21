@@ -1,5 +1,0 @@
-# A home whose NVForever.ini keeps Tale of Two Wastelands' start lines while TTW is not
-# loaded (#3229); runs write saves and logs beside it.
-/*
-!/.gitignore
-!/NVForever.ini

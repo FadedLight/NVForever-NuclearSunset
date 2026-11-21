@@ -16,8 +16,11 @@ Clean-room scope: this note describes NVForever's own Android port design, not t
   an alpha-derived monochrome layer; do not redraw the brand or use game art.
   `tools/android/LauncherIcons.java` is the reproducible source adaptation.
 - [design] Neither debug nor release packages contain the LAN diagnostics UI or
-  uploader. The manifest denies cleartext traffic. Internet permission remains
-  for the launcher's optional HTTPS project news, not for uploads.
+  uploader. The manifest denies cleartext traffic. `INTERNET` permission remains
+  for the launcher's optional HTTPS project news and GitHub Release update checks,
+  not for telemetry or uploads. `REQUEST_INSTALL_PACKAGES` and the non-exported
+  read-only `ApkUpdateProvider` are declared solely for user-confirmed in-app
+  ARM64 APK updates downloaded over HTTPS from this repository's GitHub Releases.
 - [documented] Local native crash/event logs (`engine/nvforever/src/crash.rs`,
   `events_log.rs`) and the local [render observer](../design/android-render-admission.md)
   are separate from player reports. Android startup disables player reports.

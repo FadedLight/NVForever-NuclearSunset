@@ -25,6 +25,7 @@ enum Request {
     SaveStart { fields: start::Fields },
     SetNews { enabled: bool },
     FetchNews,
+    CheckUpdate { current: String },
     Countdown { version: String, at: i64, now: i64 },
 }
 
@@ -166,10 +167,94 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
             let posts: Vec<_> = posts.iter().map(|p| json!({"title": p.title, "body": p.body, "date": p.shown_date(), "author": p.author, "url": p.url})).collect();
             Ok(json!({"posts": posts, "source": source, "next": next.and_then(|n| n.at.map(|at| json!({"version": n.version, "at": at})))}))
         }
+        Request::CheckUpdate { current } => check_update(&current, get),
         Request::Countdown { version, at, now } => Ok(json!(if at > now {
             format!("{version} · {}", news::countdown_text(at.saturating_sub(now)))
         } else { String::new() })),
     }
+}
+
+const REPO_DOWNLOADS: &str = "https://github.com/LootJunkieAzza/NVForever/releases/download/";
+const CHECKSUMS_NAME: &str = "SHA256SUMS.txt";
+
+fn safe_component(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+fn repo_asset_url(url: &str, tag: &str, name: &str) -> bool {
+    safe_component(tag)
+        && safe_component(name)
+        && url.strip_prefix(REPO_DOWNLOADS)
+            .and_then(|rest| rest.strip_prefix(tag))
+            .and_then(|rest| rest.strip_prefix('/'))
+            .is_some_and(|file| file == name)
+}
+
+fn checksum_for(sums: &str, name: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let (hash, rest) = line.trim().split_once(char::is_whitespace)?;
+        let file = rest.trim_start();
+        let file = file.strip_prefix('*').unwrap_or(file);
+        (file == name && hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| hash.to_ascii_lowercase())
+    })
+}
+
+/// Select the ARM64 Android APK from a release's assets, preferring signed arm64/aarch64 APKs
+/// and refusing non-ARM64 ABIs or off-repository download URLs.
+fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a news::Asset> {
+    let candidates: Vec<&news::Asset> = assets.iter().filter(|a| {
+        let lower = a.name.to_ascii_lowercase();
+        lower.ends_with(".apk")
+            && !lower.contains("x86")
+            && !lower.contains("armeabi")
+            && repo_asset_url(&a.browser_download_url, tag, &a.name)
+    }).collect();
+    let is_arm64 = |name: &str| {
+        let lower = name.to_ascii_lowercase();
+        lower.contains("arm64") || lower.contains("aarch64")
+    };
+    let is_unsigned = |name: &str| name.to_ascii_lowercase().contains("unsigned");
+    candidates.iter().copied().find(|a| is_arm64(&a.name) && !is_unsigned(&a.name))
+        .or_else(|| candidates.iter().copied().find(|a| is_arm64(&a.name)))
+        .or_else(|| (candidates.len() == 1).then(|| candidates[0]))
+}
+
+fn check_update(current: &str, get: &mut impl FnMut(&str) -> Result<String, String>) -> Result<Value, String> {
+    let text = get(news::RELEASES)?;
+    let releases = news::parse_release_list(&text)?;
+    let Some(latest) = news::newest(releases) else {
+        return Ok(json!({"available": false, "current": current}));
+    };
+    if !news::is_newer(&latest.version, current) {
+        return Ok(json!({
+            "available": false,
+            "current": current,
+            "version": latest.version,
+            "tag": latest.tag,
+        }));
+    }
+    let asset = select_android_apk(&latest.assets, &latest.tag).map(|apk| {
+        let sha256 = latest.assets.iter()
+            .find(|a| a.name == CHECKSUMS_NAME && repo_asset_url(&a.browser_download_url, &latest.tag, CHECKSUMS_NAME))
+            .and_then(|sums| get(&sums.browser_download_url).ok())
+            .and_then(|body| checksum_for(&body, &apk.name));
+        json!({
+            "name": apk.name,
+            "url": apk.browser_download_url,
+            "size": apk.size,
+            "sha256": sha256,
+        })
+    });
+    Ok(json!({
+        "available": true,
+        "current": current,
+        "version": latest.version,
+        "tag": latest.tag,
+        "url": latest.url,
+        "notes": latest.notes,
+        "asset": asset,
+    }))
 }
 
 fn newest_save(home: &EngineHome) -> Option<(PathBuf, String)> {

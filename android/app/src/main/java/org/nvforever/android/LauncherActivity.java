@@ -18,7 +18,9 @@ import java.util.Set;
 public final class LauncherActivity extends Activity {
     private MobileLauncher launcher;
     private boolean busy;
+    private File pendingInstallApk;
     private static final int PICK_GAME = 1;
+    private static final int REQUEST_UNKNOWN_SOURCES = 2;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -61,9 +63,57 @@ public final class LauncherActivity extends Activity {
         busy = value;
         if (!isDestroyed()) launcher.refresh(value, runningGame(), message);
     }
+    String installedVersion() {
+        try {
+            String name = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            return name == null || name.isEmpty() ? "0.0.0" : name;
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return "0.0.0";
+        }
+    }
+    void installUpdateApk(File apkFile) {
+        if (apkFile == null || !apkFile.isFile()) {
+            if (launcher != null) launcher.message("Update APK file is missing.");
+            return;
+        }
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            pendingInstallApk = apkFile;
+            new android.app.AlertDialog.Builder(this)
+                .setTitle("Allow app updates")
+                .setMessage("Android requires permission for NVForever to install downloaded updates. Enable \"Allow from this source\" on the next screen, then return to continue.")
+                .setPositiveButton("Open settings", (dialog, which) -> {
+                    Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName()));
+                    startActivityForResult(intent, REQUEST_UNKNOWN_SOURCES);
+                })
+                .setNegativeButton("Cancel", (dialog, which) -> pendingInstallApk = null)
+                .show();
+            return;
+        }
+        pendingInstallApk = null;
+        Uri uri = ApkUpdateProvider.uriFor(this, apkFile.getName());
+        Intent install = new Intent(Intent.ACTION_VIEW);
+        install.setDataAndType(uri, "application/vnd.android.package-archive");
+        install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(install);
+        } catch (android.content.ActivityNotFoundException e) {
+            if (launcher != null) launcher.message("No package installer is available on this device.");
+        }
+    }
     @Override public void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (launcher == null) return;
+        if (request == REQUEST_UNKNOWN_SOURCES) {
+            File apk = pendingInstallApk;
+            pendingInstallApk = null;
+            if (apk != null && getPackageManager().canRequestPackageInstalls()) {
+                installUpdateApk(apk);
+            } else if (apk != null) {
+                launcher.message("Install permission was not granted.");
+            }
+            return;
+        }
         if (request != PICK_GAME || result != RESULT_OK || data == null || data.getData() == null) return;
         Uri tree = data.getData();
         if (busy || runningGame()) { launcher.message("Close the game before importing another install."); return; }

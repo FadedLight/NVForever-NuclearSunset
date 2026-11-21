@@ -134,7 +134,11 @@ documentation. Neither tag there claims anything about the original game. The gr
   Android start defaults, the five dialogue styles, speaker side and safe-area framing,
   touch input ownership and cancellation, touch controls reaching scripts through
   `IsControlPressed` as their bound control without inventing physical keys, and the
-  launcher's pages, read-only folder import and newest-save Continue.
+  launcher's pages, read-only folder import, newest-save Continue, Markdown news/release
+  formatting (`MarkdownParser.java` / `MarkdownRenderer.java`, 700/400-character preview
+  caps), and user-confirmed HTTPS GitHub Releases ARM64 APK updater (`UpdatePolicy.java`,
+  `ApkUpdateProvider.java`, 512 MiB cap, 5 HTTPS-only redirects, optional `SHA256SUMS.txt`
+  verification).
 - Classic dialogue casing: the 1774 × 887 frame, its four apertures, band layout and
   12-unit caps glyph minimum ([Classic runtime](dialogue-classic-runtime.md)) are
   project design, not original-game observations. The contributor supplied the

@@ -20,11 +20,17 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HttpsURLConnection;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -47,11 +53,14 @@ final class MobileLauncher {
     private final ScrollView scroll;
     private final TextView status, countdown;
     private final JSONObject edits = new JSONObject();
-    private JSONObject state, news;
+    private JSONObject state, news, updateInfo;
     private Page page;
     private String tab = "Gameplay";
     private String message = "";
+    private String updateProgress = "";
     private boolean busy, running, newsFetching, resumed;
+    private boolean updateChecked, updateChecking, updatePrompted, updateDownloading;
+    private final AtomicBoolean updateCancel = new AtomicBoolean(false);
     private int newsEpoch;
     private final int bg, panel, card, button, gold, onGold, text, weak;
     private final Runnable tick = this::updateCountdown;
@@ -152,6 +161,7 @@ final class MobileLauncher {
         catch (IOException | JSONException e) { this.message = e.getMessage(); }
         render();
         if (news == null && !newsFetching) fetchNews();
+        if (!updateChecked && !updateChecking && state.optBoolean("newsEnabled", true)) checkForUpdates(false);
     }
     void pause() { resumed = false; root.removeCallbacks(tick); root.removeCallbacks(checkGameExit); }
     void resume() { resumed = true; updateCountdown(); watchGameExit(); }
@@ -212,8 +222,25 @@ final class MobileLauncher {
 
     private void homePage() throws JSONException {
         LinearLayout about = card("NVForever for Android");
-        add(about, label("Experimental build · play with touch, a controller, or a keyboard and mouse.", 15, weak));
+        add(about, label("Experimental build (" + activity.installedVersion() + ") · play with touch, a controller, or a keyboard and mouse.", 15, weak));
         if (state.isNull("folder")) add(about, tap("Set up a game folder", true, true, () -> showGameFolder("Import a complete game folder to enable Play.")));
+        add(about, tap(updateChecking ? "Checking for updates…" : "Check for updates", false, !updateChecking && !updateDownloading, () -> checkForUpdates(true)));
+        if (updateInfo != null && updateInfo.optBoolean("available", false)) {
+            String nextVersion = updateInfo.optString("version", "");
+            LinearLayout updateCard = card("Update available: v" + nextVersion);
+            String notes = updateInfo.optString("notes", "");
+            if (!notes.isEmpty()) addMarkdown(updateCard, notes, 400);
+            if (updateDownloading) {
+                add(updateCard, label(updateProgress.isEmpty() ? "Downloading update…" : updateProgress, 14, gold));
+                add(updateCard, tap("Cancel download", false, true, () -> updateCancel.set(true)));
+            } else {
+                if (!updateInfo.isNull("asset")) {
+                    add(updateCard, tap("Update to v" + nextVersion, true, editable(), () -> confirmAndDownloadUpdate(updateInfo)));
+                }
+                String releaseUrl = updateInfo.optString("url", "");
+                if (!releaseUrl.isEmpty()) add(updateCard, tap("Open release page", false, true, () -> openLink(releaseUrl)));
+            }
+        }
         LinearLayout feed = card("Project news");
         boolean enabled = state.optBoolean("newsEnabled", true);
         add(feed, tap(enabled ? "Turn news fetching off" : "Turn news fetching on", false, editable(), () -> act(() -> {
@@ -233,12 +260,200 @@ final class MobileLauncher {
             JSONObject post = posts.getJSONObject(i);
             LinearLayout box = card(post.getString("title"));
             add(box, label(post.getString("date") + " · " + post.getString("author"), 14, weak));
-            String body = post.getString("body");
-            int count = body.codePointCount(0, body.length());
-            TextView copy = label(count > 700 ? body.substring(0, body.offsetByCodePoints(0, 700)) + "…" : body, 16, text);
-            add(box, copy);
-            if (count > 700) add(box, tap("Read more", false, true, () -> copy.setText(body)));
+            addMarkdown(box, post.getString("body"), 700);
             if (!post.isNull("url")) add(box, tap("Open in browser", false, true, () -> openLink(post.optString("url"))));
+        }
+    }
+
+    private void addMarkdown(LinearLayout box, String markdown, int previewLimit) {
+        List<MarkdownParser.Block> blocks = MarkdownParser.parse(markdown);
+        MarkdownParser.Preview preview = MarkdownParser.preview(blocks, previewLimit);
+        TextView copy = label("", 16, text);
+        MarkdownRenderer.apply(copy, preview.blocks, gold, weak, dp(16), this::openLink);
+        add(box, copy);
+        if (preview.truncated) {
+            Button more = tap("Read more", false, true, () -> {});
+            more.setOnClickListener(v -> {
+                MarkdownRenderer.apply(copy, blocks, gold, weak, dp(16), this::openLink);
+                more.setVisibility(View.GONE);
+            });
+            add(box, more);
+        }
+    }
+
+    private void checkForUpdates(boolean userInitiated) {
+        if (updateChecking || updateDownloading) return;
+        updateChecking = true;
+        if (userInitiated && page == Page.HOME) render();
+        String current = activity.installedVersion();
+        new Thread(() -> {
+            try {
+                JSONObject result = object("check_update", "current", current);
+                activity.runOnUiThread(() -> {
+                    updateChecking = false;
+                    updateChecked = true;
+                    if (activity.isDestroyed()) return;
+                    updateInfo = result;
+                    if (result.optBoolean("available", false)) {
+                        if (page == Page.HOME) render();
+                        if (userInitiated || !updatePrompted) {
+                            updatePrompted = true;
+                            confirmAndDownloadUpdate(result);
+                        }
+                    } else {
+                        if (userInitiated) message("NVForever is up to date (" + current + ").");
+                        if (page == Page.HOME) render();
+                    }
+                });
+            } catch (IOException | JSONException e) {
+                activity.runOnUiThread(() -> {
+                    updateChecking = false;
+                    if (activity.isDestroyed()) return;
+                    if (userInitiated) message("Could not check for updates.");
+                    if (page == Page.HOME) render();
+                });
+            }
+        }, "nvf-update-check").start();
+    }
+
+    private void confirmAndDownloadUpdate(JSONObject info) {
+        if (activity.isDestroyed() || activity.isFinishing() || updateDownloading) return;
+        String nextVersion = info.optString("version", "");
+        JSONObject asset = info.optJSONObject("asset");
+        String releaseUrl = info.optString("url", "");
+        AlertDialog.Builder dialog = new AlertDialog.Builder(activity)
+            .setTitle("Update available: v" + nextVersion);
+        if (asset != null) {
+            long size = asset.optLong("size", 0);
+            String sizeText = size > 0 ? " (" + UpdatePolicy.formatBytes(size) + ")" : "";
+            dialog.setMessage("NVForever v" + nextVersion + " is available" + sizeText
+                + ". Would you like to download and install the update now?")
+                .setPositiveButton("Update", (d, which) -> downloadAndInstallUpdate(info))
+                .setNegativeButton("Later", null);
+        } else {
+            dialog.setMessage("NVForever v" + nextVersion + " is available on GitHub, but no ARM64 APK asset is attached yet.")
+                .setNegativeButton("Later", null);
+            if (!releaseUrl.isEmpty()) dialog.setPositiveButton("Open release page", (d, which) -> openLink(releaseUrl));
+        }
+        dialog.show();
+    }
+
+    private void downloadAndInstallUpdate(JSONObject info) {
+        if (updateDownloading) return;
+        if (busy || running) {
+            message("Close the game before updating.");
+            return;
+        }
+        JSONObject asset = info.optJSONObject("asset");
+        if (asset == null) return;
+        String tag = info.optString("tag", "");
+        String name = asset.optString("name", "");
+        String url = asset.optString("url", "");
+        long expectedSize = asset.optLong("size", -1);
+        String expectedSha = asset.isNull("sha256") ? null : asset.optString("sha256", null);
+        if (!UpdatePolicy.isRepoReleaseAssetUrl(url, tag, name)) {
+            message("Refused untrusted update download URL.");
+            return;
+        }
+        updateDownloading = true;
+        updateCancel.set(false);
+        updateProgress = "Starting download…";
+        message(updateProgress);
+        if (page == Page.HOME) render();
+        new Thread(() -> {
+            File dir = ApkUpdateProvider.updatesDir(activity);
+            File part = new File(dir, name + ".part");
+            File target = new File(dir, name);
+            try {
+                if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create updates cache folder");
+                byte[] digest = downloadHttpsApk(url, part, expectedSize);
+                if (expectedSha != null && !expectedSha.isEmpty() && !UpdatePolicy.checksumMatches(expectedSha, digest)) {
+                    throw new IOException("Downloaded APK failed SHA-256 verification");
+                }
+                if (target.exists() && !target.delete()) throw new IOException("Cannot replace previous cached APK");
+                if (!part.renameTo(target)) throw new IOException("Cannot finalize downloaded APK");
+                activity.runOnUiThread(() -> {
+                    updateDownloading = false;
+                    updateProgress = "";
+                    if (activity.isDestroyed()) return;
+                    message("Update downloaded. Opening Android installer…");
+                    if (page == Page.HOME) render();
+                    activity.installUpdateApk(target);
+                });
+            } catch (Exception e) {
+                part.delete();
+                boolean cancelled = updateCancel.get();
+                activity.runOnUiThread(() -> {
+                    updateDownloading = false;
+                    updateProgress = "";
+                    if (activity.isDestroyed()) return;
+                    message(cancelled ? "Update download cancelled." : "Update failed: " + e.getMessage());
+                    if (page == Page.HOME) render();
+                });
+            }
+        }, "nvf-apk-download").start();
+    }
+
+    private byte[] downloadHttpsApk(String initialUrl, File dest, long expectedSize) throws IOException {
+        String currentUrl = initialUrl;
+        HttpsURLConnection connection = null;
+        try {
+            for (int hop = 0; hop <= UpdatePolicy.MAX_REDIRECTS; hop++) {
+                if (!UpdatePolicy.isAllowedDownloadUrl(currentUrl)) {
+                    throw new IOException("Refused redirect outside GitHub release hosts");
+                }
+                connection = (HttpsURLConnection) new URL(currentUrl).openConnection();
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("User-Agent", "NVForever-Android-Launcher");
+                int code = connection.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    connection.disconnect();
+                    connection = null;
+                    if (location == null || location.isEmpty()) throw new IOException("Empty redirect location");
+                    currentUrl = new URL(new URL(currentUrl), location).toString();
+                    continue;
+                }
+                if (code != 200) throw new IOException("Server returned HTTP " + code);
+                long contentLength = connection.getContentLengthLong();
+                long total = contentLength > 0 ? contentLength : expectedSize;
+                if (total > UpdatePolicy.MAX_APK_BYTES) throw new IOException("Update APK exceeds maximum allowed size");
+                MessageDigest sha = MessageDigest.getInstance("SHA-256");
+                long downloaded = 0;
+                long lastUi = 0;
+                try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(dest)) {
+                    byte[] buffer = new byte[32768];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (updateCancel.get()) throw new IOException("Cancelled");
+                        downloaded += n;
+                        if (downloaded > UpdatePolicy.MAX_APK_BYTES) throw new IOException("Download exceeded size limit");
+                        sha.update(buffer, 0, n);
+                        out.write(buffer, 0, n);
+                        long now = android.os.SystemClock.elapsedRealtime();
+                        if (now - lastUi >= 150) {
+                            lastUi = now;
+                            String text = UpdatePolicy.progressText(downloaded, total);
+                            activity.runOnUiThread(() -> {
+                                if (!activity.isDestroyed() && updateDownloading) {
+                                    updateProgress = text;
+                                    message(text);
+                                }
+                            });
+                        }
+                    }
+                    out.getFD().sync();
+                }
+                if (downloaded == 0) throw new IOException("Downloaded APK is empty");
+                return sha.digest();
+            }
+            throw new IOException("Too many redirects");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable", e);
+        } finally {
+            if (connection != null) connection.disconnect();
         }
     }
 

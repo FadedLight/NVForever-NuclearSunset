@@ -312,19 +312,26 @@ pub fn countdown_text(left: i64) -> String {
 }
 
 
+/// A release's file, as GitHub's release list gives it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Asset {
+    pub name: String,
+    pub browser_download_url: String,
+    #[serde(default)]
+    pub size: u64,
+}
+
 /// A published release on GitHub: its version (`0.8.0`, the tag without its `v`), tag, page,
 /// notes and files (the archives and `SHA256SUMS.txt`, for the updater).
-#[cfg(feature = "desktop")]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Latest {
     pub version: String,
     pub tag: String,
     pub url: String,
     pub notes: String,
-    pub assets: Vec<crate::update::Asset>,
+    pub assets: Vec<Asset>,
 }
 
-#[cfg(feature = "desktop")]
 #[derive(Deserialize)]
 struct ListedRelease {
     tag_name: String,
@@ -335,10 +342,9 @@ struct ListedRelease {
     #[serde(default)]
     draft: bool,
     #[serde(default)]
-    assets: Vec<crate::update::Asset>,
+    assets: Vec<Asset>,
 }
 
-#[cfg(feature = "desktop")]
 impl From<ListedRelease> for Latest {
     fn from(r: ListedRelease) -> Latest {
         Latest {
@@ -352,7 +358,6 @@ impl From<ListedRelease> for Latest {
 }
 
 /// The release list's published releases (drafts left out).
-#[cfg(feature = "desktop")]
 pub fn parse_release_list(text: &str) -> Result<Vec<Latest>, String> {
     let v: Vec<ListedRelease> = serde_json::from_str(text).map_err(|e| format!("releases: {e}"))?;
     Ok(v.into_iter().filter(|r| !r.draft).map(Latest::from).collect())
@@ -360,7 +365,6 @@ pub fn parse_release_list(text: &str) -> Result<Vec<Latest>, String> {
 
 /// The release with the highest version (not the list's first: a fix of an older line
 /// published later would come first).
-#[cfg(feature = "desktop")]
 pub fn newest(list: Vec<Latest>) -> Option<Latest> {
     list.into_iter().max_by(|a, b| cmp_versions(&a.version, &b.version))
 }

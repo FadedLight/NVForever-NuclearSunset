@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x00401000" android:required="true" />
     <application android:label="NVForever" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:hasCode="true" android:theme="@android:style/Theme.Material.NoActionBar">
@@ -14,5 +15,6 @@
         <activity android:name=".GameActivity" android:theme="@style/NvfLoadingTheme" android:exported="false" android:launchMode="singleTask" android:taskAffinity="org.nvforever.android.game" android:process=":game" android:screenOrientation="sensorLandscape" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|density|uiMode|fontScale|locale|layoutDirection">
             <meta-data android:name="android.app.lib_name" android:value="nvf_android" />
         </activity>
+        <provider android:name=".ApkUpdateProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
     </application>
 </manifest>

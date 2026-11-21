@@ -181,3 +181,91 @@ fn mods_edit_the_real_plugin_list_and_shared_new_game_fields() {
     let fields: start::Fields = serde_json::from_value(mods()["fields"].clone()).unwrap();
     assert_eq!(fields, start::ttw());
 }
+
+#[test]
+fn check_update_selects_signed_arm64_apk_verifies_url_and_extracts_checksum() {
+    let fixture = Fixture::new();
+    let expected_sha = "a".repeat(64);
+    let releases = json!([
+        {
+            "tag_name": "v0.9.0",
+            "draft": true,
+            "html_url": "https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.9.0",
+            "body": "Draft release should be ignored",
+            "assets": []
+        },
+        {
+            "tag_name": "v0.8.2",
+            "draft": false,
+            "html_url": "https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.8.2",
+            "body": "## Highlights\n- Better Android launcher",
+            "assets": [
+                {
+                    "name": "NVForever-v0.8.2-x86_64.apk",
+                    "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.2/NVForever-v0.8.2-x86_64.apk",
+                    "size": 100
+                },
+                {
+                    "name": "NVForever-v0.8.2-android-arm64-unsigned.apk",
+                    "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.2/NVForever-v0.8.2-android-arm64-unsigned.apk",
+                    "size": 200
+                },
+                {
+                    "name": "NVForever-v0.8.2-android-arm64.apk",
+                    "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.2/NVForever-v0.8.2-android-arm64.apk",
+                    "size": 45_000_000
+                },
+                {
+                    "name": "SHA256SUMS.txt",
+                    "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.2/SHA256SUMS.txt",
+                    "size": 120
+                }
+            ]
+        }
+    ]).to_string();
+    let sums = format!("{expected_sha}  NVForever-v0.8.2-android-arm64.apk\n");
+    let reply: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |url| match url {
+            u if u == news::RELEASES => Ok(releases.clone()),
+            "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.2/SHA256SUMS.txt" => Ok(sums.clone()),
+            other => Err(format!("unexpected url {other}")),
+        },
+    )).unwrap();
+    let data = &reply["data"];
+    assert_eq!(data["available"], true);
+    assert_eq!(data["version"], "0.8.2");
+    assert_eq!(data["tag"], "v0.8.2");
+    assert_eq!(data["asset"]["name"], "NVForever-v0.8.2-android-arm64.apk");
+    assert_eq!(data["asset"]["size"], 45_000_000);
+    assert_eq!(data["asset"]["sha256"], expected_sha);
+
+    // Same or newer current version reports available=false.
+    let up_to_date: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.2"}).to_string(),
+        |_| Ok(releases.clone()),
+    )).unwrap();
+    assert_eq!(up_to_date["data"]["available"], false);
+
+    // Off-repository APK download URL is refused (asset is null, release page URL stays available).
+    let off_repo = json!([{
+        "tag_name": "v0.8.3",
+        "draft": false,
+        "html_url": "https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.8.3",
+        "body": "Notes",
+        "assets": [{
+            "name": "NVForever-v0.8.3-android-arm64.apk",
+            "browser_download_url": "https://evil.example/NVForever-v0.8.3-android-arm64.apk",
+            "size": 100
+        }]
+    }]).to_string();
+    let refused: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |_| Ok(off_repo.clone()),
+    )).unwrap();
+    assert_eq!(refused["data"]["available"], true);
+    assert!(refused["data"]["asset"].is_null());
+}

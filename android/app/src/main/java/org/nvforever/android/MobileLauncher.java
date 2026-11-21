@@ -61,6 +61,7 @@ final class MobileLauncher {
     private boolean busy, running, newsFetching, resumed;
     private boolean updateChecked, updateChecking, updatePrompted, updateDownloading;
     private final AtomicBoolean updateCancel = new AtomicBoolean(false);
+    private volatile HttpsURLConnection activeDownload;
     private int newsEpoch;
     private final int bg, panel, card, button, gold, onGold, text, weak;
     private final Runnable tick = this::updateCountdown;
@@ -232,7 +233,15 @@ final class MobileLauncher {
             if (!notes.isEmpty()) addMarkdown(updateCard, notes, 400);
             if (updateDownloading) {
                 add(updateCard, label(updateProgress.isEmpty() ? "Downloading update…" : updateProgress, 14, gold));
-                add(updateCard, tap("Cancel download", false, true, () -> updateCancel.set(true)));
+                boolean cancelling = updateCancel.get();
+                add(updateCard, tap(cancelling ? "Cancelling…" : "Cancel download", false, !cancelling, () -> {
+                    updateCancel.set(true);
+                    updateProgress = "Cancelling…";
+                    message(updateProgress);
+                    HttpsURLConnection conn = activeDownload;
+                    if (conn != null) new Thread(conn::disconnect, "nvf-apk-cancel").start();
+                    render();
+                }));
             } else {
                 if (!updateInfo.isNull("asset")) {
                     add(updateCard, tap("Update to v" + nextVersion, true, editable(), () -> confirmAndDownloadUpdate(updateInfo)));
@@ -403,6 +412,7 @@ final class MobileLauncher {
                     throw new IOException("Refused redirect outside GitHub release hosts");
                 }
                 connection = (HttpsURLConnection) new URL(currentUrl).openConnection();
+                activeDownload = connection;
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(15000);
                 connection.setReadTimeout(30000);
@@ -453,6 +463,7 @@ final class MobileLauncher {
         } catch (NoSuchAlgorithmException e) {
             throw new IOException("SHA-256 unavailable", e);
         } finally {
+            activeDownload = null;
             if (connection != null) connection.disconnect();
         }
     }
@@ -489,25 +500,43 @@ final class MobileLauncher {
     }
 
     // JNI calls this on the worker. Android supplies DNS, HTTPS and the device trust store.
+    // Follows up to UpdatePolicy.MAX_REDIRECTS HTTPS redirects only to pinned GitHub release hosts
+    // (required for GitHub Releases SHA256SUMS.txt 302 redirects) while preserving size/deadline caps.
     private static String getHttps(String address) {
+        String currentUrl = address;
+        long deadline = android.os.SystemClock.elapsedRealtime() + 15000;
         HttpsURLConnection connection = null;
         try {
-            URL url = new URL(address);
-            if (!"https".equals(url.getProtocol())) return null;
-            connection = (HttpsURLConnection) url.openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
-            connection.setRequestProperty("User-Agent", "NVForever-Android-Launcher");
-            if (connection.getResponseCode() != 200) return null;
-            try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-                byte[] bytes = new byte[8192]; int n;
-                long deadline = android.os.SystemClock.elapsedRealtime() + 15000;
-                while ((n = in.read(bytes)) != -1) {
-                    if (out.size() + n > 2 * 1024 * 1024 || android.os.SystemClock.elapsedRealtime() > deadline) return null;
-                    out.write(bytes, 0, n);
+            for (int hop = 0; hop <= UpdatePolicy.MAX_REDIRECTS; hop++) {
+                if (android.os.SystemClock.elapsedRealtime() > deadline) return null;
+                URL url = new URL(currentUrl);
+                if (!"https".equals(url.getProtocol())) return null;
+                connection = (HttpsURLConnection) url.openConnection();
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+                connection.setRequestProperty("User-Agent", "NVForever-Android-Launcher");
+                int code = connection.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    connection.disconnect();
+                    connection = null;
+                    if (location == null || location.isEmpty()) return null;
+                    String next = new URL(url, location).toString();
+                    if (!UpdatePolicy.isAllowedDownloadUrl(next)) return null;
+                    currentUrl = next;
+                    continue;
                 }
-                return new String(out.toByteArray(), StandardCharsets.UTF_8);
+                if (code != 200) return null;
+                try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                    byte[] bytes = new byte[8192]; int n;
+                    while ((n = in.read(bytes)) != -1) {
+                        if (out.size() + n > 2 * 1024 * 1024 || android.os.SystemClock.elapsedRealtime() > deadline) return null;
+                        out.write(bytes, 0, n);
+                    }
+                    return new String(out.toByteArray(), StandardCharsets.UTF_8);
+                }
             }
+            return null;
         } catch (IOException e) { return null; }
         finally { if (connection != null) connection.disconnect(); }
     }

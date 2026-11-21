@@ -268,4 +268,48 @@ fn check_update_selects_signed_arm64_apk_verifies_url_and_extracts_checksum() {
     )).unwrap();
     assert_eq!(refused["data"]["available"], true);
     assert!(refused["data"]["asset"].is_null());
+
+    // Fail closed when SHA256SUMS.txt is published on the release but fetching it fails.
+    let sums_fetch_failed: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |url| match url {
+            u if u == news::RELEASES => Ok(releases.clone()),
+            _ => Err("simulated 302/network failure".into()),
+        },
+    )).unwrap();
+    assert_eq!(sums_fetch_failed["data"]["available"], true);
+    assert!(sums_fetch_failed["data"]["asset"].is_null());
+
+    // Fail closed when SHA256SUMS.txt is fetched but omits a valid 64-hex hash for the APK.
+    let sums_missing_entry: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |url| match url {
+            u if u == news::RELEASES => Ok(releases.clone()),
+            _ => Ok(format!("{}  NVForever-v0.8.2-x86_64-pc-windows-msvc.zip\n", "b".repeat(64))),
+        },
+    )).unwrap();
+    assert_eq!(sums_missing_entry["data"]["available"], true);
+    assert!(sums_missing_entry["data"]["asset"].is_null());
+
+    // Unsigned-only ARM64 release is refused (Android package installer rejects unsigned APKs).
+    let unsigned_only = json!([{
+        "tag_name": "v0.8.4",
+        "draft": false,
+        "html_url": "https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.8.4",
+        "body": "Unsigned build only",
+        "assets": [{
+            "name": "NVForever-v0.8.4-android-arm64-unsigned.apk",
+            "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.4/NVForever-v0.8.4-android-arm64-unsigned.apk",
+            "size": 45_000_000
+        }]
+    }]).to_string();
+    let refused_unsigned: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |_| Ok(unsigned_only.clone()),
+    )).unwrap();
+    assert_eq!(refused_unsigned["data"]["available"], true);
+    assert!(refused_unsigned["data"]["asset"].is_null());
 }

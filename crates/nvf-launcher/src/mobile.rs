@@ -200,12 +200,13 @@ fn checksum_for(sums: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Select the ARM64 Android APK from a release's assets, preferring signed arm64/aarch64 APKs
-/// and refusing non-ARM64 ABIs or off-repository download URLs.
+/// Select the signed ARM64 Android APK from a release's assets, refusing unsigned packages,
+/// non-ARM64 ABIs, or off-repository download URLs.
 fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a news::Asset> {
     let candidates: Vec<&news::Asset> = assets.iter().filter(|a| {
         let lower = a.name.to_ascii_lowercase();
         lower.ends_with(".apk")
+            && !lower.contains("unsigned")
             && !lower.contains("x86")
             && !lower.contains("armeabi")
             && repo_asset_url(&a.browser_download_url, tag, &a.name)
@@ -214,9 +215,7 @@ fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a ne
         let lower = name.to_ascii_lowercase();
         lower.contains("arm64") || lower.contains("aarch64")
     };
-    let is_unsigned = |name: &str| name.to_ascii_lowercase().contains("unsigned");
-    candidates.iter().copied().find(|a| is_arm64(&a.name) && !is_unsigned(&a.name))
-        .or_else(|| candidates.iter().copied().find(|a| is_arm64(&a.name)))
+    candidates.iter().copied().find(|a| is_arm64(&a.name))
         .or_else(|| (candidates.len() == 1).then(|| candidates[0]))
 }
 
@@ -234,17 +233,25 @@ fn check_update(current: &str, get: &mut impl FnMut(&str) -> Result<String, Stri
             "tag": latest.tag,
         }));
     }
-    let asset = select_android_apk(&latest.assets, &latest.tag).map(|apk| {
-        let sha256 = latest.assets.iter()
-            .find(|a| a.name == CHECKSUMS_NAME && repo_asset_url(&a.browser_download_url, &latest.tag, CHECKSUMS_NAME))
-            .and_then(|sums| get(&sums.browser_download_url).ok())
-            .and_then(|body| checksum_for(&body, &apk.name));
-        json!({
+    let asset = select_android_apk(&latest.assets, &latest.tag).and_then(|apk| {
+        // Fail closed when a release publishes SHA256SUMS.txt: if fetching it fails or it lacks
+        // a valid 64-hex-char entry for the selected APK, omit the direct in-app asset so the
+        // launcher falls back to opening the GitHub release page instead of skipping verification.
+        let sha256 = if let Some(sums) = latest.assets.iter().find(|a| a.name == CHECKSUMS_NAME) {
+            if !repo_asset_url(&sums.browser_download_url, &latest.tag, CHECKSUMS_NAME) {
+                return None;
+            }
+            let body = get(&sums.browser_download_url).ok()?;
+            Some(checksum_for(&body, &apk.name)?)
+        } else {
+            None
+        };
+        Some(json!({
             "name": apk.name,
             "url": apk.browser_download_url,
             "size": apk.size,
             "sha256": sha256,
-        })
+        }))
     });
     Ok(json!({
         "available": true,

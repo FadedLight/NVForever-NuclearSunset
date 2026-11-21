@@ -26,6 +26,9 @@ public final class UpdatePolicyTest {
         check(UpdatePolicy.isAllowedDownloadUrl(official), "allow github.com");
         check(UpdatePolicy.isAllowedDownloadUrl("https://objects.githubusercontent.com/github-production-release-asset/1234"), "allow objects.githubusercontent.com");
         check(UpdatePolicy.isAllowedDownloadUrl("https://release-assets.githubusercontent.com/asset/1234"), "allow release-assets.githubusercontent.com");
+        check(UpdatePolicy.isAllowedDownloadUrl("https://github-releases.githubusercontent.com/asset/1234"), "allow github-releases.githubusercontent.com");
+        check(!UpdatePolicy.isAllowedDownloadUrl("https://raw.githubusercontent.com/user/repo/main/app.apk"), "reject raw.githubusercontent.com");
+        check(!UpdatePolicy.isAllowedDownloadUrl("https://gist.githubusercontent.com/user/123/raw/app.apk"), "reject gist.githubusercontent.com");
         check(!UpdatePolicy.isAllowedDownloadUrl("http://objects.githubusercontent.com/asset"), "reject http redirect");
         check(!UpdatePolicy.isAllowedDownloadUrl("https://untrusted.example.com/app.apk"), "reject arbitrary redirect host");
 

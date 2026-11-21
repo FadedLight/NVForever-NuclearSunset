@@ -51,7 +51,7 @@ final class UpdatePolicy {
             return lower.equals("github.com")
                 || lower.equals("objects.githubusercontent.com")
                 || lower.equals("release-assets.githubusercontent.com")
-                || lower.endsWith(".githubusercontent.com");
+                || lower.equals("github-releases.githubusercontent.com");
         } catch (IllegalArgumentException e) {
             return false;
         }

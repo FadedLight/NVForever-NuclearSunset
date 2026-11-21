@@ -123,8 +123,8 @@ impl GameStart {
 /// its own `NVForever.ini`, never the original's `Fallout.ini` (docs/design/install-layout.md).
 pub fn not_a_quest(value: &str, resolved: FormId) -> String {
     format!(
-        "{value} ({resolved}) is not a quest in the load order; New Game starts nothing and \
-         leaves the player at the New Vegas opening. If {value} names a mod's start quest, \
+        "{value} ({resolved}) is not a quest in the load order; New Game starts the New \
+         Vegas opening (VCG00) instead. If {value} names a mod's start quest, \
          enable that plugin in NVForever's own plugins.txt (NVForever reads only its own \
          NVForever.ini, never the original's)"
     )

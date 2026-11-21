@@ -159,7 +159,7 @@ fn numeric_schema_keeps_cpu_gpu_and_stale_instance_evidence_distinct() {
         main: true, main_ready: true, prepass: true, prepass_ready: true };
     let all = count(&snapshot.skins, |_| full);
     let none = Counts::default();
-    assert_eq!(line(snapshot, &all, &none) + "\n", include_str!("../../../../android/tests/fixtures/render-admission-line.txt"));
+    assert_eq!(line(snapshot, &all, &none) + "\n", include_str!("../../../../android/tests/fixtures/render-admission-line.txt").replace("\r\n", "\n"));
     let waiting = count(&snapshot.skins, |_| Flags { mesh: true, slab: true, ..default() });
     assert_eq!((waiting.cpu_material, waiting.diffuse_refs, waiting.mesh), (1, 1, 1));
     assert_eq!((waiting.diffuse, waiting.prepared, waiting.bound, waiting.main_ready), (0, 0, 0, 0));

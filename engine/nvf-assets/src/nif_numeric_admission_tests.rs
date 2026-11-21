@@ -158,7 +158,7 @@ fn ignored_optional_streams_and_triangle_filter_remain_unchanged() {
     replace(&mut data, "normals", Value::FloatList { dim: 3, data: vec![f32::NAN; 3] });
     replace(&mut data, "uv_sets", Value::List(vec![Value::FloatList { dim: 2, data: vec![f32::NAN; 2] }]));
     replace(&mut data, "triangles", Value::IntList(vec![0, 1, 2, 0, 1, 90]));
-    let (mesh, reported) = build_mesh(&data).unwrap().unwrap();
+    let (mesh, reported, _) = build_mesh(&data).unwrap().unwrap();
     assert_eq!(reported, 2, "existing report counts original triangles");
     assert_eq!(mesh.indices().unwrap().iter().collect::<Vec<_>>(), [0, 1, 2]);
     assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none());
@@ -170,7 +170,7 @@ fn ignored_optional_streams_and_triangle_filter_remain_unchanged() {
 #[test]
 fn admitted_positions_keep_signed_zero_and_original_fixed_geometry() {
     let data = geometry();
-    let (mesh, tris) = build_mesh(&data).unwrap().unwrap();
+    let (mesh, tris, _) = build_mesh(&data).unwrap().unwrap();
     assert_eq!(tris, 1);
     let VertexAttributeValues::Float32x3(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() else { panic!("positions") };
     assert_eq!(positions.iter().flatten().map(|x| x.to_bits()).collect::<Vec<_>>(), data.floats("vertices").unwrap().iter().map(|x| x.to_bits()).collect::<Vec<_>>());
@@ -187,8 +187,8 @@ impl TextureSource for NoTextures {
 fn vertex_color_repair_runs_before_final_numeric_admission() {
     let mut data = geometry();
     replace(&mut data, "vertex_colors", Value::FloatList { dim: 4, data: [f32::NAN, -3.0, 2.0, f32::INFINITY].repeat(3) });
-    let (mut mesh, _) = build_mesh(&data).unwrap().unwrap();
-    let _ = shape_material_with(&Props { vertex_alpha: true, ..Default::default() }, &mut mesh, &mut NoTextures);
+    let (mut mesh, _, _) = build_mesh(&data).unwrap().unwrap();
+    let _ = shape_material_with(&Props { vertex_alpha: true, ..Default::default() }, &mut mesh, &mut NoTextures, Tangents::Generate);
     assert!(finite_mesh(&mesh).is_ok());
     let VertexAttributeValues::Float32x4(colors) = mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() else { panic!("color stream") };
     assert_eq!(colors, &vec![[1.0, 0.0, 1.0, 1.0]; 3]);
@@ -225,7 +225,7 @@ fn absent_skin_is_distinct_from_numeric_rejection_and_neighbors_survive() {
 #[test]
 fn final_stream_check_catches_generated_tangent_and_weight_nonfinites() {
     for (attribute, stream) in [(Mesh::ATTRIBUTE_TANGENT, NumericStream::Tangent), (Mesh::ATTRIBUTE_JOINT_WEIGHT, NumericStream::NormalizedWeight)] {
-        let (mut mesh, _) = build_mesh(&geometry()).unwrap().unwrap();
+        let (mut mesh, _, _) = build_mesh(&geometry()).unwrap().unwrap();
         mesh.insert_attribute(attribute, vec![[1.0_f32, 0.0, 0.0, f32::NAN]; 3]);
         assert_eq!(finite_mesh(&mesh), Err(NumericError { stream, element: 0 }));
     }

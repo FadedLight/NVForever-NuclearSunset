@@ -25,7 +25,7 @@ impl Plugin for ScriptInputPlugin {
             .configure_sets(PreUpdate, ScriptInputSet.after(bevy::input::InputSystems))
             // [design, #2200] Scripts see consumed switching presses as absent too.
             .add_systems(PreUpdate, script_input.in_set(ScriptInputSet).after(crate::pad::device::automatic).after(crate::pad::update_stick_buttons))
-            .add_systems(PreUpdate, publish_virtual_controls.after(script_input).after(crate::pad::PlatformInputSystems::Remember).before(bevy::ui::UiSystems::Focus))
+            .add_systems(PreUpdate, publish_virtual_controls.run_if(resource_exists::<Bindings>).after(script_input).after(crate::pad::PlatformInputSystems::Remember).before(bevy::ui::UiSystems::Focus))
             // The player's state the scripts read (sights up, for the HUD bars' aiming
             // condition) is handed over after combat has updated it this frame and before
             // the scripts run [design]. `tell_magazine` keeps its own place: it also

@@ -4642,7 +4642,7 @@ dependencies = [
 
 [[package]]
 name = "nvf-android"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bevy",
  "jni 0.21.1",
@@ -4676,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "nvf-launcher"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "fnv-install",
  "fnv-save",

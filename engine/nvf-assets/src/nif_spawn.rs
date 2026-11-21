@@ -1136,7 +1136,7 @@ impl NumericRejections {
 
 /// The mesh of a shape-data block, its triangle count, and the tangent arrays it stores
 /// (for [`Tangents::Stored`]; empty when it stores none).
-fn build_mesh(data: &Struct) -> Result<Option<(Mesh, usize, StoredArrays)>, NumericError> {
+pub(crate) fn build_mesh(data: &Struct) -> Result<Option<(Mesh, usize, StoredArrays)>, NumericError> {
     let md = mesh_data(data);
     if md.positions.is_empty() || md.triangles.is_empty() {
         return Ok(None);

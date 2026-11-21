@@ -597,7 +597,7 @@ impl MenuTiles<'_, '_> {
             || barter_menu::tiled(switch.barter, game, barter_menu::is_barter(shown))
             || self.inventory.as_ref().is_some_and(|i| i.ready.is_some()));
         let quantity = self.quantity().filter(|_| menus::quantity_tiled(switch.quantity, game, true, container_tiled));
-        let prompt = quantity.and_then(|q| game.ui_tree.menu(menus::QUANTITY_MENU).map(|m| (m, q)));
+        let prompt = game.ui_tree.menu(menus::QUANTITY_MENU).zip(quantity);
         // Which showing the box on screen is (counted up for every box shown, one alike
         // included): its rows are made again for another (`menus::another_box`).
         let showing = game.front_box().map(|b| b.serial);

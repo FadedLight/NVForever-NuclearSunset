@@ -151,7 +151,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | NVF Features | Visual Only (after an empty line) | `weapon-inertia`, `animation-smoothing`, `camera-motion` (player-body.md §1.4a.3) |
 | Graphics | Quality | `quality` (#1966; only when the install has its preset files: docs/spec-notes/quality-presets.md) |
 | Graphics | Picture | `enhanced` (#1966; removed by the overhaul), `grade`, `sun-shadows`, `upscaler`, `upscaler-quality`, `dlss-model`, `fsr-library`, `frame-generation`, `frame-generation-frames`, `anti-aliasing`, `latency-reduction`, `shadow-filter`, `ambient-occlusion`, `fine-shadows`, `cloud-shadows` (#2670), `terrain-shadows` (#2671), `bloom`, `glow`, `eye-adaptation`, `neon-glow`, `sharpen`, `anisotropic`, `terrain-height-blend` (#2550), `terrain-anti-tiling` (#2551), `light-shafts`, `heat-haze`, `desert-haze` (#2675; under Lighting and Effects since the overhaul), `water-reflections`, `water-mirror`, `smooth-terrain` (#2149) |
-| Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance` |
+| Graphics | Distance | `distant-lod`, `grass`, `object-distance`, `actor-distance`, `item-distance`, `shadow-distance`, `grass-distance`, `tree-distance` (#3016) |
 | Graphics | World | `head-tracking`, `foot-ik`, `sky-clock` |
 | Tweaks | (none) | none named yet |
 | Debug | (none) | `overlay`, `hit-markers`, `god-mode`, `navmesh`, `terrain-wireframe` (#2149), `scope-3d` |

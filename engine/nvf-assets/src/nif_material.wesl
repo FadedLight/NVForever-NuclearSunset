@@ -85,7 +85,7 @@ import bevy_pbr::{
 @if(!PREPASS_PIPELINE) import nvf_assets::first_person_depth;
 @if(!PREPASS_PIPELINE && SHADE_LIGHT) import bevy_pbr::{
     render::pbr_types::PbrInput,
-    render::mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT,
+    render::mesh_types::{MESH_FLAGS_SHADOW_RECEIVER_BIT, NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT},
     render::mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT,
     render::shadows::{fetch_directional_shadow, get_cascade_index},
     render::shadow_sampling::sample_shadow_map,
@@ -458,8 +458,14 @@ const BODY_CLEARANCE: f32 = 24.0;
         return shadowed;
     }
     let wanted = min(shade, shadow_past_body(sun, in, view_z));
+    // Only the directional lights' shadows are taken off (vendored bevy_pbr mesh_types.wesl):
+    // with the receiver bit cleared instead, the lamps' shadows (lamp shadows, the Pip-Boy
+    // light) and the ambient occlusion's factor on lamps (nvforever ssao_lighting) differed
+    // between `lit` and `shadowed` too, and k (up to 1/share) multiplied that difference
+    // into the colour: first-person shapes glowed in the lamps' colour [observed 2026-11-19,
+    // Prospector Saloon at 22:00, lamp shadows Quality with ambient occlusion].
     var unshadowed = in;
-    unshadowed.flags &= ~MESH_FLAGS_SHADOW_RECEIVER_BIT;
+    unshadowed.flags |= NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT;
     let lit = apply_pbr_lighting(unshadowed);
     let k = (v_lit + share - sun_shadow_value(sun, in, wanted, view_z)) / missing;
     if lights.ambient_color.a < 0.0 {

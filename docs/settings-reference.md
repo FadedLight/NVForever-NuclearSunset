@@ -1028,9 +1028,15 @@ below cover them all.
 
 ### `ambient-occlusion`: Ambient occlusion
 
-- On the page: On: creases, corners and the ground under things are darkened by how enclosed
-  they are (screen-space, from the depth). Not in the original.
-- Command-line switches: `--graphics`
+- On the page: Creases, corners and the ground under things darken by how enclosed they are:
+  Off, Performance (cheaper, a little grainier) or Quality. Not in the original.
+- In full: Screen-space ambient occlusion from the depth, on the ambient light and the lamps
+  that cast no shadow: Off; Performance (one slice direction a pixel instead of two: half the
+  horizon march, the same denoise); or Quality (ground-truth ambient occlusion, 2 slices x 4
+  steps a side at half resolution, depth-aware denoise). Quality in the enhanced look.
+- Shown as a list since 2026-11-19; an INI written while it was an on/off switch (`1`/`0`,
+  true/false, on/off, yes/no) still loads as Quality or Off.
+- Command-line switches: `--graphics`, `--ambient-occlusion`
 - More: docs/design/graphics-enhanced.md
 - Registered in `engine/nvforever/src/settings.rs`
 
@@ -1262,6 +1268,18 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
 
 - On the page: How far from you grass is drawn, as a part of the farthest grass distance and
   its fade range.
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `tree-distance`: Tree distance
+
+- On the page: How far from you trees beyond the loaded cells are drawn as flat pictures, at
+  most as far as distant land reaches. Farther runs slower.
+- In full: Shown as a distance in game units, in steps of 2,500 up to how far distant land
+  is drawn (125,000 units by default); billboards farther out would stand where no distant
+  land is drawn. It starts at 40,000 units, as before the row.
+- Command line: `--tree-distance` sets where the slider starts (40,000 units by default, at
+  most `--lod-distance`; 0 draws no distant trees whatever the slider); `--lod-distance` sets
+  the slider's end
 - Registered in `engine/nvforever/src/settings.rs`
 
 ## Graphics › World and Animation

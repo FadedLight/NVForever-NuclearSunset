@@ -362,6 +362,11 @@ fn note_armour(script: Option<&mut ScriptState>, target: FormId, d: &damage::Dam
     }
 }
 
+pub(crate) fn apply_critical_tweaks(rules: &mut Rules, tweaks: &fnv_game::tweaks::Tweaks) {
+    rules.crit_ignores_fire_rate = tweaks.crit_ignores_fire_rate;
+    rules.crit_damage_scale = tweaks.crit_damage_scale as f32;
+}
+
 /// The weapon damage penalty below 75 % condition: SetConditionDamagePenalty's, else
 /// 0.67 (`fnv_game::Game::condition_damage_penalty`).
 fn sync_condition_penalty(c: &mut Combat, script: Option<&ScriptState>) {
@@ -370,8 +375,7 @@ fn sync_condition_penalty(c: &mut Combat, script: Option<&ScriptState>) {
         // The player's tweaks on the damage rules [design: docs/design/tweaks.md].
         c.rules.condition_damage_penalty = if t.no_condition_damage_penalty { 0.0 } else { rt.game.condition_damage_penalty() };
         c.rules.condition_damage_threshold = if t.no_condition_damage_buffer { 1.0 } else { fnv_combat::damage::CONDITION_DAMAGE_THRESHOLD };
-        c.rules.crit_ignores_fire_rate = t.crit_ignores_fire_rate;
-        c.rules.crit_damage_scale = t.crit_damage_scale as f32;
+        apply_critical_tweaks(&mut c.rules, t);
         // The Explosion Radius Buff: the inner 30% at full damage, 20% at the edge (the
         // tweak's own numbers as its description gives them).
         c.tuning.explosion_inner = if t.explosion_radius_buff { 0.3 } else { 0.0 };

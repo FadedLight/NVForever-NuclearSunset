@@ -241,7 +241,7 @@ fn choose(developer_data: bool, handoff: bool) -> Option<Active> {
         eprintln!("reports: the player chose {}", if yes { "to send reports" } else { "not to send reports" });
     }
     if r.send != Some(true) {
-        eprintln!("reports: off (the player's choice; Settings > Gameplay > Reports)");
+        eprintln!("reports: off (the player's choice; Settings > Gameplay > Bug Reports)");
         return None;
     }
     let (Some(install_id), Some(delete_token)) = (r.install_id, r.delete_token) else {
@@ -299,7 +299,7 @@ const ASK_TITLE: &str = "Help fix NVForever?";
 const ASK_TEXT: &str = "NVForever can send a report after each session: the build, your PC's hardware and settings, \
     your mod list, how the game ran, the game's log and any problems it noticed. No personal details and no saves.\n\n\
     The reports are kept private and used only to find and fix bugs. You can change this at any time in \
-    Settings > Gameplay > Reports.\n\nWhat is sent: https://github.com/LootJunkieAzza/NVForever/blob/main/docs/design/player-reports.md";
+    Settings > Gameplay > Bug Reports.\n\nWhat is sent: https://github.com/LootJunkieAzza/NVForever/blob/main/docs/design/player-reports.md";
 
 /// The popup; true: Send reports. Closing it or Esc is Not now.
 #[cfg(windows)]

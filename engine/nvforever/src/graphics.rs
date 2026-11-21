@@ -64,7 +64,7 @@
 
 use crate::fly::FlyCam;
 use crate::sky::{SkyState, Sun};
-use crate::ssao::AmbientOcclusion;
+use crate::ssao::{AmbientOcclusion, AoLevel};
 use bevy::light::{CascadeShadowConfig, DirectionalLightShadowMap, ShadowFilteringMethod};
 use crate::post::PostEffects;
 use crate::shafts::LightShafts;
@@ -160,6 +160,9 @@ pub enum ScreenAa {
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Graphics {
     pub ambient_occlusion: bool,
+    /// Its level while it is on (the Ambient occlusion row's Performance or Quality,
+    /// `--ambient-occlusion`; ssao.rs `AoLevel`): Quality in every preset.
+    pub ambient_occlusion_level: AoLevel,
     pub fine_shadows: bool,
     pub bloom: bool,
     /// Light glow from the image space's HDR values (on in vanilla; see the module notes).
@@ -254,6 +257,7 @@ impl Graphics {
         let on = p == Preset::Enhanced;
         Graphics {
             ambient_occlusion: on,
+            ambient_occlusion_level: AoLevel::Quality,
             fine_shadows: on,
             bloom: on,
             glow: true,
@@ -922,7 +926,7 @@ fn apply(
     for (cam, cam_msaa, ..) in &cams {
         let mut e = commands.entity(cam);
         if g.ambient_occlusion {
-            e.insert(AmbientOcclusion::default());
+            e.insert(AmbientOcclusion::at(g.ambient_occlusion_level));
         } else {
             e.remove::<AmbientOcclusion>();
         }

@@ -1032,6 +1032,10 @@ missing; the pieces, largest first:
 - **Ambient occlusion, 0.6 ms**, 0.3 of it reading the multisampled depth; a depth resolved
   once to one sample would serve it, soft intersections and the water, and replace the
   0.23 ms copy of the multisampled depth. That changes Bevy's prepass textures.
+  2026-11-19 (graphics-enhanced.md §3.1.2): the occlusion's passes now read a depth it resolves
+  once itself (sample 0, bit for bit; `NVF_AO_RESOLVE_DEPTH=0` for the old way), not yet
+  measured. The copy stays: it is in `bevy_core_pipeline` (not vendored), and the water's edge
+  test reads every sample of it.
 - **The main thread** is at 5.4 ms outdoors once the GPU is out of the way.
 - **About 1 ms of GPU time a frame is in no encoder** (a `profile` run held by the GPU, 8x
   multisampling: the frame 9.81 ms, the encoders 8.80 ms; the same gap at 4x and with

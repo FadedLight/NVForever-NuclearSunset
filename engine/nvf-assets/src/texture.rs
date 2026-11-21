@@ -1,5 +1,6 @@
-//! DDS → GPU textures. BC1/BC2/BC3 retain their mip chains; BC5 data and
-//! explicitly requested normal maps have separate interpretations (dds-bc5.md).
+//! DDS → GPU textures. BC1/BC2/BC3 and BC7 retain their mip chains; BC5 data and
+//! explicitly requested normal maps have separate interpretations (dds-bc5.md); BC4 is
+//! linear data only (dds.md §6).
 
 mod filtering;
 
@@ -242,9 +243,13 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
     }
     let (w, h) = (dds.header.width, dds.header.height);
     let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][..] };
+    // The GPU takes block formats only when the top level's sides are multiples of 4.
+    let aligned = w % 4 == 0 && h % 4 == 0;
+    // The colour space follows the role, never a DX10 header's `_SRGB` code (#2981,
+    // dds.md §6): legacy files state none, and the hint is only reported.
     let (format, data) = match dds.format {
         Format::Dxt1 | Format::Dxt3 | Format::Dxt5 => {
-            if !bc_supported || w % 4 != 0 || h % 4 != 0 {
+            if !bc_supported || !aligned {
                 // Reuse the bounded DDS decoder when BC sampling is unavailable, or
                 // dimensions cannot use a block texture (dds.md §3, #2164). Keep all
                 // parsed mip levels and the caller's diffuse/linear colour intent.
@@ -253,27 +258,57 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
                     let (lw, lh) = dds.header.level_dims(m as u32);
                     out.extend(fnv_dds::decode_blocks(dds.format, lw, lh, l).ok_or("block data too short")?);
                 }
-                let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
-                let mut img = checked_image(w, h, levels.len() as u32, format, out)?;
-                img.sampler = sampler();
-                return Ok(img.into());
+                (if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm }, out)
+            } else {
+                let f = match (dds.format, srgb) {
+                    (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
+                    (Format::Dxt1, false) => TextureFormat::Bc1RgbaUnorm,
+                    (Format::Dxt3, true) => TextureFormat::Bc2RgbaUnormSrgb,
+                    (Format::Dxt3, false) => TextureFormat::Bc2RgbaUnorm,
+                    (_, true) => TextureFormat::Bc3RgbaUnormSrgb,
+                    (_, false) => TextureFormat::Bc3RgbaUnorm,
+                };
+                (f, levels.concat())
             }
-            let f = match (dds.format, srgb) {
-                (Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
-                (Format::Dxt1, false) => TextureFormat::Bc1RgbaUnorm,
-                (Format::Dxt3, true) => TextureFormat::Bc2RgbaUnormSrgb,
-                (Format::Dxt3, false) => TextureFormat::Bc2RgbaUnorm,
-                (_, true) => TextureFormat::Bc3RgbaUnormSrgb,
-                (_, false) => TextureFormat::Bc3RgbaUnorm,
-            };
-            (f, levels.concat())
+        }
+        // BC7 has no CPU decoder in the tree: it goes to the GPU as it is or not at all.
+        Format::Bc7 => {
+            if !aligned {
+                return Err(format!("BC7 needs sides that are multiples of 4 ({w}x{h}); it is not decoded on the CPU"));
+            }
+            if !bc_supported {
+                return Err("GPU lacks BC texture support (BC7 is not decoded on the CPU)".into());
+            }
+            (if srgb { TextureFormat::Bc7RgbaUnormSrgb } else { TextureFormat::Bc7RgbaUnorm }, levels.concat())
+        }
+        // One channel: linear data only (a height or a mask), never a colour or a normal.
+        Format::Bc4U | Format::Bc4S => {
+            if usage != TextureUsage::Linear {
+                return Err(format!("BC4 has one channel and no {} layout; request linear data", if srgb { "sRGB color" } else { "normal-map" }));
+            }
+            let signed = dds.format == Format::Bc4S;
+            if bc_supported && aligned {
+                (if signed { TextureFormat::Bc4RSnorm } else { TextureFormat::Bc4RUnorm }, levels.concat())
+            } else {
+                let mut out = Vec::new();
+                for (m, level) in levels.iter().enumerate() {
+                    let (lw, lh) = dds.header.level_dims(m as u32);
+                    let values = fnv_dds::decode_bc4(dds.format, lw, lh, level).ok_or("invalid BC4 block data")?;
+                    if signed {
+                        out.extend(values.into_iter().map(|v| (v * 127.0).round() as i8 as u8));
+                    } else {
+                        out.extend(values.into_iter().map(|v| (v * 255.0).round() as u8));
+                    }
+                }
+                (if signed { TextureFormat::R8Snorm } else { TextureFormat::R8Unorm }, out)
+            }
         }
         Format::Bc5U | Format::Bc5S => {
             if srgb {
                 return Err("BC5 has no sRGB color layout; request linear data or a normal map".into());
             }
             let signed = dds.format == Format::Bc5S;
-            if usage != TextureUsage::Normal && bc_supported && w % 4 == 0 && h % 4 == 0 {
+            if usage != TextureUsage::Normal && bc_supported && aligned {
                 (if signed { TextureFormat::Bc5RgSnorm } else { TextureFormat::Bc5RgUnorm }, levels.concat())
             } else {
                 let mut out = Vec::new();
@@ -309,7 +344,16 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
     };
     let mut img = checked_image(w, h, levels.len() as u32, format, data)?;
     img.sampler = sampler();
-    let lacks_alpha = matches!(dds.format, Format::Bc5U | Format::Bc5S) || crate::nif_spawn::format_lacks_alpha(format);
+    // No specular mask in the alpha: a format without alpha (BC4 and BC5 also when
+    // expanded or decoded on the CPU) or a DX10 header stating every alpha opaque. Every
+    // successful path, the CPU-decoded DXT one included, ends here. A DX10 BC1 keeps its
+    // source's classification when decoded to RGBA8 off the block grid, as it has when
+    // uploaded as blocks; a legacy odd-sized DXT1 keeps main's classification (alpha
+    // read as a mask) unchanged.
+    let lacks_alpha = dds.alpha_opaque()
+        || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
+        || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
+        || crate::nif_spawn::format_lacks_alpha(format);
     Ok(DecodedTexture { image: img, lacks_alpha })
 }
 
@@ -673,7 +717,9 @@ pub fn alpha_shares(bytes: &[u8]) -> Option<AlphaShares> {
                 add(p[3]);
             }
         }
-        Format::R8G8B8 | Format::X8R8G8B8 | Format::X8B8G8R8 | Format::R5G6B5 | Format::X1R5G5B5 | Format::L8 | Format::Bc5U | Format::Bc5S => return None,
+        // No alpha, or (BC7) no CPU decoder: no alpha information.
+        Format::R8G8B8 | Format::X8R8G8B8 | Format::X8B8G8R8 | Format::R5G6B5 | Format::X1R5G5B5 | Format::L8
+        | Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S | Format::Bc7 => return None,
     }
     let n = counts.iter().sum::<usize>().max(1) as f32;
     Some(AlphaShares { clear: counts[0] as f32 / n, opaque: counts[1] as f32 / n, partial: counts[2] as f32 / n })
@@ -695,6 +741,14 @@ pub fn alpha_map(bytes: &[u8]) -> Option<AlphaMap> {
     let (width, height) = (dds.header.width as usize, dds.header.height as usize);
     if width == 0 || height == 0 {
         return None;
+    }
+    // Formats without alpha information are refused before the map is allocated.
+    match dds.format {
+        Format::Dxt1 | Format::Dxt3 | Format::Dxt5
+        | Format::A8R8G8B8 | Format::A4R4G4B4 | Format::A8B8G8R8 | Format::A1R5G5B5 | Format::A8L8 => {}
+        // No alpha, or (BC7) no CPU decoder.
+        Format::R8G8B8 | Format::X8R8G8B8 | Format::X8B8G8R8 | Format::R5G6B5 | Format::X1R5G5B5 | Format::L8
+        | Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S | Format::Bc7 => return None,
     }
     let mut alpha = vec![0u8; width * height];
     match dds.format {
@@ -718,7 +772,7 @@ pub fn alpha_map(bytes: &[u8]) -> Option<AlphaMap> {
                 *a = p[3];
             }
         }
-        Format::R8G8B8 | Format::X8R8G8B8 | Format::X8B8G8R8 | Format::R5G6B5 | Format::X1R5G5B5 | Format::L8 | Format::Bc5U | Format::Bc5S => return None,
+        _ => return None,
     }
     Some(AlphaMap { width, height, alpha })
 }
@@ -1429,5 +1483,211 @@ pub(crate) mod bc5_tests {
         assert_eq!(cache.release(&mut idle, &hints, 2.0, keep), 1);
         assert!(cache.is_empty());
         assert!(cache.snapshot(&images).is_empty());
+    }
+}
+
+/// DX10 files, BC7 and BC4 per role (#2981 stage 1). Every file is generated here.
+#[cfg(test)]
+mod dx10_tests {
+    use super::*;
+
+    /// A DX10 DDS file: the header with FourCC `DX10`, the extension (DXGI code, 2D, an
+    /// array of one, `misc` and `flags2` as given), then `payload`.
+    fn dx10(dxgi: u32, misc: u32, flags2: u32, w: u32, h: u32, mips: u32, payload: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0; 128];
+        bytes[..4].copy_from_slice(b"DDS ");
+        for (offset, value) in [(4, 124), (8, 0x21007), (12, h), (16, w), (28, mips), (76, 32), (80, 4), (108, 0x1000)] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[84..88].copy_from_slice(b"DX10");
+        for value in [dxgi, 3, misc, 1, flags2] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(payload);
+        bytes
+    }
+
+    const OPAQUE: u32 = 3;
+    const ROLES: [TextureUsage; 3] = [TextureUsage::Color, TextureUsage::Linear, TextureUsage::Normal];
+
+    #[test]
+    fn bc7_takes_its_colour_space_from_the_role_not_the_code() {
+        let block: Vec<u8> = (0..16).collect();
+        for code in [98, 99] {
+            let bytes = dx10(code, 0, 0, 4, 4, 1, &block);
+            for (usage, format) in ROLES.into_iter().zip([TextureFormat::Bc7RgbaUnormSrgb, TextureFormat::Bc7RgbaUnorm, TextureFormat::Bc7RgbaUnorm]) {
+                let t = dds_texture(&bytes, usage, true, false).unwrap();
+                assert_eq!(t.image.texture_descriptor.format, format, "dxgi {code} {usage:?}");
+                assert_eq!(t.image.data.as_deref(), Some(block.as_slice()));
+                assert!(!t.lacks_alpha, "no alpha mode stated: the alpha may be a mask");
+            }
+            // An OPAQUE alpha mode says the alpha holds no mask, whatever the role.
+            let opaque = dx10(code, 0, OPAQUE, 4, 4, 1, &block);
+            for usage in ROLES {
+                assert!(dds_texture(&opaque, usage, true, false).unwrap().lacks_alpha);
+            }
+        }
+        assert_eq!(dds_image(&dx10(99, 0, 0, 4, 4, 1, &block), false, true).unwrap().texture_descriptor.format, TextureFormat::Bc7RgbaUnorm);
+    }
+
+    #[test]
+    fn bc7_off_the_block_grid_or_without_bc_support_is_refused() {
+        // 6×5: 2×2 blocks.
+        let odd = dx10(98, 0, 0, 6, 5, 1, &[0; 64]);
+        for usage in ROLES {
+            let e = dds_texture(&odd, usage, true, false).err().unwrap();
+            assert!(e.contains("multiples of 4") && e.contains("6x5"), "{e}");
+        }
+        assert!(dds_image_top(&odd, true, true).unwrap_err().contains("multiples of 4"));
+        let even = dx10(99, 0, 0, 8, 8, 1, &[0; 64]);
+        for usage in ROLES {
+            assert!(dds_texture(&even, usage, false, false).err().unwrap().contains("BC texture support"));
+        }
+    }
+
+    /// Full chains down to 1×1 upload with whole blocks per level; a chain longer than the
+    /// size allows parses (fnv-dds takes up to 32 levels) and is refused at upload.
+    #[test]
+    fn bc7_and_bc4_full_chains_upload_with_exact_lengths() {
+        let total: usize = (0..13).map(|i| (4096usize >> i).max(1).div_ceil(4).pow(2) * 16).sum();
+        let big = dx10(99, 0, 0, 4096, 4096, 13, &vec![0; total]);
+        let img = dds_image(&big, true, true).unwrap();
+        assert_eq!((img.width(), img.texture_descriptor.mip_level_count, img.data.as_ref().unwrap().len()), (4096, 13, total));
+        let too_long = dx10(99, 0, 0, 4096, 4096, 14, &vec![0; total + 16]);
+        assert!(Dds::parse(&too_long).is_ok());
+        assert!(dds_image(&too_long, true, true).unwrap_err().contains("14 mip levels"));
+        let small = dx10(98, 0, 0, 8, 4, 4, &[0; 80]);
+        let img = dds_image(&small, false, true).unwrap();
+        assert_eq!((img.texture_descriptor.mip_level_count, img.data.as_ref().unwrap().len()), (4, 80));
+        assert_eq!(dds_image_top(&small, false, true).unwrap().data.as_ref().unwrap().len(), 32);
+        // 5×3 BC4, 3 levels (5×3, 2×1, 1×1), off the grid: decoded to R8, one byte a texel.
+        let bc4 = dx10(80, 0, 0, 5, 3, 3, &[0; 32]);
+        let img = dds_image(&bc4, false, true).unwrap();
+        assert_eq!(img.texture_descriptor.format, TextureFormat::R8Unorm);
+        assert_eq!((img.texture_descriptor.mip_level_count, img.data.as_ref().unwrap().len()), (3, 15 + 2 + 1));
+    }
+
+    #[test]
+    fn bc4_is_linear_data_native_or_decoded_to_r8() {
+        // Unsigned: endpoints 255/0, indices 0..7 twice; signed: 127/-127.
+        let unsigned = [255u8, 0, 0x88, 0xc6, 0xfa, 0x88, 0xc6, 0xfa];
+        let signed = [127u8, 129, 0x88, 0xc6, 0xfa, 0x88, 0xc6, 0xfa];
+        for (code, block, native, fallback) in [
+            (80, unsigned, TextureFormat::Bc4RUnorm, TextureFormat::R8Unorm),
+            (81, signed, TextureFormat::Bc4RSnorm, TextureFormat::R8Snorm),
+        ] {
+            let bytes = dx10(code, 0, 0, 4, 4, 1, &block);
+            let t = dds_texture(&bytes, TextureUsage::Linear, true, false).unwrap();
+            assert_eq!(t.image.texture_descriptor.format, native);
+            assert_eq!(t.image.data.as_deref(), Some(block.as_slice()));
+            assert!(t.lacks_alpha);
+            let t = dds_texture(&bytes, TextureUsage::Linear, false, false).unwrap();
+            assert_eq!(t.image.texture_descriptor.format, fallback);
+            assert_eq!(t.image.data.as_ref().unwrap().len(), 16);
+            assert!(t.lacks_alpha);
+            for usage in [TextureUsage::Color, TextureUsage::Normal] {
+                for bc in [true, false] {
+                    assert!(dds_texture(&bytes, usage, bc, false).err().unwrap().contains("BC4"), "{usage:?}");
+                }
+            }
+            assert!(alpha_shares(&bytes).is_none());
+            assert!(alpha_map(&bytes).is_none());
+        }
+        // The R8 bytes: 255, 0, then 6/7 … 1/7 of 255, rounded.
+        let decoded = dds_image(&dx10(80, 0, 0, 4, 4, 1, &unsigned), false, false).unwrap();
+        assert_eq!(&decoded.data.as_ref().unwrap()[..8], &[255, 0, 219, 182, 146, 109, 73, 36]);
+        let decoded = dds_image(&dx10(81, 0, 0, 4, 4, 1, &signed), false, false).unwrap();
+        assert_eq!(&decoded.data.as_ref().unwrap()[..8], &[127, 129, 91, 54, 18, 238, 202, 165]);
+        // The legacy BC4U FourCC reads the same.
+        let legacy = bc5_tests::dds(b"BC4U", 4, 4, 1, &unsigned);
+        assert_eq!(dds_image(&legacy, false, true).unwrap().texture_descriptor.format, TextureFormat::Bc4RUnorm);
+        for format in [TextureFormat::Bc4RUnorm, TextureFormat::Bc4RSnorm, TextureFormat::R8Unorm, TextureFormat::R8Snorm] {
+            assert!(crate::nif_spawn::format_lacks_alpha(format));
+        }
+        for format in [TextureFormat::Bc7RgbaUnorm, TextureFormat::Bc7RgbaUnormSrgb] {
+            assert!(!crate::nif_spawn::format_lacks_alpha(format));
+        }
+    }
+
+    /// The OPAQUE alpha mode survives every path, the early CPU decode of a DXT texture
+    /// off the block grid included.
+    #[test]
+    fn opaque_alpha_mode_holds_on_every_path() {
+        let odd_payload: Vec<u8> = (0..4).flat_map(|_| { let mut b = [0u8; 16]; b[0] = 255; b[1] = 255; b }).collect();
+        for (flags2, opaque) in [(0, false), (1, false), (OPAQUE, true)] {
+            // 6×5 BC3 through DX10: decoded to RGBA8 here.
+            let odd = dx10(77, 0, flags2, 6, 5, 1, &odd_payload);
+            for usage in ROLES {
+                let t = dds_texture(&odd, usage, true, false).unwrap();
+                assert!(matches!(t.image.texture_descriptor.format, TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb));
+                assert_eq!(t.lacks_alpha, opaque, "{usage:?} miscFlags2 {flags2}");
+            }
+            // 4×4 BC3 uploaded as blocks, and 1×1 B8G8R8A8 converted to RGBA8.
+            let aligned = dx10(78, 0, flags2, 4, 4, 1, &odd_payload[..16]);
+            assert_eq!(dds_texture(&aligned, TextureUsage::Normal, true, false).unwrap().lacks_alpha, opaque);
+            let bgra = dx10(87, 0, flags2, 1, 1, 1, &[1, 2, 3, 4]);
+            let t = dds_texture(&bgra, TextureUsage::Color, true, false).unwrap();
+            assert_eq!(t.image.data.as_deref(), Some([3u8, 2, 1, 4].as_slice()));
+            assert_eq!(t.lacks_alpha, opaque);
+        }
+        // DX10 BC1 lacks alpha by its format, as legacy DXT1 does.
+        assert!(dds_texture(&dx10(71, 0, 0, 4, 4, 1, &[0; 8]), TextureUsage::Normal, true, false).unwrap().lacks_alpha);
+    }
+
+    /// An odd-sized BC1 normal map decoded to RGBA8: through a DX10 header it keeps BC1's
+    /// "no alpha mask", as the same file on the block grid has. The legacy DXT1 beside it
+    /// keeps main's classification (its alpha read as a mask) on purpose; the difference
+    /// is pinned here.
+    #[test]
+    fn odd_sized_dx10_bc1_normal_keeps_no_mask_unlike_its_legacy_counterpart() {
+        // 6×5 = 2×2 blocks of 8 bytes, colour 0 white above colour 1: opaque texels.
+        let blocks: Vec<u8> = (0..4).flat_map(|_| [0xFF, 0xFF, 0, 0, 0, 0, 0, 0]).collect();
+        let dx10_odd = dds_texture(&dx10(71, 0, 0, 6, 5, 1, &blocks), TextureUsage::Normal, true, false).unwrap();
+        let legacy_odd = dds_texture(&bc5_tests::dds(b"DXT1", 6, 5, 1, &blocks), TextureUsage::Normal, true, false).unwrap();
+        assert_eq!(dx10_odd.image.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(legacy_odd.image.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(dx10_odd.image.data, legacy_odd.image.data);
+        assert!(dx10_odd.lacks_alpha, "DX10 BC1 carries its source classification through the expansion");
+        assert!(!legacy_odd.lacks_alpha, "legacy odd-sized DXT1: unchanged from main");
+        // On the block grid both are BC1 blocks without a mask.
+        let dx10_even = dds_texture(&dx10(71, 0, 0, 8, 8, 1, &blocks), TextureUsage::Normal, true, false).unwrap();
+        let legacy_even = dds_texture(&bc5_tests::dds(b"DXT1", 8, 8, 1, &blocks), TextureUsage::Normal, true, false).unwrap();
+        assert!(dx10_even.lacks_alpha && legacy_even.lacks_alpha);
+    }
+
+    #[test]
+    fn dx10_cube_maps_and_unknown_codes_are_refused() {
+        assert!(dds_image(&dx10(98, 0x4, 0, 4, 4, 1, &[0; 96]), true, true).unwrap_err().contains("cube"));
+        assert!(dds_image(&dx10(95, 0, 0, 4, 4, 1, &[0; 16]), true, true).unwrap_err().contains("dxgi=95"));
+        // The alpha readers report no alpha information for BC7 (no CPU decoder).
+        let bc7 = dx10(98, 0, 0, 8, 8, 1, &[0; 64]);
+        assert!(alpha_shares(&bc7).is_none());
+        assert!(alpha_map(&bc7).is_none());
+        // A DX10 BC3 is read by both like a legacy DXT5.
+        let mut blocks = Vec::new();
+        for a in [0u8, 255, 255, 255] {
+            let mut b = [0u8; 16]; b[0] = a; b[1] = a;
+            blocks.extend_from_slice(&b);
+        }
+        let bc3 = dx10(77, 0, 0, 8, 8, 1, &blocks);
+        assert_eq!(alpha_shares(&bc3).unwrap(), AlphaShares { clear: 0.25, opaque: 0.75, partial: 0.0 });
+        assert_eq!(alpha_map(&bc3).unwrap().alpha[0], 0);
+    }
+
+    #[test]
+    fn roles_of_one_dx10_file_keep_their_own_handles_and_a_refusal_poisons_none() {
+        let workers = WorkerTextures::default();
+        let images = Assets::<Image>::default().get_handle_provider();
+        let bc7 = dx10(99, 0, 0, 4, 4, 1, &[0; 16]);
+        let load = |usage| workers.load_once(("textures\\pbr\\a.dds".into(), usage), &images, |_| dds_texture(&bc7, usage, true, false));
+        let (color, linear, normal) = (load(TextureUsage::Color).unwrap(), load(TextureUsage::Linear).unwrap(), load(TextureUsage::Normal).unwrap());
+        assert_eq!((color.1, linear.1, normal.1), (TextureFormat::Bc7RgbaUnormSrgb, TextureFormat::Bc7RgbaUnorm, TextureFormat::Bc7RgbaUnorm));
+        assert!(color.0 != linear.0 && linear.0 != normal.0 && color.0 != normal.0);
+        let bc4 = dx10(80, 0, 0, 4, 4, 1, &[0; 8]);
+        let load4 = |usage| workers.load_once(("textures\\pbr\\a_p.dds".into(), usage), &images, |_| dds_texture(&bc4, usage, true, false));
+        assert!(load4(TextureUsage::Color).is_none());
+        let height = load4(TextureUsage::Linear).unwrap();
+        assert_eq!(height.1, TextureFormat::Bc4RUnorm);
+        assert!(height.2);
     }
 }

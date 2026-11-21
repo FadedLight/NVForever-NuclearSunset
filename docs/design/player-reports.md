@@ -73,7 +73,7 @@ menu, on a player's start only (not with `--data`, `NVFOREVER_DATA`, a test aid 
 > NVForever can send a report after each session: the build, your PC's hardware and
 > settings, your mod list, how it ran, the game's log and any problems it noticed.
 > No personal details, no saves.
-> You can change this at any time in Settings → Gameplay → Reports.
+> You can change this at any time in Settings → Gameplay → Bug Reports.
 >
 > [ Send reports ]  [ Not now ]   *What is sent?* (opens §3 in the browser)
 
@@ -96,7 +96,8 @@ Endpoint=           ; empty = the project's server; set for a self-hosted one
 
 - `InstallId` is random, made at opt-in, not derived from hardware or account. Turning
   reports off and on again makes a new one (the old one is unlinked).
-- Settings → Gameplay → Reports (`engine/nvf-play/src/settings_layout.rs`): a toggle
+- Settings → Gameplay → Bug Reports (`crates/nvf-settings-layout/src/lib.rs` `SECTIONS`;
+  the launcher shows the same rows): a toggle
   (Send reports) and "Delete my reports" (§6); "Open reports folder" and the last sent
   time are designed but not built. The hand report (§3.3) is opened from the
   pause menu's "Report a bug", not from Settings.

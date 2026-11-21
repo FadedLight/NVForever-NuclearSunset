@@ -322,8 +322,12 @@ outlines; the main session's `view-lighting` pictures at the Goodsprings bushes:
 at plant outlines].
 
 **Who reads it.** By bevy_pbr's rule, the pipelines that write depth (Bevy's own SSAO rule):
-NIF objects opaque and alpha-tested, the terrain, grass, trees, the first-person arms, skinned
-actors. Opted in: the landscape's blended texture layers (they lie on the prepass's surface;
+NIF objects opaque and alpha-tested, the terrain, grass, trees, skinned actors. The
+first-person shapes (the arms, the weapon, the Pip-Boy: `FIRST_PERSON_DEPTH`) take a factor of
+1 on the ambient and the lamps, so only the world is occluded [design, #3075: "exclude them
+from the calculation so only the environment would be affected"]; their glow in the lamps'
+colour with lamp shadows on was the shade light's relight (vendored bevy_pbr "no directional
+shadows", engine/vendor/README.md). Opted in: the landscape's blended texture layers (they lie on the prepass's surface;
 `nvf_assets` `NifSurfaceKey::terrain_layer`). Opted out: water and refracting NIF shapes (in no
 prepass, the texels under them are the bed's or the wall's behind). Grass and leaf cards read
 it unless their constants say otherwise (`grass.rs` `GRASS_READS_AMBIENT_OCCLUSION`, `tree.rs`
@@ -404,11 +408,77 @@ Mitchell's house at 2560x1440: 0.34 / 0.46, 0.45 / 0.40, 0.41 / 0.48; Goodspring
 2560x1440: 0.10 / 0.52, 0.20 / 0.52, 0.08 / 0.51-0.54. The main pass reads four texels per shaded fragment (the lamp factor
 is formed from the ambient's read). Not measured: a slower GPU.
 
-**Not measured yet:** the shimmer with the view moving; the Freeside alley and the gas station exterior pictures #2897 asks for.
+**Multi-bounce** (2026-11-18): the ambient's factor and the lamps' (those that cast no shadow
+here) take the paper's multi-bounce fit per colour channel from the surface's diffuse colour
+(ssao_lighting.wesl `nvf_ao_multibounce`, ssao_lighting.rs `MULTIBOUNCE`) [documented: Jimenez,
+Wu, Pesce, Jarabo, "Practical Real-Time Strategies for Accurate Indirect Occlusion", SIGGRAPH
+2016 course: the cubic fit of the visibility after several bounces against the one-bounce
+visibility, per albedo]: never below the plain factor, exactly 1 on open surfaces, a light
+surface's crease lifted more than a dark one's. Its effect on the game's dark textures is small
+[observed 2026-11-18, enhanced at 1600 x 900, multi-bounce on against
+`NVF_PLAY_DEBUG_AO_MULTIBOUNCE=0`: Doc Mitchell's house at 12:00, 0.03 % of the pixels lighter
+by more than 2 levels of 255; the Goodsprings street at 12:30, 0.4 % lighter and 0.46 % darker,
+the swaying plants' and actors' level of change; the house's factor is below 0.9 on 6.2 % of
+the pixels and below 0.7 on 2 %, its edges and corners]. Kept on: it only lifts.
 
-**Not done:** the paper's multi-bounce fit (the lighting has the surface colour now; a later
-step), a bent normal (the ambient is a flat colour with no direction), occlusion on decals and
-blended shapes (not in the prepass), on lamps that cast a shadow and on highlights.
+**Shimmer** [observed 2026-11-18, the Goodsprings street at 12:30, standing still, enhanced,
+four pictures 0.05 s apart, pixels changing by more than 8 levels between consecutive pictures]:
+the factor alone (`NVF_PLAY_DEBUG_AO=view-lighting`) 1.65 % with 4x MSAA and 1.70 % with DLSS
+Quality (the camera jittering), the lit picture 1.33 % and 0.84 %; by more than 24 levels
+0.00-0.04 %. The same with and without the jitter: the change is the plants' sway, not the
+occlusion's. Not measured yet: the view moving; the Freeside alley and the gas station
+exterior pictures #2897 asks for.
+
+**Off, Performance, Quality** (2026-11-19, [design, #3075]: AO's row to match Sun shadows' and
+Lamp shadows'). The row `ambient-occlusion` is a list: Off; Quality, the estimate above
+unchanged (2 slices x 4 steps a side, half resolution, the depth-aware denoise, `thin+soft`,
+strength 0.8, multi-bounce, first-person shapes excluded: the uniform is the same value for
+value); Performance, the same pass with one slice direction a pixel (`ssao.rs`
+`PERFORMANCE_SLICES`, through the uniform's slice count, the one the aid's `slices3` uses; the
+aid's own count still wins). The `enhanced` preset is Quality; `--ambient-occlusion[=performance|
+quality]` turns it on at a level whatever the look; an INI written while the row was a switch
+(`1`/`0`, true/false, on/off, yes/no) loads as Quality or Off, and the launcher shows that value
+as the list's (`catalog::list_value`). The start's line ends with the level (`, level
+Performance`), and is said again when the level changes.
+
+Reads a half-resolution texel in the lighting placement, without multisampling (as with
+DLSS) [engineering count from `ssao.wesl`, not a measurement]:
+
+| | Quality | Performance |
+|---|---|---|
+| `occlusion`: the pixel's depth, the normal's 4 neighbours | 5 | 5 |
+| `occlusion`: the horizon march, slices x steps x 2 sides (scattered, up to 80 px away) | 16 | 8 |
+| `denoise`: the pixel's depth, the gradient's 4 neighbours | 5 | 5 |
+| `denoise`: the 4 x 4 occlusion texels (`Rg16Float`) | 16 | 16 |
+| all | 42 | 34 |
+
+The march is the costly part (its reads miss the cache, and each slice adds two `acos`, an
+`atan2` and the arc integral), so Performance takes about half the occlusion pass and none of
+the denoise, whose 4 x 4 texels the one slice's sixteen turns need to cancel (a 2 x 2 denoise
+would show the pattern; the turns are fixed per pixel, not jittered, so DLSS would not average
+them). Steps stay at 4: the contact shadows come from the near steps. Not measured yet: the
+cost and the pictures (the main session's in-game run).
+
+**The depth resolved once under multisampling** (2026-11-19; frame-rate-audit §9 "What is
+left": 0.3 of the pass's 0.6 ms at 1440p 4x was reading the multisampled depth). With a
+multisampled prepass, `ssao.rs` `resolve_depth` first writes sample 0 (the sample every pass
+read; with the aid's `nearest`, the nearest sample) into a single-sampled `Depth32Float`
+texture at the prepass's size (`ssao.wesl` `resolve_depth`, a depth-writing fullscreen pass),
+and the occlusion, denoise and picture passes read that with their single-sampled pipelines:
+one coherent read a pixel instead of 26 reads a half-resolution texel from the multisampled
+texture. The values are the same bit for bit, so the picture is too. Inside the
+`nvf_ambient_occlusion` GPU span; `NVF_AO_RESOLVE_DEPTH=0` reads the multisampled depth as
+before, for the comparison. The start says `ambient occlusion: the multisampled depth resolved
+once to one sample for the passes`. Without multisampling (DLSS, FSR, TAA) nothing changes.
+Not done: replacing Bevy's 0.23 ms copy of the multisampled depth (frame-rate-audit §9) with
+this resolve. That copy is in `bevy_core_pipeline` (`prepass/node.rs`, not vendored), and the
+copy it makes is read per sample by the water's edge test (`water.wesl`, every sample against
+the fragment) and bound as a multisampled texture in every material's view bindings (bevy_pbr
+`mesh_view_bindings`), so it cannot become a single sample without changing those readers.
+
+**Not done:** a bent normal (the ambient is a flat colour with no direction), occlusion on
+decals and blended shapes (not in the prepass), on lamps that cast a shadow and on highlights
+(no environment reflections exist yet for a specular occlusion to act on, §3 gaps).
 
 ### 3.2 Longer sun shadows (`fine-shadows`)
 
@@ -653,6 +723,22 @@ past that the reflection is sunlit. The submerged pass is ordered after ambient
 occlusion and before temporal anti-aliasing: each of the three swaps the view's two
 pictures, and unordered they could record on two threads, one reading a stale picture
 for a frame [hypothesis for the flicker reported under water, from the code].
+
+[design] Under a temporal upscaler (FSR, DLSS) the submerged pass runs before it instead,
+as the ambient occlusion's picture placement does (§3.1): at the render size, from the
+depth prepass as the main pass drew it, and multiplied into the HDR picture the upscaler
+reads (and, under FSR, into FSR's opaque copy, so its reactive masks compare the two as
+before). The upscaler then accumulates the pattern with the bed it lights. After the
+upscaler the pattern would be added unsmoothed every frame, from a depth drawn jittered
+at the render size and expanded to the display size by nearest texels, and the pass would
+cost the display's pixels. The band limit stays the displayed pixel's, as the textures'
+mip bias keeps their detail at the display's. The gain then brightens the HDR light before
+tonemapping, so on a bright bed it shows a little less than when it multiplied the
+tonemapped picture [engineering choice; compared by eye with the old placement under
+FSR/DLSS at Boulder Beach in daylight, #3089: looks fine]. `NVF_CAUSTICS_BEFORE_UPSCALER=0`
+keeps the pass after tonemapping under an upscaler too (§6). The log says the placement
+once a view takes it ("underwater caustics: on the HDR picture at the render size, before
+the upscaler").
 
 [design] River currents animate the noise layers on selected exterior reaches: the
 Colorado below Hoover Dam through Cottonwood Cove, and the western channel in Zion
@@ -2392,6 +2478,11 @@ remedies for the plants' shimmer (unset: `thin+soft` in the lighting, none on th
 the grey replaces the HDR picture and still passes through the upscaler and tonemapping;
 `NVF_AO_BEFORE_FSR=0` shows it after tonemapping instead. Its pass's GPU time is the
 `nvf_ambient_occlusion` span of `--log-frame-times`.
+
+`NVF_CAUSTICS_BEFORE_UPSCALER=0` (read once at the start) draws the submerged caustics
+after tonemapping at the display size under a temporal upscaler, as builds before it moved
+did (§3.8.2), for before/after pictures; without an upscaler it changes nothing. The pass's
+GPU time is the `nvf_underwater_caustics` span in either placement.
 
 ## 7. Next candidates
 

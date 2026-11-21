@@ -128,6 +128,11 @@ people building the same thing:
    never sends to the project's server anyway: only builds from the release workflow do.
 4. **Open a pull request** against `main` and fill in the template. CI runs the build and
    tests on Linux. First-time contributors' CI runs wait for a maintainer's approval.
+   The template's **clean-room checklist is required**: a pull request is not merged until
+   all six items are in its description and ticked. Tick only what is true. Where a
+   constant or behaviour has no cited source or observation in the original game, tag it
+   `[hypothesis]` or `[design]` in the notes and list it in the description, as the
+   template says.
 
 ### What a good pull request looks like
 
@@ -156,8 +161,10 @@ and it is a good brief for any assistant.
 
 The settings page has one system for its rows (tabs, categories, lists for 7 or fewer
 values, greyed rows, Title Case on the page): `docs/design/settings-page.md` §0 says how to
-add or change one. A new row needs its place in `engine/nvf-play/src/settings_layout.rs`
-`SECTIONS`; the tests fail until it has one.
+add or change one. A new row needs its place in `crates/nvf-settings-layout/src/lib.rs`
+`SECTIONS` (shared with the launcher; the engine's `settings_layout.rs` re-exports it) and a
+line under the same tab and category in `docs/settings-reference.md`; the tests fail until it
+has one.
 
 ## Licence
 

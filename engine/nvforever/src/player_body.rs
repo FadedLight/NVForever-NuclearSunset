@@ -1429,7 +1429,7 @@ impl MotionTrace {
                 match std::fs::File::create(&path) {
                     Ok(f) => {
                         let mut w = std::io::BufWriter::new(f);
-                        let _ = std::io::Write::write_all(&mut w, b"t,dt,heading,pitch,eye_x,eye_y,eye_z,hand_x,hand_y,hand_z,hand_rx,hand_ry,hand_rz,sway_x,sway_y,sway_z,sway_yaw,sway_pitch,sway_roll,sights,aiming,falling,sneaking,speed,drawn,feet_z,airborne,lhand_x,lhand_y,lhand_z,lens\n");
+                        let _ = std::io::Write::write_all(&mut w, b"t,dt,heading,pitch,eye_x,eye_y,eye_z,hand_x,hand_y,hand_z,hand_rx,hand_ry,hand_rz,sway_x,sway_y,sway_z,sway_yaw,sway_pitch,sway_roll,sights,aiming,falling,sneaking,speed,drawn,feet_z,airborne,lhand_x,lhand_y,lhand_z,lens,rgrip_x,rgrip_y,rgrip_z,rgrip_turn,lgrip_x,lgrip_y,lgrip_z\n");
                         info!("motion trace: writing {path}");
                         self.file = Some(w);
                         self.layers = std::fs::File::create(format!("{path}.layers")).ok().map(std::io::BufWriter::new);
@@ -1442,17 +1442,18 @@ impl MotionTrace {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn write(&mut self, t: f64, dt: f32, player: &Player, eye: Option<Vec3>, hand: Option<(Vec3, Vec3)>, sway: SwayPose, flags: (f32, bool, bool, bool, f32, bool), airborne: f32, left: Option<Vec3>, lens: f32) {
+    fn write(&mut self, t: f64, dt: f32, player: &Player, eye: Option<Vec3>, hand: Option<(Vec3, Vec3)>, sway: SwayPose, flags: (f32, bool, bool, bool, f32, bool), airborne: f32, left: Option<Vec3>, lens: f32, grips: Option<(Vec3, f32, Vec3)>) {
         let Some(w) = self.file.as_mut() else { return };
         let e = eye.unwrap_or(Vec3::NAN);
         let (h, r) = hand.unwrap_or((Vec3::NAN, Vec3::NAN));
         let l = left.unwrap_or(Vec3::NAN);
+        let (rg, rt, lg) = grips.unwrap_or((Vec3::NAN, f32::NAN, Vec3::NAN));
         let (yaw, pitch, roll) = sway.rotation.to_euler(EulerRot::ZXY);
         let (sights, aiming, falling, sneaking, speed, drawn) = flags;
         let b = |v: bool| u8::from(v);
         let line = format!(
-            "{t:.5},{dt:.5},{:.5},{:.5},{:.3},{:.3},{:.3},{:.4},{:.4},{:.4},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},{yaw:.5},{pitch:.5},{roll:.5},{sights:.4},{},{},{},{speed:.1},{},{:.3},{airborne:.3},{:.4},{:.4},{:.4},{lens:.5}\n",
-            player.heading, player.pitch, e.x, e.y, e.z, h.x, h.y, h.z, r.x, r.y, r.z, sway.offset.x, sway.offset.y, sway.offset.z, b(aiming), b(falling), b(sneaking), b(drawn), player.feet[2], l.x, l.y, l.z
+            "{t:.5},{dt:.5},{:.5},{:.5},{:.3},{:.3},{:.3},{:.4},{:.4},{:.4},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},{yaw:.5},{pitch:.5},{roll:.5},{sights:.4},{},{},{},{speed:.1},{},{:.3},{airborne:.3},{:.4},{:.4},{:.4},{lens:.5},{:.3},{:.3},{:.3},{rt:.2},{:.3},{:.3},{:.3}\n",
+            player.heading, player.pitch, e.x, e.y, e.z, h.x, h.y, h.z, r.x, r.y, r.z, sway.offset.x, sway.offset.y, sway.offset.z, b(aiming), b(falling), b(sneaking), b(drawn), player.feet[2], l.x, l.y, l.z, rg.x, rg.y, rg.z, lg.x, lg.y, lg.z
         );
         let _ = std::io::Write::write_all(w, line.as_bytes());
     }
@@ -3934,7 +3935,15 @@ fn drive_body(
             let turn = rot(c).inverse() * rot(h);
             Some((Vec3::from(h.translation) - Vec3::from(c.translation), turn.to_scaled_axis()))
         });
-        trace.write(time.elapsed_secs_f64(), dt, &player, eye, hand, sway, (m.sights_share, control.aiming, m.falling, stance == Stance::Sneak, m.speed, m.hands.phase == WeaponPhase::Drawn), m.airborne, left, lens_k);
+        // Each hand in the weapon's frame (the `Weapon` node, model space): where it holds
+        // the gun, to see a hand leave its grip; the right hand with its turn there.
+        let grips = body.first.as_ref().filter(|_| m.hands.in_hand).and_then(|f| {
+            let gun = f.weapon_node_at(Transform::IDENTITY, &[])?.inverse();
+            let bone = |n: &str| f.animator.skel.by_name.get(n).map(|&b| gun * f.animator.model_space(b));
+            let (r, l) = (bone("Bip01 R Hand")?, bone("Bip01 L Hand")?);
+            Some((Vec3::from(r.translation), r.to_scale_rotation_translation().1.to_scaled_axis().length().to_degrees(), Vec3::from(l.translation)))
+        });
+        trace.write(time.elapsed_secs_f64(), dt, &player, eye, hand, sway, (m.sights_share, control.aiming, m.falling, stance == Stance::Sneak, m.speed, m.hands.phase == WeaponPhase::Drawn), m.airborne, left, lens_k, grips);
         trace.write_layers(time.elapsed_secs_f64(), &m.hands, body.first.as_ref().map(|f| &f.animator));
     }
     state.head_eye = third_eye.filter(|_| third_view).map(|e| e.to_array());

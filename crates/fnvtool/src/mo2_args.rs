@@ -5,14 +5,38 @@
 //! <PLUGINS>...` reads the mod list as it is, without MO2 running and without a merged
 //! Data folder (a full path joined to the data folder stays itself). The game's Data
 //! folder that the base plugins come from is the instance's `gamePath` in
-//! `ModOrganizer.ini` (two folders above the profile) plus `Data`. Only plugins are
-//! resolved: a mod's loose files and archives are not seen. Plugins no mod has are
+//! `ModOrganizer.ini` (two folders above the profile) plus `Data`. The profile is also
+//! kept ([`profile`]) so commands that read meshes (`phys`, `nav walk`, `sim`) mount the
+//! mods' loose files and archives as MO2 would ([`vfs`]). Plugins no mod has are
 //! named on stderr and left out.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 const FLAG: &str = "--mo2-profile";
+
+static PROFILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The `--mo2-profile` folder this run was given, if any.
+pub fn profile() -> Option<&'static Path> {
+    PROFILE.get().map(PathBuf::as_path)
+}
+
+/// The file system the profile's game sees: `data` with the enabled mods' loose files
+/// layered over it and the profile's archive list, Update.bsa and its plugins' archives
+/// (`Vfs::open_for_plugins_layered`, as `fnvtool vfs mods --path`). `None` without
+/// `--mo2-profile`.
+pub fn vfs(data: &Path) -> anyhow::Result<Option<fnv_vfs::Vfs>> {
+    let Some(profile) = profile() else { return Ok(None) };
+    let instance = profile.parent().and_then(Path::parent).ok_or_else(|| anyhow::anyhow!("{FLAG}: {} is not in an instance's profiles folder", profile.display()))?;
+    let name = profile.file_name().map(|n| n.to_string_lossy().into_owned());
+    let layout = fnv_install::mo2::Layout::open(instance, name.as_deref()).map_err(|e| anyhow::anyhow!(e))?;
+    if let Some((list, _)) = layout.profile_archives() {
+        fnv_vfs::set_archive_list(list).map_err(|_| anyhow::anyhow!("{FLAG}: the profile's archive list names no archive"))?;
+    }
+    let plugins = layout.profile_plugins().map_err(|e| anyhow::anyhow!(e))?;
+    Ok(Some(fnv_vfs::Vfs::open_for_plugins_layered(data, &layout.mod_roots(), &plugins)?))
+}
 
 /// The arguments with `--mo2-profile <dir>` (or `--mo2-profile=<dir>`) replaced by the
 /// profile's plugins at the end; unchanged when the option is not given.
@@ -32,6 +56,7 @@ pub fn expand(args: Vec<OsString>) -> anyhow::Result<Vec<OsString>> {
         }
     }
     let Some(profile) = profile else { return Ok(out) };
+    let _ = PROFILE.set(profile.clone());
     let data = instance_data(&profile)?;
     let got = fnv_install::mo2::profile_plugins(&profile, &data)?;
     for m in &got.missing {

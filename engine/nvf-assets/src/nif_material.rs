@@ -1538,6 +1538,27 @@ mod tests {
         assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
     }
 
+    #[test]
+    fn shade_light_relight_takes_off_only_the_directional_shadows() {
+        // The relight in `with_shade_light` must differ from Bevy's lighting in the
+        // directional lights' shadows alone: clearing the receiver bit also dropped the lamps'
+        // shadows and changed the ambient occlusion's factor on lamps, and k multiplied that
+        // into a glow on first-person shapes [observed 2026-11-19].
+        let shader = include_str!("nif_material.wesl").replace("\r\n", "\n");
+        assert!(shader.contains("    unshadowed.flags |= NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT;\n"));
+        assert!(!shader.contains("unshadowed.flags &= ~MESH_FLAGS_SHADOW_RECEIVER_BIT"));
+        // The vendored bevy_pbr reads the bit in the directional loop only (its shadow-map,
+        // transmitted-lobe and contact-shadow conditions), never in the point or spot loops.
+        let pbr = include_str!("../../vendor/bevy_pbr/src/render/pbr_functions.wesl").replace("\r\n", "\n");
+        let directional = pbr.find("    // directional lights (direct)\n").expect("directional loop");
+        let end = directional + pbr[directional..].find("    // Ambient light (indirect)").expect("after the loop");
+        let at = |s: &str| pbr.match_indices(s).map(|(i, _)| i).collect::<Vec<_>>();
+        let reads = at("(in.flags & NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT) == 0u");
+        assert_eq!(reads.len(), 3);
+        assert!(reads.iter().all(|&i| directional < i && i < end));
+        assert!(include_str!("../../vendor/bevy_pbr/src/render/mesh_types.wesl").contains("const NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT: u32 = 1u << 26u;"));
+    }
+
     /// First-person depth (module notes): the squeeze keeps the near plane at 1, puts the
     /// far end at 1 − share, keeps the order, and is the shader's (same share).
     #[test]

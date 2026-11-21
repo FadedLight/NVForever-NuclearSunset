@@ -1251,4 +1251,25 @@ mod tests {
         assert_eq!(world.resource::<SaveQueue>().0.len(), 1);
         assert!(!world.resource::<SaveWrites>().busy());
     }
+
+    /// The player's stored autosave switches reach `SaveConfig`: `SavePlugin` starts every
+    /// switch on and `settings::apply_stored` (`PostStartup`) sets the ones in
+    /// `NVForever.ini`. Nothing may replace `SaveConfig` after registration (#3010 review).
+    #[test]
+    fn stored_autosave_switches_are_applied_to_the_save_config() {
+        let dir = std::env::temp_dir().join(format!("nvf-autosave-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ini = dir.join("NVForever.ini");
+        std::fs::write(&ini, "[Settings]\nautosave-travel=0\nautosave-fast-travel=0\nautosave-wait=0\nautosave-sleep=0\nautosave-scripts=0\n").unwrap();
+        let mut app = App::new();
+        app.add_plugins(SavePlugin);
+        app.insert_resource(crate::settings::SettingsFile(Some(ini)));
+        crate::settings::apply_stored(app.world_mut());
+        let cfg = app.world().resource::<SaveConfig>();
+        assert!(
+            !cfg.autosave_travel && !cfg.autosave_fast_travel && !cfg.autosave_wait && !cfg.autosave_sleep && !cfg.autosave_scripts,
+            "the INI's switches were not applied: {cfg:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

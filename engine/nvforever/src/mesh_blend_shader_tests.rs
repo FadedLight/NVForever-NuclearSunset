@@ -21,7 +21,7 @@ fn validating_cache() -> ShaderCache<String, ()> {
     })
 }
 
-fn sources(directory: &std::path::Path, package: &str, root: &std::path::Path, out: &mut Vec<(String, String)>) {
+pub(crate) fn sources(directory: &std::path::Path, package: &str, root: &std::path::Path, out: &mut Vec<(String, String)>) {
     for entry in std::fs::read_dir(directory).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() { sources(&path, package, root, out); }
@@ -34,7 +34,7 @@ fn sources(directory: &std::path::Path, package: &str, root: &std::path::Path, o
 
 /// The vendored Bevy PBR/render modules, plus the fullscreen vertex IO type imported by
 /// Bevy's SSR library (bevy_core_pipeline is not vendored; no tested entry point uses it).
-fn vendored_modules() -> Vec<(String, String)> {
+pub(crate) fn vendored_modules() -> Vec<(String, String)> {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut modules = Vec::new();
     for package in ["bevy_pbr", "bevy_render"] {
@@ -47,7 +47,7 @@ fn vendored_modules() -> Vec<(String, String)> {
 }
 
 /// Composes `entry` from `modules` with `defs` (naga-validated), and returns its source.
-fn compose(modules: &[(String, String)], entry: &str, defs: &[ShaderDefVal]) -> String {
+pub(crate) fn compose(modules: &[(String, String)], entry: &str, defs: &[ShaderDefVal]) -> String {
     let mut cache = validating_cache();
     let mut assets = Assets::<Shader>::default();
     let mut root = None;
@@ -64,7 +64,7 @@ fn compose(modules: &[(String, String)], entry: &str, defs: &[ShaderDefVal]) -> 
 /// The (group, binding) of every sampled texture (plain or binding array) the composed
 /// module declares. Composition keeps only what the entry point reaches, so this is what
 /// the shader uses, a subset of its pipeline layout (which Rust's AsBindGroup makes).
-fn texture_bindings(source: &str) -> std::collections::BTreeSet<(u32, u32)> {
+pub(crate) fn texture_bindings(source: &str) -> std::collections::BTreeSet<(u32, u32)> {
     let module = naga::front::wgsl::parse_str(source).unwrap();
     let mut bindings = std::collections::BTreeSet::new();
     for (_, variable) in module.global_variables.iter() {

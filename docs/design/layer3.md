@@ -155,6 +155,14 @@ What it does now:
   turned towards the camera in the vertex shader, one mesh per cell and TREE base; the
   game ships no tree LOD (world.md §7) [hypothesis: distant trees are these billboards].
   They crossfade with their cells like the object blocks and cast no shadows.
+  The settings page's Tree distance row (#3016) is a part of the distant LOD's far limit
+  (`--lod-distance`, 125,000 by default) in steps of 0.02 (2,500 units at the default),
+  shown as the distance it gives; it ends at that limit because billboards beyond it would
+  stand where no distant terrain is drawn [design]. It starts at `--tree-distance`'s share
+  (0.32, 40,000 units at the defaults; a flag beyond the limit is taken as the limit), so an
+  untouched game draws as before and the slider can draw the billboards farther than the
+  flag; `--tree-distance 0` still draws none whatever the slider. Applied live: the wanted
+  cells are chosen again at once when it moves.
   Load distances follow the owner's `FalloutPrefs.ini` (world.md §7 table): uGridsToLoad
   5 → `--radius 2` (5 × 5 cells, unchanged), fBlockLoadDistance, fBlockLoadDistanceLow,
   fSplitDistanceMult and fTreeLoadDistance as above. Not applied: uExterior Cell Buffer

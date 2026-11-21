@@ -1,5 +1,6 @@
 //! Distant trees: beyond the loaded cells, TREE references are drawn as their billboards
-//! out to [`LodSettings::trees`](crate::lod::LodSettings) (fTreeLoadDistance).
+//! out to the Tree distance reach, at the start [`LodSettings::trees`](crate::lod::LodSettings)
+//! (fTreeLoadDistance; below).
 //!
 //! The game ships no pre-built tree LOD [observed: no tree LOD meshes or lists in the
 //! archives; every `.spt` has a billboard texture, `textures\trees\billboards\<stem>.dds`,
@@ -14,7 +15,17 @@
 //! shader (tree.wesl `TREE_BILLBOARD`), so the meshes never change. A loaded cell draws
 //! its own trees; its billboards crossfade with it (fade.rs, the complementary pattern,
 //! culled once the cell is fully drawn). Billboards cast and receive no shadows.
+//!
+//! The reach is the settings page's Tree distance part
+//! ([`DrawDistances::trees`](crate::draw_distance::DrawDistances), #3016) of the distant
+//! LOD's far limit ([`LodSettings::far`](crate::lod::LodSettings), `--lod-distance`), read
+//! each frame ([`reach`]); the part starts at `--tree-distance`'s share of that limit
+//! ([`start_part`]), so an untouched game reaches as the flag says, and `--tree-distance 0`
+//! draws none whatever the part. When the reach changes the wanted cells are chosen again at
+//! once, so billboards beyond a shortened reach go and those within a lengthened one are
+//! built over the next frames, not at the next cell crossing.
 
+use crate::draw_distance::DrawDistances;
 use crate::fade;
 use crate::lod::{square_distance, LodState};
 use crate::tree::{BillboardMaterial, TreeBillboards};
@@ -52,6 +63,8 @@ type Board = Option<(Handle<BillboardMaterial>, [f32; 2])>;
 pub struct DistantTrees {
     /// The camera's cell the cells were chosen for.
     centre: Option<Grid>,
+    /// The reach the cells were chosen for.
+    dist: f32,
     /// Cells wanted, nearest first.
     want: Vec<Grid>,
     /// TREE references per cell (enabled at the start), read once.
@@ -80,6 +93,46 @@ impl DistantTrees {
         self.centre = None;
         self.want.clear();
         self.count = 0;
+    }
+
+    /// Take the reach now wanted: when it differs from the one the cells were chosen for,
+    /// the choice is made again at the next update (even in the same camera cell). Returns
+    /// the earlier reach when it changed.
+    fn follow_reach(&mut self, dist: f32) -> Option<f32> {
+        if self.dist == dist {
+            return None;
+        }
+        let was = std::mem::replace(&mut self.dist, dist);
+        self.centre = None;
+        Some(was)
+    }
+}
+
+/// The Tree distance slider's part of the distant LOD's far limit `far` in whole game
+/// units. The slider ends at `far`: billboards beyond it would stand where no distant
+/// terrain is drawn (lod.rs draws no chunk beyond `far`) [design, #3016].
+pub fn part_reach(far: f32, part: f32) -> f32 {
+    (far.max(0.0) * part.clamp(0.0, 1.0)).round()
+}
+
+/// The billboards' reach in game units: `part` of `far` ([`part_reach`]), none while
+/// `--tree-distance` (`flag`) is 0 whatever the part.
+pub fn reach(flag: f32, far: f32, part: f32) -> f32 {
+    if flag <= 0.0 {
+        0.0
+    } else {
+        part_reach(far, part)
+    }
+}
+
+/// The slider's part at the start: `--tree-distance`'s share of `far`, a flag beyond `far`
+/// taken as `far` (the part 1), so an untouched slider reaches as the flag says. 0 when
+/// either is 0 (no billboards, or no distant LOD to stand on).
+pub fn start_part(flag: f32, far: f32) -> f32 {
+    if far <= 0.0 {
+        0.0
+    } else {
+        flag.clamp(0.0, far) / far
     }
 }
 
@@ -182,8 +235,10 @@ pub fn update_distant_trees(
     camera: Query<&GlobalTransform, crate::fly::WorldCamera>,
     mut models: ModelCtx,
     mut materials: ResMut<Assets<BillboardMaterial>>,
+    distances: Option<Res<DrawDistances>>,
 ) {
-    let dist = lod.settings.trees;
+    let (flag, far) = (lod.settings.trees, lod.settings.far);
+    let dist = reach(flag, far, distances.map_or_else(|| start_part(flag, far), |d| d.trees));
     let lod = &mut *lod;
     let trees = &mut lod.trees;
     if !lod.enabled || dist <= 0.0 || streamer.interior.is_some() {
@@ -195,6 +250,9 @@ pub fn update_distant_trees(
     let (Ok(root), Ok(cam)) = (root.single(), camera.single()) else { return };
     let g = bevy_to_game(cam.translation());
     let c = cell_of(g.x, g.y);
+    if let Some(was) = trees.follow_reach(dist).filter(|was| *was > 0.0) {
+        info!("distant trees: reach {was:.0} -> {dist:.0} units");
+    }
     if trees.centre != Some(c) {
         trees.centre = Some(c);
         trees.want = cells_within(g.truncate(), dist);
@@ -277,6 +335,46 @@ mod tests {
         let d: Vec<f32> = cells.iter().map(|&g| square_distance(p, g, 1)).collect();
         assert!(d.windows(2).all(|w| w[0] <= w[1]));
         assert!(cells_within(p, 0.0).is_empty());
+    }
+
+    #[test]
+    fn the_reach_is_the_part_of_the_far_limit_and_starts_at_the_flag() {
+        let (flag, far) = (40_000.0, 125_000.0);
+        assert_eq!(start_part(flag, far), 0.32, "the defaults: 40,000 of 125,000");
+        assert_eq!(reach(flag, far, start_part(flag, far)), 40_000.0, "untouched: exactly the flag's value");
+        assert_eq!(reach(flag, far, 1.0), 125_000.0, "the full part: the distant LOD's far limit");
+        assert_eq!(reach(flag, far, 0.08), 10_000.0);
+        assert_eq!(reach(flag, far, 0.34) - reach(flag, far, 0.32), 2_500.0, "a step of 0.02");
+        assert_eq!(reach(flag, far, 1.5), 125_000.0, "never beyond the far limit");
+        assert_eq!(reach(flag, far, 0.0), 0.0);
+        assert_eq!(reach(0.0, far, 0.5), 0.0, "--tree-distance 0 stays off whatever the part");
+        assert_eq!(reach(0.0, far, 1.0), 0.0);
+        assert_eq!(start_part(200_000.0, far), 1.0, "a flag beyond the far limit is taken as it");
+        assert_eq!(reach(200_000.0, far, start_part(200_000.0, far)), 125_000.0);
+        assert_eq!(start_part(0.0, far), 0.0);
+        assert_eq!(start_part(flag, 0.0), 0.0, "no distant LOD: no part");
+        assert_eq!(reach(flag, 0.0, 0.5), 0.0);
+    }
+
+    #[test]
+    fn a_changed_reach_chooses_the_cells_again_in_the_same_cell() {
+        let mut t = DistantTrees::default();
+        // The first update's choice: the reach before it was none.
+        assert_eq!(t.follow_reach(40_000.0), Some(0.0));
+        t.centre = Some((3, 4));
+        assert_eq!(t.follow_reach(40_000.0), None, "unchanged: the choice stands");
+        assert_eq!(t.centre, Some((3, 4)));
+        // Shortened: chosen again at once, and the cells beyond are no longer wanted.
+        assert_eq!(t.follow_reach(10_000.0), Some(40_000.0));
+        assert_eq!(t.centre, None);
+        let p = Vec2::new(100.0, 100.0);
+        let (long, short) = (cells_within(p, 40_000.0), cells_within(p, 10_000.0));
+        assert!(short.len() < long.len() && short.iter().all(|g| long.contains(g)));
+        assert!(long.iter().any(|g| !short.contains(g)), "billboards of those cells go");
+        // Lengthened again: the nearer cells stay, the farther come back.
+        t.centre = Some((3, 4));
+        assert_eq!(t.follow_reach(40_000.0), Some(10_000.0));
+        assert_eq!(t.centre, None);
     }
 
     #[test]

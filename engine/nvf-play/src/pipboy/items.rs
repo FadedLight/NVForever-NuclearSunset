@@ -1018,6 +1018,30 @@ mod tests {
         Row { item: FormId(1), at: None, name: "Thing".into(), count: 1, weight: None, value: None, kind, equipped: false, quest: false, condition: None, icon: None, price: None, bartered: false, loaded: false, mods: 0, mods_value: 0, folder: None, reference: None, live: false }
     }
 
+    #[test]
+    fn stewie_single_item_query_matches_actual_pipboy_stack_figures() {
+        use fnv_script::vm::XVal;
+        let mut script = crate::script::ScriptState::over_no_plugins();
+        let mut sim = SimState::over_placed([]);
+        let mut r = row(Some(fnv_sim::forms::ItemKind::Misc));
+        r.count = 4;
+        r.weight = Some(2.5);
+        r.value = Some(7);
+        for (one, weight, value) in [(false, "10.00", "28"), (true, "2.50", "7"), (false, "10.00", "28")] {
+            {
+                let game = &mut script.rt.as_mut().unwrap().game;
+                let settings = fnv_game::tweaks::Tweaks { single_item_figures: one, ..Default::default() };
+                game.bind_stewie_stat_settings(&settings);
+                for name in ["StewVal", "StewieGetValue"] {
+                    assert_eq!(game.run_query(&format!("Begin Function {{}}\nSetFunctionValue ({name} \"bIndividialItemStats:Tweaks\")\nEnd\n"), Default::default()).unwrap(), XVal::Num(f64::from(u8::from(one))));
+                }
+            }
+            let info = info_of(&r, None, &mut sim, None, Some(&mut script));
+            assert_eq!(info.weight.as_deref(), Some(weight));
+            assert_eq!(info.value.as_deref(), Some(value));
+        }
+    }
+
     fn shown(h: &[Hint]) -> Vec<(String, bool)> {
         h.iter().map(|h| (h.text(), h.dim)).collect()
     }

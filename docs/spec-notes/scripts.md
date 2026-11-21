@@ -1105,7 +1105,12 @@ whose health percent the remaining health (DEST health − damage) has fallen to
 damaged above every stage, −1 without data or damage [documented −1: GECK wiki
 GetDestructionStage; the rest hypothesis]; a stage with the Destroy flag sets the
 destroyed state, one with Disable disables the reference, a stage change runs
-OnDestructionStageChange [hypothesis from the flag names]. Regions: the player is in a
+OnDestructionStageChange [hypothesis from the flag names]; a block with a parameter
+(`Begin OnDestructionStageChange 3`) runs only for the stage reached counted from 1 (DSTD
+index + 1), one without a parameter for any change [hypothesis: fit to the only such
+block in a TTW load order, SCPT 0x0A096CC8 on MQ11vertibirdPartyBus, whose 3 is index 2
+in both Fallout3.esm's four-stage and TTW's three-stage DEST, DSTD damage stage 3 too;
+observed, #3112: without it Liberty Prime's march never passed the first wreck]. Regions: the player is in a
 region when in an exterior cell of the region's worldspace and inside one of its area
 polygons (even-odd rule; the RPLI edge fall-off is ignored) [documented: never in an
 interior, nested regions both true; hypothesis: the polygon test]. GetHeadingAngle

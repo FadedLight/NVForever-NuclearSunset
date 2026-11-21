@@ -819,6 +819,15 @@ fn objects(
         out.write(PlaySound { sound, at: ref_pos(&sim, reference) });
     }
 
+    // Items a script gave the player (caps, #3095): their pick-up sound at the listener.
+    for item in std::mem::take(&mut script_sounds.items_added) {
+        let sound = item_sound(ws, sfx, item, true);
+        info!("world sounds: {item} given by a script, sound {}", sound_name(sfx, sound));
+        if let Some(sound) = sound {
+            out.write(PlaySound { sound, at: None });
+        }
+    }
+
     // Scripts: the engine's answers for the sounds already played, StopSound's stops,
     // and the new sounds (`fnv_game::nvse_sound`).
     if let Some(rt) = script.and_then(|s| s.into_inner().rt.as_mut()) {

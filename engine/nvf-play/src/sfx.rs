@@ -175,6 +175,9 @@ pub struct ScriptSounds {
     pub fades_in: Vec<(u32, f32)>,
     /// Sounds whose stop fades them out over seconds instead of at once.
     pub fades_out: Vec<(FormId, f32)>,
+    /// Items a script gave the player whose pick-up sound plays at the listener
+    /// (`script_events::ScriptEffect::ItemAddedSound`, #3095).
+    pub items_added: Vec<FormId>,
 }
 
 /// A script's sound fading in or out (`fnv_game::nvse_jg9`): seconds in all and so far,
@@ -812,6 +815,12 @@ pub struct Sfx {
 }
 
 impl Sfx {
+    /// A SOUN record by Editor ID (any case). The form store (`fnv_sim::forms`) does not
+    /// index SOUN records, so its `by_edid` finds no sound (#3095).
+    pub fn sound_by_edid(&self, edid: &str) -> Option<FormId> {
+        self.forms.sounds.iter().find(|(_, s)| s.edid.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(edid))).map(|(f, _)| *f)
+    }
+
     fn new(forms: FxForms) -> Sfx {
         Sfx {
             forms,

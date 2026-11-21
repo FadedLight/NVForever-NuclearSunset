@@ -726,3 +726,76 @@ fn play_animation_path_stops_at_its_reported_end() {
     assert_eq!(q(&mut g,"SetFunctionValue (PlayerREF.IsAnimSequencePlaying \"test\\b.kf\")"),n(0.0));
     assert!(g.anim_paths.sequences.is_empty());
 }
+
+#[test]
+fn stewie_inventory_queries_keep_unbound_fallback_and_follow_current_choices_after_handoff() {
+    files();
+    let f = fixture();
+    let mut g = game(&f);
+    let ini = b"[Tweaks]\nbHardcoreTweaks=1\nbIndividialItemStats=1\nbWeightlessItems=1\nbUnmapped=7\nsUnmapped=\"retained\"\n[Hardcore Tweaks]\nbAmmoWeight=1\n[Other]\nbAmmoWeight=9\n";
+    assert!(g.mod_files.write_bytes("NVSE/Plugins/nvse_stewie_tweaks.ini", ini));
+    let keys = ["bHardcoreTweaks:Tweaks", "bAmmoWeight:Hardcore Tweaks", "bIndividialItemStats:Tweaks"];
+    for key in keys {
+        assert_eq!(q(&mut g, &format!("SetFunctionValue (StewVal \"{key}\")")), n(1.0), "unbound {key} retains file fallback");
+    }
+    // The default retains an enabled ammo child under its disabled parent.
+    // This control instead explicitly selects all three choices off.
+    let chosen = fnv_game::tweaks::Tweaks {
+        hardcore_tweaks: false,
+        hardcore_ammo_weight: false,
+        single_item_figures: false,
+        ..Default::default()
+    };
+    g.bind_stewie_stat_settings(&chosen);
+    let version = q(&mut g, "SetFunctionValue (GetPluginVersion \"lStewieAl's Tweaks\")");
+    for name in ["StewVal", "StewieGetValue"] {
+        for key in keys {
+            assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \" {key} \")")), n(0.0), "loaded explicit off for {name} {key}");
+        }
+        for (key, expected) in [("bUnmapped:Tweaks", n(7.0)), ("sUnmapped:Tweaks", s("retained")), ("bWeightlessItems:Tweaks", n(1.0)), ("bAmmoWeight:Other", n(9.0)), ("malformed", n(0.0))] {
+            assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"{key}\")")), expected, "unchanged fallback {name} {key}");
+        }
+    }
+    g.tweaks.hardcore_tweaks = true;
+    g.tweaks.hardcore_ammo_weight = true;
+    g.tweaks.single_item_figures = true;
+    let before = g.tweaks.clone();
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \" bHARDCOREtweaks : tWEAKs \")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \" bAMMOweight : hardcore tweaks \")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \" bindividialitemstats : tweaks \")"), n(1.0));
+    assert_eq!(g.tweaks, before, "queries do not mutate any settings");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetPluginVersion \"lStewieAl's Tweaks\")"), version);
+    let saved = g.snapshot();
+    let mut restored = Game::restore(&f.data, World::new(&f.forms, &f.refs, SimConfig::default()), GameConfig { strict: true, ..Default::default() }, &saved).unwrap();
+    assert!(restored.mod_files.write_bytes("NVSE/Plugins/nvse_stewie_tweaks.ini", ini));
+    assert_eq!(q(&mut restored, "SetFunctionValue (StewVal \"bHardcoreTweaks:Tweaks\")"), n(1.0), "saved game does not retain application authority");
+    restored.bind_stewie_stat_settings(&chosen);
+    for key in keys {
+        assert_eq!(q(&mut restored, &format!("SetFunctionValue (StewVal \"{key}\")")), n(0.0), "application choices rebound after restore {key}");
+    }
+}
+
+#[test]
+fn stewie_ammo_child_choice_and_actual_inventory_totals_follow_the_parent_separately() {
+    let mut f = fixture();
+    let fnv_sim::forms::BaseData::Item(ammo) = &mut f.forms.bases.get_mut(&FormId(AMMO)).unwrap().data else { panic!("fixture ammunition is an item") };
+    ammo.weight = Some(0.5);
+    let mut g = game(&f);
+    q(&mut g, "PlayerREF.AddItem TestAmmo 3");
+    for parent in [false, true] {
+        for child in [false, true] {
+            let settings = fnv_game::tweaks::Tweaks { hardcore_tweaks: parent, hardcore_ammo_weight: child, ..Default::default() };
+            g.bind_stewie_stat_settings(&settings);
+            assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bHardcoreTweaks:Tweaks\")"), n(f64::from(u8::from(parent))));
+            assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \"bAmmoWeight:Hardcore Tweaks\")"), n(f64::from(u8::from(child))), "child remains selected while parent is off");
+            g.sync_perk_weights();
+            let rules = g.world.weight_rules(FormId::PLAYER_REF);
+            for hardcore in [false, true] {
+                let total = g.world.inventory_mut(FormId::PLAYER_REF).unwrap().totals_with(&f.forms, hardcore, &rules);
+                let expected = if if parent { child } else { hardcore } { 1.5 } else { 0.0 };
+                assert_eq!(total.weight, expected, "parent={parent} child={child} mode={hardcore}");
+                assert!(total.unknown_weight.is_empty(), "weighted fixture must be admitted");
+            }
+        }
+    }
+}

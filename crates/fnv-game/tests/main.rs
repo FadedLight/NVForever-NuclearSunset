@@ -34,6 +34,7 @@ mod csty_session;
 mod crippled_limbs_data;
 mod dead_on_spawn;
 mod death_items;
+mod destruction_stage_blocks;
 mod dialogue_data;
 mod dialogue;
 mod difficulty;

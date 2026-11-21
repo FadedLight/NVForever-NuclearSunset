@@ -4000,6 +4000,12 @@ impl<'a> Game<'a> {
     /// Run a non-frame event on a reference's script, with a trace line.
     pub fn ref_event(&mut self, r: FormId, event: u16, subject: Option<Value>, action_ref: Option<FormId>) -> bool {
         self.ext_event(event, r, subject);
+        self.ref_blocks(r, event, subject, action_ref)
+    }
+
+    /// [`Game::ref_event`] without the NVSE event handlers: the reference's own blocks
+    /// only, for an event whose blocks take a `subject` its handlers are not given.
+    pub(crate) fn ref_blocks(&mut self, r: FormId, event: u16, subject: Option<Value>, action_ref: Option<FormId>) -> bool {
         if event == event::ON_LOAD {
             // An OnLoad run by the caller (a cell load, or an engine that runs it
             // itself) settles one queued by Enable: OnLoad runs once per load.

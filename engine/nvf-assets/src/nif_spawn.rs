@@ -173,6 +173,9 @@ pub(crate) struct Props {
     /// An actor's part whose material carries an NiAlphaController for the actor's
     /// clips to drive ([`shape_alpha_mode`], [`material_alpha_controlled`]).
     pub(crate) alpha_gated: bool,
+    /// The caller keeps the shape off authored sets (#2981): particle systems, object LOD
+    /// (`crate::authored::shape_eligible`).
+    pub(crate) no_authored: bool,
     /// Some property is attached (to the shape or an ancestor).
     has_properties: bool,
     /// One of them derives from BSShaderProperty.
@@ -800,6 +803,19 @@ pub(crate) trait TextureSource {
     /// (`texture::WorkerTextures::alpha_is_mask`): asked only for the shapes
     /// [`blended_cutout`] concerns.
     fn alpha_is_mask(&self, raw_path: &str) -> bool;
+    /// The key a NIF texture path loads under (`texture::resolved_path` over this source's
+    /// VFS): the diffuse's key is what an authored set is looked up by.
+    fn resolve(&self, raw_path: &str) -> String;
+    /// The authored set (#2981) for a resolved diffuse key, its maps loaded by the exact paths
+    /// the index names (`crate::authored::find`); `None` when the run's setting is off (then
+    /// nothing is asked of the index), with no set, or when its `_orm` does not load. Every
+    /// production source implements it (no default, so none can leave the feature off by
+    /// omission); test doubles answer for themselves.
+    fn authored(&mut self, resolved_diffuse: &str) -> Option<crate::authored::AuthoredSet>;
+    /// Whether authored sets are in use at all (the run's setting, `crate::authored::enabled`,
+    /// for every production source): off, no shape is looked up and no legacy look is kept,
+    /// so an off run's materials carry nothing new. No default, as for [`Self::authored`].
+    fn authored_on(&self) -> bool;
 }
 
 /// The main thread's textures: the cache and the image store.
@@ -825,6 +841,22 @@ impl TextureSource for StoreTextures<'_> {
 
     fn alpha_is_mask(&self, raw_path: &str) -> bool {
         self.textures.workers.alpha_is_mask(raw_path, self.data)
+    }
+
+    fn resolve(&self, raw_path: &str) -> String {
+        crate::texture::resolved_path(raw_path, |p| self.data.vfs.exists(p))
+    }
+
+    fn authored_on(&self) -> bool {
+        crate::authored::enabled()
+    }
+
+    fn authored(&mut self, resolved_diffuse: &str) -> Option<crate::authored::AuthoredSet> {
+        let workers = self.textures.workers.clone();
+        let (textures, data, images, formats) = (&mut *self.textures, self.data, &mut *self.images, self.formats);
+        crate::authored::find(data, crate::authored::enabled(), resolved_diffuse, &workers.authored, |path, usage| {
+            textures.exact(path, usage, data, images, formats).map(|(h, _)| h)
+        })
     }
 }
 
@@ -895,14 +927,39 @@ pub(crate) fn shape_material_reusing_tangents(
 /// [`shape_material_reusing_tangents`]).
 pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut impl TextureSource, tangents: Tangents) -> (NifMaterial, Option<String>) {
     fix_vertex_colors(mesh, props.vertex_alpha);
-    let base = props.textures.first().filter(|t| !t.is_empty()).and_then(|t| textures.texture(t, true));
+    let diffuse = props.textures.first().filter(|t| !t.is_empty());
+    let base = diffuse.and_then(|t| textures.texture(t, true));
     let normal = props.textures.get(1).filter(|t| !t.is_empty()).and_then(|t| textures.normal(t));
-    let missing = if base.is_none() { props.textures.first().filter(|t| !t.is_empty()).cloned() } else { None };
+    let missing = if base.is_none() { diffuse.cloned() } else { None };
     let has_uv = mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some();
+    let had_tangents = mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some();
     let normal = normal.filter(|_| has_uv && tangents.add_to(mesh));
     let (normal, unmasked) = normal.map_or((None, false), |(h, unmasked)| (Some(h), unmasked));
     let cut = blend_cut(props, mesh);
     let alpha_mode = if cut.is_some() { AlphaMode::Blend } else { shape_alpha_mode(props) };
+    // An authored set (#2981, crate::authored): looked up by the resolved diffuse when the
+    // shape may take one; `None` whenever the run's setting is off.
+    let on = textures.authored_on();
+    let eligible = on && crate::authored::shape_eligible(props.unlit, props.refraction.is_some(), props.hair, props.skin, alpha_mode, has_uv, props.no_authored);
+    if on && !eligible {
+        crate::authored::note_skipped(false);
+    }
+    let key = diffuse.filter(|_| eligible).map(|t| textures.resolve(t));
+    let key_ok = key.as_deref().is_some_and(crate::authored::key_eligible);
+    if key.is_some() && !key_ok {
+        crate::authored::note_skipped(true);
+    }
+    let authored = key.filter(|_| key_ok).and_then(|k| textures.authored(&k));
+    // The final normal is chosen before the tangents are settled: a set's `_n` on a shape
+    // without a normal map needs tangents on the drawn mesh, given here from `tangents` (kept,
+    // stored or generated, as for the game's own normal map).
+    let tangents = if normal.is_some() {
+        true
+    } else if authored.as_ref().is_some_and(|s| s.normal.is_some()) && !had_tangents {
+        has_uv && tangents.add_to(mesh)
+    } else {
+        had_tangents
+    };
     let cutout = blended_cutout(props, cut, alpha_mode, || props.textures.first().is_some_and(|t| !t.is_empty() && textures.alpha_is_mask(t)));
     let gloss = props.glossiness.unwrap_or(10.0);
     // Emitted light × glow map, or uniform without a glow map. Not scaled by the camera
@@ -960,6 +1017,26 @@ pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut
     // Object LOD atlases hold near-black colour where their alpha is 0 (see
     // `shape_alpha_mode`); a soft edge would draw a little of it around every cut-out.
     material.extension.hard_edges = props.lod_building;
+    // The authored set last, over the legacy values chosen above and after the extension's
+    // `emissive_rule` is assigned (its w lane carries the mark). Shapes that may take a set
+    // keep their legacy look for later swaps (`crate::authored::LegacyLook`).
+    if eligible {
+        let legacy = crate::authored::LegacyLook {
+            normal: material.base.normal_map_texture.clone(),
+            specular: material.base.specular_texture.clone(),
+            roughness: material.base.perceptual_roughness,
+            reflectance: material.base.reflectance,
+            metallic: material.base.metallic,
+            tangents,
+            specular_tint: material.base.specular_tint,
+            scripted_tint: None,
+        };
+        if let Some(set) = &authored {
+            crate::authored::apply(&mut material, set, &legacy);
+            crate::authored::note_built(set);
+        }
+        material.extension.legacy = Some(legacy);
+    }
     (material, missing)
 }
 
@@ -1362,7 +1439,9 @@ impl SpawnCtx<'_, '_> {
             let Some(data) = dec.get(data_ref) else { continue };
             let Some(AdmittedShape { mut mesh, triangles: tris, skin, .. }) = rejected.admit(o.block, &dec, shape, data) else { continue };
 
-            let props = shape_props(&file, &dec, o, &by_block);
+            let mut props = shape_props(&file, &dec, o, &by_block);
+            // Landscape LOD takes no authored set (#2981), as in the model loader.
+            props.no_authored = crate::model::is_lod_model(path);
             let (material, missing) = shape_material(
                 &props,
                 &mut mesh,
@@ -1439,6 +1518,15 @@ mod tests {
         fn alpha_is_mask(&self, _: &str) -> bool {
             false
         }
+        fn resolve(&self, raw_path: &str) -> String {
+            fnv_vfs::texture_path(raw_path)
+        }
+        fn authored(&mut self, _: &str) -> Option<crate::authored::AuthoredSet> {
+            None
+        }
+        fn authored_on(&self) -> bool {
+            false
+        }
     }
 
     /// Textures whose alpha is a cut-out mask when their path says "mask".
@@ -1452,6 +1540,15 @@ mod tests {
         }
         fn alpha_is_mask(&self, raw_path: &str) -> bool {
             raw_path.contains("mask")
+        }
+        fn resolve(&self, raw_path: &str) -> String {
+            fnv_vfs::texture_path(raw_path)
+        }
+        fn authored(&mut self, _: &str) -> Option<crate::authored::AuthoredSet> {
+            None
+        }
+        fn authored_on(&self) -> bool {
+            false
         }
     }
 
@@ -2068,6 +2165,9 @@ mod tests {
 #[cfg(test)]
 #[path = "nif_numeric_admission_tests.rs"]
 mod numeric_admission_tests;
+
+#[cfg(test)]
+mod authored_tests;
 
 #[cfg(test)]
 mod bc5_material_tests {

@@ -25,7 +25,17 @@ pub enum TextureUsage {
     Color,
     #[default]
     Linear,
+    /// The game's normal maps: BC5 is expanded to RGBA on the CPU (dds-bc5.md), so every
+    /// result is a three-channel map whose alpha may be a specular mask.
     Normal,
+    /// An authored set's `_n` (#2981, docs/spec-notes/pbr-materials.md): unsigned BC5 on the
+    /// block grid goes to the GPU as it is (`Bc5RgUnorm`), so Bevy rebuilds Z from the two
+    /// channels (`TWO_COMPONENT_NORMAL_MAP`, with the vendored clamp, engine/vendor/README.md);
+    /// off the grid or without BC support the two channels are stored as they are in
+    /// `Rg8Unorm`, and signed BC5 is moved to 0..1 (`x * 0.5 + 0.5`) in `Rg8Unorm`, the range
+    /// Bevy's two-channel path expects. Three-channel files (BC7, BC1-3) load as for
+    /// [`TextureUsage::Normal`].
+    NormalTwoChannel,
 }
 
 impl TextureUsage {
@@ -34,19 +44,21 @@ impl TextureUsage {
     }
 }
 
-const TEXTURE_USAGES: [TextureUsage; 3] = [TextureUsage::Color, TextureUsage::Linear, TextureUsage::Normal];
+const TEXTURE_USAGES: [TextureUsage; 4] = [TextureUsage::Color, TextureUsage::Linear, TextureUsage::Normal, TextureUsage::NormalTwoChannel];
 
 /// An image and whether its source lacked a specular alpha channel. BC5 normal
 /// expansion has a synthesized storage alpha which is not a source mask.
 struct DecodedTexture {
     image: Image,
     lacks_alpha: bool,
+    /// The file's DX10 header names an `_SRGB` format (a hint only; the role decides).
+    srgb_code: bool,
 }
 
 impl From<Image> for DecodedTexture {
     fn from(image: Image) -> Self {
         let lacks_alpha = crate::nif_spawn::format_lacks_alpha(image.texture_descriptor.format);
-        Self { image, lacks_alpha }
+        Self { image, lacks_alpha, srgb_code: false }
     }
 }
 
@@ -93,6 +105,9 @@ pub struct WorkerTextures {
     /// Whether a texture's alpha is a cut-out mask, by resolved path
     /// ([`Self::alpha_is_mask`]).
     masks: Mutex<HashMap<String, bool>>,
+    /// Authored material sets' scalar files and warnings (`crate::authored::find`), shared
+    /// by the main thread and the workers.
+    pub(crate) authored: crate::authored::Memo,
 }
 
 struct WorkerTexture {
@@ -123,13 +138,40 @@ pub(crate) fn worker_texture(
     bc_supported: bool,
 ) -> Option<(Handle<Image>, TextureFormat, bool)> {
     let key = (resolved_path(raw_path, |p| data.vfs.exists(p)), usage);
+    worker_texture_key(key, data, cached, workers, images, bc_supported)
+}
+
+/// [`worker_texture`] for a file at exactly `path` (normalised only, never turned to another
+/// file by [`resolved_path`]): an authored set's member, as the index names it (#2981).
+pub(crate) fn worker_texture_exact(
+    path: &str,
+    usage: TextureUsage,
+    data: &GameData,
+    cached: &TextureSnapshot,
+    workers: &WorkerTextures,
+    images: &AssetHandleProvider,
+    bc_supported: bool,
+) -> Option<(Handle<Image>, TextureFormat, bool)> {
+    worker_texture_key((fnv_vfs::normalize(path), usage), data, cached, workers, images, bc_supported)
+}
+
+fn worker_texture_key(
+    key: (String, TextureUsage),
+    data: &GameData,
+    cached: &TextureSnapshot,
+    workers: &WorkerTextures,
+    images: &AssetHandleProvider,
+    bc_supported: bool,
+) -> Option<(Handle<Image>, TextureFormat, bool)> {
     if let Some(found) = cached.get(&key) {
         return Some(found.clone());
     }
+    let usage = key.1;
     workers.load_once(key, images, |path| {
         let bytes = data.read(path).ok_or_else(|| "not in any archive".to_string())?;
         let mut decoded = dds_texture(&bytes, usage, bc_supported, false)?;
         decoded.image.texture_descriptor.label = Some(folder_label(path));
+        crate::authored::srgb_warning(&workers.authored, path, usage, decoded.srgb_code);
         Ok(decoded)
     })
 }
@@ -148,6 +190,12 @@ impl WorkerTextures {
         let gate = Arc::new(Mutex::new(()));
         loading.insert(key.clone(), Arc::downgrade(&gate));
         gate
+    }
+
+    /// Entries decoded by workers (tests).
+    #[cfg(test)]
+    pub(crate) fn entries_len(&self) -> usize {
+        self.entries.lock().expect("worker textures").len()
     }
 
     /// Reserve one handle and decode once for concurrent requests for this key. The
@@ -308,7 +356,23 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
                 return Err("BC5 has no sRGB color layout; request linear data or a normal map".into());
             }
             let signed = dds.format == Format::Bc5S;
-            if usage != TextureUsage::Normal && bc_supported && aligned {
+            if usage == TextureUsage::NormalTwoChannel {
+                if !signed && bc_supported && aligned {
+                    (TextureFormat::Bc5RgUnorm, levels.concat())
+                } else {
+                    let mut out = Vec::new();
+                    for (m, level) in levels.iter().enumerate() {
+                        let (lw, lh) = dds.header.level_dims(m as u32);
+                        let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
+                        for [r, g] in pixels {
+                            // Unsigned: the channels as stored; signed (-1..1): moved to 0..1.
+                            let (r, g) = if signed { (r * 0.5 + 0.5, g * 0.5 + 0.5) } else { (r, g) };
+                            out.extend([(r.clamp(0.0, 1.0) * 255.0).round() as u8, (g.clamp(0.0, 1.0) * 255.0).round() as u8]);
+                        }
+                    }
+                    (TextureFormat::Rg8Unorm, out)
+                }
+            } else if usage != TextureUsage::Normal && bc_supported && aligned {
                 (if signed { TextureFormat::Bc5RgSnorm } else { TextureFormat::Bc5RgUnorm }, levels.concat())
             } else {
                 let mut out = Vec::new();
@@ -318,8 +382,9 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
                     for [r, g] in pixels {
                         if usage == TextureUsage::Normal {
                             let [x, y] = if signed { [r, g] } else { [r * 2.0 - 1.0, g * 2.0 - 1.0] };
-                            // Expand here to use Bevy's three-component path; its
-                            // vendored two-component reconstruction has no clamp.
+                            // Expand here to use Bevy's three-component path, as every
+                            // other game normal map does (the authored `_n` role keeps two
+                            // channels: `NormalTwoChannel`).
                             let z = (1.0 - x * x - y * y).max(0.0).sqrt();
                             out.extend([normal_byte(x), normal_byte(y), normal_byte(z), 255]);
                         } else if signed {
@@ -354,7 +419,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
         || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
         || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
         || crate::nif_spawn::format_lacks_alpha(format);
-    Ok(DecodedTexture { image: img, lacks_alpha })
+    Ok(DecodedTexture { image: img, lacks_alpha, srgb_code: dds.srgb_hint() == Some(true) })
 }
 
 fn normal_byte(value: f32) -> u8 {
@@ -600,6 +665,20 @@ impl TextureCache {
         self.load(raw_path, TextureUsage::Normal, false, data, images, formats)
     }
 
+    /// Load (once) the file at exactly `path` in role `usage`: normalised only, never turned
+    /// to another file by [`resolved_path`]. For an authored set's members, by the path the
+    /// index names (#2981).
+    pub(crate) fn exact(
+        &mut self,
+        path: &str,
+        usage: TextureUsage,
+        data: &GameData,
+        images: &mut Assets<Image>,
+        formats: Option<&CompressedImageFormatSupport>,
+    ) -> Option<(Handle<Image>, bool)> {
+        self.load_key(fnv_vfs::normalize(path), usage, false, data, images, formats)
+    }
+
     fn load(
         &mut self,
         raw_path: &str,
@@ -610,6 +689,18 @@ impl TextureCache {
         formats: Option<&CompressedImageFormatSupport>,
     ) -> Option<(Handle<Image>, bool)> {
         let path = resolved_path(raw_path, |p| data.vfs.exists(p));
+        self.load_key(path, usage, clamp, data, images, formats)
+    }
+
+    fn load_key(
+        &mut self,
+        path: String,
+        usage: TextureUsage,
+        clamp: bool,
+        data: &GameData,
+        images: &mut Assets<Image>,
+        formats: Option<&CompressedImageFormatSupport>,
+    ) -> Option<(Handle<Image>, bool)> {
         if let Some(h) = (if clamp { &self.clamped } else { &self.map }).get(&(path.clone(), usage)) {
             return h.clone();
         }
@@ -640,8 +731,9 @@ impl TextureCache {
         };
         drop(decode_span);
         let handle = match result {
-            Ok(DecodedTexture { mut image, lacks_alpha }) => {
+            Ok(DecodedTexture { mut image, lacks_alpha, srgb_code }) => {
                 image.texture_descriptor.label = Some(folder_label(&path));
+                crate::authored::srgb_warning(&self.workers.authored, &path, usage, srgb_code);
                 if clamp {
                     if let ImageSampler::Descriptor(d) = &mut image.sampler {
                         d.address_mode_u = ImageAddressMode::ClampToEdge;
@@ -1296,10 +1388,7 @@ pub(crate) mod bc5_tests {
             std::fs::write(root.join("textures/signed.dds"), dds(b"BC5S", 4, 4, 1, &signed)).unwrap();
             std::fs::write(root.join("textures/unsigned.dds"), dds(b"ATI2", 4, 4, 1, &signed)).unwrap();
             std::fs::write(root.join("textures/old.dds"), dds(b"DXT5", 4, 4, 1, &[255; 16])).unwrap();
-            let data = GameData {
-                vfs: Arc::new(fnv_vfs::Vfs::open(&root, &[]).unwrap()),
-                schema: Arc::new(fnv_nif::Schema::default()),
-            };
+            let data = GameData::new(Arc::new(fnv_vfs::Vfs::open(&root, &[]).unwrap()), Arc::new(fnv_nif::Schema::default()));
             Self { root, data }
         }
     }
@@ -1460,6 +1549,64 @@ pub(crate) mod bc5_tests {
         cache.take_workers(&mut images, 4.0);
         assert_eq!(cache.failures.len(), 1);
         assert_eq!(cache.normal("signed.dds", &owned.data, &mut images, None).unwrap(), normal);
+    }
+
+    /// The authored `_n` role (#2981): unsigned BC5 on the block grid goes up natively,
+    /// otherwise its channels are stored as they are; signed BC5 is moved to 0..1. Both
+    /// fall back to `Rg8Unorm`, which Bevy reads as a two-channel normal map too.
+    #[test]
+    fn two_channel_normals_keep_unsigned_bytes_and_bias_signed_ones() {
+        let usage = TextureUsage::NormalTwoChannel;
+        // Red endpoint 129, green 127, every index 0: each texel is the first endpoint.
+        let mut block = [0; 16]; block[0] = 129; block[8] = 127;
+        let unsigned = dds(b"ATI2", 4, 4, 1, &block);
+        let native = dds_texture(&unsigned, usage, true, false).unwrap();
+        assert_eq!(native.image.texture_descriptor.format, TextureFormat::Bc5RgUnorm);
+        assert_eq!(native.image.data.as_deref(), Some(block.as_slice()));
+        assert!(native.lacks_alpha, "two channels hold no specular mask");
+        let fallback = dds_texture(&unsigned, usage, false, false).unwrap();
+        assert_eq!(fallback.image.texture_descriptor.format, TextureFormat::Rg8Unorm);
+        assert_eq!(fallback.image.data.as_deref(), Some([129, 127].repeat(16).as_slice()), "unsigned bytes unchanged");
+        assert!(fallback.lacks_alpha);
+        // Signed: -127 reads as -1 (byte 0), 127 as 1 (byte 255), 0 as 0 (byte 128); never native.
+        for (x, y, want) in [(129u8, 127u8, [0u8, 255]), (0, 0, [128, 128]), (64, 192, [192, 63])] {
+            let mut block = [0; 16]; block[0] = x; block[8] = y;
+            let signed = dds(b"BC5S", 4, 4, 1, &block);
+            for bc in [true, false] {
+                let t = dds_texture(&signed, usage, bc, false).unwrap();
+                assert_eq!(t.image.texture_descriptor.format, TextureFormat::Rg8Unorm, "signed BC5, bc {bc}");
+                assert_eq!(t.image.data.as_deref(), Some(want.repeat(16).as_slice()), "signed ({x}, {y}), bc {bc}");
+                assert!(t.lacks_alpha);
+            }
+        }
+        // Off the block grid with BC support: decoded, exact length for two levels.
+        let odd = dds(b"ATI2", 5, 3, 2, &[0; 48]);
+        let t = dds_texture(&odd, usage, true, false).unwrap();
+        assert_eq!(t.image.texture_descriptor.format, TextureFormat::Rg8Unorm);
+        assert_eq!(t.image.data.as_ref().unwrap().len(), (15 + 2) * 2);
+        // Three-channel files load as the game's normal maps do.
+        assert_eq!(dds_texture(&dds(b"DXT5", 4, 4, 1, &[0; 16]), usage, true, false).unwrap().image.texture_descriptor.format, TextureFormat::Bc3RgbaUnorm);
+        assert!(dds_texture(&dds(b"BC4U", 4, 4, 1, &[0; 8]), usage, true, false).err().unwrap().contains("BC4"));
+    }
+
+    /// The two-channel role has handles of its own beside the Normal and Linear roles of the
+    /// same file, and is among the roles a read-ahead offer and `has_or_ahead` look at.
+    #[test]
+    fn two_channel_role_is_cached_apart_from_normal_and_linear() {
+        let owned = OwnedData::new();
+        let cache = TextureCache::default();
+        let images = Assets::<Image>::default();
+        let provider = images.get_handle_provider();
+        let empty = TextureSnapshot::new();
+        let two = worker_texture("unsigned.dds", TextureUsage::NormalTwoChannel, &owned.data, &empty, &cache.workers, &provider, true).unwrap();
+        let normal = worker_texture("unsigned.dds", TextureUsage::Normal, &owned.data, &empty, &cache.workers, &provider, true).unwrap();
+        let linear = worker_texture("unsigned.dds", TextureUsage::Linear, &owned.data, &empty, &cache.workers, &provider, true).unwrap();
+        assert!(two.0 != normal.0 && two.0 != linear.0);
+        assert_eq!((two.1, normal.1, linear.1), (TextureFormat::Bc5RgUnorm, TextureFormat::Rgba8Unorm, TextureFormat::Bc5RgUnorm));
+        assert!(TEXTURE_USAGES.contains(&TextureUsage::NormalTwoChannel));
+        let only_two = TextureCache::default();
+        let _ = worker_texture("unsigned.dds", TextureUsage::NormalTwoChannel, &owned.data, &empty, &only_two.workers, &provider, true).unwrap();
+        assert!(only_two.has_or_ahead("textures\\unsigned.dds"), "a two-channel load counts as loaded");
     }
 
     #[test]

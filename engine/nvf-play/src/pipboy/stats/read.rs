@@ -26,12 +26,28 @@ pub struct Text {
 
 /// A perk's DATA: trait, minimum level, ranks, playable, hidden [hypothesis: the five
 /// bytes as xEdit names them; `IntenseTraining`'s are 0, 2, 10, 1, 0 and it has ten
-/// ranks].
+/// ranks]. Playable only says the level-up menu offers it [documented: GECK wiki
+/// Category:Perk], so the page reads ranks and Hidden alone (#3118).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PerkData {
     pub ranks: u8,
-    pub playable: bool,
     pub hidden: bool,
+}
+
+impl PerkData {
+    /// From the DATA bytes; a 4-byte DATA (older records: Ant Sight) has no Hidden byte.
+    pub fn of(d: &[u8]) -> PerkData {
+        PerkData { ranks: d.get(2).copied().unwrap_or(1), hidden: d.get(4).is_some_and(|&b| b != 0) }
+    }
+
+    /// Whether the Perks list shows a perk the player has: unless it is Hidden, "does not
+    /// show up in the user interface" [documented: GECK wiki Category:Perk]. Perks that
+    /// are not Playable (challenge perks such as Lord Death, implants, companion and quest
+    /// perks) are given by scripts and listed [hypothesis: as the original lists them;
+    /// #3118].
+    pub fn listed(&self) -> bool {
+        !self.hidden
+    }
 }
 
 /// An enchantment (ENCH): its name, whether it is worn apparel's, and its value changes
@@ -101,7 +117,7 @@ impl Forms {
         let (lo, schema) = (self.lo, self.schema);
         *self.perks.entry(id).or_insert_with(|| {
             let d = fields(lo, schema, id).and_then(|(_, f)| f.raw(b"DATA").map(|s| s.data.to_vec())).unwrap_or_default();
-            PerkData { ranks: d.get(2).copied().unwrap_or(1), playable: d.get(3).is_none_or(|&b| b != 0), hidden: d.get(4).is_some_and(|&b| b != 0) }
+            PerkData::of(&d)
         })
     }
 
@@ -307,12 +323,13 @@ pub fn snapshot(forms: &mut Forms, sim: &mut SimState, script: Option<&mut Scrip
                 row.bold = matches!(row.key, RowKey::Av(code) if g.player.tag_skills.contains(&code));
             }
         }
-        // Perks the player has, playable and not hidden [hypothesis: traits are listed
-        // with them], by name; the rank when the perk has more than one.
+        // Perks the player has that are not Hidden, Playable or not (`PerkData::listed`)
+        // [hypothesis: traits are listed with them], by name; the rank when the perk has
+        // more than one.
         let mut perks: Vec<Row> = Vec::new();
         for (&perk, &rank) in &g.player.perks {
             let d = forms.perk(perk.0);
-            if !d.playable || d.hidden {
+            if !d.listed() {
                 continue;
             }
             let t = forms.text(perk.0).clone();

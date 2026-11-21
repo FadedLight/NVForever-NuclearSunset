@@ -1095,6 +1095,10 @@ pub struct GameData {
     /// TACT: the record-header flags of every talking activator (radio stations: the
     /// Continuous Broadcast bit, `crate::radio`; docs/spec-notes/radio.md §2).
     pub station_flags: HashMap<FormId, u32>,
+    /// TACT VNAM: each talking activator's voice type [documented: xEdit TACT "Voice
+    /// Type"; schema `placed.json`], for GetIsVoiceType and the voice gate
+    /// (`Game::voice_type_of`; #3060: The Pitt's Ashur intercom, DLC01RaiderMaleColdVoice).
+    pub talking_voices: HashMap<FormId, FormId>,
     /// PERK: perks and traits ([`PerkDef`]).
     pub perks: HashMap<FormId, PerkDef>,
     /// AVIF: the name, short name, description and icon of each actor value
@@ -1897,6 +1901,20 @@ impl GameData {
         let form_flags: HashMap<FormId, u32> = winners.iter().filter(|(_, _, r)| r.header.flags != 0).map(|&(g, _, r)| (FormId(g), r.header.flags)).collect();
         let record_fields = RecordFields::new(schema, winners.iter().filter(|(_, _, r)| FIELD_SIGS.contains(&r.header.sig)).map(|&(g, _, r)| (FormId(g), r.clone())));
         let station_flags: HashMap<FormId, u32> = winners.iter().filter(|w| &w.2.header.sig == b"TACT").map(|w| (FormId(w.0), w.2.header.flags)).collect();
+        let talking_voices: HashMap<FormId, FormId> = winners
+            .iter()
+            .filter(|w| &w.2.header.sig == b"TACT")
+            .filter_map(|&(g, pi, r)| {
+                let mut local = None;
+                r.visit_subrecords(|sig, data| {
+                    if sig == b"VNAM" && local.is_none() {
+                        local = data.get(0..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                    }
+                })
+                .ok()?;
+                Some((FormId(g), FormId(lo.to_global(pi, local.filter(|&l| l != 0)?)?)))
+            })
+            .collect();
         clock.lap("form flags, record field handles");
         let radiation_markers = crate::radiation::markers(refs);
         clock.lap("radiation markers");
@@ -1978,6 +1996,7 @@ impl GameData {
             idle_children: HashMap::new(),
             image_modifiers: HashMap::new(),
             station_flags,
+            talking_voices,
             perks: HashMap::new(),
             actor_value_infos: HashMap::new(),
             recipes: HashMap::new(),

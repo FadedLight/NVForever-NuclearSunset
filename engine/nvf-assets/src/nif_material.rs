@@ -466,7 +466,9 @@ pub struct NifSurface {
     pub fire_period: f32,
     /// Unlit emissive rules: x 1 skips the image-space scale; y holds each light channel
     /// to that value on the soft path (0: no hold); z 1: the vertex colours are display
-    /// values, made linear per fragment (`nif_spawn::unlit_vertex_colors`); w unused.
+    /// values, made linear per fragment (`nif_spawn::unlit_vertex_colors`); w 1 marks a lit
+    /// material shaded from an authored set (`crate::authored::AUTHORED_MARK`, #2981), 0
+    /// otherwise.
     /// Zero keeps the default [hypothesis, nif.md §6 "Unlit shapes that are pictures, and
     /// cut-out signs"].
     pub emissive_rule: Vec4,
@@ -543,6 +545,10 @@ pub struct NifSurface {
     pub terrain_repeat: f32,
     /// Landscape anti-tiling on (a landscape material only, with a repeat above 0).
     pub anti_tiling: bool,
+    /// The shape's material without an authored set (#2981, `crate::authored::LegacyLook`),
+    /// kept for shapes that may take one, so a change of diffuse can apply the new one's set
+    /// or go back; `None` for every other material. CPU only.
+    pub legacy: Option<crate::authored::LegacyLook>,
 }
 
 /// The values of a [`NifSurface`] the shaders read (`nif_surface_bindings.wesl`, shared
@@ -647,6 +653,7 @@ impl Default for NifSurface {
             facegen_offset: None,
             terrain_repeat: 0.0,
             anti_tiling: false,
+            legacy: None,
         }
     }
 }
@@ -757,6 +764,17 @@ impl MaterialExtension for NifSurface {
         // A first-person shape writes its own depth, a refracting one is in no prepass.
         if !key.bind_group_data.first_person && !key.bind_group_data.refract {
             depth_equal(descriptor, key.mesh_key);
+        }
+        // A channel view of the authored materials' inputs (crate::authored::PbrView; off
+        // unless NVF_PBR_VIEW is set at the start): the main pass's colour only.
+        // The metallic debug switch (crate::authored::metallic_debug; off unless
+        // NVF_PBR_METALLIC=1 at the start) likewise.
+        let metallic_def: &[&str] = if crate::authored::metallic_debug() { &["NVF_PBR_METALLIC"] } else { &[] };
+        let view_defs = crate::authored::view().shader_defs();
+        if !(view_defs.is_empty() && metallic_def.is_empty()) && !descriptor.vertex.shader_defs.contains(&ShaderDefVal::from("PREPASS_PIPELINE")) {
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader_defs.extend(view_defs.iter().chain(metallic_def).map(|d| ShaderDefVal::from(*d)));
+            }
         }
         // StandardMaterial has set the rasteriser's bias from the material's depth bias.
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
@@ -1016,7 +1034,12 @@ impl Plugin for NifMaterialPlugin {
             .init_resource::<BlendedCutouts>()
             .add_systems(Startup, spawn_transmission_anchor)
             .add_systems(PostUpdate, (apply_blended_cutouts.in_set(BlendedCutoutSystems), see_through_casts_no_shadow.in_set(SeeThroughShadowSystems)));
+        // The authored materials' debug switches are read once, at the start.
+        crate::authored::view();
+        crate::authored::metallic_debug();
+        app.add_systems(Last, crate::authored::report);
         crate::bc5_field::install(app);
+        crate::pbr_field::install(app);
     }
 }
 

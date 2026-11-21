@@ -1,6 +1,6 @@
 [package]
 name = "nvforever"
-description = "NVForever: the game. At milestone M3 a free-camera explorer of the world (terrain and objects)"
+description = "NVForever: the game, playing Fallout: New Vegas from the player's own install"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -54,6 +54,7 @@ png = "0.18"
 # Owned SVG touch icons at actual physical UI dimensions; already locked, BSD-3-Clause.
 # No runtime XML parser or PNG encoder. See docs/design/android-svg-icons.md.
 tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
+rayon = "1"
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Only for the window icon type (window_icon.rs); the version Bevy already uses.
 winit = { version = "0.30", default-features = false }

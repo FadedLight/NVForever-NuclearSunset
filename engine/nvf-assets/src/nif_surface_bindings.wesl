@@ -1033,6 +1033,15 @@ fn base_color_size(instance_index: u32) -> vec2<u32> {
     @if(!BINDLESS) return textureDimensions(pbr_bindings::base_color_texture);
 }
 
+// The occlusion texture's red channel sampled at `uv` with the view's mip bias `bias` (the
+// authored materials' occlusion view, nif_material.wesl "NVF_PBR_VIEW"); the caller checks
+// the material has one.
+fn occlusion_texel(instance_index: u32, uv: vec2<f32>, bias: f32) -> f32 {
+    @if(BINDLESS) let i = material_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleBias(bindless_textures_2d[i.occlusion_texture], bindless_samplers_filtering[i.occlusion_sampler], uv, bias).r;
+    @if(!BINDLESS) return textureSampleBias(pbr_bindings::occlusion_texture, pbr_bindings::occlusion_sampler, uv, bias).r;
+}
+
 // The normal map sampled at `uv`.
 fn normal_map_texel(instance_index: u32, uv: vec2<f32>) -> vec4<f32> {
     @if(BINDLESS) let i = material_indices[material_slot(instance_index)];

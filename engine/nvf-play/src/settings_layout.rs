@@ -326,8 +326,8 @@ mod shared_table_tests {
     /// Inertia and Camera Motion in place of weapon sway and head bob, #2843's Shadow
     /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, the
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
-    /// shadows row), by the group it registers with.
-    const KNOWN: [(&str, &str); 140] = [
+    /// shadows row; #2981's authored materials row), by the group it registers with.
+    const KNOWN: [(&str, &str); 141] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -442,6 +442,7 @@ mod shared_table_tests {
         ("neon-glow", "Graphics"),
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
+        ("authored-materials", "Graphics"),
         ("terrain-height-blend", "Graphics"),
         ("terrain-anti-tiling", "Graphics"),
         ("mesh-terrain-blend", "Graphics"),
@@ -691,6 +692,7 @@ mod shared_table_tests {
         assert_eq!(at("quick-loot"), "NVF Features > Quick Loot");
         assert_eq!(at("button-style"), "Controls > Input");
         assert_eq!(at("terrain-anti-tiling"), "Graphics > Detail and Distance", "beside terrain height blending (#2551)");
+        assert_eq!(at("authored-materials"), "Graphics > Detail and Distance", "beside anisotropic filtering, the other texture row (#2981)");
         assert_eq!(at("mesh-terrain-blend"), "Graphics > Detail and Distance", "beside the terrain rows (#2661)");
         assert_eq!(at("cloud-shadows"), "Graphics > Shadows", "after Longer sun shadows (#2670)");
         assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
@@ -880,7 +882,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 209] = [
+    const KNOWN: [(&str, &str); 210] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -995,6 +997,7 @@ mod android_profile_tests {
         ("neon-glow", "Graphics"),
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
+        ("authored-materials", "Graphics"),
         ("terrain-height-blend", "Graphics"),
         ("terrain-anti-tiling", "Graphics"),
         ("mesh-terrain-blend", "Graphics"),

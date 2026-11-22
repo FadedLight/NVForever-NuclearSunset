@@ -198,54 +198,17 @@ fn spawn(commands: &mut Commands, key: &Key, request: &Request, view: &DeviceVie
             top:px(rect.min.y/key.stamp.density/units),width:px(rect.width()/key.stamp.density/units),
             height:px(rect.height()/key.stamp.density/units),..default()},ImageNode::new(view.image.clone())));
     if let Some(camera)=key.overlay {display.insert(UiTargetCamera(camera));}
-    // Clear passive ring over the Wrist Terminal / Retro Console power-off button
-    // ONLY when a normal exit/goodbye option is available (hidden during forced dialogue).
-    if key.view.goodbye && !key.view.choices.is_empty() {
-        if let Some(btn) = view.power_button_rect(request) {
-            let local = Rect::from_corners(btn.min - rect.min, btn.max - rect.min);
-            let ring = match request.stamp.kind {
-                DeviceKind::PipBoy => crate::interface::pipboy_amber(255.0),
-                DeviceKind::Terminal => crate::terminal::screen::bright(),
-            };
-            let w_px = local.width() / key.stamp.density / units;
-            let h_px = local.height() / key.stamp.density / units;
-            let bar_w = (w_px * 0.12).clamp(2.0 / units, 5.0 / units);
-            let bar_h = (h_px * 0.34).max(6.0 / units);
-            display.with_children(|p| {
-                p.spawn((
-                    Pickable::IGNORE,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(local.min.x / key.stamp.density / units),
-                        top: px(local.min.y / key.stamp.density / units),
-                        width: px(w_px),
-                        height: px(h_px),
-                        border: UiRect::all(px(2.0 / units)),
-                        border_radius: BorderRadius::all(percent(50.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.04, 0.03, 0.02, 0.72)),
-                    BorderColor::all(ring.with_alpha(0.92)),
-                ))
-                .with_children(|icon| {
-                    icon.spawn((
-                        Pickable::IGNORE,
-                        Node {
-                            width: px(bar_w),
-                            height: px(bar_h),
-                            border_radius: BorderRadius::all(px(bar_w * 0.5)),
-                            ..default()
-                        },
-                        BackgroundColor(ring),
-                    ));
-                });
-            });
-        }
-    }
+    // Power-button exit hit-testing (`view.power_button_at`) stays active directly
+    // over the physical 3D power button with no visible circle/glyph overlay.
     let solid_backdrop = match request.stamp.kind {
-        DeviceKind::PipBoy => Color::srgb(0.025, 0.02, 0.008),
+        DeviceKind::PipBoy => {
+            let [r, g, b] = crate::interface::pipboy_rgb();
+            Color::srgb(
+                0.014 + f32::from(r) / 255.0 * 0.032,
+                0.014 + f32::from(g) / 255.0 * 0.032,
+                0.010 + f32::from(b) / 255.0 * 0.022,
+            )
+        }
         DeviceKind::Terminal => Color::srgb(0.012, 0.042, 0.020),
     };
     commands.spawn((Content,PaletteRoot,UiTargetCamera(request.camera),Node {

@@ -18,10 +18,12 @@ use nvf_assets::{model::{ModelCtx, ModelCache}, nif_material::NifMaterial,
 use nvf_play::dialogue_device::{DeviceKind, DeviceView, Request};
 use std::sync::Arc;
 
-const LAYER: usize = 17;
+// Dedicated layer separate from `creator_view::STUDIO_LAYER` (17) and `terminal_view` (16).
+const LAYER: usize = 22;
 const PLACE: Vec3 = Vec3::new(16384.0, 16384.0, 16384.0);
 const FOV: f32 = 0.5;
 const UV_ATTEMPTS: i32 = 16;
+const FRAME_MARGIN: f32 = 1.05;
 
 type ProjectionKey = (Mat4, Affine3A, Option<Rect>, Option<UVec2>);
 
@@ -152,13 +154,13 @@ fn remove_view(commands: &mut Commands, request: &Request) {
     });
 }
 
-type RetireAssets<'w> = (Option<ResMut<'w, Assets<Image>>>, Option<ResMut<'w, Assets<NifMaterial>>>);
+type RetireAssets<'w> = (Option<Res<'w, Assets<Image>>>, Option<Res<'w, Assets<NifMaterial>>>);
 
 fn retire(
     mut commands: Commands, request: Option<Res<Request>>, sources: Sources,
     mut owned: ResMut<Owned>,
     cameras: Query<(&Camera,&GlobalTransform,&RenderTarget)>, windows: Query<&Window>,
-    (mut images, mut materials): RetireAssets<'_>,
+    (images, materials): RetireAssets<'_>,
 ) {
     let current = request.as_deref().filter(|r| r.valid() && r.stamp.kind == DeviceKind::PipBoy);
     let changed = match (owned.request.as_ref(), current) {
@@ -186,13 +188,21 @@ fn retire(
     if changed || provider_changed || missing_assets {
         if let Some(old) = owned.request.as_ref() { remove_view(&mut commands, old); }
         if let Some(scene) = owned.scene.take() {
+            // Despawn the layer-22 camera and meshes BEFORE removing their image/material
+            // assets so no live render target or bindless material slab entry is freed
+            // while an entity still references it.
+            let root = scene.root;
+            let image_id = scene.image.id();
+            let material_ids: Vec<_> = scene.materials.iter().map(Handle::id).collect();
             commands.queue(move |world: &mut World| {
-                if let Ok(entity) = world.get_entity_mut(scene.root) { entity.despawn(); }
+                if let Ok(entity) = world.get_entity_mut(root) { entity.despawn(); }
+                if let Some(mut images) = world.get_resource_mut::<Assets<Image>>() {
+                    images.remove(image_id);
+                }
+                if let Some(mut materials) = world.get_resource_mut::<Assets<NifMaterial>>() {
+                    for id in material_ids { materials.remove(id); }
+                }
             });
-            if let Some(images) = images.as_deref_mut() { images.remove(scene.image.id()); }
-            if let Some(materials) = materials.as_deref_mut() {
-                for material in scene.materials { materials.remove(material.id()); }
-            }
         }
         owned.attempted = false;
     }
@@ -224,10 +234,60 @@ fn resolved_model_path(world: &ActorWorld, worn: &[FormId], look: Option<&fnv_ac
         .map(|p| p.model)
 }
 
-/// [design: docs/design/android.md] Frame the Wrist Terminal straight-on and tightly
-/// around the glass so dialogue text fills nearly the full height and side width of
-/// the screen with no awkward tilt angle while keeping the bezel & power button visible.
-fn fit(glass: &Posed, shapes: &[Arc<Posed>], aspect: f32) -> Option<(Transform, f32, f32)> {
+/// Unlit, fully opaque screen material for the offscreen Wrist Terminal dialogue
+/// camera. Unlike `pipboy_arm::menus_material` (which sets `pipboy_screen = true`
+/// so `nif_material.wesl` writes `alpha = 0.25` for main-camera `imagespace.wesl`
+/// `SCREEN_MARK`), the offscreen dialogue image is alpha-composited over the world
+/// by UI `ImageNode`, so it must write `alpha = 1.0` to keep the CRT opaque.
+pub(crate) fn dialogue_screen_material(source: &NifMaterial, image: Handle<Image>) -> NifMaterial {
+    let mut m = pipboy_arm::menus_material(source, image);
+    m.base.unlit = true;
+    m.base.alpha_mode = AlphaMode::Opaque;
+    m.base.emissive = LinearRgba::BLACK;
+    m.base.emissive_texture = None;
+    m.base.normal_map_texture = None;
+    m.extension.pipboy_screen = false;
+    m.extension.pipboy_a = Vec4::ZERO;
+    m.extension.pipboy_b = Vec4::ZERO;
+    m.extension.first_person = false;
+    m.extension.refract = false;
+    m.extension.shade_light = false;
+    m.extension.soft = Vec4::ZERO;
+    nvf_assets::authored::clear_for_unlit_copy(&mut m);
+    m
+}
+
+/// Sanitize non-screen Pip-Boy materials (e.g. additive button glows) for the
+/// isolated offscreen dialogue camera so they never sample `view_transmission_texture`
+/// or inherit first-person depth/refraction/shade-light state.
+pub(crate) fn dialogue_accessory_material(source: &NifMaterial) -> Option<NifMaterial> {
+    let needs_copy = (source.base.alpha_mode == AlphaMode::Add && !source.extension.add_linear)
+        || source.extension.first_person
+        || source.extension.refract
+        || source.extension.shade_light
+        || source.extension.pipboy_screen
+        || source.extension.soft != Vec4::ZERO;
+    if !needs_copy {
+        return None;
+    }
+    let mut m = source.clone();
+    if m.base.alpha_mode == AlphaMode::Add {
+        m.extension.add_linear = true;
+    }
+    m.extension.first_person = false;
+    m.extension.refract = false;
+    m.extension.shade_light = false;
+    m.extension.pipboy_screen = false;
+    m.extension.soft = Vec4::ZERO;
+    Some(m)
+}
+
+/// [design: docs/design/android.md] Frame the entire Wrist Terminal bezel (top rim,
+/// side dials/knobs, bottom STATS/ITEMS/DATA housing, and screen opening) straight-on
+/// with exact per-vertex perspective bounds and safe near-plane clearance so no part
+/// of the Pip-Boy clips against the viewport or near plane.
+fn fit(glass: &Posed, shapes: &[Arc<Posed>], aspect: f32) -> Option<(Transform, Vec3, f32, f32)> {
+    if !aspect.is_finite() || aspect <= 0.0 { return None; }
     let center = glass.middle()?;
     // Area-weighted average normal across the whole glass mesh avoids corner-triangle tilt.
     let normal = glass.triangles.iter().fold(Vec3::ZERO, |acc, &[a, b, c]| {
@@ -245,41 +305,64 @@ fn fit(glass: &Posed, shapes: &[Arc<Posed>], aspect: f32) -> Option<(Transform, 
     if !orientation.rotation.is_finite() { return None; }
     let right = orientation.rotation * Vec3::X;
     let up = orientation.rotation * Vec3::Y;
-    let mut glass_width: f32 = 0.0;
     let mut glass_height: f32 = 0.0;
     for point in &glass.points {
-        let p = *point - center;
-        glass_width = glass_width.max(p.dot(right).abs());
-        glass_height = glass_height.max(p.dot(up).abs());
+        glass_height = glass_height.max((*point - center).dot(up).abs());
     }
-    let mut width: f32 = 0.0;
-    let mut height: f32 = 0.0;
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for shape in shapes {
+        for point in &shape.points {
+            let p = *point - center;
+            let x = p.dot(right);
+            let y = p.dot(up);
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+    }
+    if !min_x.is_finite() || !max_x.is_finite() || !min_y.is_finite() || !max_y.is_finite() {
+        return None;
+    }
+    // Center camera aim on the full housing/bezel midpoint (including the bottom
+    // STATS/ITEMS/DATA section and left/right rims) instead of only the glass center.
+    let aim = center + right * ((min_x + max_x) * 0.5) + up * ((min_y + max_y) * 0.5);
+    let tan_half_y = (FOV * 0.5).tan();
+    let tan_half_x = tan_half_y * aspect;
+    if !tan_half_x.is_finite() || tan_half_x <= 0.0 || !tan_half_y.is_finite() || tan_half_y <= 0.0 {
+        return None;
+    }
+    let mut required_distance: f32 = 0.0;
     let mut front_depth: f32 = 0.0;
     let mut back_depth: f32 = 0.0;
     for shape in shapes {
         for point in &shape.points {
-            let p = *point - center;
-            width = width.max(p.dot(right).abs());
-            height = height.max(p.dot(up).abs());
-            let d = p.dot(normal);
-            if d > 0.0 {
-                front_depth = front_depth.max(d);
+            let rel = *point - aim;
+            let x = rel.dot(right).abs();
+            let y = rel.dot(up).abs();
+            let z = rel.dot(normal);
+            if z > 0.0 {
+                front_depth = front_depth.max(z);
             } else {
-                back_depth = back_depth.max(-d);
+                back_depth = back_depth.max(-z);
             }
+            let need_x = z + (x * FRAME_MARGIN) / tan_half_x;
+            let need_y = z + (y * FRAME_MARGIN) / tan_half_y;
+            required_distance = required_distance.max(need_x).max(need_y);
         }
     }
-    // Only geometry in front of the glass needs camera clearance; behind-screen cuff
-    // geometry must not push the camera back and shrink the dialogue screen.
-    let clearance = if glass_height > 0.0 { front_depth.min(glass_height * 0.45) } else { front_depth };
-    let frame_w = if glass_width > 0.0 { (glass_width * 1.12).min(width.max(glass_width)) } else { width };
-    let frame_h = if glass_height > 0.0 { (glass_height * 1.04).min(height.max(glass_height)) } else { height };
-    let distance = clearance + (frame_h.max(frame_w / aspect) / (FOV * 0.5).tan()) * 1.005;
-    if !distance.is_finite() || distance <= clearance || !aspect.is_finite() || aspect <= 0.0 { return None; }
-    let transform = Transform::from_translation(center + normal * distance).looking_at(center, up);
+    let min_clearance = (glass_height.max(1.0) * 0.25).max(0.5);
+    let distance = required_distance.max(front_depth + min_clearance);
+    if !distance.is_finite() || distance <= front_depth { return None; }
+    let transform = Transform::from_translation(aim + normal * distance).looking_at(aim, up);
     if !transform.translation.is_finite() || !transform.rotation.is_finite() { return None; }
-    let total_depth = front_depth.max(back_depth);
-    Some((transform, ((distance - clearance) * 0.1).max(0.001), distance + total_depth + (width + height).max(1.0)))
+    let clearance = distance - front_depth;
+    let near = (clearance * 0.25).clamp(0.05, (clearance * 0.5).max(0.05));
+    let far = distance + back_depth + ((max_x - min_x) + (max_y - min_y)).max(1.0);
+    Some((transform, aim, near, far))
 }
 
 fn prepare(
@@ -336,7 +419,7 @@ fn prepare(
     let Some(uv) = bounds.filter(|r| r.min.is_finite() && r.max.is_finite() && r.width()>0.0 && r.height()>0.0) else { return; };
     let all = prepared.iter().filter_map(|(_,_,_,p)| p.clone()).collect::<Vec<_>>();
     let display = request.stamp.display.size();
-    let Some((camera_transform, near, far)) = fit(&glass, &all, display.x/display.y) else { return; };
+    let Some((camera_transform, aim, near, far)) = fit(&glass, &all, display.x/display.y) else { return; };
     let size = display.ceil().as_uvec2();
     if size.x == 0 || size.y == 0 || size.max_element() > 8192 { return; }
     let mut image = Image::new_fill(Extent3d {width:size.x,height:size.y,depth_or_array_layers:1},
@@ -353,13 +436,8 @@ fn prepare(
         let mut material = shape.material.clone();
         if let Some(source) = models.materials.get(&shape.material) {
             let copy = match part {
-                Some(PipBoyPart::Screen) => {
-                    let mut m = pipboy_arm::menus_material(source, request.image.clone());
-                    // Keep dialogue screen text crisp without blur/noise washout.
-                    m.extension.pipboy_b = Vec4::ZERO;
-                    Some(m)
-                }
-                _ => None,
+                Some(PipBoyPart::Screen) => Some(dialogue_screen_material(source, request.image.clone())),
+                _ => dialogue_accessory_material(source),
             };
             if let Some(copy) = copy {
                 material = models.materials.add(copy);
@@ -377,28 +455,34 @@ fn prepare(
         }
         commands.spawn((Name::new(format!("Dialogue Pip-Boy {}",shape.name.as_deref().unwrap_or("shape"))),
             Mesh3d(shape.mesh.clone()), MeshMaterial3d(material), Transform::from_matrix(Mat4::from(transform)),
+            bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver,
             layer.clone(), ChildOf(root)));
     }
-    let msaa = if cfg!(target_os = "android") { Msaa::Off } else { Msaa::Sample4 };
     let camera = commands.spawn((Name::new("Dialogue Pip-Boy camera"), Camera3d::default(),
         Camera {order:-3,clear_color:ClearColorConfig::Custom(Color::NONE),..default()},
         RenderTarget::Image(ImageRenderTarget::from(image.clone())),
         Projection::Perspective(PerspectiveProjection {fov:FOV,near,far,..default()}),
-        bevy::core_pipeline::tonemapping::Tonemapping::Linear, msaa,
+        bevy::core_pipeline::tonemapping::Tonemapping::Linear, Msaa::Sample4,
         AmbientLight {color:Color::WHITE,brightness:150.0,..default()}, camera_transform,
         layer.clone(), ChildOf(root))).id();
     commands.spawn((DirectionalLight {illuminance:3000.0,shadow_maps_enabled:false,..default()},
-        Transform::from_translation(camera_transform.translation).looking_at(glass.middle().unwrap_or(PLACE),Vec3::Y),
+        Transform::from_translation(camera_transform.translation).looking_at(aim,Vec3::Y),
         layer, ChildOf(root)));
     let Some(screen_material) = screen_material else {
-        commands.entity(root).despawn();
-        models.images.remove(image.id());
-        for material in materials { models.materials.remove(material.id()); }
+        let image_id = image.id();
+        let material_ids: Vec<_> = materials.iter().map(Handle::id).collect();
+        commands.queue(move |world: &mut World| {
+            if let Ok(entity) = world.get_entity_mut(root) { entity.despawn(); }
+            if let Some(mut images) = world.get_resource_mut::<Assets<Image>>() { images.remove(image_id); }
+            if let Some(mut mats) = world.get_resource_mut::<Assets<NifMaterial>>() {
+                for id in material_ids { mats.remove(id); }
+            }
+        });
         return;
     };
     owned.scene = Some(Scene {root,camera,image,materials,screen_material,glass,blockers,power_button,uv,
         projection:None,rejected:None});
-    info!("dialogue Pip-Boy: resolved {path}, actual NIF bind pose, independent layer17");
+    info!("dialogue Pip-Boy: resolved {path}, actual NIF bind pose, independent layer{LAYER}");
 }
 
 fn camera_signature(

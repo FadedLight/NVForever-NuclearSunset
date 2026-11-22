@@ -11,7 +11,6 @@ struct Key {
     display: Rect,
     density: f32,
     scale: f32,
-    list: Option<crate::dialogue::ListId>,
 }
 
 #[derive(Resource, Default)]
@@ -89,18 +88,29 @@ fn prepare(
             let scale = scale.as_ref().map_or(1.0, |s| s.0);
             (positive_rect(display) && density.is_finite() && density > 0.0
                 && scale.is_finite() && scale > 0.0 && window.focused)
-                .then(|| Key {kind, window: entity, display, density, scale, list: menu.list.clone()})
+                .then_some(Key {kind, window: entity, display, density, scale})
         });
     if key.is_none() { owned.refused = None; }
     if key == owned.key { return; }
     owned.generation = owned.generation.wrapping_add(1);
     owned.key = key.clone();
     let Some(key) = key else {
-        if let Some(camera) = owned.camera.take() { commands.entity(camera).despawn(); }
-        if let Some(owner) = owned.owner.take() { commands.entity(owner).despawn(); }
-        if let Some(image) = owned.image.take() {
-            if let Some(images) = images.as_deref_mut() { images.remove(image.id()); }
-        }
+        let camera = owned.camera.take();
+        let owner = owned.owner.take();
+        let image = owned.image.take();
+        commands.queue(move |world: &mut World| {
+            if let Some(camera) = camera {
+                if let Ok(entity) = world.get_entity_mut(camera) { entity.despawn(); }
+            }
+            if let Some(owner) = owner {
+                if let Ok(entity) = world.get_entity_mut(owner) { entity.despawn(); }
+            }
+            if let Some(image) = image {
+                if let Some(mut images) = world.get_resource_mut::<Assets<Image>>() {
+                    images.remove(image.id());
+                }
+            }
+        });
         commands.remove_resource::<Request>();
         return;
     };

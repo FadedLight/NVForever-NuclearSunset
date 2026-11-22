@@ -238,18 +238,23 @@ fn actual_capture_worn_fallback_never_overrides_a_present_empty_player_body() {
 }
 
 #[test]
-fn pipboy_skips_light_effect_and_exposes_enlarged_glass_and_power_button() {
+fn pipboy_skips_light_effect_and_frames_full_bezel_opaque_without_clipping() {
     let (mut app, files) = fixture();
-    // Write a Pip-Boy NIF that also contains a huge PipboyLightEffect:0 cone
-    // (as in vanilla pipboyarm.nif); prepare() must ignore it rather than
-    // shrinking the screen or blocking rays, and PowerButton:0 must be hittable.
+    // Write a Pip-Boy NIF with asymmetric bottom STATS/ITEMS/DATA housing,
+    // protruding front bezel/power button, and a huge PipboyLightEffect:0 cone
+    // (as in vanilla pipboyarm.nif); prepare() must ignore the light cone,
+    // frame every bezel vertex inside the viewport with margin (no top/bottom/
+    // right/near clipping), keep screen_material opaque (pipboy_screen == false),
+    // and expose PowerButton:0 as hittable.
     let mut root = av_object(0);
     words(&mut root, &[5, 1, 3, 5, 7, 9, 0]);
     let mut blocks = vec![("NiNode", root)];
     for (name, bounds, y, uv) in [
-        (1, [-12.0, -10.0, 12.0, 10.0], -0.05, [1., 1.]),
+        // Asymmetric housing extending further below the glass (STATS/ITEMS/DATA)
+        // behind the glass plane, plus protruding PowerButton:0 in front of glass (+y).
+        (1, [-6.6, -5.6, 6.4, 4.4], -0.05, [1., 1.]),
         (2, [-4.8, -3.6, 4.8, 3.6], 0.0, [0.8, 0.8]),
-        (3, [5.1, -3.4, 5.7, -2.8], 0.10, [1., 1.]),
+        (3, [5.1, -4.6, 5.9, -3.8], 0.45, [1., 1.]),
         (4, [-4.8, -3.6, 4.8, 3.6], -0.05, [0.8, 0.8]),
         (5, [-80.0, -80.0, 80.0, 80.0], 2.0, [1., 1.]),
     ] {
@@ -280,20 +285,85 @@ fn pipboy_skips_light_effect_and_exposes_enlarged_glass_and_power_button() {
     let names = ["Root", "Housing", "pipboyscreen:0", "PowerButton:0", "glare:0", "PipboyLightEffect:0"];
     words(&mut nif, &[names.len() as u32, names.iter().map(|s| s.len()).max().unwrap() as u32]);
     for name in names { words(&mut nif, &[name.len() as u32]); nif.extend(name.as_bytes()); }
-    words(&mut nif, &[0]); for (_, bytes) in blocks { nif.extend(bytes); }
+    words(&mut nif, &[0]); for (_, bytes) in blocks { out_extend(&mut nif, bytes); }
     words(&mut nif, &[1, 0]);
     std::fs::write(files.path().join("meshes").join("dialogue_pip_a.nif"), nif).unwrap();
     let schema = app.world().resource::<GameData>().schema.clone();
     app.insert_resource(GameData::new(Arc::new(fnv_vfs::Vfs::open(files.path(), &[]).unwrap()), schema));
     *app.world_mut().resource_mut::<ModelCache>() = ModelCache::default();
-    ready(&mut app);
+    let (camera_entity, _) = ready(&mut app);
     let request = app.world().resource::<Request>();
     let view = app.world().resource::<DeviceView>();
-    // Enlarged framing: the glass occupies most of the 350px display height.
+
+    // Opaque CRT screen material: pipboy_screen must be false so alpha = 1.0 (not 0.25).
+    let scene = app.world().resource::<Owned>().scene.as_ref().unwrap();
+    let screen_mat = app.world().resource::<Assets<NifMaterial>>().get(&scene.screen_material).unwrap();
+    assert!(!screen_mat.extension.pipboy_screen, "offscreen dialogue Pip-Boy screen must not write 0.25 SCREEN_MARK alpha");
+    assert!(screen_mat.base.unlit);
+    assert_eq!(screen_mat.base.alpha_mode, AlphaMode::Opaque);
+
+    // Camera isolation: dedicated layer (distinct from creator_view::STUDIO_LAYER) and Msaa::Sample4.
+    assert_ne!(LAYER, crate::creator_view::STUDIO_LAYER);
+    assert_eq!(app.world().get::<RenderLayers>(camera_entity), Some(&RenderLayers::layer(LAYER)));
+    assert_eq!(app.world().get::<Msaa>(camera_entity), Some(&Msaa::Sample4));
+
+    // Exact frustum framing: every vertex of Housing, Screen, and PowerButton must project
+    // strictly inside the viewport with margin and stay safely in front of the near plane.
+    let cam = app.world().get::<Camera>(camera_entity).unwrap();
+    let cam_gt = app.world().get::<GlobalTransform>(camera_entity).unwrap();
+    let near = match app.world().get::<Projection>(camera_entity).unwrap() {
+        Projection::Perspective(p) => p.near,
+        _ => panic!("expected perspective projection"),
+    };
+    let cam_inv = cam_gt.affine().inverse();
+    for shape in std::iter::once(&scene.glass).chain(&scene.blockers) {
+        for &pt in &shape.points {
+            let view_pos = cam_inv.transform_point3(pt);
+            assert!(-view_pos.z > near * 1.5, "vertex clipped/too close to near plane: depth={} near={near}", -view_pos.z);
+            let ndc = cam.world_to_ndc(cam_gt, pt).expect("bezel vertex must project inside frustum");
+            assert!(ndc.x.abs() <= 0.98 && ndc.y.abs() <= 0.98, "bezel vertex clipped viewport edge: ndc={ndc:?}");
+        }
+    }
+
+    // Readable glass height on realistic proportions (> 60% of 350px display height).
     let top_left = view.window_at(request, request.canvas.min + Vec2::splat(2.0)).unwrap();
     let bottom_right = view.window_at(request, request.canvas.max - Vec2::splat(2.0)).unwrap();
-    assert!((bottom_right.y - top_left.y).abs() > 240.0, "enlarged Wrist Terminal screen height");
+    assert!((bottom_right.y - top_left.y).abs() > 210.0, "Wrist Terminal glass height {}", (bottom_right.y - top_left.y).abs());
+
     // Power button is exposed and clickable outside the glass.
     let power_rect = view.power_button_rect(request).expect("power button rect published");
     assert!(view.power_button_at(request, power_rect.center()));
+}
+
+fn out_extend(dst: &mut Vec<u8>, bytes: Vec<u8>) {
+    dst.extend(bytes);
+}
+
+#[test]
+fn dialogue_materials_isolate_screen_opacity_and_additive_glows_from_world_passes() {
+    let mut source = NifMaterial::default();
+    source.base.alpha_mode = AlphaMode::Add;
+    source.extension.first_person = true;
+    source.extension.refract = true;
+    source.extension.shade_light = true;
+    source.extension.soft = Vec4::new(4.0, 0.0, 0.0, 0.0);
+
+    let screen = dialogue_screen_material(&source, Handle::default());
+    assert!(!screen.extension.pipboy_screen);
+    assert!(!screen.extension.first_person);
+    assert!(!screen.extension.refract);
+    assert!(!screen.extension.shade_light);
+    assert_eq!(screen.extension.soft, Vec4::ZERO);
+    assert_eq!(screen.base.alpha_mode, AlphaMode::Opaque);
+    assert!(screen.base.unlit);
+
+    let glow = dialogue_accessory_material(&source).expect("additive/first-person shape gets isolated copy");
+    assert!(glow.extension.add_linear, "additive Pip-Boy glows must not read view_transmission_texture");
+    assert!(!glow.extension.first_person);
+    assert!(!glow.extension.refract);
+    assert!(!glow.extension.shade_light);
+    assert_eq!(glow.extension.soft, Vec4::ZERO);
+
+    // Ordinary opaque housing material needs no copy.
+    assert!(dialogue_accessory_material(&NifMaterial::default()).is_none());
 }

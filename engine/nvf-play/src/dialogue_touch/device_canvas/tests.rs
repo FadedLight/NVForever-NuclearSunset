@@ -119,10 +119,49 @@ fn console_and_wrist_terminal_power_button_exits_at_high_dpi_even_when_corner_ov
         // Normal dialogue with goodbye: tapping rendered power button (with small thumb jitter) exits.
         app.world_mut().resource_mut::<DialogueMenu>().view.as_mut().unwrap().goodbye = true;
         settle(&mut app);
+        // Power button hit target is invisible: Display must spawn no visible ring/glyph children.
+        {
+            let world = app.world_mut();
+            let mut displays = world.query_filtered::<Option<&Children>, With<Display>>();
+            assert!(
+                displays.single(world).unwrap().is_none_or(|c| c.is_empty()),
+                "{theme_name}: power button overlay must stay invisible (no ring/glyph children on Display)"
+            );
+            let mut contents = world.query_filtered::<&BackgroundColor, With<Content>>();
+            let bg = contents.single(world).unwrap().0.to_srgba();
+            assert!((bg.alpha - 1.0).abs() < 1e-4, "{theme_name}: CRT backdrop must be fully opaque");
+            assert!(bg.red < 0.12 && bg.green < 0.12 && bg.blue < 0.12, "{theme_name}: CRT backdrop must be dark");
+        }
         send(&mut app, window, 62, TouchPhase::Started, logical_tap);
         send(&mut app, window, 62, TouchPhase::Moved, logical_tap + Vec2::new(5.0, -4.0));
         send(&mut app, window, 62, TouchPhase::Ended, logical_tap + Vec2::new(5.0, -4.0));
         app.update();
         assert!(app.world().resource::<TouchFrame>().asked.leave, "{theme_name}: tapping rendered power button exits dialogue");
     }
+}
+
+#[test]
+fn advancing_dialogue_lines_keeps_device_request_generation_stable() {
+    let (mut app, _window) = layout_scene(true, Vec2::new(792.0, 363.0), 1.0);
+    app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>();
+    let i = app.world().resource::<crate::settings::Settings>().index(appearance::THEME_KEY).unwrap();
+    assert!(crate::settings::pick(app.world_mut(), i, "Wrist Terminal"));
+    settle(&mut app);
+    let initial = app.world().resource::<Request>().clone();
+    // Transition from choices to spoken goodbye line (same as live-device choices -> "Take it easy now.").
+    {
+        let mut menu = app.world_mut().resource_mut::<DialogueMenu>();
+        menu.list = None;
+        let view = menu.view.as_mut().unwrap();
+        view.choices.clear();
+        view.line = Some("Take it easy now.".into());
+    }
+    settle(&mut app);
+    let after = app.world().resource::<Request>().clone();
+    assert_eq!(
+        after.stamp, initial.stamp,
+        "advancing dialogue lines must not bump Request generation or tear down the 3D Pip-Boy scene"
+    );
+    assert_eq!(after.camera, initial.camera);
+    assert_eq!(after.image, initial.image);
 }

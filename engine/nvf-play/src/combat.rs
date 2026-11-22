@@ -7299,6 +7299,7 @@ mod tests {
                 kick_back_goal: [0.0; 2],
                 kick_back: [crate::ease::Spring::default(); 2],
                 spent_rng: SplitMix(4),
+                chosen_ammo: std::collections::BTreeMap::new(),
             };
             let dt = 1.0 / 60.0;
             let mut had_weapon = false;

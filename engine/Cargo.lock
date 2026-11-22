@@ -4668,6 +4668,7 @@ dependencies = [
  "fnv-pbr",
  "fnv-vfs",
  "fnv-world",
+ "half",
  "naga",
 ]
 
@@ -4728,6 +4729,7 @@ dependencies = [
  "rodio",
  "serde",
  "serde_json",
+ "swash",
 ]
 
 [[package]]

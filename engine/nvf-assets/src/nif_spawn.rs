@@ -170,6 +170,10 @@ pub(crate) struct Props {
     pub(crate) animated_emissive: bool,
     /// A clip of the model drives the shape's material alpha ([`shape_alpha_mode`]).
     pub(crate) animated_alpha: bool,
+    /// The `environment_map_scale` of a lit shader property that sets both
+    /// Environment_Mapping and Window_Environment_Mapping ([`window_env_flags`]): the shape
+    /// reflects its texture set's environment cube ([`window_env`]).
+    window_env: Option<f32>,
     /// An actor's part whose material carries an NiAlphaController for the actor's
     /// clips to drive ([`shape_alpha_mode`], [`material_alpha_controlled`]).
     pub(crate) alpha_gated: bool,
@@ -322,6 +326,26 @@ pub(crate) fn uses_falloff(shader_flags: i64) -> bool {
     shader_flags & (1 << 6) != 0
 }
 
+/// Whether shader flags ask for a window's environment map: BSShaderFlags bit 7
+/// "Environment_Mapping" and bit 21 "Window_Environment_Mapping" [documented: nif.xml flag
+/// names] (docs/spec-notes/nif.md §6 "Window glass and environment maps"). The glass of
+/// windows, bottles and lamps (490 files in `Fallout - Meshes.bsa`, gap audit §2.1);
+/// shapes with bit 7 alone are not given a reflection [design, #2462].
+pub(crate) fn window_env_flags(shader_flags: i64) -> bool {
+    shader_flags & (1 << 7) != 0 && shader_flags & (1 << 21) != 0
+}
+
+/// A shape's window environment map ([`window_env_flags`]): the environment cube (texture
+/// set slot 4), the environment mask (slot 5) if the set has one, and the scale
+/// (`environment_map_scale`) [documented: nif.xml BSShaderTextureSet slot order,
+/// BSShaderProperty field]. `None` without the flags, without a cube, on an unlit shape or
+/// at a scale of 0 or less.
+pub(crate) fn window_env(props: &Props) -> Option<(String, Option<String>, f32)> {
+    let scale = props.window_env.filter(|&s| s > 0.0 && !props.unlit)?;
+    let slot = |i: usize| props.textures.get(i).filter(|t| !t.is_empty()).cloned();
+    Some((slot(4)?, slot(5), scale))
+}
+
 /// Whether a shader property's shapes take their vertex alpha: with BSShaderFlags bit 3
 /// "Vertex_Alpha", and on an unlit shape (BSShaderNoLightingProperty) also with bit 19
 /// "Dynamic_Alpha" [documented: nif.xml flag names; hypothesis for the second: the
@@ -369,6 +393,8 @@ fn apply_property(file: &NifFile, dec: &Decoded, r: i32, p: &mut Props) {
         p.fire_period = fire_period(flags, s.int("refraction_fire_period"));
         p.lod_building = s.int("shader_flags_2").unwrap_or(0) & (1 << 2) != 0;
         p.falloff = None;
+        let lit = dec.is_a(r as usize, "BSShaderPPLightingProperty");
+        p.window_env = (lit && window_env_flags(flags)).then(|| s.float("environment_map_scale").unwrap_or(1.0));
     }
     match ty {
         "BSShaderPPLightingProperty" => p.glow = glow_map(s.int("shader_flags").unwrap_or(0), &p.textures),
@@ -803,18 +829,23 @@ pub(crate) trait TextureSource {
     /// (`texture::WorkerTextures::alpha_is_mask`): asked only for the shapes
     /// [`blended_cutout`] concerns.
     fn alpha_is_mask(&self, raw_path: &str) -> bool;
+    /// Whether every texel of the texture at a NIF texture path is opaque
+    /// (`texture::alpha_all_opaque`), read from the archives once per file: asked only
+    /// for the shapes [`blend_is_opaque`] concerns.
+    fn alpha_is_opaque(&self, raw_path: &str) -> bool;
     /// The key a NIF texture path loads under (`texture::resolved_path` over this source's
     /// VFS): the diffuse's key is what an authored set is looked up by.
     fn resolve(&self, raw_path: &str) -> String;
-    /// The authored set (#2981) for a resolved diffuse key, its maps loaded by the exact paths
-    /// the index names (`crate::authored::find`); `None` when the run's setting is off (then
-    /// nothing is asked of the index), with no set, or when its `_orm` does not load. Every
-    /// production source implements it (no default, so none can leave the feature off by
-    /// omission); test doubles answer for themselves.
-    fn authored(&mut self, resolved_diffuse: &str) -> Option<crate::authored::AuthoredSet>;
+    /// The set (#2981: authored, or height only) for a resolved diffuse key, its maps loaded by
+    /// the exact paths the index names (`crate::authored::find`); `None` when the run's setting
+    /// is off (then nothing is asked of the index), with no active set, when an authored set's
+    /// `_orm` does not load, or when a height-only set gives no height map. Every production
+    /// source implements it (no default, so none can leave the feature off by omission); test
+    /// doubles answer for themselves.
+    fn pbr_set(&mut self, resolved_diffuse: &str) -> Option<crate::authored::PbrSet>;
     /// Whether authored sets are in use at all (the run's setting, `crate::authored::enabled`,
     /// for every production source): off, no shape is looked up and no legacy look is kept,
-    /// so an off run's materials carry nothing new. No default, as for [`Self::authored`].
+    /// so an off run's materials carry nothing new. No default, as for [`Self::pbr_set`].
     fn authored_on(&self) -> bool;
 }
 
@@ -842,6 +873,9 @@ impl TextureSource for StoreTextures<'_> {
     fn alpha_is_mask(&self, raw_path: &str) -> bool {
         self.textures.workers.alpha_is_mask(raw_path, self.data)
     }
+    fn alpha_is_opaque(&self, raw_path: &str) -> bool {
+        self.textures.workers.alpha_is_opaque(raw_path, self.data)
+    }
 
     fn resolve(&self, raw_path: &str) -> String {
         crate::texture::resolved_path(raw_path, |p| self.data.vfs.exists(p))
@@ -851,11 +885,13 @@ impl TextureSource for StoreTextures<'_> {
         crate::authored::enabled()
     }
 
-    fn authored(&mut self, resolved_diffuse: &str) -> Option<crate::authored::AuthoredSet> {
+    fn pbr_set(&mut self, resolved_diffuse: &str) -> Option<crate::authored::PbrSet> {
         let workers = self.textures.workers.clone();
         let (textures, data, images, formats) = (&mut *self.textures, self.data, &mut *self.images, self.formats);
         crate::authored::find(data, crate::authored::enabled(), resolved_diffuse, &workers.authored, |path, usage| {
-            textures.exact(path, usage, data, images, formats).map(|(h, _)| h)
+            let (h, _) = textures.exact(path, usage, data, images, formats)?;
+            let format = images.get(&h).map(|i| i.texture_descriptor.format);
+            Some((h, format))
         })
     }
 }
@@ -890,6 +926,68 @@ pub(crate) fn blended_cutout(props: &Props, cut: Option<f32>, alpha_mode: AlphaM
         && props.refraction.is_none()
         && !props.hair;
     (matches!(alpha_mode, AlphaMode::Blend) && source_over && tested && alpha_from_texture_only && mask()).then_some(BLENDED_CUTOUT_CUT)
+}
+
+/// Whether a shape that asks to be blended draws the same as an opaque one: it blends
+/// SRC_ALPHA / INV_SRC_ALPHA and nothing gives it an alpha below 1. Its base texture is
+/// opaque in every texel (`opaque_texture`, asked last), its material alpha is 1, it has no
+/// vertex alpha, no vertex-alpha cut, no alpha animation, view-angle falloff, light,
+/// decal, refraction, hair shading or window environment map. With alpha 1 the blend is `colour x 1 + behind x 0`:
+/// the shape's own colour, as if opaque.
+///
+/// Drawn opaque it is in the depth and motion prepasses, which a blended shape is not
+/// (docs/design/fsr-upscaling.md "Blended cut-outs"). Drawn blended, the placed T-45d
+/// Power Armor (`armor\powerarmor\powerarmorgo.nif`: one NiTriStrips, NiAlphaProperty
+/// flags 4333 = blend on, test off, threshold 0, material alpha 1, no vertex colours,
+/// `PowerArmorBody.dds` in DXT1) showed as a faint see-through outline on a table with
+/// DLSS, frame generation and the room's haze on, which all take a blended shape for
+/// something to see through [observed: player report R-C66YZC4D, #3230; fnvtool nif
+/// decode]. In a plain scene it drew solid either way [observed: a placed ArmorPowerT45d
+/// on the Searchlight Airport runway, 2026-11-21].
+pub(crate) fn blend_is_opaque(props: &Props, cut: Option<f32>, alpha_mode: AlphaMode, opaque_texture: impl FnOnce() -> bool) -> bool {
+    let Some((flags, _)) = props.alpha else { return false };
+    let source_over = (flags >> 1) & 0xF == 6 && (flags >> 5) & 0xF == 7;
+    let nothing_thins_it = cut.is_none()
+        && !props.vertex_alpha
+        && props.material_alpha.unwrap_or(1.0) >= 1.0
+        && !props.animated_alpha
+        && props.falloff.is_none()
+        && !props.unlit
+        && !props.decal
+        && props.refraction.is_none()
+        && !props.hair
+        // A shape with a window environment map (`window_env`) keeps its blend: blended,
+        // its reflection is added over it (`premultiply` below), and that path is left as
+        // it is [design, #3230]. (The drinking glass, the glass pitcher and the NCR
+        // glasses are not such shapes: they have the plain environment-map flag only,
+        // material alpha 1 and an opaque texture, so the rule takes them too; they drew
+        // at alpha 1 before as well [observed: fnvtool nif decode of
+        // `clutter\cafeteria\drinkingglass01.nif`; the smoke runs' summary lines].)
+        && props.window_env.is_none();
+    matches!(alpha_mode, AlphaMode::Blend) && source_over && nothing_thins_it && opaque_texture()
+}
+
+/// How many materials [`blend_is_opaque`] turned opaque this run, and the first few
+/// textures they were for (the exit's summary line).
+static BLEND_DRAWN_OPAQUE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static BLEND_DRAWN_OPAQUE_FIRST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn note_blend_drawn_opaque(texture: &str) {
+    BLEND_DRAWN_OPAQUE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut first) = BLEND_DRAWN_OPAQUE_FIRST.lock() {
+        let t = texture.to_ascii_lowercase();
+        if first.len() < 8 && !first.contains(&t) {
+            first.push(t);
+        }
+    }
+}
+
+/// The exit's line: how many materials that asked to be blended were made opaque because
+/// nothing could thin them ([`blend_is_opaque`]), and the first few textures.
+pub fn blend_opaque_summary() -> String {
+    let n = BLEND_DRAWN_OPAQUE.load(std::sync::atomic::Ordering::Relaxed);
+    let first = BLEND_DRAWN_OPAQUE_FIRST.lock().map(|f| f.join(", ")).unwrap_or_default();
+    format!("blended shapes drawn opaque: {n} material builds (alpha 1 everywhere: opaque texture, material alpha 1, no vertex alpha){}", if first.is_empty() { String::new() } else { format!("; first textures: {first}") })
 }
 
 /// The material for a shape's properties; also returns the base texture path when it
@@ -937,6 +1035,28 @@ pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut
     let (normal, unmasked) = normal.map_or((None, false), |(h, unmasked)| (Some(h), unmasked));
     let cut = blend_cut(props, mesh);
     let alpha_mode = if cut.is_some() { AlphaMode::Blend } else { shape_alpha_mode(props) };
+    // A blended shape that nothing can thin is drawn opaque (#3230).
+    let alpha_mode = if blend_is_opaque(props, cut, alpha_mode, || props.textures.first().is_some_and(|t| !t.is_empty() && textures.alpha_is_opaque(t))) {
+        note_blend_drawn_opaque(props.textures.first().map_or("", String::as_str));
+        AlphaMode::Opaque
+    } else {
+        alpha_mode
+    };
+    // The window environment map: the cube, the mask and the scale (docs/spec-notes/nif.md
+    // §6 "Window glass and environment maps"). A blended shape that reflects is drawn
+    // premultiplied, so its reflection is added over the blend whatever its alpha.
+    let env = window_env(props).and_then(|(cube, mask, scale)| {
+        let cube = textures.texture(&crate::texture::cube_path(&cube), true)?;
+        let mask = mask.filter(|_| has_uv).and_then(|m| textures.texture(&m, false));
+        Some((cube, mask, scale))
+    });
+    // Not a blended cut-out (a tested shape whose texture is a mask): it stays Blend, the
+    // mode `blended_cutout` and the FSR cut-out switch (nif_material.rs) know, and its
+    // reflection is added inside the blend.
+    let premultiply = env.is_some()
+        && matches!(alpha_mode, AlphaMode::Blend)
+        && blended_cutout(props, cut, alpha_mode, || props.textures.first().is_some_and(|t| !t.is_empty() && textures.alpha_is_mask(t))).is_none();
+    let alpha_mode = if premultiply { AlphaMode::Premultiplied } else { alpha_mode };
     // An authored set (#2981, crate::authored): looked up by the resolved diffuse when the
     // shape may take one; `None` whenever the run's setting is off.
     let on = textures.authored_on();
@@ -949,13 +1069,22 @@ pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut
     if key.is_some() && !key_ok {
         crate::authored::note_skipped(true);
     }
-    let authored = key.filter(|_| key_ok).and_then(|k| textures.authored(&k));
-    // The final normal is chosen before the tangents are settled: a set's `_n` on a shape
-    // without a normal map needs tangents on the drawn mesh, given here from `tangents` (kept,
-    // stored or generated, as for the game's own normal map).
+    let found = key.filter(|_| key_ok).and_then(|k| textures.pbr_set(&k));
+    let authored = found.as_ref().and_then(crate::authored::PbrSet::authored);
+    let height = found.as_ref().and_then(crate::authored::PbrSet::height);
+    // A height map is drawn only on an opaque (or, under the alpha-tested switch, an
+    // alpha-tested), single-sided, non-decal shape (`crate::authored::height_gate`, asked
+    // again of the built material): only such a shape gains tangents for one.
+    let height_wanted = height.is_some()
+        && crate::authored::height_alpha(alpha_mode, crate::authored::parallax_mask()).is_ok()
+        && !props.double_sided
+        && !props.decal;
+    // The final normal is chosen before the tangents are settled: a set's `_n` or `_p` on a
+    // shape without a normal map needs tangents on the drawn mesh, given here from `tangents`
+    // (kept, stored or generated, as for the game's own normal map).
     let tangents = if normal.is_some() {
         true
-    } else if authored.as_ref().is_some_and(|s| s.normal.is_some()) && !had_tangents {
+    } else if (authored.is_some_and(|s| s.normal.is_some()) || height_wanted) && !had_tangents {
         has_uv && tangents.add_to(mesh)
     } else {
         had_tangents
@@ -1000,6 +1129,11 @@ pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut
         material.extension.depth_write = true;
     }
     material.extension.add_whole = if adds_whole(props) { 1.0 } else { 0.0 };
+    if let Some((cube, mask, scale)) = env {
+        material.extension.env = Vec4::new(scale, if mask.is_some() { 1.0 } else { 0.0 }, 0.0, 0.0);
+        material.extension.env_cube = Some(cube);
+        material.extension.env_mask = mask;
+    }
     material.extension.emissive_rule = shape_emissive_rule(props, alpha_mode);
     if props.unlit {
         unlit_vertex_colors(&mut material);
@@ -1029,11 +1163,19 @@ pub(crate) fn shape_material_with(props: &Props, mesh: &mut Mesh, textures: &mut
             metallic: material.base.metallic,
             tangents,
             specular_tint: material.base.specular_tint,
+            parallax: crate::authored::Parallax::of(&material.base),
             scripted_tint: None,
         };
-        if let Some(set) = &authored {
+        if let Some(set) = authored {
             crate::authored::apply(&mut material, set, &legacy);
             crate::authored::note_built(set);
+        }
+        // The height map over either kind of set (a height-only set changes nothing else and
+        // leaves the mark clear).
+        if let Some(height) = height {
+            if crate::authored::apply_height(&mut material, height, &legacy).is_ok() {
+                crate::authored::note_height_built(authored.is_none());
+            }
         }
         material.extension.legacy = Some(legacy);
     }
@@ -1105,6 +1247,10 @@ pub fn refraction_material(material: &mut NifMaterial, strength: f32, fire_perio
     material.extension.fire_period = fire_period;
     material.extension.refract = true;
     material.extension.depth_write = false;
+    // #2981: a refracting copy (a cloak's: nvforever `stealth_field.rs`, player and actors
+    // alike) draws no authored height map: the shader samples the standard material, with
+    // the march, before its refraction return.
+    crate::authored::recheck_height(material);
 }
 
 /// Numeric mesh admission is an engine policy; see nif-numeric-admission.md.
@@ -1518,10 +1664,13 @@ mod tests {
         fn alpha_is_mask(&self, _: &str) -> bool {
             false
         }
+        fn alpha_is_opaque(&self, _: &str) -> bool {
+            false
+        }
         fn resolve(&self, raw_path: &str) -> String {
             fnv_vfs::texture_path(raw_path)
         }
-        fn authored(&mut self, _: &str) -> Option<crate::authored::AuthoredSet> {
+        fn pbr_set(&mut self, _: &str) -> Option<crate::authored::PbrSet> {
             None
         }
         fn authored_on(&self) -> bool {
@@ -1541,10 +1690,13 @@ mod tests {
         fn alpha_is_mask(&self, raw_path: &str) -> bool {
             raw_path.contains("mask")
         }
+        fn alpha_is_opaque(&self, raw_path: &str) -> bool {
+            raw_path.contains("solid")
+        }
         fn resolve(&self, raw_path: &str) -> String {
             fnv_vfs::texture_path(raw_path)
         }
-        fn authored(&mut self, _: &str) -> Option<crate::authored::AuthoredSet> {
+        fn pbr_set(&mut self, _: &str) -> Option<crate::authored::PbrSet> {
             None
         }
         fn authored_on(&self) -> bool {
@@ -1630,6 +1782,48 @@ mod tests {
         }
     }
 
+    /// #3230: a shape that asks to be blended and that nothing can thin is drawn opaque.
+    /// The placed T-45d Power Armor: blend SRC_ALPHA / INV_SRC_ALPHA, test off, threshold 0
+    /// (flags 4333), material alpha 1, no vertex colours, an opaque texture.
+    #[test]
+    fn a_blended_shape_that_nothing_thins_is_opaque() {
+        let quad = || {
+            let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+            m.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]);
+            m
+        };
+        let mode = |p: &Props| shape_material_with(p, &mut quad(), &mut MaskTextures, Tangents::Generate).0.base.alpha_mode;
+        let armour = Props { alpha: Some((4333, 0)), material_alpha: Some(1.0), textures: vec![r"armor\powerarmor\powerarmorbody_solid.dds".into()], ..Default::default() };
+        assert!(matches!(mode(&armour), AlphaMode::Opaque), "{:?}", mode(&armour));
+        // No stated material alpha is 1 too; so is one tested below the cut (0x12ED).
+        assert!(matches!(mode(&Props { material_alpha: None, ..armour.clone() }), AlphaMode::Opaque));
+        assert!(matches!(mode(&Props { alpha: Some((0x12ED, 0)), ..armour.clone() }), AlphaMode::Opaque));
+        // A texture with any alpha below 1 (or none loaded), and everything else that can
+        // thin a shape, keeps the blend.
+        for props in [
+            Props { textures: vec![r"clutter\glass.dds".into()], ..armour.clone() },
+            Props { textures: vec![String::new()], ..armour.clone() },
+            Props { textures: Vec::new(), ..armour.clone() },
+            Props { material_alpha: Some(0.99), ..armour.clone() },
+            Props { vertex_alpha: true, ..armour.clone() },
+            Props { animated_alpha: true, ..armour.clone() },
+            Props { falloff: Some(crate::nif_material::Falloff { params: Vec4::new(1.0, 0.5, 1.0, 0.0) }), ..armour.clone() },
+            Props { unlit: true, ..armour.clone() },
+            Props { decal: true, ..armour.clone() },
+            Props { hair: true, ..armour.clone() },
+            Props { window_env: Some(1.0), ..armour.clone() },
+        ] {
+            assert!(matches!(mode(&props), AlphaMode::Blend), "{props:?} drawn {:?}", mode(&props));
+            assert!(!blend_is_opaque(&props, None, AlphaMode::Blend, || props.textures.first().is_some_and(|t| t.contains("solid"))), "{props:?}");
+        }
+        // Other blends are not this one: additive stays additive, multiply multiply.
+        assert!(matches!(mode(&Props { alpha: Some((4333 & !(0xF << 5), 0)), ..armour.clone() }), AlphaMode::Add));
+        assert!(matches!(mode(&Props { alpha: Some(((4333 & !(0xF << 1)) | (1 << 1), 0)), ..armour.clone() }), AlphaMode::Multiply));
+        // A shape that is not blended at all is as it was.
+        assert!(matches!(mode(&Props { alpha: None, ..armour.clone() }), AlphaMode::Opaque));
+        assert!(matches!(mode(&Props { alpha: Some((0x12ED, 128)), ..armour }), AlphaMode::Mask(_)));
+    }
+
     fn triangle() -> Mesh {
         Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD).with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; 3])
     }
@@ -1671,6 +1865,26 @@ mod tests {
         hair_model_cut_out(&mut masked);
         assert_eq!(masked.base.alpha_mode, AlphaMode::Mask(0.7));
         assert!(hair_model_layer(&masked).is_none());
+    }
+
+    /// A window environment map needs both flags (bits 7 and 21), a lit shader, a cube in
+    /// slot 4 and a scale above 0; the mask in slot 5 is optional (`vwindow01.nif`: flags
+    /// 0x82200180, ShinyBright_e.dds, no mask; nif.md §6 "Window glass and environment
+    /// maps").
+    #[test]
+    fn window_env_needs_both_flags_a_lit_shader_and_a_cube() {
+        assert!(window_env_flags(0x8220_0180));
+        assert!(!window_env_flags(1 << 7));
+        assert!(!window_env_flags(1 << 21));
+        let set = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let glass = Props { window_env: Some(1.0), textures: set(&["vglass01.dds", "vglass01_n.dds", "", "", "shinybright_e.dds", ""]), ..default() };
+        assert_eq!(window_env(&glass), Some(("shinybright_e.dds".to_string(), None, 1.0)));
+        let masked = Props { textures: set(&["a.dds", "a_n.dds", "", "", "b_e.dds", "a_m.dds"]), ..glass.clone() };
+        assert_eq!(window_env(&masked), Some(("b_e.dds".to_string(), Some("a_m.dds".to_string()), 1.0)));
+        assert_eq!(window_env(&Props { textures: set(&["a.dds", "a_n.dds"]), ..glass.clone() }), None);
+        assert_eq!(window_env(&Props { window_env: Some(0.0), ..glass.clone() }), None);
+        assert_eq!(window_env(&Props { unlit: true, ..glass.clone() }), None);
+        assert_eq!(window_env(&Props { window_env: None, ..glass }), None);
     }
 
     #[test]

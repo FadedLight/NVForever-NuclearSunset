@@ -638,6 +638,7 @@ mod tests {
             centre: None,
             waiting: default(),
             model_overrides: default(),
+            travels: 0,
         });
         app.world_mut()
             .resource_mut::<nvf_play::main_menu::MainMenu>()

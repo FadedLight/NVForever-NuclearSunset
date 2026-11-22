@@ -234,7 +234,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let a = subject.unwrap_or(FormId::PLAYER_REF);
             yes(g.senses.motion.get(&a).is_some_and(|m| m.swimming))
         }
-        "isinair" => zero,
+        // In the air: the physics' airborne state (neither grounded nor swimming)
+        // [documented: GECK wiki IsInAir; hypothesis: swimming counts as not in air].
+        "isinair" => {
+            let a = subject.unwrap_or(FormId::PLAYER_REF);
+            yes(g.senses.motion.get(&a).is_some_and(|m| m.in_air))
+        }
         // Units per second on the axis (none given: the speed), measured frame to frame
         // from the first call on [hypothesis: the first call gives 0].
         "getactorvelocity" => {

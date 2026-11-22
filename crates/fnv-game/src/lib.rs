@@ -245,6 +245,7 @@ pub mod ui_loading;
 pub mod ui_hud;
 pub mod ui_more;
 pub mod ui_projection;
+pub mod ui_search_bar;
 pub mod ui_input;
 pub mod unconscious;
 pub mod use_weapon;

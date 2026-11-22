@@ -764,7 +764,7 @@ fn open(
             };
             // The player's hacking tweaks [design: docs/design/tweaks.md].
             let t = &rt.game.tweaks;
-            puzzle.rules = fnv_game::hacking::HackRules { no_single_chars: t.hack_no_single_chars, no_repeat_words: t.hack_no_repeat_words, dud_when_full: t.hack_dud_when_full, spare_guessed: t.hack_spare_guessed };
+            puzzle.rules = fnv_game::hacking::HackRules::from_tweaks(t);
             stats.hacks += 1;
             info!(
                 "terminal: open {reference} {name}: hacking, {} (Science {sci:.0}): {} words of {} letters, {} bracket pairs",
@@ -1249,13 +1249,13 @@ fn draw(
     image: Option<Res<TerminalImage>>,
     (mut rows, read): (ResMut<MenuRows>, Res<ReadEntries>),
     mut faces: Local<Option<screen::Faces>>,
-    mut shown: Local<Option<String>>,
+    mut shown: Local<Option<(String, u32)>>,
 ) {
     // The screen is laid out in its own texture, at its size whatever the UI scale; the
     // picture of it on the window scales (`screen::spawn_backdrop`, #1631).
     let _canvas = crate::interface::original_units();
     let grey = grey_read();
-    let key = screen.0.as_ref().map(|s| format!("{}:{grey}", view_key(s)));
+    let key = screen.0.as_ref().map(|s| (format!("{}:{grey}", view_key(s)), crate::cjk_font::revision()));
     // A closing screen keeps its picture while it fades (`fade_out`); one opened meanwhile
     // takes its place at once.
     if !fading.is_empty() {

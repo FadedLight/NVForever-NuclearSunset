@@ -107,6 +107,7 @@ mod tests {
             centre: None,
             waiting: default(),
             model_overrides: default(),
+            travels: 0,
         }
     }
     fn app() -> App {

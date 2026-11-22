@@ -11,7 +11,7 @@ use bevy::image::{
     ImageSamplerDescriptor,
 };
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension};
 use bevy::asset::AssetHandleProvider;
 use fnv_dds::{to_rgba8, Dds, Format};
 use std::collections::HashMap;
@@ -53,12 +53,15 @@ struct DecodedTexture {
     lacks_alpha: bool,
     /// The file's DX10 header names an `_SRGB` format (a hint only; the role decides).
     srgb_code: bool,
+    /// The file's own format, before any decode on the CPU (`None`: not decoded from a DDS
+    /// file here). An authored `_p` is judged by it (`crate::authored::note_source`).
+    source: Option<Format>,
 }
 
 impl From<Image> for DecodedTexture {
     fn from(image: Image) -> Self {
         let lacks_alpha = crate::nif_spawn::format_lacks_alpha(image.texture_descriptor.format);
-        Self { image, lacks_alpha, srgb_code: false }
+        Self { image, lacks_alpha, srgb_code: false, source: None }
     }
 }
 
@@ -105,6 +108,9 @@ pub struct WorkerTextures {
     /// Whether a texture's alpha is a cut-out mask, by resolved path
     /// ([`Self::alpha_is_mask`]).
     masks: Mutex<HashMap<String, bool>>,
+    /// Whether every texel of a texture is opaque, by resolved path
+    /// ([`Self::alpha_is_opaque`]).
+    opaques: Mutex<HashMap<String, bool>>,
     /// Authored material sets' scalar files and warnings (`crate::authored::find`), shared
     /// by the main thread and the workers.
     pub(crate) authored: crate::authored::Memo,
@@ -137,7 +143,8 @@ pub(crate) fn worker_texture(
     images: &AssetHandleProvider,
     bc_supported: bool,
 ) -> Option<(Handle<Image>, TextureFormat, bool)> {
-    let key = (resolved_path(raw_path, |p| data.vfs.exists(p)), usage);
+    let (raw, cube) = split_cube(raw_path);
+    let key = (cube_key(resolved_path(raw, |p| data.vfs.exists(p)), cube), usage);
     worker_texture_key(key, data, cached, workers, images, bc_supported)
 }
 
@@ -167,11 +174,14 @@ fn worker_texture_key(
         return Some(found.clone());
     }
     let usage = key.1;
-    workers.load_once(key, images, |path| {
+    workers.load_once(key, images, |key_path| {
+        let (path, cube) = split_cube(key_path);
         let bytes = data.read(path).ok_or_else(|| "not in any archive".to_string())?;
-        let mut decoded = dds_texture(&bytes, usage, bc_supported, false)?;
+        let mut decoded = decode(&bytes, cube, usage, bc_supported)?;
         decoded.image.texture_descriptor.label = Some(folder_label(path));
         crate::authored::srgb_warning(&workers.authored, path, usage, decoded.srgb_code);
+        let size = decoded.image.texture_descriptor.size;
+        crate::authored::note_source(&workers.authored, path, decoded.source, (size.width, size.height));
         Ok(decoded)
     })
 }
@@ -419,11 +429,101 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
         || matches!(dds.format, Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S)
         || (dds.format == Format::Dxt1 && dds.header.dx10.is_some())
         || crate::nif_spawn::format_lacks_alpha(format);
-    Ok(DecodedTexture { image: img, lacks_alpha, srgb_code: dds.srgb_hint() == Some(true) })
+    Ok(DecodedTexture { image: img, lacks_alpha, srgb_code: dds.srgb_hint() == Some(true), source: Some(dds.format) })
 }
 
 fn normal_byte(value: f32) -> u8 {
     ((value + 1.0) * 0.5 * 255.0).round() as u8
+}
+
+/// The end of a texture path that asks for the file as a cube map ([`cube_path`]): the
+/// texture caches key a cube map by its path with this added, so a file loaded as a cube
+/// map is never handed out for a flat texture slot, nor the other way round.
+const CUBE_KEY: &str = "#cube";
+
+/// The path to pass to a texture source (`TextureSource::texture`, [`TextureCache::get`])
+/// to have the file at a NIF texture path loaded as a cube map ([`dds_cube_image`]): the
+/// environment cube of texture-set slot 4 (docs/spec-notes/nif.md §6 "Window glass and
+/// environment maps").
+pub fn cube_path(raw_path: &str) -> String {
+    format!("{raw_path}{CUBE_KEY}")
+}
+
+/// A requested path and whether it asks for a cube map ([`cube_path`]).
+fn split_cube(raw_path: &str) -> (&str, bool) {
+    raw_path.strip_suffix(CUBE_KEY).map_or((raw_path, false), |p| (p, true))
+}
+
+/// The cache key of a resolved path, loaded as a cube map or not.
+fn cube_key(path: String, cube: bool) -> String {
+    if cube {
+        path + CUBE_KEY
+    } else {
+        path
+    }
+}
+
+/// The file's image for a cache key: a cube map ([`dds_cube_image`]) for a key that asks
+/// for one, else [`dds_texture`] for the usage.
+fn decode(bytes: &[u8], cube: bool, usage: TextureUsage, bc_supported: bool) -> Result<DecodedTexture, String> {
+    if cube {
+        dds_cube_image(bytes, usage == TextureUsage::Color, bc_supported).map(DecodedTexture::from)
+    } else {
+        dds_texture(bytes, usage, bc_supported, false)
+    }
+}
+
+/// Build a cube-map GPU image from DDS bytes: the six faces in the file's order (+X, -X,
+/// +Y, -Y, +Z, -Z [documented: Microsoft's DDS documentation, "Cubic Environment Maps"]),
+/// each with its mip chain, as the six layers of a texture viewed as a cube. An error for a
+/// file that is not a cube map with all six faces. Block-compressed faces are decoded when
+/// the device cannot sample them or their side is not a multiple of 4, as in [`dds_image`].
+pub fn dds_cube_image(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Image, String> {
+    crate::guard::guarded(|| dds_cube_image_unguarded(bytes, srgb, bc_supported))
+}
+
+fn dds_cube_image_unguarded(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Image, String> {
+    let dds = Dds::parse(bytes).map_err(|e| e.to_string())?;
+    if !dds.header.is_cubemap() || dds.levels.len() != 6 {
+        return Err("not a cube map with six faces".into());
+    }
+    let (w, h) = (dds.header.width, dds.header.height);
+    if w != h {
+        return Err(format!("cube faces of {w}x{h} are not square"));
+    }
+    let mips = dds.levels[0].len() as u32;
+    let block = matches!(dds.format, Format::Dxt1 | Format::Dxt3 | Format::Dxt5);
+    let compressed = block && bc_supported && w % 4 == 0;
+    let mut data = Vec::new();
+    for face in &dds.levels {
+        if face.len() as u32 != mips {
+            return Err("cube faces with different mip counts".into());
+        }
+        for (m, l) in face.iter().enumerate() {
+            if compressed {
+                data.extend_from_slice(l);
+            } else if block {
+                let (lw, lh) = dds.header.level_dims(m as u32);
+                data.extend(fnv_dds::decode_blocks(dds.format, lw, lh, l).ok_or("block data too short")?);
+            } else {
+                data.extend(to_rgba8(dds.format, l).ok_or("unsupported layout")?);
+            }
+        }
+    }
+    let format = match (compressed, dds.format, srgb) {
+        (true, Format::Dxt1, true) => TextureFormat::Bc1RgbaUnormSrgb,
+        (true, Format::Dxt1, false) => TextureFormat::Bc1RgbaUnorm,
+        (true, Format::Dxt3, true) => TextureFormat::Bc2RgbaUnormSrgb,
+        (true, Format::Dxt3, false) => TextureFormat::Bc2RgbaUnorm,
+        (true, _, true) => TextureFormat::Bc3RgbaUnormSrgb,
+        (true, _, false) => TextureFormat::Bc3RgbaUnorm,
+        (false, _, true) => TextureFormat::Rgba8UnormSrgb,
+        (false, _, false) => TextureFormat::Rgba8Unorm,
+    };
+    let mut img = checked_image_layers(w, h, mips, 6, format, data)?;
+    img.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..default() });
+    img.sampler = sampler();
+    Ok(img)
 }
 
 /// The largest side of a texture taken from a file. Above every texture the game ships
@@ -437,6 +537,11 @@ pub const MAX_TEXTURE_SIDE: u32 = 16384;
 /// is shorter than the size says; so every image made from a file's numbers is built
 /// here (docs/design/broken-files.md).
 pub fn checked_image(w: u32, h: u32, mips: u32, format: TextureFormat, data: Vec<u8>) -> Result<Image, String> {
+    checked_image_layers(w, h, mips, 1, format, data)
+}
+
+/// [`checked_image`] with `layers` layers, each with its whole mip chain in turn.
+fn checked_image_layers(w: u32, h: u32, mips: u32, layers: u32, format: TextureFormat, data: Vec<u8>) -> Result<Image, String> {
     if w == 0 || h == 0 || w > MAX_TEXTURE_SIDE || h > MAX_TEXTURE_SIDE {
         return Err(format!("size {w}x{h} out of range (1 to {MAX_TEXTURE_SIDE})"));
     }
@@ -446,13 +551,13 @@ pub fn checked_image(w: u32, h: u32, mips: u32, format: TextureFormat, data: Vec
     }
     let (bw, bh) = format.block_dimensions();
     let block = format.block_copy_size(None).ok_or("format has no single block size")? as usize;
-    let expected: usize = (0..mips).map(|m| ((w >> m).max(1).div_ceil(bw) * (h >> m).max(1).div_ceil(bh)) as usize * block).sum();
+    let expected: usize = (0..mips).map(|m| ((w >> m).max(1).div_ceil(bw) * (h >> m).max(1).div_ceil(bh)) as usize * block).sum::<usize>() * layers as usize;
     if data.len() != expected {
         return Err(format!("{} bytes of data for a {w}x{h} texture of {mips} levels ({expected} expected)", data.len()));
     }
     // Image::new validates only the base level in debug builds. The complete mip
     // chain has been validated above, so initialize its descriptor and bytes here.
-    let mut img = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
+    let mut img = Image::new_uninit(Extent3d { width: w, height: h, depth_or_array_layers: layers }, TextureDimension::D2, format, RenderAssetUsages::RENDER_WORLD);
     img.data = Some(data);
     img.texture_descriptor.mip_level_count = mips;
     img.texture_descriptor.label = Some("dds texture");
@@ -688,7 +793,8 @@ impl TextureCache {
         images: &mut Assets<Image>,
         formats: Option<&CompressedImageFormatSupport>,
     ) -> Option<(Handle<Image>, bool)> {
-        let path = resolved_path(raw_path, |p| data.vfs.exists(p));
+        let (raw, cube) = split_cube(raw_path);
+        let path = cube_key(resolved_path(raw, |p| data.vfs.exists(p)), cube);
         self.load_key(path, usage, clamp, data, images, formats)
     }
 
@@ -722,18 +828,22 @@ impl TextureCache {
         }
         let bc = formats.is_none_or(|f| f.0.contains(CompressedImageFormats::BC));
         let read_span = bevy::log::info_span!("texture::read").entered();
-        let read = self.ahead.remove(&path).map(|(bytes, _)| bytes).or_else(|| data.read(&path));
+        // The file behind the key: a cube map's key is its path with [`CUBE_KEY`] added.
+        let (file, cube) = split_cube(&path);
+        let read = self.ahead.remove(file).map(|(bytes, _)| bytes).or_else(|| data.read(file));
         drop(read_span);
         let decode_span = bevy::log::info_span!("texture::decode").entered();
         let result = match read {
             None => Err("not in any archive".to_string()),
-            Some(bytes) => dds_texture(&bytes, usage, bc, false),
+            Some(bytes) => decode(&bytes, cube, usage, bc),
         };
         drop(decode_span);
         let handle = match result {
-            Ok(DecodedTexture { mut image, lacks_alpha, srgb_code }) => {
-                image.texture_descriptor.label = Some(folder_label(&path));
-                crate::authored::srgb_warning(&self.workers.authored, &path, usage, srgb_code);
+            Ok(DecodedTexture { mut image, lacks_alpha, srgb_code, source }) => {
+                image.texture_descriptor.label = Some(folder_label(file));
+                crate::authored::srgb_warning(&self.workers.authored, file, usage, srgb_code);
+                let size = image.texture_descriptor.size;
+                crate::authored::note_source(&self.workers.authored, file, source, (size.width, size.height));
                 if clamp {
                     if let ImageSampler::Descriptor(d) = &mut image.sampler {
                         d.address_mode_u = ImageAddressMode::ClampToEdge;
@@ -815,6 +925,34 @@ pub fn alpha_shares(bytes: &[u8]) -> Option<AlphaShares> {
     }
     let n = counts.iter().sum::<usize>().max(1) as f32;
     Some(AlphaShares { clear: counts[0] as f32 / n, opaque: counts[1] as f32 / n, partial: counts[2] as f32 / n })
+}
+
+/// Whether every texel of a DDS file's top level is opaque (alpha 255), all of them
+/// looked at: a layout without alpha is, a DX10 header stating opaque alpha is, and one
+/// with alpha is when no texel has less. `None` for a file that does not parse and for
+/// BC7 without that statement (no CPU decoder). Unlike [`alpha_shares`] nothing is
+/// sampled: one clear texel in a large texture is a hole someone drew.
+pub fn alpha_all_opaque(bytes: &[u8]) -> Option<bool> {
+    let dds = Dds::parse(bytes).ok()?;
+    if dds.alpha_opaque() {
+        return Some(true);
+    }
+    let top = *dds.levels.first()?.first()?;
+    let (w, h) = (dds.header.width as usize, dds.header.height as usize);
+    match dds.format {
+        Format::Dxt1 | Format::Dxt3 | Format::Dxt5 => {
+            let size = dds.format.block_bytes()?;
+            let blocks = (w.div_ceil(4) * h.div_ceil(4)).min(top.len() / size);
+            Some(top.chunks_exact(size).take(blocks).all(|b| block_alpha(dds.format, b).iter().all(|&a| a == 255)))
+        }
+        Format::A8R8G8B8 | Format::A4R4G4B4 | Format::A8B8G8R8 | Format::A1R5G5B5 | Format::A8L8 => {
+            let rgba = to_rgba8(dds.format, top)?;
+            Some(rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255))
+        }
+        Format::R8G8B8 | Format::X8R8G8B8 | Format::X8B8G8R8 | Format::R5G6B5 | Format::X1R5G5B5 | Format::L8
+        | Format::Bc5U | Format::Bc5S | Format::Bc4U | Format::Bc4S => Some(true),
+        Format::Bc7 => None,
+    }
 }
 
 /// A texture's top-level alpha, one byte per texel, rows from the top.
@@ -942,6 +1080,14 @@ impl WorkerTextures {
     pub fn alpha_is_mask(&self, raw_path: &str, data: &GameData) -> bool {
         let path = resolved_path(raw_path, |p| data.vfs.exists(p));
         remembered(&self.masks, path, |path| data.read(path).and_then(|bytes| alpha_shares(&bytes)).is_some_and(|s| s.is_mask()))
+    }
+
+    /// Whether every texel of the texture at a NIF texture path is opaque
+    /// ([`alpha_all_opaque`]); false for a file that is missing or cannot be told. Read
+    /// once per file and remembered, as [`Self::alpha_is_mask`].
+    pub fn alpha_is_opaque(&self, raw_path: &str, data: &GameData) -> bool {
+        let path = resolved_path(raw_path, |p| data.vfs.exists(p));
+        remembered(&self.opaques, path, |path| data.read(path).and_then(|bytes| alpha_all_opaque(&bytes)).unwrap_or(false))
     }
 }
 
@@ -1152,6 +1298,28 @@ mod tests {
         blk
     }
 
+    /// A cube map (DDS caps2 0xFE00, six faces: `textures\effects\shinybright_e.dds`)
+    /// loads only as a cube: six layers viewed as a cube, the faces' blocks as they are or
+    /// decoded for a GPU without BC formats; a flat texture is no cube, and a cube map is
+    /// still refused as a flat texture (nif.md §6 "Window glass and environment maps").
+    #[test]
+    fn cube_maps_load_as_cubes_only() {
+        let mut cube = dds(b"DXT1", 4, 4, &[0x55; 6 * 8]);
+        cube[112..116].copy_from_slice(&0xFE00u32.to_le_bytes());
+        let img = super::dds_cube_image(&cube, true, true).unwrap();
+        assert_eq!(img.texture_descriptor.format, TextureFormat::Bc1RgbaUnormSrgb);
+        assert_eq!(img.texture_descriptor.size.depth_or_array_layers, 6);
+        assert_eq!(img.texture_view_descriptor.as_ref().and_then(|v| v.dimension), Some(super::TextureViewDimension::Cube));
+        assert_eq!(img.data.as_ref().unwrap().len(), 6 * 8);
+        let rgba = super::dds_cube_image(&cube, false, false).unwrap();
+        assert_eq!(rgba.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(rgba.data.as_ref().unwrap().len(), 6 * 4 * 4 * 4);
+        assert!(dds_image(&cube, true, true).is_err());
+        assert!(super::dds_cube_image(&dds(b"DXT1", 4, 4, &[0; 8]), true, true).is_err());
+        assert_eq!(super::split_cube(&super::cube_path("textures\\a_e.dds")), ("textures\\a_e.dds", true));
+        assert_eq!(super::split_cube("textures\\a.dds"), ("textures\\a.dds", false));
+    }
+
     /// A block texture whose sides are not multiples of 4 becomes an RGBA image of its
     /// own size; one with bytes after its last level loads as if they were not there [#2164].
     #[test]
@@ -1206,6 +1374,21 @@ mod tests {
         let s = alpha_shares(&dds(b"DXT1", 4, 4, &dxt1)).unwrap();
         assert_eq!(s, AlphaShares { clear: 0.5, opaque: 0.5, partial: 0.0 });
         assert!(s.is_mask());
+        // #3230: whether every texel is opaque, all of them looked at.
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT1", 4, 4, &dxt1)), Some(false), "punch-through texels");
+        // The same indices with colour 0 above colour 1: four colours, no clear one.
+        let mut solid = dxt1;
+        (solid[0], solid[2]) = (2, 1);
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT1", 4, 4, &solid)), Some(true));
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT5", 4, 4, &dxt5_block(255))), Some(true));
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT5", 4, 4, &dxt5_block(254))), Some(false));
+        // One clear block among many opaque ones is found (nothing is sampled).
+        let mut many: Vec<u8> = std::iter::repeat_n(solid, 64 * 64).flatten().collect();
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT1", 256, 256, &many)), Some(true));
+        let last = many.len() - 8;
+        many[last..].copy_from_slice(&dxt1);
+        assert_eq!(super::alpha_all_opaque(&dds(b"DXT1", 256, 256, &many)), Some(false));
+        assert_eq!(super::alpha_all_opaque(b"not a dds"), None);
         // DXT3: explicit 4-bit alphas, 0x0F → 255 then 0.
         let mut dxt3 = [0u8; 16];
         dxt3[..8].copy_from_slice(&[0x0F; 8]);

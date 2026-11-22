@@ -514,13 +514,21 @@ fn entry_node_at(f: &Face, i: usize, column_top: f32, right: f32) -> Node {
     Node { position_type: PositionType::Absolute, right: u(right), top: u(top), width: u(w), height: u(ITEM), ..default() }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RelabelKey {
+    words: u32,
+    sharp: bool,
+    cjk: u32,
+    dims: (u32, u32),
+}
+
 /// The entries' labels drawn again in the new language, or in the new face when the Menu Font
-/// row changed (both chosen on the settings page, which opens over this menu), or when the
-/// live viewport changes at a scale above 100%.
+/// row changed (both chosen on the settings page, which opens over this menu), or a CJK fallback
+/// font is ready, or when the live viewport changes at a scale above 100%.
 #[allow(clippy::too_many_arguments)]
 fn relabel(
     mut menu: ResMut<MainMenu>,
-    mut seen: Local<Option<(u32, bool, u32, u32)>>,
+    mut seen: Local<Option<RelabelKey>>,
     mut menu_font: Option<ResMut<crate::pause::MenuFont>>,
     mut fonts: Option<ResMut<Assets<bevy::text::Font>>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -532,11 +540,11 @@ fn relabel(
     let scale = crate::interface::menu_scale();
     let view = windows.single().ok().map_or(Vec2::new(1280.0, 720.0), |w| Vec2::new(w.width(), w.height()));
     let dims = if scale > 1.0 { (view.x.round() as u32, view.y.round() as u32) } else { (0, 0) };
-    let now = (fnv_util::words::generation(), sharp, dims.0, dims.1);
+    let now = RelabelKey { words: fnv_util::words::generation(), sharp, cjk: crate::cjk_font::revision(), dims };
     if *seen == Some(now) {
         return;
     }
-    if seen.is_some_and(|s| s.1 != sharp) {
+    if seen.is_some_and(|s| s.sharp != sharp) {
         if let (Some(raster), Some(m)) = (menu.raster.clone(), menu_font.as_deref_mut()) {
             menu.face = Some(m.title(&raster, fonts.as_deref_mut()));
         }

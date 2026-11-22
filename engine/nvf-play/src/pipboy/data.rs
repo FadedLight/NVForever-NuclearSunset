@@ -1551,7 +1551,7 @@ fn lists(st: &mut DataState, game: &Game) -> Lists {
         .filter(|(q, s)| listed(g, **q, s) && !(g.tweaks.hide_completed_quests && (s.completed || s.failed)))
         .map(|(q, s)| QuestKey { seen: st.seen.get(&q.0).copied().unwrap_or(st.seen_count + 1), form: q.0, done: s.completed || s.failed })
         .collect();
-    model::sort_quests(&mut out.quests);
+    model::sort_quests_with_top(&mut out.quests, g.top_ui_quest().map(|q| q.0));
     // A script's ForceActiveQuest makes its quest the active one [documented: GECK wiki
     // ForceActiveQuest]; the player's pick afterwards wins again.
     if g.ui.active_quest_count != st.forced_seen {

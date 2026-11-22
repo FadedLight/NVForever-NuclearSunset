@@ -181,8 +181,9 @@ impl TextureSource for NoTextures {
     fn texture(&mut self, _: &str, _: bool) -> Option<Handle<Image>> { None }
     fn lacks_alpha(&self, _: &Handle<Image>) -> bool { false }
     fn alpha_is_mask(&self, _: &str) -> bool { false }
+    fn alpha_is_opaque(&self, _: &str) -> bool { false }
     fn resolve(&self, raw_path: &str) -> String { raw_path.to_string() }
-    fn authored(&mut self, _: &str) -> Option<crate::authored::AuthoredSet> { None }
+    fn pbr_set(&mut self, _: &str) -> Option<crate::authored::PbrSet> { None }
     fn authored_on(&self) -> bool { false }
 }
 

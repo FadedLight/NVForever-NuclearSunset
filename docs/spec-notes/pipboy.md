@@ -1440,7 +1440,10 @@ fonts) and the owner's five DATA screenshots (§1), compared at 1280 × 720 with
     McCarran 8, Hoover Dam 7]), flags `FNAM`, radius `XRDS`. Shown when the player has been
     within the radius (`XRDS`) in the marker's own worldspace with its type's icon,
     or when ShowMap or the Visible flag made it known, with the undiscovered icon
-    [hypothesis]. A marker without `XRDS` is found within `iMapMarkerRevealDistance`
+    [hypothesis]. What `GetMapMarkerVisible` returns for an undiscovered marker
+    authored Visible (0 on main, 1 in #3268) is open [hypothesis]: observer check 252
+    (`docs/handoff/observer-checks.md`, campaign `o31_mapmarker_visible`).
+    A marker without `XRDS` is found within `iMapMarkerRevealDistance`
     [documented: GECK wiki "Complete List of GameSettings", the Fallout: New Vegas default
     1000; no master sets it], that setting being this distance a [hypothesis] (#2338;
     observer check 128); a plugin's value is used as it is, and 0 finds no such marker by

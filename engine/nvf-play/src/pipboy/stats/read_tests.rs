@@ -169,6 +169,17 @@ fn a_failing_condition_changes_nothing_and_is_not_listed() {
     assert_eq!(worn_changes(g), vec![(GLASSES, vec![(PERCEPTION, 2.0)])]);
 }
 
+/// #3119: an item's effect text is its values, then the names of effects shown by name;
+/// either alone stands by itself, and an empty name is left out.
+#[test]
+fn effect_text_puts_the_names_after_the_values() {
+    assert_eq!(with_names("STR +2".into(), ["Damage +25%".to_string()]), "STR +2, Damage +25%");
+    assert_eq!(with_names(String::new(), ["Damage +25%".to_string()]), "Damage +25%");
+    assert_eq!(with_names("HP +40".into(), Vec::<String>::new()), "HP +40");
+    assert_eq!(with_names(String::new(), ["".to_string(), "Low-Light Vision".to_string()]), "Low-Light Vision");
+    assert_eq!(with_names(String::new(), Vec::<String>::new()), "");
+}
+
 /// #3118: the Perks list shows a perk the player has unless it is Hidden; Playable (the
 /// level-up menu's) does not matter. Lord Death's DATA is 00 00 03 00 00 (3 ranks, not
 /// Playable, not Hidden) [observed: `fnvtool esm decode`]; Psycho's effect perk is Hidden;

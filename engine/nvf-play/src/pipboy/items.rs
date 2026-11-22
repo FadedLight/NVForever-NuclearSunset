@@ -404,10 +404,17 @@ pub fn info_of(r: &Row, combat: Option<&crate::combat::Combat>, sim: &mut SimSta
         _ => {}
     }
     if let Some(forms) = forms {
-        let preview = script.as_mut().and_then(|s| s.rt.as_mut()).filter(|_| r.kind == Some(ItemKind::Aid)).map(|rt| crate::script::with_world(rt, sim, |rt| rt.game.aid_preview(FormId::PLAYER_REF, r.item)));
-        if let Some(lines) = preview {
+        let preview = script
+            .as_mut()
+            .and_then(|s| s.rt.as_mut())
+            .filter(|_| r.kind == Some(ItemKind::Aid))
+            .map(|rt| crate::script::with_world(rt, sim, |rt| (rt.game.aid_preview(FormId::PLAYER_REF, r.item), rt.game.aid_preview_names(FormId::PLAYER_REF, r.item))));
+        if let Some((lines, named)) = preview {
             let changes: Vec<super::stats::model::Change> = lines.into_iter().filter(|(_, amount)| amount.abs() >= 0.5).map(|(code, amount)| super::stats::model::Change { value: forms.short_name(code), amount: amount.abs(), detrimental: amount < 0.0 }).collect();
-            i.effects = (!changes.is_empty()).then(|| super::stats::model::changes_text(&changes));
+            // Script effects shown by name (Psycho's "Damage +25%", Cateye's "Low-Light
+            // Vision") after the values (#3119).
+            let text = super::stats::read::with_names(super::stats::model::changes_text(&changes), named.iter().map(|m| forms.text(m.0).name.clone()));
+            i.effects = (!text.is_empty()).then_some(text);
             return i;
         }
         // The player's tweak: a skill book says what it teaches [design: docs/design/tweaks.md]: the skill and the

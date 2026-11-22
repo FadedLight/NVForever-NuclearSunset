@@ -153,7 +153,22 @@ impl NameMenu {
     }
 }
 
-/// Spawn the box under `root` (a full-screen node that centres its child).
+/// Root layout for the name/text-input menu: centered on desktop; anchored near the top
+/// of the viewport when an on-screen soft keyboard is active (Android) so the IME does
+/// not cover the input box or the Ok button.
+pub(crate) fn root_node(soft_keyboard: bool) -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        justify_content: JustifyContent::Center,
+        align_items: if soft_keyboard { AlignItems::FlexStart } else { AlignItems::Center },
+        padding: if soft_keyboard { UiRect::top(Val::Percent(8.0)) } else { UiRect::ZERO },
+        ..default()
+    }
+}
+
+/// Spawn the box under `root` (a full-screen node that places its child).
 pub fn spawn(root: &mut ChildSpawnerCommands, m: &NameMenu, c: &mut Ctx) {
     let bright = amber(255.0);
     let size = m.size();
@@ -207,5 +222,18 @@ mod tests {
         assert_eq!(m.text, "A");
         m.type_text(&"b".repeat(60));
         assert_eq!(m.text.chars().count(), chargen::NAME_MAX_CHARS);
+    }
+
+    #[test]
+    fn android_soft_keyboard_places_text_entry_box_in_upper_viewport() {
+        let desktop = root_node(false);
+        assert_eq!(desktop.align_items, AlignItems::Center);
+        assert_eq!(desktop.padding.top, Val::Px(0.0));
+        let android = root_node(true);
+        assert_eq!(android.align_items, AlignItems::FlexStart);
+        let Val::Percent(top_pct) = android.padding.top else { panic!("expected percent top padding") };
+        assert!(top_pct <= 10.0, "box starts near top of viewport: {top_pct}%");
+        let box_pct = BOX.y / 960.0 * 100.0;
+        assert!(top_pct + box_pct < 40.0, "box and Ok button stay well above the bottom 50% soft keyboard area");
     }
 }

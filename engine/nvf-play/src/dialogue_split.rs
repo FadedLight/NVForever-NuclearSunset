@@ -4,17 +4,42 @@ use crate::{dialogue_menu::DialogueMenu, dialogue_touch::TouchDialogue, PlayerCa
 use crate::touch_safe_area::SafeInsets;
 
 pub const KEY: &str = "dialogue-speaker-side";
+pub const DEVICE_SIDE_KEY: &str = "dialogue-device-side-v1";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Side { #[default] Standard, Left, Right }
 impl Side {
     fn name(self) -> &'static str { match self { Self::Standard => "Standard", Self::Left => "Speaker left", Self::Right => "Speaker right" } }
     fn named(name: &str) -> Option<Self> { [Self::Standard, Self::Left, Self::Right].into_iter().find(|s| s.name() == name) }
 }
+/// [design: docs/design/android.md] Explicit Left/Right side placement for Wrist
+/// Terminal and Retro Console dialogue models (default Right, framing the NPC left).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeviceSide { #[default] Right, Left }
+impl DeviceSide {
+    fn name(self) -> &'static str { match self { Self::Right => "Right", Self::Left => "Left" } }
+    fn named(name: &str) -> Option<Self> { [Self::Right, Self::Left].into_iter().find(|s| s.name() == name) }
+    fn speaker_side(self) -> Side { match self { Self::Right => Side::Left, Self::Left => Side::Right } }
+}
 #[cfg_attr(test, derive(Debug))]
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
-pub struct Options { pub side: Side }
+pub struct Options { pub side: Side, pub device_side: DeviceSide }
 impl Default for Options {
-    fn default() -> Self { Self { side: if cfg!(target_os="android") { Side::Left } else { Side::Standard } } }
+    fn default() -> Self {
+        Self {
+            side: if cfg!(target_os="android") { Side::Left } else { Side::Standard },
+            device_side: DeviceSide::Right,
+        }
+    }
+}
+impl Options {
+    /// Side of the speaker for device-model dialogue (Wrist Terminal / Retro Console).
+    /// Always docks cleanly to Left or Right even when Field Notes speaker side is Standard.
+    pub(crate) fn device_speaker_side(self) -> Side {
+        match self.side {
+            Side::Left | Side::Right => self.side,
+            Side::Standard => self.device_side.speaker_side(),
+        }
+    }
 }
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Frame {
@@ -90,7 +115,23 @@ struct Owned {
 fn chosen(w: &World) -> String { w.resource::<Options>().side.name().into() }
 fn choose(w: &mut World, name: &str) -> bool {
     let Some(side) = Side::named(name) else { return false };
-    w.resource_mut::<Options>().side = side;
+    let mut opts = w.resource_mut::<Options>();
+    opts.side = side;
+    match side {
+        Side::Left => opts.device_side = DeviceSide::Right,
+        Side::Right => opts.device_side = DeviceSide::Left,
+        Side::Standard => {}
+    }
+    true
+}
+fn chosen_device_side(w: &World) -> String { w.resource::<Options>().device_side.name().into() }
+fn choose_device_side(w: &mut World, name: &str) -> bool {
+    let Some(device_side) = DeviceSide::named(name) else { return false };
+    let mut opts = w.resource_mut::<Options>();
+    opts.device_side = device_side;
+    if opts.side != Side::Standard {
+        opts.side = device_side.speaker_side();
+    }
     true
 }
 pub(crate) fn install(app: &mut App) {
@@ -106,6 +147,12 @@ pub(crate) fn install(app: &mut App) {
         switches:"", get:|_|false,set:|_,_|{},slider:None,
     },crate::settings::ChoiceList { names:|_|[Side::Standard,Side::Left,Side::Right].map(|s|s.name().into()).to_vec(),
         chosen,pick:choose,save:chosen,load:choose,ask_keep:false });
+    crate::settings::add_choice_list(app, crate::settings::Setting {
+        key:DEVICE_SIDE_KEY, group:crate::pause::GROUP_MENUS, label:"Device dialogue side",
+        note:"Place the Wrist Terminal or Retro Console on the Right (default) or Left side of the screen, framing the speaker on the opposite side.",
+        switches:"", get:|_|false,set:|_,_|{},slider:None,
+    },crate::settings::ChoiceList { names:|_|[DeviceSide::Right,DeviceSide::Left].map(|s|s.name().into()).to_vec(),
+        chosen:chosen_device_side,pick:choose_device_side,save:chosen_device_side,load:choose_device_side,ask_keep:false });
 }
 
 fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {
@@ -117,6 +164,27 @@ fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {
     let left = Rect::from_corners(inner.min,Vec2::new(mid-4.0,inner.max.y));
     let right = Rect::from_corners(Vec2::new(mid+4.0,inner.min.y),inner.max);
     Some(if side==Side::Left {(left,right)}else{(right,left)})
+}
+
+/// [design: docs/design/android.md] Enlarged side split for Wrist Terminal and
+/// Retro Console so the device model reaches nearly to the top, bottom and chosen
+/// side screen edges (66% width) while framing the speaker cleanly opposite.
+fn device_panel_rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect, Rect)> {
+    if side == Side::Standard || !size.is_finite() || size.x < 480.0 || size.y < 240.0 { return None }
+    let safe = SafeInsets::from_array([safe.left, safe.top, safe.right, safe.bottom])?;
+    let inner = Rect::from_corners(Vec2::new(safe.left, safe.top), size - Vec2::new(safe.right, safe.bottom));
+    if inner.width() < 464.0 || inner.height() < 160.0 { return None }
+    let panel_share = 0.66;
+    let (speaker, panel) = if side == Side::Left {
+        let split = inner.min.x + inner.width() * (1.0 - panel_share);
+        (Rect::from_corners(inner.min, Vec2::new(split - 2.0, inner.max.y)),
+         Rect::from_corners(Vec2::new(split + 2.0, inner.min.y), inner.max))
+    } else {
+        let split = inner.min.x + inner.width() * panel_share;
+        (Rect::from_corners(Vec2::new(split + 2.0, inner.min.y), inner.max),
+         Rect::from_corners(inner.min, Vec2::new(split - 2.0, inner.max.y)))
+    };
+    Some((speaker, panel))
 }
 
 /// The physical window rectangle a side-placed device model is presented in.
@@ -201,7 +269,11 @@ fn resolve(
                 Theme::WristTerminal=>Some(crate::dialogue_device::DeviceKind::PipBoy),
                 _=>None,
             };
-            let sides=rectangles(Vec2::new(window.width(),window.height()),*safe,options.side);
+            let sides = if device_kind.is_some() {
+                device_panel_rectangles(Vec2::new(window.width(), window.height()), *safe, options.device_speaker_side())
+            } else {
+                rectangles(Vec2::new(window.width(), window.height()), *safe, options.side)
+            };
             // A device keeps its side even while camera framing is suspended, so
             // its model is not rebuilt for every cinematic or held line.
             if device_kind.is_some() {next.panel=sides.map(|(_,panel)|panel);}
@@ -481,5 +553,17 @@ mod overlay_order_tests {
             assert_eq!(app.world().get::<Camera>(foreign).unwrap().order,high_order.saturating_add(30));
             assert_eq!(default_camera(app.world_mut()),Some(foreign));
         });
+    }
+
+    #[test]
+    fn wrist_terminal_split_uses_enlarged_side_panel_and_vertical_space() {
+        let size = Vec2::new(880.0, 396.0);
+        let safe = SafeInsets { left: 24.0, top: 0.0, right: 24.0, bottom: 16.0 };
+        let safe_w = size.x - safe.left - safe.right;
+        let safe_h = size.y - safe.top - safe.bottom;
+        let (speaker, panel) = device_panel_rectangles(size, safe, Side::Left).unwrap();
+        assert!(panel.width() / safe_w >= 0.60, "Wrist Terminal panel share {}", panel.width() / safe_w);
+        assert!(panel.height() / safe_h >= 0.95, "Wrist Terminal height share {}", panel.height() / safe_h);
+        assert!(speaker.max.x < panel.min.x);
     }
 }

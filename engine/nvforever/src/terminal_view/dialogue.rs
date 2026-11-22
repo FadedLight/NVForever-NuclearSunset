@@ -35,6 +35,7 @@ struct Instance {
     camera: Entity,
     image: Handle<Image>,
     glass: Arc<crate::pipboy_arm::Posed>,
+    button: Option<Arc<crate::pipboy_arm::Posed>>,
     blockers: Vec<Arc<crate::pipboy_arm::Posed>>,
     published: Option<ProjectionKey>,
 }
@@ -85,13 +86,13 @@ fn manage(
     // The image has integer texels; the mapping keeps the actual fractional
     // physical display rectangle used to present it.
     let size = request.stamp.display.size();
-    let Some(RenderedMonitor {entities,camera,image,glass,blockers,..}) = spawn_monitor(
+    let Some(RenderedMonitor {entities,camera,image,glass,button,blockers,..}) = spawn_monitor(
         &mut commands, &mut models, &mut plain, &model, &request.image, request.target,
         Extent3d {width:size.x.ceil() as u32,height:size.y.ceil() as u32,depth_or_array_layers:1},
-        DIALOGUE_MONITOR_LAYER, "Dialogue terminal", true, -3, true, Vec3::ZERO,
+        DIALOGUE_MONITOR_LAYER, "Dialogue terminal", true, -3, true, false, Vec3::ZERO,
     ) else { return; };
     state.0 = Some(Instance {request:request.clone(),entities,camera,image,
-        glass:Arc::new(glass),blockers,published:None});
+        glass:Arc::new(glass),button:button.map(Arc::new),blockers,published:None});
 }
 
 fn publish(
@@ -125,6 +126,15 @@ fn publish(
         instance.published = None;
         return;
     };
+    let display = instance.request.stamp.display;
+    let density = instance.request.stamp.density;
+    let btn_size = (56.0 * density).max(48.0);
+    let margin = (8.0 * density).max(6.0);
+    let fallback_power = Rect::from_corners(
+        Vec2::new((display.max.x - margin - btn_size).max(display.min.x), (display.max.y - margin - btn_size).max(display.min.y)),
+        Vec2::new((display.max.x - margin).max(display.min.x + 1.0), (display.max.y - margin).max(display.min.y + 1.0)),
+    );
+    let map = map.with_power_button(instance.button.clone(), Some(fallback_power), density);
     commands.insert_resource(DeviceView {stamp:instance.request.stamp,image:instance.image.clone(),
         camera:instance.camera,scale,map:Arc::new(map)});
     instance.published = Some(key);

@@ -25,8 +25,7 @@ impl Art {
             Self::Terminal(_) => if selected {crate::terminal::screen::lit_text()}
                 else if darkened {crate::terminal::screen::read_green()}
                 else {crate::terminal::screen::bright()},
-            Self::PipBoy(_,_) => crate::interface::pipboy_amber(if darkened {128.0}
-                else {crate::pipboy::frame::Kit::default().text()}),
+            Self::PipBoy(_,_) => crate::interface::pipboy_amber(if darkened {170.0} else {255.0}),
         }
     }
 }
@@ -70,16 +69,21 @@ pub(crate) fn usable(request:&Request,view:&DeviceView,menu:&DialogueMenu,
     let Some(cache)=cache else{return false;};
     let art=match request.stamp.kind {DeviceKind::Terminal=>cache.terminal.as_ref(),DeviceKind::PipBoy=>cache.pipboy.as_ref()};
     let Some(art)=art else{return false;};
+    let theme = match request.stamp.kind {
+        DeviceKind::Terminal => appearance::Theme::RetroConsole,
+        DeviceKind::PipBoy => appearance::Theme::WristTerminal,
+    };
+    let factor = TouchDialogue::theme_text_factor(theme);
     let face=art.face(false);
     let Some(unit)=view.canvas_length(request,1.0) else{return false;};
     let width=request.canvas.width()-16.0*unit;
     let inner=width-12.0*unit;
     if !inner.is_finite() || width<48.0*unit || inner<=0.0 {return false;}
-    let Some(header)=label_height(face,&content.speaker,18.0*unit,width) else{return false;};
+    let Some(header)=label_height(face,&content.speaker,18.0*factor*unit,width) else{return false;};
     let confirm=settings.confirm && !content.choices.is_empty();
     let footer=if confirm {
-        let Some(first)=label_height(face,"Confirm selection",18.0*unit,inner) else{return false;};
-        let Some(second)=label_height(face,"Select a choice first",18.0*unit,inner) else{return false;};
+        let Some(first)=label_height(face,"Confirm selection",18.0*factor*unit,inner) else{return false;};
+        let Some(second)=label_height(face,"Select a choice first",18.0*factor*unit,inner) else{return false;};
         (48.0*unit).max(12.0*unit+first.max(second))
     } else {0.0};
     let remaining=request.canvas.height()-16.0*unit-header-footer
@@ -194,10 +198,61 @@ fn spawn(commands: &mut Commands, key: &Key, request: &Request, view: &DeviceVie
             top:px(rect.min.y/key.stamp.density/units),width:px(rect.width()/key.stamp.density/units),
             height:px(rect.height()/key.stamp.density/units),..default()},ImageNode::new(view.image.clone())));
     if let Some(camera)=key.overlay {display.insert(UiTargetCamera(camera));}
+    // Clear passive ring over the Wrist Terminal / Retro Console power-off button
+    // ONLY when a normal exit/goodbye option is available (hidden during forced dialogue).
+    if key.view.goodbye && !key.view.choices.is_empty() {
+        if let Some(btn) = view.power_button_rect(request) {
+            let local = Rect::from_corners(btn.min - rect.min, btn.max - rect.min);
+            let ring = match request.stamp.kind {
+                DeviceKind::PipBoy => crate::interface::pipboy_amber(255.0),
+                DeviceKind::Terminal => crate::terminal::screen::bright(),
+            };
+            let w_px = local.width() / key.stamp.density / units;
+            let h_px = local.height() / key.stamp.density / units;
+            let bar_w = (w_px * 0.12).clamp(2.0 / units, 5.0 / units);
+            let bar_h = (h_px * 0.34).max(6.0 / units);
+            display.with_children(|p| {
+                p.spawn((
+                    Pickable::IGNORE,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(local.min.x / key.stamp.density / units),
+                        top: px(local.min.y / key.stamp.density / units),
+                        width: px(w_px),
+                        height: px(h_px),
+                        border: UiRect::all(px(2.0 / units)),
+                        border_radius: BorderRadius::all(percent(50.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.04, 0.03, 0.02, 0.72)),
+                    BorderColor::all(ring.with_alpha(0.92)),
+                ))
+                .with_children(|icon| {
+                    icon.spawn((
+                        Pickable::IGNORE,
+                        Node {
+                            width: px(bar_w),
+                            height: px(bar_h),
+                            border_radius: BorderRadius::all(px(bar_w * 0.5)),
+                            ..default()
+                        },
+                        BackgroundColor(ring),
+                    ));
+                });
+            });
+        }
+    }
+    let solid_backdrop = match request.stamp.kind {
+        DeviceKind::PipBoy => Color::srgb(0.025, 0.02, 0.008),
+        DeviceKind::Terminal => Color::srgb(0.012, 0.042, 0.020),
+    };
     commands.spawn((Content,PaletteRoot,UiTargetCamera(request.camera),Node {
         position_type:PositionType::Absolute,left:px(request.canvas.min.x/units),
         top:px(request.canvas.min.y/units),width:px(request.canvas.width()/units),
-        height:px(request.canvas.height()/units),overflow:Overflow::clip(),..default()}))
+        height:px(request.canvas.height()/units),overflow:Overflow::clip(),..default()},
+        BackgroundColor(solid_backdrop)))
         .with_children(|root| {
             {
                 let _units=crate::interface::original_units();
@@ -216,6 +271,11 @@ fn spawn(commands: &mut Commands, key: &Key, request: &Request, view: &DeviceVie
 }
 
 fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, view: &DeviceView, art: &Art) {
+    let theme = match request.stamp.kind {
+        DeviceKind::Terminal => appearance::Theme::RetroConsole,
+        DeviceKind::PipBoy => appearance::Theme::WristTerminal,
+    };
+    let factor = TouchDialogue::theme_text_factor(theme);
     let length=|logical|view.canvas_length(request,logical).unwrap();
     let units=key.ui_scale;
     let padding=length(8.0);
@@ -225,7 +285,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
     root.spawn(Node {position_type:PositionType::Absolute,left:px(padding/units),top:px(padding/units),
         width:px(width/units),height:px(height/units),flex_direction:FlexDirection::Column,
         row_gap:px(length(4.0)/units),..default()}).with_children(|p| {
-        label(p,&key.view.speaker,art.face(false),length(18.0),width,units,art.ink(false,false));
+        label(p,&key.view.speaker,art.face(false),length(18.0*factor),width,units,art.ink(false,false));
         p.spawn((Viewport,ScrollPosition::default(),Node {width:percent(100.0),flex_grow:1.0,
             min_height:px(0.0),overflow:Overflow::scroll_y(),flex_direction:FlexDirection::Column,..default()}))
             .with_children(|p| {
@@ -235,7 +295,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
                         p.spawn((Button,native_skip(key.list.clone()),Node {width:percent(100.0),
                             min_height:px(length(56.0)/units),padding:UiRect::all(px(row_padding/units)),
                             flex_shrink:0.0,..default()})).with_children(|p|label(p,line,art.face(false),
-                                length(key.settings.subtitle_size()),width-2.0*row_padding,
+                                length(key.settings.subtitle_size_for(theme)),width-2.0*row_padding,
                                 units,art.ink(false,false)));
                     }
                     for (index,row) in key.view.choices.iter().enumerate() {
@@ -252,7 +312,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
                             BackgroundColor(fill),Outline::new(px(1.0/units),px(-1.0/units),
                                 if selected && matches!(art,Art::PipBoy(_, _)) {line}else{Color::NONE})))
                             .with_children(|p|label(p,&row.label,art.face(selected),
-                                length(key.settings.choice_size()),width-2.0*row_padding,
+                                length(key.settings.choice_size_for(theme)),width-2.0*row_padding,
                                 units,art.ink(selected,row.darkened)));
                     }
                 });
@@ -262,7 +322,7 @@ fn spawn_rows(root: &mut ChildSpawnerCommands, key: &Key, request: &Request, vie
                 min_height:px(length(48.0)/units),padding:UiRect::all(px(row_padding/units)),
                 flex_shrink:0.0,..default()})).with_children(|p|label(p,
                     if key.armed {"Confirm selection"}else{"Select a choice first"},
-                    art.face(false),length(18.0),width-2.0*row_padding,units,art.ink(false,false)));
+                    art.face(false),length(18.0*factor),width-2.0*row_padding,units,art.ink(false,false)));
         }
     });
 }

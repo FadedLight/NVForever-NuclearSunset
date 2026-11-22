@@ -111,10 +111,18 @@ documentation. Neither tag there claims anything about the original game. The gr
   and distances, and the fixed, floating and legacy stick schemes.
 - Sizes and defaults: phone dialogue text base 16 logical units against 20 on desktop
   (`dialogue_touch.rs`), 85% choice and 100% subtitle defaults on Android, 50–150% menu
-  text sizes, `hud-scale-v2` 25–250% in 5% steps (46 choices, `interface.rs`), 75–150%
-  lockpick sizes (`lockpick/touch.rs`), 0.85–1.35 Pip-Boy presentation scale
+  text sizes (Android defaults 125% for barter, repair and workbench menus via
+  `menu_readability.rs`, desktop 100%), `settings-menu-scale-v1` 80–140% list defaulting
+  to 100% (exact desktop pause/settings menu layout with touch enhancement directly over
+  it, `pause.rs`), `hud-scale-v2` 25–250% in 5% steps (46 choices, `interface.rs`),
+  75–150% lockpick sizes (`lockpick/touch.rs`), 0.85–1.35 Pip-Boy presentation scale
   (`pipboy/touch_presentation.rs`), the 78-unit appearance preview and the eight-pixel
-  split gap, and the touch maintenance presentation On by default on Android only.
+  split gap, Android-only defaults (gyro aiming On with X and Y axes inverted, tap-on-VATS
+  On, lockpicking hints Off, Pip-Boy button overlays Off, Pip-Boy downward dismissal Both,
+  bottom swipe handle On, touch maintenance On), upper-viewport placement of text-entry
+  boxes (`NameMenu` at 8% top padding, `Console` at top 4%) on soft-keyboard builds, and
+  a 15 s display window followed by a 1.5 s fade-out before automatically turning off
+  default touch overlay hints and button text labels (`touch.rs`).
 - Bounds and limits: at most 128 queued menu-sheet edges and 32 owned contact IDs
   (`touch/menu_sheets.rs`), 32 queued maintenance requests (`maintenance_touch.rs`),
   16 retired VATS marks and 32 points (`vats_mode/touch.rs`), 16 touch-map edits, 8 layout
@@ -128,22 +136,57 @@ documentation. Neither tag there claims anything about the original game. The gr
 - Timeouts and lifetimes: thermal sampling (10 s, 25 s stale), gyro sample gap
   and age (50 ms, 100 ms), and the loading-cover ticket, lease and generation
   checks ([loading cover](android-loading-cover.md)).
-- Mode and layout policy: the Mobile settings tab and its placements
-  ([settings page](settings-page.md)), Battery/Balanced/Quality performance presets
-  with 30 or 60 FPS caps (`mobile_performance.rs`), borderless and one MSAA sample as
-  Android start defaults, the five dialogue styles, speaker side and safe-area framing,
+- Mode and layout policy: the Mobile settings tab and its placements including Mobile
+  performance (`crates/nvf-settings-layout`, [settings page](settings-page.md)),
+  Battery/Balanced/Quality performance presets with 30 or 60 FPS caps
+  (`mobile_performance.rs`), borderless and one MSAA sample as Android start defaults,
+  Android-only defaults (gyro aiming on with both axes inverted, tap-on-V.A.T.S. on,
+  150% Barter/Repair/Workbench menu size with 50%–200% range, 50%–200% Android menu
+  scale, 80%–200% pause Settings menu UI scale defaulting to 100%, lockpicking hints off,
+  Pip-Boy button graphics off, downward Pip-Boy dismissal enabled on both sides, bottom
+  swipe handle on, and 15-second auto-fadeout for default touch hints), the five dialogue
+  styles, speaker side and safe-area framing, compact 0.78× default text scale in Wrist
+  Terminal and Classic dialogue, enlarged Wrist Terminal framing around the glass with
+  tappable power-button quick-exit (enabled only when a normal goodbye option exists),
+  standalone touch hit-testing and backdrop-cancel for tiled and hand-built QuantityMenu
+  over Barter/Container/Inventory, larger category arrows and horizontal swipe on Barter
+  and Workbench category headers, tapping the Pause touch button while paused to toggle
+  the Pause menu closed, a compact top-left 44×44 logical-pixel touch-overlay Hide/Show
+  toggle button that hides all other touch controls and lets touches pass through
+  everywhere else on screen until restored (`touch.rs`), full touch controls on the
+  character appearance customizer (`creator.rs`), upper-viewport Android text entry
+  placement (`chargen/name.rs`, `console.rs`), explicit soft-keyboard suppression on
+  non-text `FormOver` overlays (`soft_keyboard.rs`, `FormTextInput`, `AndroidManifest.xml`),
   touch input ownership and cancellation, touch controls reaching scripts through
   `IsControlPressed` as their bound control without inventing physical keys, and the
-  launcher's pages, read-only folder import, newest-save Continue, Markdown news/release
-  formatting (`MarkdownParser.java` / `MarkdownRenderer.java`, 700/400-character preview
-  caps), and user-confirmed HTTPS GitHub Releases ARM64 APK updater (`UpdatePolicy.java`,
-  `ApkUpdateProvider.java`, 512 MiB cap, 5 HTTPS-only redirects, optional `SHA256SUMS.txt`
-  verification).
-- Classic dialogue casing: the 1774 × 887 frame, its four apertures, band layout and
-  12-unit caps glyph minimum ([Classic runtime](dialogue-classic-runtime.md)) are
-  project design, not original-game observations. The contributor supplied the
-  AI-generated image; it is not taken or derived from game files. Its TRADE
+  launcher's pages, top-left app icon, read-only folder import, newest-save Continue
+  with thumbnail/metadata preview card (`mobile.rs`, `MobileLauncher.java`), Markdown
+  news/release formatting (`MarkdownParser.java` / `MarkdownRenderer.java`,
+  700/400-character preview caps), and user-confirmed HTTPS GitHub Releases ARM64 APK
+  updater (`UpdatePolicy.java`, `ApkUpdateProvider.java`, 512 MiB cap, 5 HTTPS-only
+  redirects, fail-closed `SHA256SUMS.txt` verification when published).
+- Classic dialogue casing: the 1774 × 887 frame and its four apertures
+  ([Classic runtime](dialogue-classic-runtime.md)) are project design, not original-game
+  observations. The entire `dialogue/classic.png` image stretches cleanly to fill 100% × 100%
+  of the mobile viewport (zero black borders, no edge-only strip stretching) with the live
+  portrait, speech, responses, caps and TRADE openings mapped proportionally inside the
+  stretched layout (keeping interactive text/controls inside safe insets). The contributor
+  supplied the AI-generated image; it is not taken or derived from game files. Its TRADE
   control opens the existing barter menu.
+- Round-2 and Round-3 mobile defaults and layout rules (`[design]`): Android defaults
+  double-tap look space for VATS (`touch-vats-double-tap-v1`) On, auto-move lock target
+  (`touch-auto-move-lock-v1`) On positioned `1.95 × stick_radius` above the movement
+  stick, horizontal/mouse and vertical look sensitivities to `1.25` (desktop stays `1.0`),
+  Gyro default position at middle-left `(0.075, 0.48)` (mirrored in southpaw), compact 5×3
+  top/bottom-dockable and collapsible touch-editor toolbar that auto-hides while dragging,
+  virtual on-screen navigation keys active in Pause and Settings menus alongside direct
+  touch, viewport-fit clamping for Main Menu entries above `100%` `menu-scale`, enlarged
+  straight-on Wrist Terminal and Retro Console side split (`dialogue-device-side-v1`,
+  Right default / Left selectable, 66% width × full safe height, area-weighted normal,
+  front-depth clearance, opaque dark screen backdrop, dialogue glare skipped, and
+  density-scaled tappable power-off quick-exit on both devices), and a retro-terminal
+  styled top-right next-release countdown badge (`CountdownFormat.java`,
+  `MobileLauncher.java`) in the Android launcher.
 - Engine library choices: the vendored Android `winit` and Rapier 0.36.1 query refresh
   ([query refresh](../spec-notes/query-refresh-island-lifecycle.md)), the DDS decode
   fallback when BC sampling is missing ([DDS](../spec-notes/dds.md)), NIF numeric

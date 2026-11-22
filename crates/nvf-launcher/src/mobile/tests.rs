@@ -313,3 +313,35 @@ fn check_update_selects_signed_arm64_apk_verifies_url_and_extracts_checksum() {
     assert_eq!(refused_unsigned["data"]["available"], true);
     assert!(refused_unsigned["data"]["asset"].is_null());
 }
+
+#[test]
+fn state_exposes_last_save_preview_with_metadata_and_png_thumbnail() {
+    let fixture = Fixture::new();
+    let root = fixture.copy();
+    fixture.select(&root);
+    // Without a save, savePreview is null.
+    let empty: Value = serde_json::from_str(&request(&fixture.home(), r#"{"action":"state"}"#, |_| Err("offline".into()))).unwrap();
+    assert!(empty["data"]["savePreview"].is_null());
+
+    // Write a real NVForever save containing header metadata and a PNG thumbnail.
+    let saves = EngineHome::new(fixture.home()).saves();
+    std::fs::create_dir_all(&saves).unwrap();
+    let png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03];
+    let mut header = fnv_save::SaveHeader::new(fnv_save::SaveKind::Manual);
+    header.player_name = "Courier Six".into();
+    header.level = 12;
+    header.location = "Goodsprings".into();
+    header.play_seconds = 8100.0; // 2h 15m
+    header.saved_unix = 1_700_000_000;
+    fnv_save::write(&saves.join(format!("0001_CourierSix.{}", fnv_save::EXTENSION)), &header, &png, b"{}", false).unwrap();
+
+    let with_save: Value = serde_json::from_str(&request(&fixture.home(), r#"{"action":"state"}"#, |_| Err("offline".into()))).unwrap();
+    let preview = &with_save["data"]["savePreview"];
+    assert_eq!(preview["name"], "Courier Six");
+    assert_eq!(preview["level"], 12);
+    assert_eq!(preview["location"], "Goodsprings");
+    assert_eq!(preview["playtime"], "2h 15m");
+    assert_eq!(preview["detail"], "Level 12 · Goodsprings · 2h 15m");
+    assert_eq!(preview["shotBase64"], base64_encode(&png));
+    assert_eq!(with_save["data"]["continue"], "Courier Six");
+}

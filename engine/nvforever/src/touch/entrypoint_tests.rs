@@ -103,6 +103,25 @@ fn mobile_settings_editor_escape_and_lost_focus_restore_the_draft() {
     }
 }
 #[test]
+fn customize_touch_layout_suppresses_android_soft_keyboard_even_on_taps() {
+    let (mut app, window) = controls_scene();
+    app.insert_resource(nvf_play::save::SaveConfig::with_dir(None))
+        .init_resource::<nvf_play::pad::PadGlyphs>()
+        .add_message::<nvf_play::save::SaveRequest>()
+        .add_message::<nvf_play::save::SaveDone>()
+        .add_message::<nvf_play::save::LoadRequest>()
+        .add_message::<nvf_play::ui_sounds::UiSound>()
+        .add_plugins((nvf_play::pause::PausePlugin, nvf_play::soft_keyboard::SoftKeyboardPlugin));
+    app.insert_resource(nvf_play::soft_keyboard::SoftKeyboard::for_platform(true));
+    let row = layout_settings(&mut app);
+    customize(&mut app, row);
+    // Tap inside the layout editor: soft keyboard must stay suppressed.
+    move_editor_stick(&mut app, window);
+    app.update();
+    assert!(!app.world().get::<Window>(window).unwrap().ime_enabled,
+        "Customize Touch Layout must not open Android soft keyboard");
+}
+#[test]
 fn removed_hud_shortcuts_never_reappear_on_startup_restore_or_controller_return() {
     use nvf_play::bindings::InputDevice;
     let (mut app, window) = controls_scene();

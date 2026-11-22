@@ -337,13 +337,15 @@ fn normal_services_registered_size_roundtrip_cancels_but_same_effective_value_pr
     for kind in [Kind::Vendor,Kind::Workbench] {for native in [false,true] {
         let mut app=scene(kind,native);let key=match kind {Kind::Vendor=>"repair-menu-size-v1",Kind::Workbench=>"workbench-menu-size-v1"};
         let index=app.world().resource::<crate::settings::Settings>().index(key).unwrap();let p=hit_point(&mut app,|a|a==Action::Row(0));
+        let default_part = crate::settings::choice_part(10, 31);
+        let alt_part = crate::settings::choice_part(24, 31);
         edge(&mut app,20,TouchPhase::Started,p);app.update();
-        assert_eq!(crate::settings::set_slider(app.world_mut(),index,0.75),Some(0.75));
-        assert_eq!(crate::settings::set_slider(app.world_mut(),index,0.5),Some(0.5));
+        assert_eq!(crate::settings::set_slider(app.world_mut(),index,alt_part),Some(alt_part));
+        assert_eq!(crate::settings::set_slider(app.world_mut(),index,default_part),Some(default_part));
         edge(&mut app,20,TouchPhase::Ended,p);app.update();app.update();
         assert_eq!(count(&app,VENDOR,CAPS),0);if kind==Kind::Workbench{assert_eq!(quantity(&app),None);}
         let p=hit_point(&mut app,|a|a==Action::Row(0));edge(&mut app,21,TouchPhase::Started,p);app.update();
-        assert_eq!(crate::settings::set_slider(app.world_mut(),index,0.5),Some(0.5));
+        assert_eq!(crate::settings::set_slider(app.world_mut(),index,default_part),Some(default_part));
         edge(&mut app,21,TouchPhase::Ended,p);app.update();app.update();
         match kind {Kind::Vendor=>assert!(count(&app,VENDOR,CAPS)>0),Kind::Workbench=>assert_eq!(quantity(&app),Some((1,6)))}
     }}
@@ -646,4 +648,61 @@ fn normal_vendor_original_keyboard_and_native_requests_keep_confirmation_until_r
         assert!(!app.world().resource::<crate::repair::RepairServices>().is_open());
         assert_eq!(count(&app,PLAYER,CAPS),paid);
     }
+}
+
+#[test]
+fn normal_workbench_recipes_header_horizontal_swipe_switches_filter() {
+    let _units = crate::interface::units_at(1.0);
+    // Use hand-built workbench with real subcategories so horizontal swipe on the
+    // RECIPES header exercises filter cycling end-to-end.
+    let mut app = scene(Kind::Workbench, false);
+    let sub_a = FormId(0xFC131);
+    let sub_b = FormId(0xFC132);
+    {
+        let refs = app.world().resource::<SimState>().refs;
+        let schemas = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+        let functions = schemas.join("script/functions.json");
+        let json = serde_json::from_str(&std::fs::read_to_string(&functions).unwrap()).unwrap();
+        let mut owned = fnv_game::data::GameData::build(
+            &fnv_esm::LoadOrder::new(&[]).unwrap(),
+            &fnv_esm::Schema::load_dir(schemas.join("fnv")).unwrap(),
+            fnv_script::FunctionTable::load(&functions).unwrap(),
+            &json,
+            refs,
+        );
+        owned.recipe_categories.insert(CATEGORY, fnv_game::crafting::RecipeCategoryDef { name: "Authored workbench".into(), subcategory: false });
+        owned.recipe_categories.insert(sub_a, fnv_game::crafting::RecipeCategoryDef { name: "Ammo".into(), subcategory: true });
+        owned.recipe_categories.insert(sub_b, fnv_game::crafting::RecipeCategoryDef { name: "Aid".into(), subcategory: true });
+        for i in 0..12 {
+            let form = FormId(0xFC200 + i);
+            owned.recipes.insert(form, fnv_game::crafting::RecipeDef {
+                form,
+                name: format!("Workbench recipe {i:02}"),
+                category: Some(CATEGORY),
+                subcategory: Some(if i % 2 == 0 { sub_a } else { sub_b }),
+                ingredients: vec![(INPUT, 2)],
+                outputs: vec![(OUTPUT, 1)],
+                ..default()
+            });
+        }
+        let mut script = app.world_mut().resource_mut::<ScriptState>();
+        script.rt.as_mut().unwrap().game.data = Box::leak(Box::new(owned));
+    }
+    for _ in 0..3 { app.update(); }
+    let Guard::Workbench { filter: initial, view, .. } = guard(&app) else { panic!("workbench") };
+    assert_eq!(view.filters, 2, "fixture exposes two recipe subcategories");
+    let p = hit_point(&mut app, |a| a == Action::CategoryHeader);
+    // Swipe right -> next subcategory (+1)
+    edge(&mut app, 410, TouchPhase::Started, p); app.update();
+    edge(&mut app, 410, TouchPhase::Moved, p + Vec2::new(40.0, 0.0)); app.update();
+    edge(&mut app, 410, TouchPhase::Ended, p + Vec2::new(45.0, 0.0)); app.update(); app.update();
+    let Guard::Workbench { filter: after_right, .. } = guard(&app) else { panic!("workbench") };
+    assert_ne!(after_right, initial, "right swipe on Recipes header advances subcategory filter");
+    // Swipe left -> back (-1)
+    let p2 = hit_point(&mut app, |a| a == Action::CategoryHeader);
+    edge(&mut app, 411, TouchPhase::Started, p2); app.update();
+    edge(&mut app, 411, TouchPhase::Moved, p2 - Vec2::new(40.0, 0.0)); app.update();
+    edge(&mut app, 411, TouchPhase::Ended, p2 - Vec2::new(45.0, 0.0)); app.update(); app.update();
+    let Guard::Workbench { filter: after_left, .. } = guard(&app) else { panic!("workbench") };
+    assert_eq!(after_left, initial, "left swipe on Recipes header reverses subcategory filter");
 }

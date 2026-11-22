@@ -8,6 +8,8 @@ use std::sync::Arc;
 pub(crate) struct GlassMap {
     glass: Arc<Posed>,
     blockers: Vec<Arc<Posed>>,
+    power_button: Option<Arc<Posed>>,
+    power_rect: Option<Rect>,
     camera: Camera,
     transform: GlobalTransform,
     display: Rect,
@@ -31,8 +33,38 @@ impl GlassMap {
             return None;
         }
         let scale = projected_scale(&glass, camera, transform, canvas, uv_to_canvas, display.size())?;
-        Some((Self { glass, blockers, camera: camera.clone(), transform: *transform,
-            display, canvas, uv_to_canvas, logical_view }, scale))
+        Some((Self { glass, blockers, power_button: None, power_rect: None, camera: camera.clone(),
+            transform: *transform, display, canvas, uv_to_canvas, logical_view }, scale))
+    }
+
+    /// Attach a tappable power button (projected mesh and/or bezel fallback rect)
+    /// for Wrist Terminal / Retro Console quick-exit dialogue.
+    pub(crate) fn with_power_button(mut self, mesh: Option<Arc<Posed>>, fallback_rect: Option<Rect>, density: f32) -> Self {
+        let min_size = (56.0 * density.max(1.0)).max(48.0);
+        let projected = mesh.as_ref().and_then(|posed| {
+            let mut bounds: Option<Rect> = None;
+            for &world in &posed.points {
+                let Ok(viewport) = self.camera.world_to_viewport(&self.transform, world) else {
+                    continue;
+                };
+                let local = (viewport - self.logical_view.min) / self.logical_view.size();
+                let point = self.display.min + local * self.display.size();
+                if !point.is_finite() {
+                    continue;
+                }
+                bounds = Some(bounds.map_or(Rect::from_corners(point, point), |r| {
+                    Rect::from_corners(r.min.min(point), r.max.max(point))
+                }));
+            }
+            bounds.map(|r| {
+                let center = r.center();
+                let size = r.size().max(Vec2::splat(min_size));
+                Rect::from_center_size(center, size).intersect(self.display)
+            }).filter(|r| valid_rect(*r))
+        });
+        self.power_button = mesh;
+        self.power_rect = projected.or_else(|| fallback_rect.map(|r| r.intersect(self.display)).filter(|r| valid_rect(*r)));
+        self
     }
 }
 
@@ -61,6 +93,26 @@ impl ScreenMap for GlassMap {
         // A folded screen can project a back triangle through a nearer part of
         // the same glass. Accept the reverse map only for the same canvas texel.
         ((nearest-canvas).abs().max_element()<=0.25).then_some(point)
+    }
+
+    fn power_button_at(&self, point: Vec2) -> bool {
+        if !point.is_finite() || !self.display.contains(point) {
+            return false;
+        }
+        if let Some(button) = self.power_button.as_ref() {
+            let local = (point - self.display.min) / self.display.size();
+            let viewport = self.logical_view.min + local * self.logical_view.size();
+            if let Ok(ray) = self.camera.viewport_to_world(&self.transform, viewport) {
+                if button.hit(ray.origin, Vec3::from(ray.direction)).is_some() {
+                    return true;
+                }
+            }
+        }
+        self.power_rect.is_some_and(|r| r.contains(point))
+    }
+
+    fn power_button_rect(&self) -> Option<Rect> {
+        self.power_rect
     }
 }
 

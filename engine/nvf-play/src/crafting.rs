@@ -223,6 +223,7 @@ pub(crate) enum RecipeButton {
     Exit,
     Left,
     Right,
+    Title,
 }
 
 /// A row of the list.
@@ -240,7 +241,7 @@ pub(crate) struct View {
     title: String,
     pub(crate) rows: Vec<RowView>,
     /// The subcategories the arrows go through, by name.
-    filters: usize,
+    pub(crate) filters: usize,
     /// The subcategory's record name while it filters the list.
     pub(crate) subcategory: Option<String>,
     /// The recipes the filter leaves out.
@@ -561,7 +562,7 @@ fn keys(
         open.navigated = open.navigated.wrapping_add(1);
     }
     let filters = v.filters + 1;
-    if keys.just_pressed(KeyCode::ArrowRight) || clicked == Some(RecipeButton::Right) || act("filter") {
+    if keys.just_pressed(KeyCode::ArrowRight) || clicked == Some(RecipeButton::Right) || clicked == Some(RecipeButton::Title) || act("filter") {
         filter_step(open,filters,1);
     }
     if keys.just_pressed(KeyCode::ArrowLeft) || clicked == Some(RecipeButton::Left) {
@@ -790,11 +791,20 @@ fn spawn(commands: &mut Commands, look: &RecipeLook, presentation:(&View,crate::
             // The list's box: "◀ RECIPES ▶" in the top line.
             let tw = look.title.width(&v.title);
             brackets(m, ITEMS_AT.x, ITEMS_AT.y, BOX_WIDTH, ITEMS_AT.y + 480.0, (25.0, 50.0 + tw + 40.0));
+            // Spawn the title hit zone first so left/right arrow buttons sit above it in UiStack.
+            m.spawn((Button, RecipeButton::Title, at(ITEMS_AT.x + 50.0, ITEMS_AT.y - 28.0, (tw + 4.0).max(80.0), 56.0))).with_children(|t| text(t, &look.title, &v.title, 0.0, 0.0, bright));
             if let Some((l, r)) = &look.arrows {
-                m.spawn((Button, RecipeButton::Left, at(ITEMS_AT.x + 30.0, ITEMS_AT.y - 17.0, 17.5, 35.0), ImageNode { color: amber(255.0), ..ImageNode::new(l.clone()) }));
-                m.spawn((Button, RecipeButton::Right, at(ITEMS_AT.x + 55.0 + tw, ITEMS_AT.y - 17.0, 17.5, 35.0), ImageNode { color: amber(255.0), ..ImageNode::new(r.clone()) }));
+                let hit_w = 52.0;
+                let hit_h = 52.0;
+                let dx = (hit_w - 17.5) * 0.5;
+                let dy = (hit_h - 35.0) * 0.5;
+                m.spawn((Button, RecipeButton::Left, at(ITEMS_AT.x + 30.0 - dx, ITEMS_AT.y - 17.0 - dy, hit_w, hit_h))).with_children(|btn| {
+                    btn.spawn((at(dx, dy, 17.5, 35.0), ImageNode { color: amber(255.0), ..ImageNode::new(l.clone()) }));
+                });
+                m.spawn((Button, RecipeButton::Right, at(ITEMS_AT.x + 55.0 + tw - dx, ITEMS_AT.y - 17.0 - dy, hit_w, hit_h))).with_children(|btn| {
+                    btn.spawn((at(dx, dy, 17.5, 35.0), ImageNode { color: amber(255.0), ..ImageNode::new(r.clone()) }));
+                });
             }
-            m.spawn(at(ITEMS_AT.x + 50.0, ITEMS_AT.y - 28.0, tw + 4.0, 56.0)).with_children(|t| text(t, &look.title, &v.title, 0.0, 0.0, bright));
             // The rows from the first shown.
             let shown=recipe_window(look,v,false);
             m.spawn(Node {overflow:Overflow::clip(),..at(ITEMS_AT.x+5.0,LIST_TOP,BOX_WIDTH-15.0-ROWS_BAR_W,ROWS as f32*ROW)}).with_children(|list| {

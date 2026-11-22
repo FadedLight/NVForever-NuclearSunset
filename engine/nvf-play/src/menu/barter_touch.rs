@@ -316,7 +316,7 @@ pub(super) fn game_allows(game:Option<&fnv_game::Game<'_>>,creator:Option<&crate
         use fnv_game::game::menus;
         !game.loading && !matches!(game.side_menu(), Some(menus::LOADING | menus::VATS))
             && game.top_menu().is_none_or(|code| code == menus::BARTER
-                || (code == menus::QUANTITY && m.quantity.is_some()))
+                || (m.quantity.is_some() && matches!(code, menus::QUANTITY | crate::script::MENU_CONTAINER | menus::INVENTORY)))
             // ui_prompt is the engine's own Quantity publication, not a top
             // menu. Its clearing can trail apply_input by one frame.
             && game.ui_prompt.is_none_or(|code| code == menus::QUANTITY)

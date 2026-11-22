@@ -87,9 +87,8 @@ fn selected_appearance_note_and_real_unavailable_reason_keep_the_visible_uncut_w
         app.init_resource::<crate::dialogue_menu::DialogueMenu>().init_resource::<crate::pad::PadGlyphs>();
         crate::dialogue_touch::appearance::register_theme_note(&mut app,if required_reason {"Actual theme note"}else{word});
         crate::dialogue_touch::install(&mut app);
-        for key in ["preview-extra-a","preview-extra-b"] {
-            add_setting(&mut app,Setting{key,group:GROUP_MENUS,label:key,note:"",switches:"",get:|_|false,set:|_,_|{},slider:None});
-        }
+        let key = "preview-extra-a";
+        add_setting(&mut app,Setting{key,group:GROUP_MENUS,label:key,note:"",switches:"",get:|_|false,set:|_,_|{},slider:None});
         app.insert_resource(RequiredWord(word.into()));
         if required_reason {crate::settings::set_choice_unavailable(&mut app,crate::dialogue_touch::appearance::THEME_KEY,|w,_|Some(w.resource::<RequiredWord>().0.clone()));}
         app.world_mut().resource_mut::<crate::dialogue_touch::appearance::Appearance>().theme=crate::dialogue_touch::appearance::Theme::SplitPanel;

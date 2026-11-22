@@ -45,6 +45,7 @@ use crate::ui_sounds::{UiEvent, UiMenu, UiSound};
 use crate::PlaySet;
 use bevy::image::CompressedImageFormatSupport;
 use bevy::input::mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use fnv_actor::creator::Creator;
@@ -121,6 +122,8 @@ pub struct CreatorMenu {
     /// The camera being dragged, and with which button.
     camera_drag: Option<CameraDrag>,
     camera_button: Option<MouseButton>,
+    /// Active touch interaction on the character creator (panel controls + 3D preview).
+    touch: CreatorTouch,
     kit: Option<view::Kit>,
     /// The view's width the panel was last drawn for: it stands at the view's right.
     drawn_w: f32,
@@ -155,6 +158,38 @@ struct CreatorRoot;
 enum CameraDrag {
     Orbit,
     Pan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CreatorTouchMode {
+    Pending,
+    ScrollList,
+    Slider(usize),
+    Scrollbar,
+    CameraOrbit,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CreatorTouchContact {
+    id: u64,
+    origin_px: Vec2,
+    last_px: Vec2,
+    start_hit: Option<HitWhat>,
+    mode: CreatorTouchMode,
+    scroll_accum: f32,
+}
+
+#[derive(Debug, Default)]
+struct CreatorTouch {
+    primary: Option<CreatorTouchContact>,
+    second: Option<(u64, Vec2)>,
+}
+
+impl CreatorTouch {
+    fn clear(&mut self) {
+        self.primary = None;
+        self.second = None;
+    }
 }
 
 /// The camera's distance now (for how far a pixel of panning goes).
@@ -293,6 +328,7 @@ fn sync(mut st: ResMut<CreatorMenu>, data: Option<Res<CreatorData>>, script: Opt
         st.studio = false;
         st.answered = false;
         st.drag = None;
+        st.touch.clear();
         st.dirty = true;
         control.portrait = None;
         info!("creator: closed");
@@ -344,12 +380,17 @@ fn view_width(window: &Window) -> f32 {
     960.0 * window.width() / window.height().max(1.0)
 }
 
+/// Convert a logical window point to the creator's interface units.
+fn to_units(window: &Window, pos: Vec2) -> Vec2 {
+    let p = crate::interface::from_menu_frame(pos, Vec2::new(window.width(), window.height()), crate::interface::MIDDLE);
+    let k = 960.0 / window.height().max(1.0);
+    p * k
+}
+
 /// The pointer's place in the interface's units.
 fn pointer(window: &Window) -> Option<Vec2> {
     // Where the pointer is on the menu as drawn at the UI scale (#1631).
-    let p = crate::interface::from_menu_frame(window.cursor_position()?, Vec2::new(window.width(), window.height()), crate::interface::MIDDLE);
-    let k = 960.0 / window.height().max(1.0);
-    Some(p * k)
+    Some(to_units(window, window.cursor_position()?))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -362,6 +403,7 @@ fn input(
     mouse: crate::pad::ActionButtons<MouseButton>,
     motion: Res<AccumulatedMouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
+    (mut touches, touch_capture): (MessageReader<TouchInput>, Option<Res<crate::ui_pointer::TouchUiCapture>>),
     windows: Query<&Window, With<PrimaryWindow>>,
     pads: crate::pad::ActionPads,
     mut script: Option<ResMut<ScriptState>>,
@@ -371,7 +413,9 @@ fn input(
     let keys = keys.snapshot();
     let mouse = mouse.snapshot();
     let wheel: f32 = wheel.read().map(|w| if w.unit == MouseScrollUnit::Line { w.y } else { w.y / 40.0 }).sum();
+    let touch_events: Vec<TouchInput> = touches.read().copied().collect();
     if st.model.is_none() || st.answered {
+        st.touch.clear();
         return;
     }
     let mut ops: Vec<(Op, &str)> = Vec::new();
@@ -530,6 +574,145 @@ fn input(
                 Some(_) => ops.push((Op::Scroll(-wheel.round() as i32), "wheel")),
                 // A notch: a tenth nearer or further.
                 None => m.view.zoom_by(0.9f32.powf(wheel)),
+            }
+        }
+    }
+    // Touch controls directly on the character appearance customizer (panel + 3D preview).
+    if let Ok(win) = windows.single() {
+        let window_h = win.height().max(1.0);
+        let left = view::panel_left(view_width(win));
+        let row_px = (68.0 * (window_h / 960.0) * crate::interface::menu_scale()).max(24.0);
+        for t in touch_events {
+            if !t.position.is_finite() || touch_capture.as_ref().is_some_and(|cap| !cap.allows(t.id)) {
+                continue;
+            }
+            let p = to_units(win, t.position);
+            let under = view::hit_at(&st_ref.hits, p);
+            match t.phase {
+                TouchPhase::Started => {
+                    if let Some(primary) = st_ref.touch.primary {
+                        if st_ref.touch.second.is_none()
+                            && primary.id != t.id
+                            && primary.mode == CreatorTouchMode::CameraOrbit
+                            && under.is_none()
+                        {
+                            st_ref.touch.second = Some((t.id, t.position));
+                        }
+                        continue;
+                    }
+                    let mode = match under {
+                        Some(HitWhat::Scrollbar) => {
+                            ops.push((Op::ScrollTo(view::first_at(&view::heights(m), p.y)), "touch"));
+                            CreatorTouchMode::Scrollbar
+                        }
+                        None => CreatorTouchMode::CameraOrbit,
+                        Some(_) => CreatorTouchMode::Pending,
+                    };
+                    st_ref.touch.primary = Some(CreatorTouchContact {
+                        id: t.id,
+                        origin_px: t.position,
+                        last_px: t.position,
+                        start_hit: under,
+                        mode,
+                        scroll_accum: 0.0,
+                    });
+                }
+                TouchPhase::Moved => {
+                    if let (Some(primary), Some((sid, s_last))) = (st_ref.touch.primary.as_mut(), st_ref.touch.second.as_mut()) {
+                        let (prev_a, prev_b) = (primary.last_px, *s_last);
+                        if primary.id == t.id {
+                            primary.last_px = t.position;
+                        } else if *sid == t.id {
+                            *s_last = t.position;
+                        } else {
+                            continue;
+                        }
+                        let (curr_a, curr_b) = (primary.last_px, *s_last);
+                        let prev_dist = prev_a.distance(prev_b);
+                        let curr_dist = curr_a.distance(curr_b);
+                        if prev_dist > 10.0 && curr_dist > 10.0 {
+                            m.view.zoom_by((prev_dist / curr_dist).clamp(0.85, 1.15));
+                        }
+                        let d = (curr_a + curr_b) * 0.5 - (prev_a + prev_b) * 0.5;
+                        let k = control_distance(m) / window_h;
+                        m.view.pan_by(d.x * k, -d.y * k);
+                        continue;
+                    }
+                    let Some(c) = st_ref.touch.primary.as_mut().filter(|c| c.id == t.id) else { continue };
+                    let total = t.position - c.origin_px;
+                    let step = t.position - c.last_px;
+                    if c.mode == CreatorTouchMode::Pending {
+                        match c.start_hit {
+                            Some(HitWhat::Track(i)) => {
+                                if total.x.abs() > 10.0 && total.x.abs() >= total.y.abs() {
+                                    c.mode = CreatorTouchMode::Slider(i);
+                                } else if total.y.abs() > 12.0 {
+                                    c.mode = CreatorTouchMode::ScrollList;
+                                }
+                            }
+                            Some(HitWhat::RowsArea | HitWhat::Row(_) | HitWhat::Arrow(..) | HitWhat::Swatch(..))
+                                if total.y.abs() > 12.0 =>
+                            {
+                                c.mode = CreatorTouchMode::ScrollList;
+                            }
+                            _ => {}
+                        }
+                    }
+                    match c.mode {
+                        CreatorTouchMode::ScrollList => {
+                            c.scroll_accum += -step.y / row_px;
+                            let by = c.scroll_accum.trunc() as i32;
+                            if by != 0 {
+                                c.scroll_accum -= by as f32;
+                                ops.push((Op::Scroll(by), "touch scroll"));
+                            }
+                        }
+                        CreatorTouchMode::Slider(i) => {
+                            ops.push((Op::Track(i, view::track_fraction(p.x - left)), "touch drag"));
+                        }
+                        CreatorTouchMode::Scrollbar => {
+                            ops.push((Op::ScrollTo(view::first_at(&view::heights(m), p.y)), "touch drag"));
+                        }
+                        CreatorTouchMode::CameraOrbit => {
+                            m.view.orbit(-step.x / window_h * 3.0, step.y / window_h * 1.5);
+                        }
+                        CreatorTouchMode::Pending => {}
+                    }
+                    c.last_px = t.position;
+                }
+                TouchPhase::Ended => {
+                    if st_ref.touch.second.is_some_and(|(sid, _)| sid == t.id) {
+                        st_ref.touch.second = None;
+                        continue;
+                    }
+                    let Some(c) = st_ref.touch.primary.filter(|c| c.id == t.id) else { continue };
+                    st_ref.touch.clear();
+                    if c.mode == CreatorTouchMode::Pending && (t.position - c.origin_px).length() <= 16.0 {
+                        let target = under.filter(|u| *u == c.start_hit.unwrap_or(*u)).or(c.start_hit);
+                        match target {
+                            Some(HitWhat::Tab(i)) => ops.push((Op::Tab(m.tabs()[i]), "touch")),
+                            Some(HitWhat::Arrow(i, by)) => ops.push((Op::AdjustRow(i, by), "touch")),
+                            Some(HitWhat::Track(i)) => {
+                                ops.push((Op::Select(i), "touch"));
+                                ops.push((Op::Track(i, view::track_fraction(p.x - left)), "touch"));
+                            }
+                            Some(HitWhat::Swatch(i, k)) => {
+                                ops.push((Op::Select(i), "touch"));
+                                ops.push((Op::Swatch(k), "touch"));
+                            }
+                            Some(HitWhat::Row(i)) => ops.push((Op::Select(i), "touch")),
+                            Some(HitWhat::Action(i)) => ops.push((Op::Act(ACTIONS[i]), "touch")),
+                            _ => {}
+                        }
+                    }
+                }
+                TouchPhase::Canceled => {
+                    if st_ref.touch.second.is_some_and(|(sid, _)| sid == t.id) {
+                        st_ref.touch.second = None;
+                    } else if st_ref.touch.primary.is_some_and(|c| c.id == t.id) {
+                        st_ref.touch.clear();
+                    }
+                }
             }
         }
     }
@@ -905,5 +1088,161 @@ mod tests {
         for m in [menus::MESSAGE, menus::RACE, menus::NAME, menus::TAG_SKILLS, menus::LOVE_TESTER, menus::TRAITS] {
             assert!(crate::script::is_script_menu(m), "{m}");
         }
+    }
+
+    fn touch_creator_scene() -> (App, Entity) {
+        use fnv_actor::creator::{Catalogue, RaceChoice, Slider, Space};
+        use fnv_sim::FormId;
+        let mut catalogue = Catalogue::default();
+        catalogue.races.push(RaceChoice {
+            id: FormId(0x19),
+            name: "Caucasian".into(),
+            edid: "Caucasian".into(),
+            hairs: [Vec::new(), Vec::new()],
+            default_hair: [None, None],
+            eyes: [Vec::new(), Vec::new()],
+            older: None,
+            facegen: [None, None],
+        });
+        let sliders: Vec<Slider> = (0..12)
+            .map(|i| Slider {
+                label: format!("Face - Slider {i} Low / High"),
+                group: "Face".into(),
+                aspect: format!("Slider {i}"),
+                low: "Low".into(),
+                high: "High".into(),
+                parts: vec![(Space::Shape, {
+                    let mut v = vec![0.0; 50];
+                    v[i] = 1.0;
+                    v
+                })],
+                offset: 0.0,
+                range: (-1.0, 1.0),
+            })
+            .collect();
+        let look = fnv_actor::Look {
+            race: FormId(0x19),
+            female: false,
+            hair: None,
+            hair_color: None,
+            eyes: None,
+            head_parts: Vec::new(),
+            facegen: fnv_actor::creator::full(&FaceGen::default()),
+        };
+        let creator = Arc::new(Creator {
+            catalogue,
+            sliders: [sliders.clone(), sliders],
+            player: Some(look.clone()),
+            ctl_problem: None,
+        });
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin))
+            .init_resource::<Assets<Image>>()
+            .init_resource::<crate::pause::PlayClock>()
+            .init_resource::<crate::control::PlayerControl>()
+            .init_resource::<CreatorAid>()
+            .add_message::<UiSound>()
+            .insert_resource(CreatorData(creator.clone()))
+            .insert_resource(CreatorMenu {
+                model: Some(Model::new(creator, look)),
+                dirty: true,
+                ..default()
+            })
+            .add_systems(Update, (input, draw).chain());
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    resolution: bevy::window::WindowResolution::new(1600, 900),
+                    focused: true,
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        app.update();
+        app.update();
+        (app, window)
+    }
+
+    fn hit_center_px(app: &App, what: HitWhat) -> Vec2 {
+        let hit = app
+            .world()
+            .resource::<CreatorMenu>()
+            .hits
+            .iter()
+            .find(|h| h.what == what)
+            .unwrap_or_else(|| panic!("missing creator hit {what:?}"));
+        let center_u = Vec2::new(hit.rect[0] + hit.rect[2] * 0.5, hit.rect[1] + hit.rect[3] * 0.5);
+        // Window is 1600x900 with menu_scale 1.0 -> units * (900 / 960).
+        center_u * (900.0 / 960.0)
+    }
+
+    fn send_touch(app: &mut App, window: Entity, id: u64, phase: TouchPhase, pos: Vec2) {
+        app.world_mut().write_message(TouchInput { window, id, phase, position: pos, force: None });
+    }
+
+    #[test]
+    fn creator_touch_handles_tabs_sliders_list_scroll_and_preview_orbit_pinch() {
+        let (mut app, window) = touch_creator_scene();
+        // 1. Tap the Face tab (index 1).
+        let face_tab = hit_center_px(&app, HitWhat::Tab(1));
+        send_touch(&mut app, window, 1, TouchPhase::Started, face_tab);
+        send_touch(&mut app, window, 1, TouchPhase::Ended, face_tab);
+        app.update();
+        assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().tab, Tab::Face);
+        app.update();
+
+        // 2. Horizontal touch drag on slider 1 sets its value.
+        let track = hit_center_px(&app, HitWhat::Track(1));
+        let before = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0];
+        send_touch(&mut app, window, 2, TouchPhase::Started, track);
+        app.update();
+        send_touch(&mut app, window, 2, TouchPhase::Moved, track + Vec2::X * 90.0);
+        app.update();
+        send_touch(&mut app, window, 2, TouchPhase::Ended, track + Vec2::X * 90.0);
+        app.update();
+        let after = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0];
+        assert!(after > before, "horizontal slider touch drag should raise slider value");
+
+        // 3. Vertical touch drag over sliders scrolls the list without altering slider 1.
+        let before_scroll = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().scroll();
+        let track_after = hit_center_px(&app, HitWhat::Track(1));
+        send_touch(&mut app, window, 3, TouchPhase::Started, track_after);
+        app.update();
+        send_touch(&mut app, window, 3, TouchPhase::Moved, track_after - Vec2::Y * 180.0);
+        app.update();
+        send_touch(&mut app, window, 3, TouchPhase::Ended, track_after - Vec2::Y * 180.0);
+        app.update();
+        assert!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().scroll() > before_scroll, "vertical drag scrolls list");
+        assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0], after, "vertical scroll must not mutate slider");
+
+        // 4. Single-finger drag on 3D character preview orbits camera; two-finger pinch zooms.
+        let preview_a = Vec2::new(260.0, 420.0);
+        let preview_b = Vec2::new(420.0, 420.0);
+        let turn_before = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().view.turn;
+        send_touch(&mut app, window, 4, TouchPhase::Started, preview_a);
+        app.update();
+        send_touch(&mut app, window, 4, TouchPhase::Moved, preview_a + Vec2::X * 100.0);
+        app.update();
+        let turn_after = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().view.turn;
+        assert!((turn_after - turn_before).abs() > 0.05, "dragging preview orbits character");
+        let zoom_before = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().view.zoom;
+        send_touch(&mut app, window, 5, TouchPhase::Started, preview_b);
+        app.update();
+        send_touch(&mut app, window, 5, TouchPhase::Moved, preview_b + Vec2::X * 80.0);
+        app.update();
+        let zoom_after = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().view.zoom;
+        assert!(zoom_after < zoom_before, "pinching outward zooms closer");
+        send_touch(&mut app, window, 5, TouchPhase::Ended, preview_b + Vec2::X * 80.0);
+        send_touch(&mut app, window, 4, TouchPhase::Ended, preview_a + Vec2::X * 100.0);
+        app.update();
+
+        // 5. Tap Reset action button (index 2) restores original slider value.
+        let reset_btn = hit_center_px(&app, HitWhat::Action(2));
+        send_touch(&mut app, window, 6, TouchPhase::Started, reset_btn);
+        send_touch(&mut app, window, 6, TouchPhase::Ended, reset_btn);
+        app.update();
+        assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0], before);
     }
 }

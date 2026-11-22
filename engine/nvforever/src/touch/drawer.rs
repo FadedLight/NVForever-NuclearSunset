@@ -37,13 +37,18 @@ pub(super) struct Options {
     pub threshold: f32,
     pub destination: Destination,
 }
-impl Default for Options {
-    fn default() -> Self {
+impl Options {
+    pub(super) fn for_platform(android: bool) -> Self {
         Self {
-            enabled: false,
+            enabled: android,
             threshold: 96.0,
             destination: Destination::Inventory,
         }
+    }
+}
+impl Default for Options {
+    fn default() -> Self {
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 #[derive(Resource)]

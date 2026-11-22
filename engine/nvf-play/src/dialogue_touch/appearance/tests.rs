@@ -250,7 +250,7 @@ fn field_notes_keeps_speaker_side_camera_and_safe_area_at_both_sides() {
         let mut script=crate::script::ScriptState::over_no_plugins();
         script.rt.as_mut().unwrap().game.dialogue=Some(fnv_game::dialogue::Conversation{actor:fnv_sim::FormId(42),through:None,line:None,choices:vec![],topic_list:false,lines:1,then:None,ending:false});
         app.insert_resource(script).insert_resource(crate::dialogue_look::SpeakerFace(Some((42,[35.,180.,130.]))))
-            .insert_resource(crate::dialogue_split::Options{side})
+            .insert_resource(crate::dialogue_split::Options{side,device_side:crate::dialogue_split::DeviceSide::Right})
             .insert_resource(crate::touch_safe_area::SafeInsets{left:24.,top:12.,right:10.,bottom:18.})
             .add_systems(Update,publish.after(crate::PlaySet::Sync));
         let world=app.world_mut().spawn((crate::PlayerCamera,Camera3d::default(),Camera{order:1,..default()},Transform::from_xyz(0.,112.,0.))).id();
@@ -422,7 +422,7 @@ fn installed_cursor_first_insertion_frame_clears_backing_and_preserves_tint() {
     let vfs=fnv_vfs::Vfs::open(&files.0,&[]).unwrap();
     let schema=fnv_nif::Schema::load_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/nif")).unwrap();
     let mut app=App::new();
-    app.insert_resource(nvf_assets::GameData{vfs:std::sync::Arc::new(vfs),schema:std::sync::Arc::new(schema)})
+    app.insert_resource(nvf_assets::GameData::new(std::sync::Arc::new(vfs),std::sync::Arc::new(schema)))
         .insert_resource(Appearance{theme:Theme::WristTerminal,..default()})
         .init_resource::<Assets<Image>>()
         .init_resource::<crate::dialogue_menu::DialogueMenu>()

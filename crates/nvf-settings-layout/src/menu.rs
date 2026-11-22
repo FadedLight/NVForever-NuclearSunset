@@ -224,7 +224,7 @@ mod tests {
         let reference = include_str!("../../../docs/settings-reference-android.md")
             .split_once("## Android placement by stored key").unwrap().1;
         let expected = crate::MOBILE_SECTIONS.iter().chain(crate::ANDROID_SECTIONS.iter().filter(|section| {
-            matches!(section.placement.heading, Some("Controller" | "Mobile performance"))
+            matches!(section.placement.heading, Some("Controller"))
         }));
         let rows: Vec<_> = reference.lines().filter(|line| line.starts_with('|')).skip(2).collect();
         assert_eq!(rows.len(), expected.clone().count());

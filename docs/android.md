@@ -39,7 +39,9 @@ or `adb install -r <apk>`, then use **Import game folder**. Select a folder copi
 own lawful game installation. The importer needs enough space for the full Data directory
 and leaves source files untouched. No game assets are downloaded or included in the APK.
 
-The touch launcher uses the desktop launcher's news feed, release countdown, save selection,
+The touch launcher uses the desktop launcher's news feed, release countdown, save selection
+(with a compact last-save preview card showing thumbnail, character name, level, location and
+playtime beside Play/Continue, plus the app icon in the top-left header),
 settings catalogue and new-game start fields. Home, Settings, Mods and Game folder work in
 portrait or landscape inside the system insets. Play requires a complete imported game;
 Continue additionally requires an NVForever save. Settings writes only edited INI keys and
@@ -56,6 +58,7 @@ cargo test -p nvf-launcher --no-default-features --features mobile --lib --locke
 python -m unittest discover -s tools/android/tests
 javac -d <temporary-output> android/app/src/main/java/org/nvforever/android/InstallConfig.java android/app/src/test/java/org/nvforever/android/InstallConfigTest.java
 java -cp <temporary-output> org.nvforever.android.InstallConfigTest
+java -cp <temporary-output> org.nvforever.android.CountdownFormatTest
 ```
 
 The existing desktop checks in CONTRIBUTING.md still apply to engine changes. A passing
@@ -83,7 +86,10 @@ buttons light up. The layout editor's Hints action controls action names and the
 movement guide.
 
 Open **Pause > Settings > Mobile > Customize layout** for the touch editor.
-**Controls help / gesture practice** opens the isolated teaching screen. Drag a
+**Controls help / gesture practice** opens the isolated teaching screen. The compact editor
+toolbar docks at the top or bottom edge (`Dock bottom` / `Dock top`), can be collapsed via
+`Hide tools` / `Show tools`, and automatically hides while you drag any control so the
+center of the screen stays unobstructed for placement. Drag a
 control to reposition it, then use Smaller/Larger, Opacity and Show/Hide. Mirror
 swaps the layout between hands; Stick mode chooses fixed or floating movement.
 Game/Menu switches which group you edit. Settings and help have no persistent HUD shortcuts.
@@ -216,7 +222,7 @@ Android pixels, performance, save/Doc exit or loading-cure result is inferred.
 
 ## Mobile performance
 
-**Display > Mobile performance** offers
+**Mobile > Mobile performance** offers
 Battery (30 FPS, 50% world resolution), Balanced
 (60 FPS, 67%) and Quality (60 FPS, native). The frame limit and world resolution
 can also be selected separately. Smaller world resolutions require FSR support;
@@ -230,11 +236,13 @@ Unavailable thermal feedback uses manual settings. Performance varies by phone a
 
 ## In-game settings by touch
 
-Tap a tab or row to select it. Drag the settings list to browse without changing
-values. Drag a slider sideways on its meter; a vertical drag there still scrolls
-the list. Drag within an open choice list to see more choices, tap one to apply it,
-or tap outside to dismiss the list. Back and Defaults stay below the list, inside
-the system safe area.
+The in-game Settings menu keeps the exact desktop layout, typography, right-side rail,
+scrollbar and proportions by default (`settings-menu-scale-v1` defaults to 100% under
+**Mobile > Interface size** and takes effect immediately). Tap a tab, category heading or
+row to activate it. Drag the settings list or scrollbar to browse without changing values.
+Drag a slider sideways on its meter; a vertical drag there still scrolls the list. Drag
+within an open choice list to see more choices, tap one to apply it, or tap outside to
+dismiss the list.
 
 ## Optional touch views and appearance
 
@@ -245,13 +253,19 @@ practice explains the selected movement thumb, dead zone, walking/running and
 fixed or floating joystick without using ammo or sending game actions.
 
 Mobile > Dialogue offers Normal (default), Classic, Field Notes, Retro Console
-and Wrist Terminal. Classic fits the live world and dialogue into the bundled
-2:1 frame. Its TRADE button opens the normal barter menu when a merchant is
+and Wrist Terminal. Classic resizes cleanly to fill the mobile screen and safe-area insets
+without black borders (keeping hardware corners and buttons uniformly scaled while expanding
+straight metal bars and openings), and both Classic and
+Wrist Terminal start with compact default text sizes that still scale with the dialogue text
+sliders. Its TRADE button opens the normal barter menu when a merchant is
 available. The installation can override the frame with
 `Textures/Interface/NVForever/Dialogue/classic.png`.
 Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
-with separate dialogue screens; Wrist Terminal draws the Pip-Boy the player is
-wearing, so a character without one ([hypothesis: such as a new character before
+with separate dialogue screens; Wrist Terminal uses an enlarged side panel (64% width and
+full safe height) and frames the player's worn Pip-Boy screen tightly
+for extra text room and makes its power button a tappable quick-exit whenever a normal goodbye
+option is available (disabled during forced quest dialogue). A character without a Pip-Boy
+([hypothesis: such as a new character before
 receiving it]) talks on Normal. If a model or template cannot safely present the
 conversation, Normal keeps dialogue playable, touch-scrollable and exitable with
 the on-screen controls still available, without changing the saved theme.

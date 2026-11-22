@@ -461,14 +461,21 @@ fn half(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side) {
     // The heading.
     c.fade(p, x0, TOP, false, bright);
     c.line(p, x0, TOP, 25.0, THICK, bright);
-    for (x, name, by) in [(left_arrow, "main_arrow_left.dds", -1), (right_arrow, "main_arrow_right.dds", 1)] {
-        let node = at(x0 + x, TOP - 10.0, ARROW.x, ARROW.y);
-        c.image_with(p, &format!("interface\\main\\{name}"), node, bright, (Button, CmdButton(Command::Category(side, by))));
-    }
     c.text(p, true, &title, x0 + title_x, title_top, Align::Left, bright);
-    // Over the arrows and the title, where the wheel steps the category.
+    // Over the arrows and the title, where the wheel and horizontal touch swipe step the category.
+    // Spawned before the arrows so arrows sit above it in UiStack for direct taps.
     let (zone_x, zone_w) = title_zone(title_w);
-    p.spawn((at(x0 + zone_x, TOP - 10.0, zone_w, ARROW.y), FocusPolicy::Pass, PointerState::default(), CategoryTitle(side)));
+    p.spawn((at(x0 + zone_x, TOP - 20.0, zone_w, 56.0), FocusPolicy::Pass, PointerState::default(), CategoryTitle(side)));
+    for (x, name, by) in [(left_arrow, "main_arrow_left.dds", -1), (right_arrow, "main_arrow_right.dds", 1)] {
+        // Generous 52x52 hit container centered on the exact 17.5x35 arrow artwork.
+        let hit_w = 52.0;
+        let hit_h = 52.0;
+        let dx = (hit_w - ARROW.x) * 0.5;
+        let dy = (hit_h - ARROW.y) * 0.5;
+        p.spawn((at(x0 + x - dx, TOP - 10.0 - dy, hit_w, hit_h), Button, CmdButton(Command::Category(side, by)))).with_children(|btn| {
+            c.image(btn, &format!("interface\\main\\{name}"), at(dx, dy, ARROW.x, ARROW.y), bright);
+        });
+    }
     c.line(p, x0 + line_x, TOP, line_len, THICK, bright);
     if let Some(f) = half_figure(m, side) {
         // The player's tweak: the weight in red when taking the container's selected row
@@ -726,6 +733,11 @@ pub fn quantity_words(game: Option<&fnv_game::Game<'_>>) -> [String; 2] {
 pub fn spawn_quantity(root: &mut ChildSpawnerCommands, q: &Quantity, words: &[String; 2], kit: &mut Kit, data: Option<&GameData>, images: &mut Assets<Image>, bc: bool, glyphs: &crate::pad::PadGlyphs, extra: Option<&str>) {
     spawn_quantity_reusing(root,q,words,(kit,data,images,bc,glyphs,extra),(None,None));
 }
+/// Marks the full-screen modal backdrop behind the hand-built quantity prompt so
+/// touch taps outside the dialog card cancel the prompt cleanly.
+#[derive(Component)]
+pub(crate) struct QuantityBackdrop;
+
 pub(super) type QuantitySources<'a>=(&'a mut Kit,Option<&'a GameData>,&'a mut Assets<Image>,bool,&'a crate::pad::PadGlyphs,Option<&'a str>);
 pub(super) fn spawn_quantity_reusing(root:&mut ChildSpawnerCommands,q:&Quantity,words:&[String;2],
     (kit,data,images,bc,glyphs,extra):QuantitySources,
@@ -733,7 +745,7 @@ pub(super) fn spawn_quantity_reusing(root:&mut ChildSpawnerCommands,q:&Quantity,
     let mut c = Ctx { kit, data, images, bc, glyphs };
     let bright = amber(255.0);
     let sheet = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    root.spawn((sheet, FocusPolicy::Block, PointerState::default()));
+    root.spawn((sheet, QuantityBackdrop, FocusPolicy::Block, PointerState::default()));
     let boxed = Node { width: crate::interface::u(Q_BOX.x), height: crate::interface::u(Q_BOX.y), ..default() };
     root.spawn((boxed, FocusPolicy::Block)).with_children(|b| {
         let shade = Color::srgba(0.0, 0.0, 0.0, SHADE);
@@ -778,11 +790,18 @@ pub(super) fn spawn_quantity_reusing(root:&mut ChildSpawnerCommands,q:&Quantity,
                 if let Some(paint)=paint {leaf.insert(paint);}
             }
             for (x, name, step) in [(Q_ARROWS[0], "main_arrow_left.dds", -1), (Q_ARROWS[1], "main_arrow_right.dds", 1)] {
-                let node = at(x, my - 5.5, ARROW.x, ARROW.y);
-                let button = (Button, CmdButton(Command::AmountStep(step)));
-                if c.image_with(p, &format!("interface\\main\\{name}"), node.clone(), bright, button).is_none() {
-                    p.spawn((node, BackgroundColor(bright.with_alpha(0.5)), Button, CmdButton(Command::AmountStep(step))));
-                }
+                let hit_w = 48.0;
+                let hit_h = 48.0;
+                // Expand away from AmountMeter so the generous 48x48 target never overlaps the meter track.
+                let pad_x = hit_w - ARROW.x;
+                let (box_x, img_x) = if step < 0 { (x - pad_x, pad_x) } else { (x, 0.0) };
+                let dy = (hit_h - ARROW.y) * 0.5;
+                p.spawn((at(box_x, my - 5.5 - dy, hit_w, hit_h), Button, CmdButton(Command::AmountStep(step)))).with_children(|btn| {
+                    let node = at(img_x, dy, ARROW.x, ARROW.y);
+                    if c.image(btn, &format!("interface\\main\\{name}"), node.clone(), bright).is_none() {
+                        btn.spawn((node, BackgroundColor(bright.with_alpha(0.5))));
+                    }
+                });
             }
             c.text(p, true, &q.amount.to_string(), Q_CENTRE, Q_AMOUNT_Y, Align::Centre, bright);
             // The player's tweaks: what the amount weighs or costs, under it [design: docs/design/tweaks.md].

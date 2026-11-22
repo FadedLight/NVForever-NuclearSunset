@@ -1,5 +1,6 @@
 use super::*;
-use bevy::{app::{HierarchyPropagatePlugin, PropagateSet}, camera::{ComputedCameraValues, RenderTarget, RenderTargetInfo, visibility::VisibilityPlugin}, input::{InputPlugin, InputSystems, touch::Touches}, ui::{ComputedUiRenderTargetInfo, UiSystems, ui_surface::UiSurface, update::propagate_ui_target_cameras}, window::{CursorMoved, WindowRef}};
+use crate::touch_safe_area::SafeInsets;
+use bevy::{app::{HierarchyPropagatePlugin, PropagateSet}, camera::{ComputedCameraValues, RenderTarget, RenderTargetInfo, visibility::VisibilityPlugin}, input::{InputPlugin, InputSystems, touch::Touches}, ui::{ComputedUiRenderTargetInfo, UiSystems, ui_surface::UiSurface, update::propagate_ui_target_cameras}, window::{CursorMoved, PrimaryWindow, Window, WindowRef}};
 
 #[derive(Resource, Default)]
 struct Values { switches: u32, slider: f32, choice: String }
@@ -34,6 +35,7 @@ fn scene(mobile: bool, size: UVec2, density: f32) -> App {
         .init_resource::<crate::ui_pointer::TouchUiCapture>().init_resource::<Values>()
         .init_resource::<PlayClock>().init_resource::<PauseAid>().init_resource::<NextState<PlayState>>()
         .init_resource::<PageRequest>().init_resource::<Listening>().init_resource::<SettingsLayout>()
+        .init_resource::<SettingsMenuScale>()
         .init_resource::<crate::graphics_resume::GraphicsResume>().init_resource::<LoadList>()
         .init_resource::<Assets<Image>>().init_resource::<crate::save::SaveConfig>().init_resource::<PauseStatus>()
         .init_resource::<crate::pad::PadGlyphs>().insert_resource(PauseLook::plain())
@@ -50,7 +52,10 @@ fn scene(mobile: bool, size: UVec2, density: f32) -> App {
         pick: |w, name| { w.resource_mut::<Values>().choice = name.to_owned(); true },
         save: |w| w.resource::<Values>().choice.clone(), load: |w, name| { w.resource_mut::<Values>().choice = name.to_owned(); true }, ask_keep: false,
     });
-    for key in ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"] {
+    for key in [
+        "one", "two", "three", "four", "five", "six", "seven", "eight",
+        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    ] {
         add_setting(&mut app, setting(key));
     }
     add_setting(&mut app, Setting { group: "Other", ..setting("other") });
@@ -99,15 +104,41 @@ fn tap(app: &mut App, point: Vec2) {
 }
 
 #[test]
+fn settings_touch_keeps_exact_desktop_layout_and_proportions_at_default_scale() {
+    let mut mobile = scene(true, UVec2::new(2400, 1080), 2.0);
+    let mut desktop = scene(false, UVec2::new(2400, 1080), 2.0);
+    assert_eq!(mobile.world().resource::<SettingsMenuScale>().scale(), 1.0);
+    assert_eq!(view(&mobile).lines(), view(&desktop).lines(), "same desktop row window");
+    for b in [
+        PauseButton::Rail(RailItem::Tab("Other")),
+        PauseButton::Row(RowId::Setting(0)),
+        PauseButton::ScrollTrack,
+        PauseButton::Defaults,
+        PauseButton::Back,
+    ] {
+        let mr = rect(&mut mobile, b);
+        let dr = rect(&mut desktop, b);
+        assert!((mr.min - dr.min).length() < 0.5 && (mr.max - dr.max).length() < 0.5, "{b:?}: mobile {mr:?} vs desktop {dr:?}");
+    }
+    // Right-side rail and scrollbar stay on the right, never replaced by a zoomed grid.
+    let row = rect(&mut mobile, PauseButton::Row(RowId::Setting(0)));
+    let track = rect(&mut mobile, PauseButton::ScrollTrack);
+    let tab = rect(&mut mobile, PauseButton::Rail(RailItem::Tab("Other")));
+    assert!(track.min.x >= row.max.x && tab.min.x >= track.max.x, "desktop list -> scrollbar -> right rail order");
+}
+
+#[test]
 fn settings_touch_drag_follows_and_clamps_without_activating_a_row() {
-    let mut app = scene(true, UVec2::new(1600, 800), 2.0);
-    let p = rect(&mut app, PauseButton::Row(RowId::Setting(0))).center();
+    let mut app = scene(true, UVec2::new(2400, 1080), 2.0);
+    let row0 = rect(&mut app, PauseButton::Row(RowId::Setting(0)));
+    let row_h = row0.height();
+    let p = row0.center();
     edge(&mut app, TouchPhase::Started, p);
     app.update();
     assert_eq!(values(&app).switches, 0, "not on touch-down");
-    edge(&mut app, TouchPhase::Moved, p - Vec2::Y * CELL * 2.0);
+    edge(&mut app, TouchPhase::Moved, p - Vec2::Y * row_h * 2.0);
     app.update();
-    assert_eq!(view(&app).scroll, 2, "two painted row heights track the finger");
+    assert_eq!(view(&app).scroll, 2, "two painted desktop row heights track the finger 1:1");
     edge(&mut app, TouchPhase::Moved, p - Vec2::Y * 2000.0);
     app.update();
     let d = view(&app).drawn.as_ref().unwrap();
@@ -128,7 +159,7 @@ fn settings_touch_drag_follows_and_clamps_without_activating_a_row() {
 
 #[test]
 fn settings_touch_slider_uses_normal_fit_and_clamps_past_the_meter() {
-    let mut app = scene(true, UVec2::new(720, 1400), 2.0);
+    let mut app = scene(true, UVec2::new(2400, 1080), 2.0);
     let meter = rect(&mut app, PauseButton::Meter(RowId::Setting(1)));
     let p = Vec2::new(meter.min.x + meter.width() * 0.15, meter.center().y);
     edge(&mut app, TouchPhase::Started, p);
@@ -148,13 +179,14 @@ fn settings_touch_slider_uses_normal_fit_and_clamps_past_the_meter() {
 
 #[test]
 fn settings_touch_dropdown_scrolls_picks_and_closes_without_click_through() {
-    let mut app = scene(true, UVec2::new(1600, 800), 2.0);
+    let mut app = scene(true, UVec2::new(2400, 1080), 2.0);
     let row = rect(&mut app, PauseButton::Row(RowId::Setting(2))).center();
     tap(&mut app, row);
-    let p = rect(&mut app, PauseButton::Choice(2, 0)).center();
+    let choice0 = rect(&mut app, PauseButton::Choice(2, 0));
+    let p = choice0.center();
     edge(&mut app, TouchPhase::Started, p);
-    edge(&mut app, TouchPhase::Moved, p - Vec2::Y * 3.0 * CELL);
-    edge(&mut app, TouchPhase::Ended, p - Vec2::Y * 3.0 * CELL);
+    edge(&mut app, TouchPhase::Moved, p - Vec2::Y * 3.0 * choice0.height());
+    edge(&mut app, TouchPhase::Ended, p - Vec2::Y * 3.0 * choice0.height());
     app.update();
     assert_eq!(view(&app).dropdown.unwrap().first, 3);
     assert_eq!(values(&app).choice, "Option 0");
@@ -174,25 +206,37 @@ fn settings_touch_dropdown_scrolls_picks_and_closes_without_click_through() {
 }
 
 #[test]
-fn settings_touch_tabs_rows_and_back_are_safe_at_phone_density() {
-    for size in [UVec2::new(1600, 800), UVec2::new(720, 1400)] {
-        let mut app = scene(true, size, 2.0);
-        let layout = view(&app).mobile.unwrap();
-        for b in [PauseButton::Rail(RailItem::Tab("Other")), PauseButton::Row(RowId::Setting(0)), PauseButton::Back] {
-            let bounds = rect(&mut app, b);
-            assert!(bounds.width() >= 48.0 && bounds.height() >= 48.0, "{b:?}: {bounds:?}");
-            assert!(layout.safe.inflate(0.5).contains(bounds.min) && layout.safe.inflate(0.5).contains(bounds.max));
-        }
-        let tab = rect(&mut app, PauseButton::Rail(RailItem::Tab("Other"))).center();
-        tap(&mut app, tab);
-        assert_eq!(view(&app).scope, SettingsScope::Tab("Other"));
+fn settings_touch_tabs_scrollbar_and_ui_scale_work_cleanly() {
+    let mut app = scene(true, UVec2::new(2400, 1080), 2.0);
+    let base_h = rect(&mut app, PauseButton::Row(RowId::Setting(0))).height();
+    // Touch-drag the desktop scrollbar track, then return to top so Row(0) stays visible.
+    let track = rect(&mut app, PauseButton::ScrollTrack);
+    tap(&mut app, Vec2::new(track.center().x, track.max.y - 4.0));
+    assert!(view(&app).scroll > 0, "tapping scrollbar track scrolls list");
+    tap(&mut app, Vec2::new(track.center().x, track.min.y + 4.0));
+    assert_eq!(view(&app).scroll, 0, "tapping top of scrollbar returns to row 0");
+    // Live Settings Menu UI Scale: 120% enlarges rows without overflowing the viewport,
+    // and the ceiling reaches 200%.
+    assert!(take_settings_menu_scale(app.world_mut(), "200%"));
+    assert_eq!(app.world().resource::<SettingsMenuScale>().scale(), 2.0);
+    assert!(take_settings_menu_scale(app.world_mut(), "120%"));
+    for _ in 0..3 { app.update(); }
+    let scaled = rect(&mut app, PauseButton::Row(RowId::Setting(0)));
+    assert!(scaled.height() > base_h * 1.15 && scaled.height() < base_h * 1.25, "scaled {scaled:?} vs base {base_h}");
+    let screen = Rect::from_corners(Vec2::ZERO, app.world().resource::<Owner>().0.size);
+    for b in [PauseButton::Rail(RailItem::Tab("Other")), PauseButton::Back, PauseButton::Defaults] {
+        let r = rect(&mut app, b);
+        assert!(screen.inflate(1.0).contains(r.min) && screen.inflate(1.0).contains(r.max), "{b:?} inside viewport: {r:?}");
     }
+    let tab = rect(&mut app, PauseButton::Rail(RailItem::Tab("Other"))).center();
+    tap(&mut app, tab);
+    assert_eq!(view(&app).scope, SettingsScope::Tab("Other"));
 }
 
 #[test]
 fn settings_touch_desktop_keeps_mouse_press_and_keyboard_activation() {
     let mut app = scene(false, UVec2::new(1920, 1080), 1.0);
-    assert!(view(&app).mobile.is_none());
+    assert!(!view(&app).drawn.as_ref().unwrap().touch);
     let p = rect(&mut app, PauseButton::Row(RowId::Setting(0))).center();
     let window = app.world().resource::<Owner>().0.window;
     app.world_mut().get_mut::<Window>(window).unwrap().set_cursor_position(Some(p));

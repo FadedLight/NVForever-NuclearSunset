@@ -79,7 +79,7 @@ fn fixture() -> (App, crate::outfits::tests::TestFiles) {
         std::fs::write(files.path().join("meshes").join(name),pipboy_nif()).unwrap();
     }
     let schema = app.world().resource::<GameData>().schema.clone();
-    app.insert_resource(GameData {vfs:Arc::new(fnv_vfs::Vfs::open(files.path(),&[]).unwrap()),schema});
+    app.insert_resource(GameData::new(Arc::new(fnv_vfs::Vfs::open(files.path(),&[]).unwrap()),schema));
     {
         let mut world = app.world_mut().resource_mut::<ActorWorld>();
         let mut player = world.actors.npcs[&crate::outfits::tests::OTHER].clone();
@@ -235,4 +235,65 @@ fn actual_capture_worn_fallback_never_overrides_a_present_empty_player_body() {
     assert_eq!(app.world().resource::<InputViews>().0.last(),Some(&None));ready(&mut app);
     app.insert_resource(PlayerBody::default());app.update();
     assert!(app.world().get_resource::<DeviceView>().is_none());
+}
+
+#[test]
+fn pipboy_skips_light_effect_and_exposes_enlarged_glass_and_power_button() {
+    let (mut app, files) = fixture();
+    // Write a Pip-Boy NIF that also contains a huge PipboyLightEffect:0 cone
+    // (as in vanilla pipboyarm.nif); prepare() must ignore it rather than
+    // shrinking the screen or blocking rays, and PowerButton:0 must be hittable.
+    let mut root = av_object(0);
+    words(&mut root, &[5, 1, 3, 5, 7, 9, 0]);
+    let mut blocks = vec![("NiNode", root)];
+    for (name, bounds, y, uv) in [
+        (1, [-12.0, -10.0, 12.0, 10.0], -0.05, [1., 1.]),
+        (2, [-4.8, -3.6, 4.8, 3.6], 0.0, [0.8, 0.8]),
+        (3, [5.1, -3.4, 5.7, -2.8], 0.10, [1., 1.]),
+        (4, [-4.8, -3.6, 4.8, 3.6], -0.05, [0.8, 0.8]),
+        (5, [-80.0, -80.0, 80.0, 80.0], 2.0, [1., 1.]),
+    ] {
+        let mut shape = av_object(name);
+        words(&mut shape, &[(blocks.len() + 1) as u32, u32::MAX, 0, u32::MAX]);
+        shape.push(0);
+        let mut data = Vec::new(); words(&mut data, &[0]);
+        data.extend(4u16.to_le_bytes()); data.extend([0, 0, 1]);
+        let [left, bottom, right, top] = bounds;
+        floats(&mut data, &[left, y, top, right, y, top, left, y, bottom, right, y, bottom]);
+        data.extend(1u16.to_le_bytes()); data.push(0);
+        floats(&mut data, &[0., 0., 0., 8.]); data.push(0);
+        floats(&mut data, &[0., 0., uv[0], 0., 0., uv[1], uv[0], uv[1]]);
+        data.extend(0u16.to_le_bytes()); words(&mut data, &[u32::MAX]);
+        for v in [2u16, 1, 4] { data.extend(v.to_le_bytes()); }
+        data.push(1); for v in [0u16, 1, 2, 3] { data.extend(v.to_le_bytes()); }
+        blocks.push(("NiTriStrips", shape)); blocks.push(("NiTriStripsData", data));
+    }
+    let mut nif = b"Gamebryo File Format, Version 20.2.0.7\n".to_vec();
+    words(&mut nif, &[0x1402_0007]); nif.push(1);
+    words(&mut nif, &[11, blocks.len() as u32, 34]); nif.extend([1, 0, 1, 0, 1, 0]);
+    let mut types = Vec::new();
+    for (kind, _) in &blocks { if !types.contains(kind) { types.push(*kind); } }
+    nif.extend((types.len() as u16).to_le_bytes());
+    for name in &types { words(&mut nif, &[name.len() as u32]); nif.extend(name.as_bytes()); }
+    for (kind, _) in &blocks { nif.extend((types.iter().position(|t| t == kind).unwrap() as u16).to_le_bytes()); }
+    for (_, bytes) in &blocks { words(&mut nif, &[bytes.len() as u32]); }
+    let names = ["Root", "Housing", "pipboyscreen:0", "PowerButton:0", "glare:0", "PipboyLightEffect:0"];
+    words(&mut nif, &[names.len() as u32, names.iter().map(|s| s.len()).max().unwrap() as u32]);
+    for name in names { words(&mut nif, &[name.len() as u32]); nif.extend(name.as_bytes()); }
+    words(&mut nif, &[0]); for (_, bytes) in blocks { nif.extend(bytes); }
+    words(&mut nif, &[1, 0]);
+    std::fs::write(files.path().join("meshes").join("dialogue_pip_a.nif"), nif).unwrap();
+    let schema = app.world().resource::<GameData>().schema.clone();
+    app.insert_resource(GameData::new(Arc::new(fnv_vfs::Vfs::open(files.path(), &[]).unwrap()), schema));
+    *app.world_mut().resource_mut::<ModelCache>() = ModelCache::default();
+    ready(&mut app);
+    let request = app.world().resource::<Request>();
+    let view = app.world().resource::<DeviceView>();
+    // Enlarged framing: the glass occupies most of the 350px display height.
+    let top_left = view.window_at(request, request.canvas.min + Vec2::splat(2.0)).unwrap();
+    let bottom_right = view.window_at(request, request.canvas.max - Vec2::splat(2.0)).unwrap();
+    assert!((bottom_right.y - top_left.y).abs() > 240.0, "enlarged Wrist Terminal screen height");
+    // Power button is exposed and clickable outside the glass.
+    let power_rect = view.power_button_rect(request).expect("power button rect published");
+    assert!(view.power_button_at(request, power_rect.center()));
 }

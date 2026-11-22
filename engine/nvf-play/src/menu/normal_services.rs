@@ -7,6 +7,7 @@ use bevy::{ecs::system::SystemParam,input::touch::{TouchInput,TouchPhase},prelud
     ui::{CalculatedClip,ComputedUiTargetCamera,FocusPolicy,UiGlobalTransform,UiStack}};
 
 const SLOP:f32=12.0;
+const HEADER_SWIPE:f32=28.0;
 const MAX_IDS:usize=32;
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -49,6 +50,7 @@ pub(crate) enum Action {
     Row(usize),
     Pane(usize),
     Browse(usize,i64),
+    CategoryHeader,
 }
 #[derive(Clone,Copy,Debug)]
 pub(crate) struct Hit {pub source:Source,pub action:Action,pub pane:Option<usize>,pub row_step:f32}
@@ -63,7 +65,7 @@ struct Stamp {frame:Frame,units:f32,text_size:f32}
 impl Stamp {fn new(frame:Frame,text_size:f32)->Self {Self {frame,units:crate::interface::unit_scale(),text_size}}}
 struct Contact {window:Entity,id:u64,origin:Vec2,previous:Vec2,stamp:Stamp,hit:Hit,
     guard:Arc<Guard>,dragged:bool,vertical:bool,remainder:f64}
-struct Tap {id:u64,stamp:Stamp,point:Vec2,hit:Hit,guard:Arc<Guard>}
+struct Tap {id:u64,stamp:Stamp,origin:Vec2,point:Vec2,hit:Hit,swipe:bool,guard:Arc<Guard>}
 struct Scroll {id:u64,stamp:Stamp,pane:usize,pixels:f64,rows:i64,guard:Arc<Guard>,native:bool,
     source:Source,point:Vec2}
 struct Armed {token:u64,epoch:u64,tap:Tap}
@@ -132,6 +134,7 @@ fn expected(guard:&Guard,action:Action)->Action {
     match(guard,action) {
         (Guard::Vendor {view,..},Action::Row(i))=>Action::Vendor(crate::tiles::repair_services_menu::row_input(Some(view.selected),i)),
         (Guard::Workbench {view,..},Action::Row(i))=>Action::Workbench(crate::tiles::recipe_menu::row_input(Some(view.selected),i)),
+        (Guard::Workbench {..},Action::CategoryHeader)=>Action::Workbench(crate::crafting::RecipeInput::Filter(1)),
         (_,action)=>action,
     }
 }
@@ -224,6 +227,7 @@ impl Geometry<'_,'_> {
                         crate::crafting::RecipeButton::Exit=>Action::Workbench(crate::crafting::RecipeInput::Exit),
                         crate::crafting::RecipeButton::Left=>Action::Workbench(crate::crafting::RecipeInput::Filter(-1)),
                         crate::crafting::RecipeButton::Right=>Action::Workbench(crate::crafting::RecipeInput::Filter(1)),
+                        crate::crafting::RecipeButton::Title=>Action::CategoryHeader,
                     })}
                 },
             };
@@ -324,10 +328,47 @@ impl Bridge<'_,'_> {
         }
         contact.previous=e.position;
         if e.phase==TouchPhase::Ended {
-            if !contact.dragged && self.sources.matches(&contact.guard) {
+            if contact.hit.action == Action::CategoryHeader {
+                let d = e.position - contact.origin;
+                if self.sources.matches(&contact.guard) && d.x.abs() >= HEADER_SWIPE && d.x.abs() >= d.y.abs() {
+                    let dir = if d.x < 0.0 { -1 } else { 1 };
+                    let source = match contact.hit.source {
+                        Source::Tile(menu, tile) => Source::Direct(menu, tile),
+                        other => other,
+                    };
+                    self.state.pending = Some(Tap {
+                        id: e.id,
+                        stamp: contact.stamp,
+                        origin: contact.origin,
+                        point: e.position,
+                        hit: Hit {
+                            source,
+                            action: Action::Workbench(crate::crafting::RecipeInput::Filter(dir)),
+                            pane: None,
+                            row_step: contact.hit.row_step,
+                        },
+                        swipe: true,
+                        guard: contact.guard,
+                    });
+                } else if !contact.dragged && self.sources.matches(&contact.guard) {
+                    if let Some(hit) = self.geometry.hit(game, frame, &contact.guard, e.position)
+                        .filter(|h| h.source == contact.hit.source && same_action(h.action, contact.hit.action))
+                    {
+                        self.state.pending = Some(Tap {
+                            id: e.id,
+                            stamp: contact.stamp,
+                            origin: contact.origin,
+                            point: e.position,
+                            hit,
+                            swipe: false,
+                            guard: contact.guard,
+                        });
+                    }
+                }
+            } else if !contact.dragged && self.sources.matches(&contact.guard) {
                 if let Some(hit)=self.geometry.hit(game,frame,&contact.guard,e.position)
                     .filter(|h|h.source==contact.hit.source && same_action(h.action,contact.hit.action)) {
-                    self.state.pending=Some(Tap {id:e.id,stamp:contact.stamp,point:e.position,hit,guard:contact.guard});
+                    self.state.pending=Some(Tap {id:e.id,stamp:contact.stamp,origin:contact.origin,point:e.position,hit,swipe:false,guard:contact.guard});
                 }
             }
             self.state.barrier=true;if self.state.secondary {self.state.draining=Some(e.window);}
@@ -373,8 +414,17 @@ impl Commits<'_,'_> {
         if matches!(a.tap.hit.action,Action::Browse(..)) {
             return a.tap.guard.same_session(current).then_some(a.tap.hit.action)
         }
+        let source_matches = |actual: Source, expected: Source| {
+            actual == expected
+                || matches!((actual, expected), (Source::Tile(m1, t1), Source::Direct(m2, t2)) if m1 == m2 && t1 == t2)
+        };
+        if a.tap.swipe {
+            if !a.tap.guard.same(current) || !self.geometry.hit(Some(game),a.tap.stamp.frame,current,a.tap.origin)
+                .is_some_and(|h|source_matches(h.source,a.tap.hit.source) && h.action==Action::CategoryHeader) {return None}
+            return Some(a.tap.hit.action);
+        }
         if !a.tap.guard.same(current) || !self.geometry.hit(Some(game),a.tap.stamp.frame,current,a.tap.point)
-            .is_some_and(|h|h.source==a.tap.hit.source && same_action(h.action,a.tap.hit.action)){return None}
+            .is_some_and(|h|source_matches(h.source,a.tap.hit.source) && same_action(h.action,a.tap.hit.action)){return None}
         Some(expected(current,a.tap.hit.action))
     }
 }
@@ -450,9 +500,9 @@ fn dispatch(
             // Native rows have already moved in their own view; zero only
             // publishes the owner's ordinary pointer-browse intent. Hand-built
             // rows advance through the same owner with their measured row step.
-            state.pending=Some(Tap {id:scroll.id,stamp:scroll.stamp,point:scroll.point,
+            state.pending=Some(Tap {id:scroll.id,stamp:scroll.stamp,origin:scroll.point,point:scroll.point,
                 hit:Hit {source:scroll.source,action:Action::Browse(scroll.pane,if scroll.native {0}else{scroll.rows}),pane:Some(scroll.pane),row_step:0.0},
-                guard:scroll.guard});
+                swipe:false,guard:scroll.guard});
         }
     }
     let Some(tap)=state.pending.take() else{return};
@@ -460,7 +510,7 @@ fn dispatch(
     if state.stamp!=Some(tap.stamp) || tap.stamp.text_size!=text_size || !state.visible()
         || !live.allows(tap.stamp.frame,tap.id) || live.creator_open() || !menu_allows(kind,game){return}
     state.next=state.next.wrapping_add(1).max(1);let token=state.next;let epoch=state.epoch;
-    let native=matches!(tap.hit.source,Source::Tile(..)) && !matches!(tap.hit.action,Action::Browse(..));
+    let native=matches!(tap.hit.source,Source::Tile(..)) && !tap.swipe && !matches!(tap.hit.action,Action::Browse(..));
     let native_tap=NativeTap {token,id:tap.id,frame:tap.stamp.frame,source:tap.hit.source,
         point:tap.point,action:tap.hit.action,kind,text_size};
     state.armed=Some(Armed {token,epoch,tap});

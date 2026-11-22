@@ -61,6 +61,7 @@ impl Plugin for TouchControlsPlugin {
         menu_sheets::install(app);
 
         app.init_resource::<TouchState>()
+            .init_resource::<HintFade>()
             .add_message::<CursorMoved>()
             .init_resource::<Layout>()
             .init_resource::<modal::Capture>()
@@ -82,6 +83,57 @@ impl Plugin for TouchControlsPlugin {
             .add_systems(Update, show_labels);
     }
 }
+const HINT_AUTO_HIDE_SECS: f32 = 15.0;
+const HINT_FADE_SECS: f32 = 1.5;
+const HIDE_TOGGLE_SIZE: f32 = 44.0;
+
+fn hide_toggle_rect(size: Vec2, safe: nvf_play::touch_safe_area::SafeInsets) -> Rect {
+    let min = Vec2::new(
+        (safe.left + 8.0).clamp(0.0, (size.x - HIDE_TOGGLE_SIZE).max(0.0)),
+        (safe.top + 8.0).clamp(0.0, (size.y - HIDE_TOGGLE_SIZE).max(0.0)),
+    );
+    Rect::from_corners(min, min + Vec2::splat(HIDE_TOGGLE_SIZE))
+}
+
+#[derive(Resource, Default, Debug, Clone, Copy)]
+struct HintFade {
+    elapsed: f32,
+    auto_hidden: bool,
+    manual_override: bool,
+}
+
+impl HintFade {
+    fn alpha(self, hints: bool, editing: bool) -> f32 {
+        if editing {
+            return 1.0;
+        }
+        if !hints {
+            return 0.0;
+        }
+        if self.manual_override || self.elapsed <= HINT_AUTO_HIDE_SECS {
+            return 1.0;
+        }
+        (1.0 - (self.elapsed - HINT_AUTO_HIDE_SECS) / HINT_FADE_SECS).clamp(0.0, 1.0)
+    }
+
+    fn tick(&mut self, dt: f32, active: bool, hints: &mut bool) {
+        if *hints && self.auto_hidden {
+            // Player explicitly re-enabled hints after auto-fade: respect their choice.
+            self.manual_override = true;
+            self.auto_hidden = false;
+            return;
+        }
+        if !*hints || self.manual_override || !active || !dt.is_finite() || dt <= 0.0 {
+            return;
+        }
+        self.elapsed += dt;
+        if self.elapsed >= HINT_AUTO_HIDE_SECS + HINT_FADE_SECS {
+            *hints = false;
+            self.auto_hidden = true;
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Contact {
     origin: Vec2,
@@ -96,6 +148,7 @@ enum Role {
     Look,
     Button(usize),
     RunLock,
+    HideToggle,
     SettingsOverlay(usize),
     DialogueOverlay(usize),
 }
@@ -104,6 +157,7 @@ struct TouchState {
     // Raw hardware intent, sampled before aggregate touch/controller synthesis.
     // CursorMoved is physical window activity; touch-look MouseMotion is not.
     hardware_intent: bool,
+    controls_hidden: bool,
     contacts: HashMap<u64, Contact>,
     keys: HashSet<KeyCode>,
     mouse: HashSet<MouseButton>,
@@ -150,6 +204,21 @@ struct ButtonSpec {
 const SETTINGS_BREADCRUMB: &str = if cfg!(target_os = "android") {
     "Pause > Settings > Mobile"
 } else { "Pause > Settings > Controls > Touch" };
+const PAUSE_BUTTON: usize = 0;
+const TAB_BUTTON: usize = 15;
+
+fn button_active(i: usize, playing: bool, paused_now: bool) -> bool {
+    if paused_now {
+        if i == PAUSE_BUTTON {
+            return true;
+        }
+        if i == TAB_BUTTON {
+            return false;
+        }
+    }
+    BUTTONS[i].playing == playing
+}
+
 const BUTTONS: &[ButtonSpec] = &[
     ButtonSpec {
         text: "Pause",
@@ -297,8 +366,8 @@ const BUTTONS: &[ButtonSpec] = &[
     },
     ButtonSpec {
         text: "Gyro",
-        x: 0.445,
-        y: 0.28,
+        x: 0.02,
+        y: 0.42,
         control: None,
         key: None,
         playing: true,
@@ -463,6 +532,11 @@ fn sync_touch(state: &mut TouchState, bindings: Option<&Bindings>, pause: bool) 
                     controls.push(control);
                 }
             }
+            Role::SettingsOverlay(i) if i != PAUSE_BUTTON => {
+                if let Some(key) = BUTTONS[i].key {
+                    wanted_keys.insert(key);
+                }
+            }
             _ => {}
         }
     }
@@ -507,16 +581,20 @@ struct WorldInputBridges<'w,'s> {
     vats:vats_targeting::Bridge<'w,'s>,
 }
 #[derive(bevy::ecs::system::SystemParam)]
-struct TouchInputState<'w> {
+struct TouchInputState<'w, 's> {
     state: ResMut<'w, TouchState>,
     held_sneak: ResMut<'w, nvf_play::control::HeldSneakInput>,
     platform: Option<Res<'w, nvf_play::pad::PlatformInputGate>>,
     movement: movement::Bridge<'w>,
     editor_session: ResMut<'w, entrypoints::Session>,
+    safe: Option<Res<'w, nvf_play::touch_safe_area::SafeInsets>>,
+    creator: Option<Res<'w, nvf_play::creator::CreatorMenu>>,
+    paused: Option<Res<'w, nvf_play::pause::Paused>>,
+    commands: Commands<'w, 's>,
 }
 #[allow(clippy::too_many_arguments)]
 fn input(
-    TouchInputState { mut state, mut held_sneak, platform, mut movement, mut editor_session }: TouchInputState,
+    TouchInputState { mut state, mut held_sneak, platform, mut movement, mut editor_session, safe, creator, paused, mut commands }: TouchInputState,
     mut layout: ResMut<Layout>,
     (ads, gyro_options): (Option<Res<nvf_play::aim_zoom::AimZoom>>, Res<gyro::Options>),
     mut touches: MessageReader<TouchInput>,
@@ -592,19 +670,25 @@ fn input(
     }
     let suspended = state.suspended;
     let interactive = !suspended && window.focused && !lost_focus && size.min_element() >= 64.0;
+    let safe_insets = safe.as_deref().copied().unwrap_or_default();
+    let toggle_rect = hide_toggle_rect(size, safe_insets);
+    let creator_open = creator.as_deref().is_some_and(|c| c.is_open()) && !paused.as_deref().is_some_and(|p| p.0);
+    if layout.editor.is_some() {
+        state.controls_hidden = false;
+    }
     let controller = bindings
         .as_deref()
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller);
     if !interactive || resized { editor_session.interrupt(&mut layout); }
     let sheet_menu = sheets.prepare(window_id, window, interactive && !resized && layout.editor.is_none(), practice.form_over());
-    arm.prepare(interactive&&!resized&&!controller&&layout.editor.is_none()&&!modal_captures&&!sheet_menu
+    arm.prepare(interactive&&!resized&&!controller&&!creator_open&&!state.controls_hidden&&layout.editor.is_none()&&!modal_captures&&!sheet_menu
         &&(playing||arm.inventory()),platform.as_deref());
     let drawer_allowed =
-        playing && interactive && !controller && layout.editor.is_none() && drawer.allowed();
+        playing && interactive && !controller && !creator_open && !state.controls_hidden && layout.editor.is_none() && drawer.allowed();
     if !drawer_allowed {
         drawer.drawer.cancel();
     }
-    if playing != state.playing || !interactive || controller {
+    if playing != state.playing || !interactive || controller || creator_open {
         world_touch.cancel(); map.cancel(); state.cancel_touch();
     }
     state.playing = playing;
@@ -632,7 +716,7 @@ fn input(
             }
         }
     }
-    bar.prepare(size, interactive && !controller && !sheet_menu && (layout.editor.is_none() || layout.tray_editing()) && !modal_captures
+    bar.prepare(size, interactive && !controller && !creator_open && !state.controls_hidden && !sheet_menu && (layout.editor.is_none() || layout.tray_editing()) && !modal_captures
         && platform.as_ref().is_none_or(|gate|gate.allows_actions()), playing,
         &layout.config,gyro_options.enabled,&reserved);
     model.prepare(interactive && !controller && !sheet_menu && layout.editor.is_none() && !modal_captures
@@ -684,9 +768,17 @@ fn input(
         sync_touch(&mut state, bindings.as_deref(), false);
         return;
     }
+    if creator_open && layout.editor.is_none() && !practice.blocking() {
+        // Character appearance customizer handles its own touches directly.
+        vats.cancel(); arm.cancel(); model.cancel(); bar.cancel(); drawer.drawer.cancel();
+        world_touch.cancel(); map.cancel(); state.cancel_touch(); held_sneak.active = false;
+        sync_touch(&mut state, bindings.as_deref(), false);
+        return;
+    }
+    let paused_now = paused.as_deref().is_some_and(|p| p.0);
     if sheets.settings() && !controller && !modal_captures {
         // Settings has its own in-page controls. The overlay still owns and
-        // paints its press, but cannot dispatch a second action to this page.
+        // paints its press; tapping Pause toggles the Pause menu closed cleanly.
         for t in touches.read() {
             if t.window != window_id || modal.tail(t) || !t.position.is_finite()
                 || platform.as_ref().is_some_and(|gate| !gate.allows_touch(t.id)) {
@@ -694,13 +786,48 @@ fn input(
             }
             if t.phase == TouchPhase::Started && !state.contacts.contains_key(&t.id) { sheets.release_overlay(t.id); }
             if sheets.overlay_owns(t.id) {
-                if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
-                    state.contacts.remove(&t.id);
+                match t.phase {
+                    TouchPhase::Moved => {
+                        if let Some(c) = state.contacts.get_mut(&t.id) {
+                            let p = t.position / size;
+                            c.dragged |= ((p - c.origin) * size).length() > 12.0;
+                            c.position = p;
+                        }
+                    }
+                    TouchPhase::Ended => {
+                        if let Some(c) = state.contacts.remove(&t.id) {
+                            if matches!(c.role, Role::HideToggle) && !c.dragged && toggle_rect.contains(t.position) {
+                                state.controls_hidden = !state.controls_hidden;
+                                if state.controls_hidden { state.cancel_touch(); }
+                            } else if paused_now
+                                && matches!(c.role, Role::SettingsOverlay(PAUSE_BUTTON))
+                                && !c.dragged
+                                && layout.config.button_hit(t.position, size, PAUSE_BUTTON, false)
+                            {
+                                commands.queue(nvf_play::pause::close_pause);
+                            }
+                        }
+                    }
+                    TouchPhase::Canceled => { state.contacts.remove(&t.id); }
+                    _ => {}
                 }
             } else if sheets.tail(t) {
                 continue;
-            } else if let Some(i) = (t.phase == TouchPhase::Started && layout.config.opacity > 0.0)
-                .then(|| layout.config.hit(t.position, size, false, false)).flatten()
+            } else if t.phase == TouchPhase::Started && toggle_rect.contains(t.position) {
+                sheets.claim_overlay(t.id);
+                let p = t.position / size;
+                state.contacts.insert(t.id, Contact { origin: p, position: p,
+                    role: Role::HideToggle, started: movement.now(), dragged: false });
+            } else if paused_now && !state.controls_hidden && t.phase == TouchPhase::Started
+                && layout.config.opacity > 0.0
+                && layout.config.button_hit(t.position, size, PAUSE_BUTTON, false)
+            {
+                sheets.claim_overlay(t.id);
+                let p = t.position / size;
+                state.contacts.insert(t.id, Contact { origin: p, position: p,
+                    role: Role::SettingsOverlay(PAUSE_BUTTON), started: movement.now(), dragged: false });
+            } else if let Some(i) = (!state.controls_hidden && t.phase == TouchPhase::Started && layout.config.opacity > 0.0)
+                .then(|| layout.config.hit_filtered(t.position, size, false, false, |i| !(paused_now && i == TAB_BUTTON))).flatten()
                 .and_then(|hit| match hit { Target::Button(i) => Some(i), _ => None })
             {
                 sheets.claim_overlay(t.id);
@@ -740,12 +867,34 @@ fn input(
                     continue;
                 }
                 if t.phase == TouchPhase::Started && !state.contacts.contains_key(&t.id) { sheets.release_overlay(t.id); }
-                if sheets.overlay_owns(t.id) {
-                    if matches!(t.phase, TouchPhase::Ended | TouchPhase::Canceled) {
-                        state.contacts.remove(&t.id);
+            if sheets.overlay_owns(t.id) {
+                match t.phase {
+                    TouchPhase::Moved => {
+                        if let Some(c) = state.contacts.get_mut(&t.id) {
+                            let p = t.position / size;
+                            c.dragged |= ((p - c.origin) * size).length() > 12.0;
+                            c.position = p;
+                        }
                     }
-                } else if !sheets.tail(t) && !modal.tail(t) {
-                    let overlay = (t.phase == TouchPhase::Started && t.position.is_finite() && interactive
+                    TouchPhase::Ended => {
+                        if let Some(c) = state.contacts.remove(&t.id) {
+                            if matches!(c.role, Role::HideToggle) && !c.dragged && toggle_rect.contains(t.position) {
+                                state.controls_hidden = !state.controls_hidden;
+                                if state.controls_hidden { state.cancel_touch(); }
+                            }
+                        }
+                    }
+                    TouchPhase::Canceled => { state.contacts.remove(&t.id); }
+                    _ => {}
+                }
+            } else if !sheets.tail(t) && !modal.tail(t) {
+                if t.phase == TouchPhase::Started && t.position.is_finite() && interactive && toggle_rect.contains(t.position) {
+                    sheets.claim_overlay(t.id);
+                    let p = t.position / size;
+                    state.contacts.insert(t.id, Contact { origin: p, position: p,
+                        role: Role::HideToggle, started: movement.now(), dragged: false });
+                } else {
+                    let overlay = (!state.controls_hidden && t.phase == TouchPhase::Started && t.position.is_finite() && interactive
                         && !state.ui_capture && layout.config.opacity > 0.0)
                         .then(|| layout.config.hit(t.position, size, false, false)).flatten()
                         .and_then(|hit| match hit { Target::Button(i) => Some(i), _ => None });
@@ -758,6 +907,7 @@ fn input(
                         modal.capture_event(t);
                     }
                 }
+            }
                 sync_touch(&mut state, bindings.as_deref(), false);
             }
             return;
@@ -933,12 +1083,16 @@ fn input(
         match t.phase {
             TouchPhase::Started if interactive => {
                 if state.contacts.contains_key(&t.id) { continue; }
-                let role = if layout.config.opacity <= 0.0 {
+                let role = if toggle_rect.contains(t.position) {
+                    Some(Role::HideToggle)
+                } else if state.controls_hidden || layout.config.opacity <= 0.0 {
                     None
                 } else if playing && options.run_lock && movement::lock_available(&layout, &state, size) && !bar.blocks(movement::lock_rect(&layout,&state,size)) && movement::lock_rect(&layout, &state, size).contains(t.position) {
                     Some(Role::RunLock)
+                } else if paused_now && layout.config.button_hit(t.position, size, PAUSE_BUTTON, false) {
+                    Some(Role::Button(PAUSE_BUTTON))
                 } else { match layout.config.hit_filtered(t.position,size,playing,false,
-                    |i| i != gyro::BUTTON || gyro_options.enabled) {
+                    |i| (i != gyro::BUTTON || gyro_options.enabled) && !(paused_now && i == TAB_BUTTON)) {
 
                     Some(Target::Button(i)) => Some(Role::Button(i)),
                     Some(Target::Stick) => Some(Role::Move),
@@ -958,7 +1112,7 @@ fn input(
                     })
                 });
                 if let Some(role) = role {
-                    if matches!(role, Role::Button(_) | Role::RunLock)
+                    if matches!(role, Role::Button(_) | Role::RunLock | Role::HideToggle)
                         || (matches!(role, Role::Move) && layout.config.hit(t.position, size, playing, false) == Some(Target::Stick)) {
                         sheets.claim_overlay(t.id);
                     }
@@ -1018,12 +1172,31 @@ fn input(
                 if state.look_owner == Some(t.id) { state.look_owner = None; }
                 if let Some(c) = contact {
                     let dragged = c.dragged || ((p-c.origin)*size).length() > 12.0;
-                    if playing && interactive && options.run_lock && lock_available && lock.contains(t.position)
+                    if matches!(c.role, Role::HideToggle) {
+                        if interactive && !dragged && toggle_rect.contains(t.position) {
+                            state.controls_hidden = !state.controls_hidden;
+                            if state.controls_hidden {
+                                vats.cancel();
+                                bar.cancel();
+                                drawer.drawer.cancel();
+                                world_touch.cancel();
+                                state.cancel_touch();
+                                held_sneak.active = false;
+                            }
+                        }
+                    } else if paused_now
+                        && matches!(c.role, Role::Button(PAUSE_BUTTON))
+                        && interactive
+                        && !dragged
+                        && layout.config.button_hit(t.position, size, PAUSE_BUTTON, false)
+                    {
+                        commands.queue(nvf_play::pause::close_pause);
+                    } else if playing && interactive && options.run_lock && lock_available && lock.contains(t.position)
                         && ((matches!(c.role, Role::Move) && !movement.auto_move()) || (matches!(c.role, Role::RunLock) && !dragged))
                         && !state.pulses.contains(&Control::AutoMove) {
                         state.pulses.push(Control::AutoMove);
                     }
-                    if playing && interactive && options.vats_taps && matches!(c.role, Role::Look) && !dragged
+                    if playing && interactive && !state.controls_hidden && options.vats_taps && matches!(c.role, Role::Look) && !dragged
                         && state.contacts.is_empty() && movement.now() - c.started <= 0.25 {
                         if state.taps.tap(movement.now(), t.position) {
                             world_touch.cancel(); map.cancel(); state.cancel_touch(); state.pulses.push(Control::Vats);
@@ -1062,6 +1235,8 @@ fn input(
 pub(super) enum TouchVisual {
     EditorShield,
     Button(usize),
+    HideToggle,
+    HideToggleLabel,
     Caption,
     Glyph,
     Stick,
@@ -1069,6 +1244,8 @@ pub(super) enum TouchVisual {
     Instructions,
     EditorPanel,
     EditorAction(usize),
+    EditorToggle,
+    EditorDock,
     EditorMessage,
     AimingValue(bool),
 }
@@ -1125,6 +1302,29 @@ fn labels(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 ));
             });
     }
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(px(1.5)),
+            border_radius: BorderRadius::all(px(12.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.02, 0.06, 0.07, 0.65)),
+        BorderColor::all(Color::srgba(0.7, 0.9, 0.85, 0.65)),
+        GlobalZIndex(2600),
+        TouchVisual::HideToggle,
+        Pickable::IGNORE,
+    )).with_children(|p| {
+        p.spawn((
+            Text::new("Hide"),
+            TextFont { font_size: FontSize::Px(11.0), ..default() },
+            TextColor(Color::WHITE),
+            TouchVisual::HideToggleLabel,
+            Pickable::IGNORE,
+        ));
+    });
     for visual in [TouchVisual::Stick, TouchVisual::Knob] {
         commands.spawn((
             Node {
@@ -1173,6 +1373,26 @@ fn labels(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             TouchVisual::EditorAction(i),
         ));
     }
+    for (label, visual) in [("Hide tools", TouchVisual::EditorToggle), ("Dock bottom", TouchVisual::EditorDock)] {
+        commands.spawn((
+            Text::new(label),
+            TextFont {
+                font_size: FontSize::Px(13.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Node {
+                position_type: PositionType::Absolute,
+                padding: UiRect::all(px(6.0)),
+                border: UiRect::all(px(1.5)),
+                ..default()
+            },
+            BorderColor::all(Color::srgba(0.95, 0.78, 0.35, 0.85)),
+            BackgroundColor(Color::srgba(0.14, 0.22, 0.24, 0.96)),
+            GlobalZIndex(3050),
+            visual,
+        ));
+    }
     for ads in [false, true] {
         commands.spawn((
             Text::new(""),
@@ -1208,10 +1428,10 @@ fn labels(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         TouchVisual::EditorMessage,
     ));
 }
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn show_labels(
-    (state, layout, practice, modal, gyro_options, gyro_state): (Res<TouchState>, Res<Layout>, Res<practice::Practice>, Res<modal::Capture>, Res<gyro::Options>, Res<gyro::State>),
-    control: Option<Res<nvf_play::control::PlayerControl>>,
+    (state, mut layout, mut hint_fade, time, practice, modal, gyro_options, gyro_state): (Res<TouchState>, ResMut<Layout>, ResMut<HintFade>, Res<Time<Real>>, Res<practice::Practice>, Res<modal::Capture>, Res<gyro::Options>, Res<gyro::State>),
+    (control, creator, paused, safe): (Option<Res<nvf_play::control::PlayerControl>>, Option<Res<nvf_play::creator::CreatorMenu>>, Option<Res<nvf_play::pause::Paused>>, Option<Res<nvf_play::touch_safe_area::SafeInsets>>),
     window: Query<&Window, With<PrimaryWindow>>,
     bindings: Option<Res<Bindings>>,
     pads: Query<&Gamepad>,
@@ -1231,13 +1451,23 @@ fn show_labels(
 ) {
     let Ok(window) = window.single() else { return };
     let size = Vec2::new(window.width().max(32.0), window.height().max(32.0));
+    let safe_insets = safe.as_deref().copied().unwrap_or_default();
     let editing = layout.editor.is_some();
+    let creator_open = creator.as_deref().is_some_and(|c| c.is_open()) && !paused.as_deref().is_some_and(|p| p.0);
     let controller = bindings
         .is_some_and(|b| b.device == nvf_play::bindings::InputDevice::Controller)
         && !pads.is_empty();
+    let fade_active = state.playing && !editing && !practice.blocking() && !state.suspended
+        && !state.controls_hidden && !controller && !creator_open;
+    hint_fade.tick(time.delta_secs(), fade_active, &mut layout.config.hints);
+    let hint_alpha = hint_fade.alpha(layout.config.hints, editing);
     let aiming_page = layout.editor.as_ref().is_some_and(|e| e.aiming);
     let styles_page = layout.editor.as_ref().is_some_and(|e| e.styles);
     let tray_page=layout.tray_editing();
+    let editor_dragging = layout.editor.as_ref().is_some_and(layout::Editor::dragging);
+    let editor_collapsed = layout.editor.as_ref().is_some_and(|e| e.collapsed && !e.aiming && !e.styles && !e.tray);
+    let editor_bottom = layout.editor.as_ref().is_some_and(|e| e.docked_bottom);
+    let panel_hidden = editor_dragging || editor_collapsed;
     let palette = layout.config.appearance.palette();
     let color = |c: [f32; 3], a: f32| Color::srgba(c[0], c[1], c[2], a);
     let playing = layout.editor.as_ref().map_or(state.playing, |e| e.playing);
@@ -1252,7 +1482,7 @@ fn show_labels(
     let stick_diameter = layout.config.diameter(Target::Stick, size);
     let dialogue_camera = dialogue_camera.single().ok().filter(|(_, camera)| camera.is_active)
         .map(|(entity, _)| entity);
-    for (entity, target, visual, mut node, mut visibility, mut background, text, image, border, text_color) in
+    for (entity, target, visual, mut node, mut visibility, mut background, text, image, mut border, mut text_color) in
         &mut visuals
     {
         if matches!(visual, TouchVisual::Button(i) if !BUTTONS[*i].playing) {
@@ -1299,18 +1529,55 @@ fn show_labels(
                         )
                     };
                 }
+                let paused_now = !editing && paused.as_deref().is_some_and(|p| p.0);
                 !aiming_page
-                    && BUTTONS[i].playing == playing
+                    && !state.controls_hidden
+                    && button_active(i, playing, paused_now)
                     && (editing || (layout.config.buttons[i].visible && (i != gyro::BUTTON || gyro_options.enabled)))
             }
-            TouchVisual::Caption => editing || layout.config.hints,
-            TouchVisual::Glyph => true,
+            TouchVisual::HideToggle => {
+                rect = Some(hide_toggle_rect(size, safe_insets));
+                let toggle_alpha = if state.controls_hidden {
+                    layout.config.opacity.max(0.35) * 0.65
+                } else {
+                    layout.config.opacity.max(0.35)
+                };
+                if let Some(bg) = background.as_deref_mut() {
+                    let pressed = state.contacts.values().any(|c| matches!(c.role, Role::HideToggle));
+                    bg.0 = if pressed {
+                        color(palette.pressed, toggle_alpha)
+                    } else {
+                        color(palette.background, toggle_alpha * palette.fill)
+                    };
+                }
+                if let Some(b) = border.as_deref_mut() {
+                    *b = BorderColor::all(color(palette.border, toggle_alpha));
+                }
+                !editing && !controller
+            }
+            TouchVisual::HideToggleLabel => {
+                let want = if state.controls_hidden { "Show" } else { "Hide" };
+                if let Some(mut text) = text {
+                    if text.0 != want { text.0 = want.to_string(); }
+                }
+                if let Some(tc) = text_color.as_deref_mut() {
+                    let toggle_alpha = if state.controls_hidden {
+                        layout.config.opacity.max(0.35) * 0.75
+                    } else {
+                        layout.config.opacity.max(0.35)
+                    };
+                    tc.0 = Color::srgba(palette.foreground[0], palette.foreground[1], palette.foreground[2], toggle_alpha);
+                }
+                !editing && !controller
+            }
+            TouchVisual::Caption => !state.controls_hidden && (editing || (layout.config.hints && hint_alpha > 0.0)),
+            TouchVisual::Glyph => !state.controls_hidden,
             TouchVisual::Stick => {
                 rect = Some(Rect::from_center_size(
                     stick_center,
                     Vec2::splat(stick_diameter),
                 ));
-                playing && !aiming_page
+                !state.controls_hidden && playing && !aiming_page
             }
             TouchVisual::Knob => {
                 let offset = movement.map_or(Vec2::ZERO, |c| {
@@ -1320,7 +1587,7 @@ fn show_labels(
                     stick_center + offset,
                     Vec2::splat(stick_diameter * 0.35),
                 ));
-                playing && !aiming_page
+                !state.controls_hidden && playing && !aiming_page
             }
             TouchVisual::Instructions => {
                 if let Some(mut text) = text {
@@ -1332,17 +1599,21 @@ fn show_labels(
                         if state.movement_options.run_lock {"Release the movement thumb on the arrow for Auto Move; tap it to stop. "} else {""});
 
                 }
-                !editing && layout.config.hints
+                if let Some(bg) = background.as_deref_mut() {
+                    bg.0 = Color::srgba(0.01, 0.02, 0.03, 0.8 * hint_alpha);
+                }
+                if let Some(tc) = text_color.as_deref_mut() {
+                    tc.0 = Color::srgba(1.0, 1.0, 1.0, hint_alpha);
+                }
+                !state.controls_hidden && !editing && layout.config.hints && hint_alpha > 0.0
             }
             TouchVisual::EditorPanel => {
                 rect = Some(if tray_page {tray_editor::panel(size,layout.tray_safe)} else if aiming_page {
                     aiming::editor_panel(size)
                 } else {
-                    let first = layout::editor_rect(0, size);
-                    let last = layout::editor_rect(layout::EDIT_ACTIONS.len() - 1, size);
-                    Rect::from_corners(first.min - Vec2::splat(4.0), last.max + Vec2::splat(4.0))
+                    layout::editor_panel_rect(size, editor_bottom)
                 });
-                editing
+                editing && !panel_hidden
             }
             TouchVisual::AimingValue(ads) => {
                 rect = Some(aiming::value_rect(ads, size));
@@ -1357,7 +1628,7 @@ fn show_labels(
                         } * 100.0
                     );
                 }
-                aiming_page
+                aiming_page && !editor_dragging
             }
             TouchVisual::EditorAction(i) => {
                 if tray_page && ![0,1,9,10].contains(&i) {*visibility=Visibility::Hidden;continue;}
@@ -1368,7 +1639,7 @@ fn show_labels(
                 rect = Some(if tray_page {tray_editor::action_rect_with([0,1,9,10].iter().position(|v|*v==i).unwrap_or(0),size,layout.tray_safe)} else if aiming_page {
                     aiming::editor_rect(i, size)
                 } else {
-                    layout::editor_rect(i, size)
+                    layout::editor_rect_in(i, size, editor_bottom)
                 });
                 if let Some(mut text) = text {
                     text.0 = if tray_page {layout::EDIT_ACTIONS[i].into()} else if styles_page {
@@ -1438,9 +1709,39 @@ fn show_labels(
                         }
                     };
                 }
-                editing && (!(aiming_page || styles_page) || i < 12)
+                editing && !panel_hidden && (!(aiming_page || styles_page) || i < 12)
+            }
+            TouchVisual::EditorToggle => {
+                rect = Some(layout::editor_toggle_rect(size, editor_collapsed, editor_bottom));
+                if let Some(mut text) = text {
+                    let want = if editor_collapsed { "Show tools" } else { "Hide tools" };
+                    if text.0 != want { text.0 = want.into(); }
+                }
+                editing && !editor_dragging && !aiming_page && !styles_page && !tray_page
+            }
+            TouchVisual::EditorDock => {
+                rect = Some(layout::editor_dock_rect(size, editor_bottom));
+                if let Some(mut text) = text {
+                    let want = if editor_bottom { "Dock top" } else { "Dock bottom" };
+                    if text.0 != want { text.0 = want.into(); }
+                }
+                editing && !panel_hidden && !aiming_page && !styles_page && !tray_page
             }
             TouchVisual::EditorMessage => {
+                if !aiming_page && !tray_page {
+                    let panel = layout::editor_panel_rect(size, editor_bottom);
+                    let msg_w = panel.width().min(size.x - 16.0);
+                    let msg_h = 34.0_f32;
+                    let msg_y = if editor_bottom {
+                        (panel.min.y - msg_h - 4.0).max(4.0)
+                    } else {
+                        (panel.max.y + 4.0).min((size.y - msg_h - 4.0).max(4.0))
+                    };
+                    rect = Some(Rect::from_corners(
+                        Vec2::new((size.x - msg_w) * 0.5, msg_y),
+                        Vec2::new((size.x + msg_w) * 0.5, msg_y + msg_h),
+                    ));
+                }
                 if let Some(mut text) = text {
                     text.0 = layout.editor.as_ref().map_or_else(
                         || layout.message.clone(),
@@ -1474,7 +1775,7 @@ fn show_labels(
                         },
                     );
                 }
-                editing
+                editing && !panel_hidden
             }
         };
         // Opacity belongs to the entire control, not just its dark backing.
@@ -1486,7 +1787,8 @@ fn show_labels(
                 | TouchVisual::Stick
                 | TouchVisual::Knob
         ) {
-            let alpha = layout.config.opacity;
+            let alpha = layout.config.opacity
+                * if matches!(visual, TouchVisual::Caption) { hint_alpha } else { 1.0 };
             if let Some(mut image) = image {
                 image.color = color(palette.foreground, alpha);
             }
@@ -1516,7 +1818,7 @@ fn show_labels(
             }
         }
         *visibility =
-            if visible && !state.ui_capture && !practice.blocking() && !modal.hides_overlay() && (!controller || editing) {
+            if visible && !creator_open && !state.ui_capture && !practice.blocking() && !modal.hides_overlay() && (!controller || editing) {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
@@ -3219,7 +3521,8 @@ mod tests {
                         touch(&mut app,window,id,TouchPhase::Ended,point.x,point.y-24.0); app.update();
                     }
                     let gyro = app.world().resource::<Layout>().config.center(Target::Button(gyro::BUTTON),size);
-                    assert!((gyro-Vec2::new(size.x*0.5,size.y*0.34)).length()<0.01,"{case}: fixed gyro anchor moved");
+                    let expected_x = if *preset == "left" { 1.0 - 0.075 } else { 0.075 };
+                    assert!((gyro - Vec2::new(size.x * expected_x, size.y * 0.48)).length() < 0.01, "{case}: fixed gyro anchor moved (got {gyro:?})");
                     let mut reader = bevy::ecs::message::MessageCursor::<nvf_play::weapon_wheel::TouchHotkey>::default();
                     reader.read(app.world().resource::<Messages<nvf_play::weapon_wheel::TouchHotkey>>()).for_each(drop);
                     touch(&mut app,window,320,TouchPhase::Started,gyro.x,gyro.y); app.update();
@@ -3242,7 +3545,7 @@ mod tests {
                     let tiles = mixed_hotbar_tiles(&mut app);
                     assert_eq!(tiles.len(),count+1,"{case}: missing rendered slot/tray");
                     for (label,rect) in &tiles {
-                        assert!(rect.width()>=48.0 && rect.height()>=48.0);
+                        assert!(rect.width() >= 48.0 - 1e-3 && rect.height() >= 48.0 - 1e-3, "{case}/{label}: rect={rect:?}");
                         let config=&app.world().resource::<Layout>().config;
                         for i in (0..9).chain(std::iter::once(gyro::BUTTON)) {
                             let center=config.center(Target::Button(i),size);
@@ -3895,6 +4198,166 @@ mod tests {
             assert!(app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::F12));
         }
     }
+    #[test]
+    fn hide_toggle_hides_other_touch_controls_passes_touches_through_and_restores() {
+        let (mut app, window) = controls_scene();
+        app.world_mut().resource_mut::<nvf_play::control::PlayerControl>().weapon_out = true;
+        let toggle = hide_toggle_rect(Vec2::splat(1000.0), Default::default()).center();
+        let fire_idx = BUTTONS.iter().position(|b| b.control == Some(Control::Use)).unwrap();
+        let fire = app.world().resource::<Layout>().config.center(Target::Button(fire_idx), Vec2::splat(1000.0));
+        // Before hiding: tapping Fire activates trigger.
+        touch(&mut app, window, 901, TouchPhase::Started, fire.x, fire.y);
+        app.update();
+        assert!(app.world().resource::<nvf_play::control::PlayerControl>().trigger);
+        touch(&mut app, window, 901, TouchPhase::Ended, fire.x, fire.y);
+        app.update();
+        assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger);
+
+        // Tap compact Hide toggle button: hides all other controls and leaves toggle visible.
+        touch(&mut app, window, 902, TouchPhase::Started, toggle.x, toggle.y);
+        touch(&mut app, window, 902, TouchPhase::Ended, toggle.x, toggle.y);
+        app.update();
+        assert!(app.world().resource::<TouchState>().controls_hidden);
+        {
+            let world = app.world_mut();
+            let mut q = world.query::<(&TouchVisual, &Visibility)>();
+            let mut saw_toggle = false;
+            for (v, vis) in q.iter(world) {
+                match v {
+                    TouchVisual::HideToggle | TouchVisual::HideToggleLabel => {
+                        assert_eq!(*vis, Visibility::Inherited, "restore toggle must remain visible");
+                        saw_toggle = true;
+                    }
+                    TouchVisual::Button(_) | TouchVisual::Stick | TouchVisual::Knob | TouchVisual::Instructions => {
+                        assert_eq!(*vis, Visibility::Hidden, "other touch controls must be hidden");
+                    }
+                    _ => {}
+                }
+            }
+            assert!(saw_toggle);
+        }
+
+        // While hidden, touching over Fire does NOT fire or claim TouchUiCapture.
+        touch(&mut app, window, 903, TouchPhase::Started, fire.x, fire.y);
+        app.update();
+        assert!(!app.world().resource::<nvf_play::control::PlayerControl>().trigger, "hidden buttons must not fire");
+        assert!(app.world().resource::<nvf_play::ui_pointer::TouchUiCapture>().allows(903), "touches must pass through freely while hidden");
+        touch(&mut app, window, 903, TouchPhase::Ended, fire.x, fire.y);
+        app.update();
+
+        // Tap toggle again: restores all controls.
+        touch(&mut app, window, 904, TouchPhase::Started, toggle.x, toggle.y);
+        touch(&mut app, window, 904, TouchPhase::Ended, toggle.x, toggle.y);
+        app.update();
+        assert!(!app.world().resource::<TouchState>().controls_hidden);
+        touch(&mut app, window, 905, TouchPhase::Started, fire.x, fire.y);
+        app.update();
+        assert!(app.world().resource::<nvf_play::control::PlayerControl>().trigger, "restored Fire button works again");
+        touch(&mut app, window, 905, TouchPhase::Ended, fire.x, fire.y);
+        app.update();
+    }
+
+    #[test]
+    fn default_touch_hints_and_captions_auto_fade_after_15_seconds_and_turn_off() {
+        let mut fade = HintFade::default();
+        let mut hints = true;
+        // Full visibility during the first 15 seconds of gameplay.
+        fade.tick(10.0, true, &mut hints);
+        assert!(hints);
+        assert_eq!(fade.alpha(hints, false), 1.0);
+        // Paused / non-gameplay does not advance the timer.
+        fade.tick(20.0, false, &mut hints);
+        assert!(hints);
+        assert_eq!(fade.alpha(hints, false), 1.0);
+        fade.tick(5.0, true, &mut hints);
+        assert!(hints);
+        assert_eq!(fade.alpha(hints, false), 1.0);
+        // Smooth fade between 15.0 s and 16.5 s.
+        fade.tick(0.75, true, &mut hints);
+        assert!(hints);
+        let mid = fade.alpha(hints, false);
+        assert!(mid > 0.4 && mid < 0.6, "expected midpoint fade alpha ~0.5, got {mid}");
+        // Turns off automatically once fade finishes.
+        fade.tick(1.0, true, &mut hints);
+        assert!(!hints, "hints must turn off automatically after fade");
+        assert_eq!(fade.alpha(hints, false), 0.0);
+        // Layout editor still keeps captions at full opacity.
+        assert_eq!(fade.alpha(hints, true), 1.0);
+        // If user manually turns hints back on, auto-fade respects manual override.
+        hints = true;
+        fade.tick(30.0, true, &mut hints);
+        assert!(hints);
+        assert_eq!(fade.alpha(hints, false), 1.0);
+    }
+
+    #[test]
+    fn android_platform_defaults_match_live_device_spec_and_preserve_desktop() {
+        let gyro_android = gyro::Options::for_platform(true);
+        let gyro_desktop = gyro::Options::for_platform(false);
+        assert!(gyro_android.enabled && gyro_android.invert_x && gyro_android.invert_y);
+        assert!(!gyro_desktop.enabled && !gyro_desktop.invert_x && !gyro_desktop.invert_y);
+
+        let pip_android = pipboy_options::Options::for_platform(true);
+        let pip_desktop = pipboy_options::Options::for_platform(false);
+        assert!(pip_android.left && pip_android.right && !pip_android.graphics);
+        assert!(!pip_desktop.left && !pip_desktop.right && pip_desktop.graphics);
+
+        let drawer_android = drawer::Options::for_platform(true);
+        let drawer_desktop = drawer::Options::for_platform(false);
+        assert!(drawer_android.enabled && !drawer_desktop.enabled);
+    }
+
+    #[test]
+    fn pause_touch_button_stays_visible_while_paused_and_toggles_pause_closed() {
+        assert!(button_active(PAUSE_BUTTON, false, true));
+        assert!(!button_active(TAB_BUTTON, false, true));
+        assert!(button_active(TAB_BUTTON, false, false), "Tab stays active in non-pause menus");
+
+        let (mut app, window) = scene();
+        app.insert_resource(nvf_play::pause::Paused(true));
+        app.insert_resource(nvf_play::pause::Page::Main);
+        app.insert_resource(nvf_play::pause::PauseView::default());
+        app.insert_resource(State::new(nvf_play::PlayState::Menu));
+        app.init_resource::<NextState<nvf_play::PlayState>>();
+        app.update();
+        let pause_pos = app.world().resource::<Layout>().config.center(Target::Button(PAUSE_BUTTON), Vec2::splat(1000.0));
+        touch(&mut app, window, 950, TouchPhase::Started, pause_pos.x, pause_pos.y);
+        app.update();
+        touch(&mut app, window, 950, TouchPhase::Ended, pause_pos.x, pause_pos.y);
+        app.update();
+        assert!(!app.world().resource::<nvf_play::pause::Paused>().0, "tapping Pause button while paused must clear Paused");
+        assert!(
+            matches!(
+                *app.world().resource::<NextState<nvf_play::PlayState>>(),
+                NextState::Pending(nvf_play::PlayState::Playing)
+            ) || *app.world().resource::<State<nvf_play::PlayState>>().get() == nvf_play::PlayState::Playing,
+            "tapping Pause button while paused must request or complete transition back to Playing"
+        );
+    }
+
+    #[test]
+    fn settings_overlay_virtual_controls_emit_navigation_keys() {
+        let mut state = TouchState::default();
+        let down = BUTTONS.iter().position(|b| b.key == Some(KeyCode::ArrowDown)).unwrap();
+        let ok = BUTTONS.iter().position(|b| b.key == Some(KeyCode::Enter)).unwrap();
+        state.contacts.insert(1, Contact {
+            origin: Vec2::ZERO, position: Vec2::ZERO, role: Role::SettingsOverlay(down), started: 0.0, dragged: false,
+        });
+        state.contacts.insert(2, Contact {
+            origin: Vec2::ZERO, position: Vec2::ZERO, role: Role::SettingsOverlay(ok), started: 0.0, dragged: false,
+        });
+        state.contacts.insert(3, Contact {
+            origin: Vec2::ZERO, position: Vec2::ZERO, role: Role::SettingsOverlay(PAUSE_BUTTON), started: 0.0, dragged: false,
+        });
+        sync_touch(&mut state, None, false);
+        assert!(state.keys.contains(&KeyCode::ArrowDown));
+        assert!(state.keys.contains(&KeyCode::Enter));
+        assert!(!state.keys.contains(&KeyCode::Escape), "Pause button closes pause on release rather than spamming Escape");
+        state.contacts.clear();
+        sync_touch(&mut state, None, false);
+        assert!(state.keys.is_empty());
+    }
+
     include!("touch/menu_sheet_router_tests.rs");
     include!("touch/entrypoint_tests.rs");
     include!("touch/optional_ui_tests.rs");

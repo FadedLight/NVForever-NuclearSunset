@@ -21,7 +21,10 @@ const SIZE_KEY: &str = "lockpick-touch-size";
 pub const HINTS_KEY: &str = "lockpick-touch-hints";
 #[derive(Resource)]
 pub(super) struct Hints(pub bool);
-impl Default for Hints { fn default() -> Self { Self(true) } }
+impl Hints {
+    pub(super) fn for_platform(android: bool) -> Self { Self(!android) }
+}
+impl Default for Hints { fn default() -> Self { Self::for_platform(cfg!(target_os = "android")) } }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scheme {
     Off,
@@ -1135,6 +1138,12 @@ mod tests {
         assert!(!settings::pick(loaded.world_mut(), size, "nan"));
         assert_eq!(loaded.world().resource::<Options>().size, 3);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn android_defaults_lockpick_hints_off_while_desktop_keeps_them_on() {
+        assert!(!Hints::for_platform(true).0);
+        assert!(Hints::for_platform(false).0);
     }
     include!("touch_optional_tests.rs");
     include!("touch/hints_tests.rs");

@@ -20,21 +20,25 @@ pub(super) struct Options {
 }
 impl Default for Options {
     fn default() -> Self {
-        Self {
-            analog: true,
-            fire_drag: true,
-            run_lock: false,
-            vats_taps: false,
-        }
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 impl Options {
+    pub(super) fn for_platform(android: bool) -> Self {
+        Self {
+            analog: true,
+            fire_drag: true,
+            run_lock: android,
+            vats_taps: android,
+        }
+    }
     #[cfg(test)]
     pub(super) fn legacy() -> Self {
         Self {
             analog: false,
             fire_drag: false,
-            ..Self::default()
+            run_lock: false,
+            vats_taps: false,
         }
     }
 }
@@ -128,7 +132,7 @@ pub(super) fn fixed_lock_rect(layout: &Layout, size: Vec2) -> Rect {
 fn lock_rect_at(layout: &Layout, size: Vec2, origin: Vec2) -> Rect {
     let radius = layout.config.diameter(Target::Stick, size) * 0.5;
     let center =
-        (origin - Vec2::Y * radius * 1.6).clamp(Vec2::splat(32.0), size - Vec2::splat(32.0));
+        (origin - Vec2::Y * radius * 1.95).clamp(Vec2::splat(32.0), size - Vec2::splat(32.0));
     Rect::from_center_size(center, Vec2::splat(56.0))
 }
 
@@ -294,5 +298,26 @@ mod tests {
         assert_eq!(children.len(), 1, "only the arrow icon");
         assert!(world.get::<icons::TouchIcon>(children[0]).is_some());
         assert!(world.query::<&Text>().iter(world).next().is_none(), "no visible Auto move text");
+    }
+
+    #[test]
+    fn android_defaults_enable_run_lock_and_vats_double_tap_while_desktop_keeps_off() {
+        let android = Options::for_platform(true);
+        assert!(android.run_lock && android.vats_taps && android.analog && android.fire_drag);
+        let desktop = Options::for_platform(false);
+        assert!(!desktop.run_lock && !desktop.vats_taps && desktop.analog && desktop.fire_drag);
+    }
+
+    #[test]
+    fn auto_move_lock_target_sits_cleanly_above_stick_and_clear_of_middle_left_gyro() {
+        let layout = Layout::default();
+        let state = TouchState::default();
+        for size in [Vec2::new(792.0, 363.0), Vec2::new(880.0, 396.0), Vec2::new(1280.0, 720.0)] {
+            let stick_center = layout.config.center(Target::Stick, size);
+            let stick_top = stick_center.y - layout.config.diameter(Target::Stick, size) * 0.5;
+            let rect = fixed_lock_rect(&layout, size);
+            assert!(rect.max.y <= stick_top - 12.0, "lock target {rect:?} sits cleanly above stick top {stick_top} at {size}");
+            assert!(lock_available(&layout, &state, size), "lock target clear of default buttons incl. Gyro at {size}");
+        }
     }
 }

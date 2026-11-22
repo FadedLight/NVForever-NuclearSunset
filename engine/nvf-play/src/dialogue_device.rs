@@ -52,6 +52,10 @@ impl Request {
 pub trait ScreenMap: Send + Sync {
     fn canvas_at(&self, window_physical: Vec2) -> Option<Vec2>;
     fn window_at(&self, canvas: Vec2) -> Option<Vec2>;
+    /// Whether `window_physical` hits the device's power button (outside the glass).
+    fn power_button_at(&self, _window_physical: Vec2) -> bool { false }
+    /// Screen-space bounds (physical window pixels) of the device's power button, if any.
+    fn power_button_rect(&self) -> Option<Rect> { None }
 }
 
 #[derive(Resource)]
@@ -118,6 +122,22 @@ impl DeviceView {
         }
         let value = logical * request.stamp.density / self.scale;
         value.is_finite().then_some(value)
+    }
+
+    /// Whether `window_physical` hits the device's power button for this request.
+    pub fn power_button_at(&self, request: &Request, window_physical: Vec2) -> bool {
+        self.matches(request)
+            && window_physical.is_finite()
+            && request.stamp.display.contains(window_physical)
+            && self.map.power_button_at(window_physical)
+    }
+
+    /// Screen-space bounds (physical window pixels) of the device's power button.
+    pub fn power_button_rect(&self, request: &Request) -> Option<Rect> {
+        self.matches(request)
+            .then(|| self.map.power_button_rect())
+            .flatten()
+            .filter(|r| positive_rect(*r))
     }
 }
 

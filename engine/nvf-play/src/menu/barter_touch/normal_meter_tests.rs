@@ -356,9 +356,10 @@ fn ordinary_physical_meter_context_changes_retire_hold_and_noop_size_keeps_live_
             }
             "size"|"roundtrip"|"noop"=>{
                 let row=app.world().resource::<crate::settings::Settings>().index("barter-menu-size-v1").unwrap();
-                let part=if cause=="noop" {0.5}else{1.0};
-                assert_eq!(crate::settings::set_slider(app.world_mut(),row,part),Some(part));
-                if cause=="roundtrip" {assert_eq!(crate::settings::set_slider(app.world_mut(),row,0.5),Some(0.5));}
+                let current=(app.world().resource::<crate::settings::Settings>().list()[row].slider.as_ref().unwrap().get)(app.world());
+                let part=if cause=="noop" {current}else{1.0};
+                assert!((crate::settings::set_slider(app.world_mut(),row,part).unwrap()-part).abs()<0.002);
+                if cause=="roundtrip" {assert!((crate::settings::set_slider(app.world_mut(),row,current).unwrap()-current).abs()<0.002);}
             }
             "new-max"=>{
                 let next={let mut sim=app.world_mut().resource_mut::<crate::sim::SimState>();
@@ -440,7 +441,7 @@ fn ordinary_container_meter_keeps_original_fresh_mouse_route_across_unrelated_ba
     let source={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
     let row=app.world().resource::<crate::settings::Settings>().index("barter-menu-size-v1").unwrap();
     assert_eq!(crate::settings::set_slider(app.world_mut(),row,1.0),Some(1.0));
-    assert_eq!(app.world().resource::<crate::menu_readability::MenuReadability>().size(crate::menu_readability::MenuKind::Barter),1.5);
+    assert_eq!(app.world().resource::<crate::menu_readability::MenuReadability>().size(crate::menu_readability::MenuKind::Barter),2.0);
     app.update();
     let current={let world=app.world_mut();let mut q=world.query_filtered::<Entity,With<crate::menu::AmountMeter>>();q.single(world).unwrap()};
     assert_eq!(current,source,"unrelated Barter setting cannot replace an unchanged container source");

@@ -465,19 +465,24 @@ impl Bindings {
     }
 
     pub fn game_defaults() -> Bindings {
+        Self::game_defaults_for_platform(cfg!(target_os = "android"))
+    }
+
+    pub fn game_defaults_for_platform(android: bool) -> Bindings {
+        let look_sens = if android { 1.25 } else { 1.0 };
         Bindings {
             map: GAME_CONTROLS.iter().map(|&(c, _, v)| (c, Binding::from_ini(v))).collect(),
             pad: game_pad_defaults(),
             always_run_by_default: ALWAYS_RUN_BY_DEFAULT,
             invert_y: INVERT_Y,
-            mouse_sensitivity: MOUSE_SENSITIVITY,
+            mouse_sensitivity: MOUSE_SENSITIVITY * look_sens,
             device: InputDevice::KeyboardMouse,
             automatic_input_switching: AUTOMATIC_INPUT_SWITCHING,
             look_speed: [LOOK_SPEED_HORIZONTAL, LOOK_SPEED_VERTICAL],
             rumble: RUMBLE,
             stick_sensitivity: 1.0,
             allow_duplicates: false,
-            vertical: [1.0, 1.0],
+            vertical: [look_sens, look_sens],
             aim: [1.0, 1.0],
         }
     }
@@ -1967,5 +1972,17 @@ Rumble=1"), "{text}");
         assert_eq!(changed_controls(b), [R::Binding(Control::Forward, InputDevice::KeyboardMouse), R::Binding(Control::Jump, InputDevice::Controller), R::Binding(Control::Vats, InputDevice::Controller), R::Sensitivity(InputDevice::Controller)]);
         restore_rows(world, &changed_controls(world.resource::<Bindings>()));
         assert!(changed_controls(world.resource::<Bindings>()).is_empty());
+    }
+
+    #[test]
+    fn android_defaults_set_look_and_vertical_sensitivity_to_1_25_while_desktop_keeps_1_0() {
+        let android = Bindings::game_defaults_for_platform(true);
+        assert!((android.sensitivity() - 1.25).abs() < 1e-6);
+        assert!((android.vertical_sensitivity() - 1.25).abs() < 1e-6);
+        assert!((android.vertical[1] - 1.25).abs() < 1e-6);
+        let desktop = Bindings::game_defaults_for_platform(false);
+        assert!((desktop.sensitivity() - 1.0).abs() < 1e-6);
+        assert!((desktop.vertical_sensitivity() - 1.0).abs() < 1e-6);
+        assert!((desktop.vertical[1] - 1.0).abs() < 1e-6);
     }
 }

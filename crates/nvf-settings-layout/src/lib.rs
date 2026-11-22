@@ -82,8 +82,8 @@ pub const ANDROID_CONTROLLER_KEYS: [&str; 4] = [
 // A matching category appends these keys after its shared rows.
 pub const ANDROID_SECTIONS: &[Section] = &[
     section("Gameplay", Some("Camera"), &["touch-pipboy-size-v1", "touch-pipboy-tab-swipes"]),
-    section("Gameplay", Some("Dialogue"), &["touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]),
-    section("Display", Some("Interface"), &["hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1"]),
+    section("Gameplay", Some("Dialogue"), &["touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-device-side-v1", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]),
+    section("Display", Some("Interface"), &["hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1", "settings-menu-scale-v1", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1"]),
     section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1"]),
     section("Controls", Some("Touch"), &["touch-layout-editor-v1", "touch-practice-v1", "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-swipe-v1", "touch-pipboy-distance-v1", "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button", "touch-pipboy-button-graphics", "touch-pipboy-model-wheel", "touch-direct-pipboy-v1", "touch-world-activation-v1", "touch-icon-family", "adaptive-touch-actions", "lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints", "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1", "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1", "touch-analog-movement-v1", "touch-fire-drag-look-v1", "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1"]),
     section(CONTROLS_TAB, Some("Controller"), &ANDROID_CONTROLLER_KEYS),
@@ -114,13 +114,16 @@ pub const MOBILE_SECTIONS: &[Section] = &[
     ]),
     section(MOBILE_TAB, Some("Dialogue"), &[
         "touch-dialogue", "dialogue-theme-v1", "dialogue-touch-choice", "dialogue-speaker-side",
-        "dialogue-background-tint-v1", "dialogue-hints-v1", "dialogue-choice-text-size",
+        "dialogue-device-side-v1", "dialogue-background-tint-v1", "dialogue-hints-v1", "dialogue-choice-text-size",
         "dialogue-subtitle-text-size", "dialogue-background-opacity-v1", "dialogue-frame-opacity-v1",
     ]),
     section(MOBILE_TAB, Some("Lockpicking"), &["lockpick-touch", "lockpick-touch-hints", "lockpick-touch-size"]),
     section(MOBILE_TAB, Some("Interface size"), &[
-        "menu-scale", "ui-scale", "hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
+        "menu-scale", "settings-menu-scale-v1", "ui-scale", "hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1",
         "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1",
+    ]),
+    section(MOBILE_TAB, Some("Mobile performance"), &[
+        "mobile-performance", "mobile-fps", "mobile-resolution", "mobile-thermal-auto", "mobile-thermal-status",
     ]),
 ];
 
@@ -1023,6 +1026,7 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("dialogue-touch-choice", "touch-dialogue", "Enable Touch dialogue."),
     ("dialogue-theme-v1", "touch-dialogue", "Enable Touch dialogue."),
     ("dialogue-speaker-side", "touch-dialogue", "Enable Touch dialogue."),
+    ("dialogue-device-side-v1", "touch-dialogue", "Enable Touch dialogue."),
     ("dialogue-background-opacity-v1", "touch-dialogue", "Enable Touch dialogue."),
     ("dialogue-background-tint-v1", "touch-dialogue", "Enable Touch dialogue."),
     ("dialogue-frame-opacity-v1", "touch-dialogue", "Enable Touch dialogue."),
@@ -1077,6 +1081,7 @@ pub const SHOWN_WITH: &[(&str, &str, &[&str])] = &[
 pub const NEEDS_CHOICE: &[(&str, &str, &[&str], &str)] = &[
     ("vats-slowdown", "vats-style", &["Classic"], "Classic V.A.T.S. only."),
     ("dialogue-speaker-side", "dialogue-theme-v1", &["Field Notes", "Retro Console", "Wrist Terminal"], "Available with Field Notes, Retro Console and Wrist Terminal."),
+    ("dialogue-device-side-v1", "dialogue-theme-v1", &["Retro Console", "Wrist Terminal"], "Available with Retro Console and Wrist Terminal."),
     ("dialogue-background-opacity-v1", "dialogue-theme-v1", &["Field Notes"], "Available with the Field Notes theme."),
     ("dialogue-background-tint-v1", "dialogue-theme-v1", &["Field Notes"], "Available with the Field Notes theme."),
     ("dialogue-frame-opacity-v1", "dialogue-theme-v1", &["Field Notes"], "Available with the Field Notes theme."),

@@ -786,10 +786,11 @@ fn spawn(commands: &mut Commands, look: &mut RepairLook, presentation:(&View,cra
                 format!("Repair All ({})  {}", v.total, crate::pad::hint_as(&[KeyCode::KeyA], hint_at, v.labels))
             };
             let done = format!("Done  {}", crate::pad::hint_as(&[KeyCode::KeyE, KeyCode::Escape], hint_at, v.labels));
+            let button_h = (48.0 * look.row.scale).max(48.0);
             for (k, (label, b, on)) in [(all.as_str(), RepairButton::All, v.all_ready), (done.as_str(), RepairButton::Done, true)].into_iter().enumerate() {
                 let w = crate::pad::hint_width(&look.row, label, glyphs);
-                m.spawn((Button, b, at(BUTTONS.x - w - 10.0, BUTTONS.y + k as f32 * BUTTON_STEP, w + 10.0, 44.0))).with_children(|t| {
-                    crate::pad::set_hint(t, &look.row, label, 0.0, crate::pipboy::frame::base(&look.row.font), if on { bright } else { dim }, glyphs);
+                m.spawn((Button, b, at(BUTTONS.x - w - 16.0, BUTTONS.y + k as f32 * BUTTON_STEP, w + 24.0, button_h))).with_children(|t| {
+                    crate::pad::set_hint(t, &look.row, label, 6.0, crate::pipboy::frame::base(&look.row.font), if on { bright } else { dim }, glyphs);
                 });
             }
             // The bottom bracket: a line along 680 with short sides fading up.

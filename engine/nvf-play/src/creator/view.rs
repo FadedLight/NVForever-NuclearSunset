@@ -342,7 +342,11 @@ pub fn spawn(p: &mut ChildSpawnerCommands, m: &Model, kit: &Kit, view_w: f32) ->
     // controller), on the panel's backing: the plain text was lost over a bright shirt
     // [observed: the first shots]. Only a key or button takes the form the menus' buttons
     // give theirs ("Done A)"); a drag or a stick is said in words.
-    let lines = ["Drag to turn    Right-drag or Shift-drag to pan    Wheel to zoom    Reset View C)", "Right stick to turn    Left stick to pan    Triggers to zoom    Reset View RS)"];
+    let lines = if cfg!(target_os = "android") {
+        ["Drag picture to turn    Pinch to zoom    Two-finger drag to pan", "Tap tabs, arrows, swatches or Done    Drag sliders sideways    Drag list to scroll"]
+    } else {
+        ["Drag to turn    Right-drag or Shift-drag to pan    Wheel to zoom    Reset View C)", "Right stick to turn    Left stick to pan    Triggers to zoom    Reset View RS)"]
+    };
     let wide = lines.iter().map(|l| width(&kit.body, l, 0.6)).fold(0.0, f32::max);
     piece(p, &kit.pieces.backing, [28.0, 866.0, wide + 24.0, 60.0], amber(BACKING_BRIGHTNESS).with_alpha(BACKING_ALPHA), PANEL);
     for (k, line) in lines.iter().enumerate() {

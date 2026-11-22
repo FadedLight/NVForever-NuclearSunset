@@ -69,7 +69,9 @@ impl Sources<'_> {
         if self.paused.as_ref().is_some_and(|p| p.0) || self.creator.as_ref().is_some_and(|c| c.is_open())
             || self.keyboard.as_ref().is_some_and(|k| k.0) || self.free.as_ref().is_some_and(|f| f.active) { return None; }
         let model = self.active.as_ref().and_then(|a| a.0.as_ref());
-        let kind = if model.is_some_and(|m| matches!(m.mode, Mode::Barter(_))) && self.barter.as_ref().is_some_and(|o| o.enabled) {
+        let kind = if model.is_some_and(|m| matches!(m.mode, Mode::Barter(_)) || m.quantity.is_some())
+            && self.barter.as_ref().is_some_and(|o| o.enabled)
+        {
             Kind::Barter
         } else if maintenance_enabled && self.vendor.as_ref().is_some_and(|v| v.0.is_some()) { Kind::Vendor }
         else if maintenance_enabled && self.recipe.as_ref().is_some_and(|r| r.is_open()) { Kind::Workbench }
@@ -84,7 +86,8 @@ impl Sources<'_> {
             let game = &rt.game;
             if game.loading || matches!(game.side_menu(), Some(menus::LOADING | menus::VATS)) { return None; }
             let own = match kind {
-                Kind::Barter => game.top_menu().is_none_or(|c| c == menus::BARTER || (c == menus::QUANTITY && model.is_some_and(|m| m.quantity.is_some())))
+                Kind::Barter => game.top_menu().is_none_or(|c| c == menus::BARTER
+                    || (model.is_some_and(|m| m.quantity.is_some()) && matches!(c, menus::QUANTITY | nvf_play::script::MENU_CONTAINER | menus::INVENTORY)))
                     && game.ui_prompt.is_none_or(|c| c == menus::QUANTITY),
                 Kind::Repair => game.open_menu_code().is_none_or(|c| matches!(c, menus::INVENTORY | menus::REPAIR)),
                 Kind::Mod => game.open_menu_code().is_none_or(|c| matches!(c, menus::INVENTORY | menus::ITEM_MOD)),

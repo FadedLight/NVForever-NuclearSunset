@@ -372,6 +372,8 @@ pub(super) struct Bridge<'w, 's> {
 impl Bridge<'_, '_> {
     /// A form (practice, report or editor) is over the pause page.
     pub fn form_over(&self) -> bool { self.over.0 }
+    /// Practice is open or draining its closing frames.
+    pub fn blocking(&self) -> bool { self.state.blocking() }
     // Called only from the live touch reader, before it can create gameplay contacts.
     pub fn capture(
         &mut self,

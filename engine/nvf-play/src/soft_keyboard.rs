@@ -30,20 +30,26 @@ impl Plugin for SoftKeyboardPlugin {
 
 type Fields<'w> = (
     Option<Res<'w, KeyboardCapture>>,
+    Option<Res<'w, crate::pause::FormOver>>,
+    Option<Res<'w, crate::pause::FormTextInput>>,
     Option<Res<'w, crate::chargen::ChargenMenus>>,
     Option<Res<'w, crate::console::Console>>,
 );
 
 fn follow(
     mut keyboard: ResMut<SoftKeyboard>,
-    (capture, chargen, console): Fields<'_>,
+    (capture, form, form_text, chargen, console): Fields<'_>,
     mut touches: MessageReader<TouchInput>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let tapped = touches.read().any(|t| t.phase == TouchPhase::Started);
     if !keyboard.enabled { return; }
     let Ok(mut window) = windows.single_mut() else { return; };
-    let focused = capture.is_some_and(|c| c.0) || chargen.is_some_and(|c| c.name_open())
+    // Non-text overlays over the pause menu (Customize Touch Layout, Controls Help, DLSS dialog)
+    // hold `FormOver` and `KeyboardCapture` to block menu keys, but must never open the soft keyboard.
+    let non_text_form = form.is_some_and(|f| f.0) && !form_text.is_some_and(|t| t.0);
+    let focused = (capture.is_some_and(|c| c.0) && !non_text_form)
+        || chargen.is_some_and(|c| c.name_open())
         || console.is_some_and(|c| c.open);
     // Focus loss hides it; returning to a still-focused field shows it again.
     let wanted = focused && window.focused;
@@ -127,6 +133,30 @@ mod tests {
         app.world_mut().resource_mut::<crate::chargen::ChargenMenus>().answer_for_test();
         app.update();
         assert!(!ime(&app, window), "Done hides it while the menu closes");
+    }
+
+    #[test]
+    fn non_text_form_overlay_suppresses_soft_keyboard_even_when_tapped() {
+        let (mut app, window) = scene(true);
+        app.init_resource::<crate::pause::FormOver>().init_resource::<crate::pause::FormTextInput>();
+        // Search opened IME first; opening a non-text overlay (Customize Touch Layout) hides it.
+        app.world_mut().resource_mut::<KeyboardCapture>().0 = true;
+        app.update();
+        assert!(ime(&app, window));
+        app.world_mut().resource_mut::<crate::pause::FormOver>().0 = true;
+        tap(&mut app, window);
+        app.update();
+        app.update();
+        assert!(!ime(&app, window), "non-text overlay like Customize Touch Layout must suppress IME");
+        // An explicit text form (Report a Bug) keeps IME active.
+        app.world_mut().resource_mut::<crate::pause::FormTextInput>().0 = true;
+        app.update();
+        assert!(ime(&app, window), "text form overlay keeps IME enabled");
+        app.world_mut().resource_mut::<crate::pause::FormTextInput>().0 = false;
+        app.world_mut().resource_mut::<crate::pause::FormOver>().0 = false;
+        app.world_mut().resource_mut::<KeyboardCapture>().0 = false;
+        app.update();
+        assert!(!ime(&app, window));
     }
 
     #[test]

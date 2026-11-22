@@ -31,21 +31,26 @@ pub(super) struct Options {
     toggle: bool,
     ads_only: bool,
     recenter: u64,
-    invert_x: bool,
-    invert_y: bool,
+    pub(super) invert_x: bool,
+    pub(super) invert_y: bool,
 }
-impl Default for Options {
-    fn default() -> Self {
+impl Options {
+    pub(super) fn for_platform(android: bool) -> Self {
         Self {
-            enabled: false,
+            enabled: android,
             sensitivity: 1.0,
             ads: 0.5,
             toggle: false,
             ads_only: true,
             recenter: 0,
-            invert_x: false,
-            invert_y: false,
+            invert_x: android,
+            invert_y: android,
         }
+    }
+}
+impl Default for Options {
+    fn default() -> Self {
+        Self::for_platform(cfg!(target_os = "android"))
     }
 }
 

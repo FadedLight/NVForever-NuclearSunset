@@ -41,10 +41,27 @@ impl TouchDialogue {
     pub fn captures(&self, state: crate::PlayState) -> bool {
         self.enabled && state == crate::PlayState::Dialogue
     }
-    /// Choice text size in logical units for every dialogue theme.
+    /// Choice text size in logical units for default/normal dialogue themes.
     pub fn choice_size(&self) -> f32 { self.text_base * scale(self.choice_scale) }
-    /// Speaking-line text size in logical units for every dialogue theme.
+    /// Speaking-line text size in logical units for default/normal dialogue themes.
     pub fn subtitle_size(&self) -> f32 { self.text_base * scale(self.subtitle_scale) }
+    /// Per-theme text size multiplier: Wrist Terminal and Classic bezels start smaller
+    /// so more choices and subtitles fit cleanly inside the hardware frame without
+    /// changing Normal/Minimal or Split Panel defaults.
+    pub(crate) fn theme_text_factor(theme: appearance::Theme) -> f32 {
+        match theme {
+            appearance::Theme::WristTerminal | appearance::Theme::ClassicGlass => 0.78,
+            _ => 1.0,
+        }
+    }
+    /// Choice text size adjusted for `theme`.
+    pub(crate) fn choice_size_for(&self, theme: appearance::Theme) -> f32 {
+        self.choice_size() * Self::theme_text_factor(theme)
+    }
+    /// Speaking-line text size adjusted for `theme`.
+    pub(crate) fn subtitle_size_for(&self, theme: appearance::Theme) -> f32 {
+        self.subtitle_size() * Self::theme_text_factor(theme)
+    }
 }
 /// Platform layout policy is separate from persisted text sizes. Existing saved
 /// scales are never interpreted as a request to reset density or accessibility.
@@ -187,6 +204,7 @@ enum Kind {
     Confirm,
     Skip,
     Barter,
+    PowerExit,
 }
 #[derive(Component)]
 struct Action {
@@ -486,11 +504,29 @@ fn read(
             Some(ui_point(p * density, camera, &cameras))
         }
     };
+    let can_power_exit = menu.view.as_ref().is_some_and(|v| v.goodbye && !v.choices.is_empty());
     let target_at = |p: Vec2| {
-        targets.iter().find_map(|(_, (a, n, t, v, c, camera))| {
+        if on_device && can_power_exit {
+            if let Some((request, view)) = projection {
+                if view.power_button_at(request, p * density) {
+                    return Some(Kind::PowerExit);
+                }
+            }
+        }
+        if let Some(found) = targets.iter().find_map(|(_, (a, n, t, v, c, camera))| {
             (a.list == menu.list && projected_point(p, camera).is_some_and(|point| hit(n, *t, v, c, point)))
                 .then_some(a.kind)
-        })
+        }) {
+            return Some(found);
+        }
+        if on_device {
+            if let Some((request, view)) = projection {
+                if view.power_button_at(request, p * density) {
+                    return Some(Kind::PowerExit);
+                }
+            }
+        }
+        None
     };
     // A discarded raw touch must not re-enter via its aggregate UiPointer press.
     // With no admitted raw touch, the independent physical pointer path remains.
@@ -542,7 +578,8 @@ fn read(
                 let Some(g) = gestures.gesture.as_mut().filter(|g| g.id == event.id) else {
                     continue;
                 };
-                if event.position.distance(g.origin) > 8.0 {
+                let scroll_threshold = if g.target == Some(Kind::PowerExit) { 14.0 } else { 8.0 };
+                if event.position.distance(g.origin) > scroll_threshold {
                     g.scrolling = true;
                 }
                 if g.scrolling {
@@ -576,7 +613,8 @@ fn read(
                     drop_tail = true;
                     break;
                 }
-                if event.position.distance(g.origin) <= 8.0 && g.target == target_at(event.position)
+                let slop = if g.target == Some(Kind::PowerExit) { 14.0 } else { 8.0 };
+                if event.position.distance(g.origin) <= slop && g.target == target_at(event.position)
                 {
                     if let Some(kind) = g.target {
                         if kind != Kind::Confirm
@@ -644,7 +682,7 @@ fn activate(
     frame: &mut TouchFrame,
 ) {
     let asked=&mut frame.asked;
-    if asked.pick.is_some() || asked.skip || frame.barter {
+    if asked.pick.is_some() || asked.skip || asked.leave || frame.barter {
         return;
     }
     match kind {
@@ -664,6 +702,14 @@ fn activate(
         }
         Kind::Skip => asked.skip = true,
         Kind::Barter => frame.barter = true,
+        Kind::PowerExit
+            if menu
+                .view
+                .as_ref()
+                .is_some_and(|v| v.goodbye && !v.choices.is_empty()) =>
+        {
+            asked.leave = true;
+        }
         _ => {}
     }
 }

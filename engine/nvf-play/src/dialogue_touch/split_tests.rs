@@ -21,7 +21,10 @@ fn scene(side:Side,density:f32)->(App,Entity,Entity) {
     });
     app.insert_resource(script)
         .insert_resource(crate::dialogue_look::SpeakerFace(Some((42,[35.0,180.0,130.0]))))
-        .insert_resource(Options {side})
+        .insert_resource(Options {
+            side,
+            device_side: if side == Side::Right { crate::dialogue_split::DeviceSide::Left } else { crate::dialogue_split::DeviceSide::Right },
+        })
         .insert_resource(SafeInsets {left:24.0,top:12.0,right:10.0,bottom:18.0})
         .add_systems(Update,publish_window_targets.after(crate::PlaySet::Sync));
     // Turn the fixture's existing default camera into the player camera rather
@@ -256,8 +259,13 @@ fn device_models_take_the_chosen_side_frame_the_speaker_opposite_and_map_taps_th
                 // Inside the safe area (24, 12, 10, 18) and on the half opposite the speaker.
                 assert!(panel.min.x >= 24.0 && panel.min.y >= 12.0 && panel.max.x <= size.x - 10.0 && panel.max.y <= size.y - 18.0);
                 assert!(panel.width() > 300.0 && panel.height() > 300.0);
-                // The safe interior is 32..774, split at 403 with a 4-unit gutter each side.
-                if side == Side::Left { assert_eq!(panel.min.x, 407.0); } else { assert_eq!(panel.max.x, 399.0); }
+                // Both Retro Console and Wrist Terminal use the enlarged 66% edge-to-edge
+                // side split inside the safe area (24..782, width 758).
+                let expected = if side == Side::Left { 24.0 + 758.0 * 0.34 + 2.0 } else { 24.0 + 758.0 * 0.66 - 2.0 };
+                if side == Side::Left { assert!((panel.min.x - expected).abs() < 0.01, "panel.min.x={} vs {expected}", panel.min.x); }
+                else { assert!((panel.max.x - expected).abs() < 0.01, "panel.max.x={} vs {expected}", panel.max.x); }
+                assert!((panel.min.y - 12.0).abs() < 0.01 && (panel.max.y - (size.y - 18.0)).abs() < 0.01,
+                    "device panel spans full safe vertical height");
                 assert_eq!(app.world().get::<Transform>(world).unwrap().rotation, Quat::IDENTITY,
                     "the speaker moves aside only after the side model presents");
 
@@ -312,5 +320,27 @@ fn device_side_too_small_for_real_text_uses_the_whole_safe_area_and_portrait_sta
         assert_eq!(portrait.stamp.display, Rect::new(48.0, 24.0, (400.0 - 10.0) * 2.0, (860.0 - 18.0) * 2.0));
         publish_glass(&mut app, 0.9);
         assert_eq!(app.world().get::<Transform>(world).unwrap().rotation, Quat::IDENTITY);
+    }
+}
+
+#[test]
+fn device_dialogue_side_setting_places_wrist_terminal_and_console_right_or_left_even_when_standard() {
+    for theme in [appearance::Theme::WristTerminal, appearance::Theme::RetroConsole] {
+        let (mut app, _, _) = scene(Side::Standard, 1.0);
+        app.init_resource::<Assets<Image>>().init_resource::<crate::pad::PadGlyphs>();
+        app.world_mut().resource_mut::<appearance::Appearance>().theme = theme;
+        settle(&mut app);
+        let right_panel = app.world().resource::<crate::dialogue_split::Frame>().panel.expect("default Right panel");
+        assert!(right_panel.center().x > 792.0 * 0.5, "default device side places model on the Right");
+
+        let idx = app.world().resource::<crate::settings::Settings>().index(crate::dialogue_split::DEVICE_SIDE_KEY).unwrap();
+        assert!(crate::settings::pick(app.world_mut(), idx, "Left"));
+        settle(&mut app);
+        let left_panel = app.world().resource::<crate::dialogue_split::Frame>().panel.expect("Left side panel");
+        assert!(left_panel.center().x < 792.0 * 0.5, "Left setting moves model to the Left side");
+        assert!(crate::settings::pick(app.world_mut(), idx, "Right"));
+        settle(&mut app);
+        let restored = app.world().resource::<crate::dialogue_split::Frame>().panel.expect("restored Right panel");
+        assert_eq!(restored, right_panel);
     }
 }

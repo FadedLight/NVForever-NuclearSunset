@@ -16,7 +16,7 @@ fn typography_data()->(TypographyFiles,nvf_assets::GameData) {
     }
     let vfs=fnv_vfs::Vfs::open(&root,&[]).unwrap();
     let schema=fnv_nif::Schema::load_dir(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas/nif")).unwrap();
-    (TypographyFiles(root),nvf_assets::GameData {vfs:std::sync::Arc::new(vfs),schema:std::sync::Arc::new(schema)})
+    (TypographyFiles(root),nvf_assets::GameData::new(std::sync::Arc::new(vfs),std::sync::Arc::new(schema)))
 }
 fn typography_scene(native:bool,size:f32,long:bool)->(App,FormId,TypographyFiles) {
     let pair=if long {normal_long_simulation()} else {simulation()};
@@ -37,7 +37,7 @@ fn typography_scene_with_sim(native:bool,size:f32,pair:(crate::sim::SimState,For
         app.insert_resource(data).insert_resource(crate::settings::SettingsFile(None));
         crate::menu_readability::register(app,crate::pause::GROUP_MENUS);
         let index=app.world().resource::<crate::settings::Settings>().index("barter-menu-size-v1").unwrap();
-        let part=size-0.5;
+        let part = crate::settings::choice_part(((size - 0.5) / 0.05).round() as usize, 31);
         assert_eq!(crate::settings::set_slider(app.world_mut(),index,part),Some(part));
         assert_eq!(app.world().resource::<crate::menu_readability::MenuReadability>()
             .size(crate::menu_readability::MenuKind::Barter),size);

@@ -70,9 +70,9 @@ fn fixture(width: u32, density: f32) -> (App, crate::outfits::tests::TestFiles) 
     std::fs::write(path.join("terminalinterface01.nif"),terminal_nif()).unwrap();
     // Reopen the actual VFS after adding the authored file, retaining its schema.
     let schema = app.world().resource::<nvf_assets::GameData>().schema.clone();
-    app.insert_resource(nvf_assets::GameData {
-        vfs:Arc::new(fnv_vfs::Vfs::open(files.path(),&[]).unwrap()),schema,
-    });
+    app.insert_resource(nvf_assets::GameData::new(
+        Arc::new(fnv_vfs::Vfs::open(files.path(),&[]).unwrap()),schema,
+    ));
     app.add_plugins((MinimalPlugins,AssetPlugin::default(),bevy::image::ImagePlugin::default(),
         MeshPlugin,CameraPlugin,bevy::transform::TransformPlugin,bevy::input::InputPlugin,
         WindowPlugin {primary_window:Some(Window {resolution:bevy::window::WindowResolution::new(
@@ -141,6 +141,10 @@ fn actual_model_and_camera_publish_bidirectional_glass_without_housing_hits_or_s
         let logical = camera.logical_viewport_rect().unwrap();
         let window = request.stamp.display.min+(viewport-logical.min)/logical.size()*request.stamp.display.size();
         assert!(view.canvas_at(request,window).is_none(),"power/housing cannot become dialogue action");
+        let power_rect = view.power_button_rect(request).expect("Retro Console publishes power button rect");
+        assert!(power_rect.width() >= 48.0 * density - 0.5 && power_rect.height() >= 48.0 * density - 0.5,
+            "power button target scales with display density");
+        assert!(view.power_button_at(request, power_rect.center()), "tapping Retro Console power button hits");
     }}
 }
 

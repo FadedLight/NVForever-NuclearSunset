@@ -60,10 +60,12 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
     match req {
         Request::State => {
             let game = ready();
-            let save = game.as_ref().and_then(|_| newest_save(home));
+            let preview = game.as_ref().and_then(|_| newest_save_preview(home));
+            let cont = preview.as_ref().and_then(|p| p.get("name").and_then(Value::as_str).map(str::to_owned));
             Ok(json!({
                 "theme": theme::android(), "folder": game.map(|g| g.root),
-                "continue": save.map(|(p, name)| if name.is_empty() { p.file_stem().unwrap_or_default().to_string_lossy().into_owned() } else { name }),
+                "continue": cont,
+                "savePreview": preview,
                 "newsEnabled": news_enabled(),
             }))
         }
@@ -268,6 +270,73 @@ fn newest_save(home: &EngineHome) -> Option<(PathBuf, String)> {
     fnv_save::list(&home.saves()).into_iter().next().map(|(path, header)| (path, header.player_name))
 }
 
+fn format_playtime(play_seconds: f64) -> String {
+    if !play_seconds.is_finite() || play_seconds <= 0.0 {
+        return "< 1m".into();
+    }
+    let total_minutes = (play_seconds / 60.0).floor() as u64;
+    if total_minutes == 0 {
+        return "< 1m".into();
+    }
+    let hours = total_minutes / 60;
+    let minutes = total_minutes % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = u32::from(chunk[0]);
+        let b1 = chunk.get(1).copied().map_or(0, u32::from);
+        let b2 = chunk.get(2).copied().map_or(0, u32::from);
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 { TABLE[((triple >> 6) & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[(triple & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
+/// Metadata and base64-encoded PNG thumbnail for the newest save, used by the
+/// Android launcher's Continue preview card.
+fn newest_save_preview(home: &EngineHome) -> Option<Value> {
+    let (path, hd) = fnv_save::list(&home.saves()).into_iter().next()?;
+    let name = if hd.player_name.trim().is_empty() {
+        path.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+    } else {
+        hd.player_name.clone()
+    };
+    let location = hd.location.trim();
+    let shown_location = if location.is_empty() || location == "Unnamed" { "" } else { location };
+    let playtime = format_playtime(hd.play_seconds);
+    let mut parts = vec![format!("Level {}", hd.level)];
+    if !shown_location.is_empty() {
+        parts.push(shown_location.to_string());
+    }
+    parts.push(playtime.clone());
+    let detail = parts.join(" · ");
+    let shot = fnv_save::read_header(&path)
+        .ok()
+        .map(|s| s.shot)
+        .filter(|s| !s.is_empty())
+        .map(|bytes| base64_encode(&bytes));
+    Some(json!({
+        "name": name,
+        "level": hd.level,
+        "location": shown_location,
+        "playSeconds": hd.play_seconds,
+        "playtime": playtime,
+        "detail": detail,
+        "shotBase64": shot,
+    }))
+}
+
 fn plugin_list(home: &EngineHome) -> Result<plugins::PluginList, String> {
     match std::fs::read_to_string(home.plugins_file()) {
         Ok(text) => Ok(plugins::PluginList::parse(&text)),
@@ -359,7 +428,15 @@ fn control(row: &catalog::Row, value: &str, home: &Path) -> Value {
         let choices: Vec<_> = names.iter().map(|name| json!({"name": name, "label": name})).collect();
         return json!({"type": "list", "choices": choices});
     }
-    let words = display::steps(key).or_else(|| catalog::step_words().get(key.as_str()).map(|words| words.iter().map(|s| s.to_string()).collect()));
+    let words = match key.as_str() {
+        // Android expands menu scale and barter/repair/workbench readability up to 200%.
+        "menu-scale" => Some((0..16).map(|i| format!("{}%", 50 + 10 * i)).collect()),
+        "barter-menu-size-v1" | "repair-menu-size-v1" | "workbench-menu-size-v1" => {
+            Some((0..31).map(|i| format!("{}%", 50 + 5 * i)).collect())
+        }
+        _ => display::steps(key)
+            .or_else(|| catalog::step_words().get(key.as_str()).map(|words| words.iter().map(|s| s.to_string()).collect())),
+    };
     if let Some(words) = words {
         let step = 1.0 / (words.len() - 1) as f32;
         let steps: Vec<_> = words.iter().enumerate().map(|(i, label)| json!({"value": i as f32 * step, "label": label})).collect();

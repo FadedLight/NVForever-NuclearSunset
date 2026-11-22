@@ -4,10 +4,14 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
+import android.text.TextUtils;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -15,6 +19,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -49,9 +54,9 @@ final class MobileLauncher {
 
     private final LauncherActivity activity;
     private final String home;
-    private final LinearLayout root, navigation, content, actions;
+    private final LinearLayout root, navigation, content, actions, countdownBadge, countdownDaysBox;
     private final ScrollView scroll;
-    private final TextView status, countdown;
+    private final TextView status, countdownHeader, countdownDays, countdownHours, countdownMinutes, countdownSeconds, countdownDaysSep;
     private final JSONObject edits = new JSONObject();
     private JSONObject state, news, updateInfo;
     private Page page;
@@ -84,11 +89,54 @@ final class MobileLauncher {
             v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
             return WindowInsets.CONSUMED;
         });
-        LinearLayout header = row(); header.setGravity(Gravity.CENTER_VERTICAL); space(header, 12, 0);
+        LinearLayout header = row(); header.setGravity(Gravity.CENTER_VERTICAL); space(header, 12, 4);
         header.setBackgroundColor(panel);
+        ImageView icon = new ImageView(activity);
+        icon.setImageResource(R.mipmap.ic_launcher);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setContentDescription("NVForever");
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        iconLp.rightMargin = dp(10);
+        header.addView(icon, iconLp);
         TextView title = label("NVForever", 22, gold); title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setSingleLine(true); title.setEllipsize(TextUtils.TruncateAt.END);
         header.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1)); title.setGravity(Gravity.CENTER_VERTICAL);
-        countdown = label("", 13, text); header.addView(countdown);
+        countdownBadge = column();
+        countdownBadge.setGravity(Gravity.END);
+        countdownBadge.setVisibility(View.GONE);
+        space(countdownBadge, 8, 4);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(0xFF17130C);
+        badgeBg.setStroke(Math.max(1, dp(1.5f)), (gold & 0x00FFFFFF) | 0xCC000000);
+        badgeBg.setCornerRadius(dp(8));
+        countdownBadge.setBackground(badgeBg);
+        countdownHeader = label("NEXT RELEASE", 9, (gold & 0x00FFFFFF) | 0xD8000000);
+        countdownHeader.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        countdownHeader.setLetterSpacing(0.08f);
+        countdownHeader.setSingleLine(true);
+        countdownHeader.setGravity(Gravity.END);
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(-2, -2);
+        headerLp.bottomMargin = dp(2);
+        countdownBadge.addView(countdownHeader, headerLp);
+        LinearLayout digitsRow = row();
+        digitsRow.setGravity(Gravity.CENTER_VERTICAL);
+        countdownDays = countdownDigitView();
+        countdownDaysBox = countdownSegment(countdownDays, "D");
+        countdownDaysSep = countdownColon();
+        countdownHours = countdownDigitView();
+        countdownMinutes = countdownDigitView();
+        countdownSeconds = countdownDigitView();
+        digitsRow.addView(countdownDaysBox);
+        digitsRow.addView(countdownDaysSep);
+        digitsRow.addView(countdownSegment(countdownHours, "H"));
+        digitsRow.addView(countdownColon());
+        digitsRow.addView(countdownSegment(countdownMinutes, "M"));
+        digitsRow.addView(countdownColon());
+        digitsRow.addView(countdownSegment(countdownSeconds, "S"));
+        countdownBadge.addView(digitsRow);
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(-2, -2);
+        badgeLp.leftMargin = dp(8);
+        header.addView(countdownBadge, badgeLp);
         root.addView(header);
         navigation = row();
         root.addView(horizontal(navigation));
@@ -197,12 +245,26 @@ final class MobileLauncher {
         }), false);
         message(message == null ? "Launcher could not complete that operation." : message);
         boolean ready = !state.isNull("folder"), canPlay = editable() && ready;
+        JSONObject preview = state.optJSONObject("savePreview");
+        boolean wide = activity.getResources().getDisplayMetrics().widthPixels >= dp(600);
+        actions.setOrientation(wide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        if (preview != null && !wide) {
+            addSavePreview(actions, preview, canPlay, false);
+        }
+        LinearLayout buttonRow = wide ? actions : row();
+        if (!wide) {
+            actions.addView(buttonRow, new LinearLayout.LayoutParams(-1, -2));
+        }
         Button play = tap("Play", true, canPlay, () -> activity.prepareAndStart(false));
         if (!ready) play.setContentDescription("Play unavailable · import a complete game folder first");
-        addBar(actions, play, true);
+        addBar(buttonRow, play, true);
         if (!state.isNull("continue")) {
             Button resume = tap("Continue", true, canPlay, () -> activity.prepareAndStart(true));
-            resume.setContentDescription("Continue · " + state.optString("continue")); addBar(actions, resume, true);
+            resume.setContentDescription("Continue · " + state.optString("continue")); addBar(buttonRow, resume, true);
+        }
+        if (preview != null && wide) {
+            addSavePreview(actions, preview, canPlay, true);
         }
         try {
             switch (page) {
@@ -212,6 +274,58 @@ final class MobileLauncher {
                 case GAME -> gamePage();
             }
         } catch (IOException | JSONException e) { message(e.getMessage() == null ? "Could not load this page." : e.getMessage()); }
+    }
+
+    private void addSavePreview(LinearLayout parent, JSONObject preview, boolean canPlay, boolean sideBySide) {
+        LinearLayout box = row();
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        space(box, 8, 6);
+        GradientDrawable fill = new GradientDrawable();
+        fill.setColor(card);
+        fill.setCornerRadius(dp(8));
+        box.setBackground(new RippleDrawable(ColorStateList.valueOf(0x30ffffff), fill, null));
+        String shotB64 = preview.isNull("shotBase64") ? "" : preview.optString("shotBase64", "");
+        if (!shotB64.isEmpty()) {
+            try {
+                byte[] bytes = Base64.decode(shotB64, Base64.DEFAULT);
+                Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bmp != null) {
+                    ImageView thumb = new ImageView(activity);
+                    thumb.setImageBitmap(bmp);
+                    thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(84), dp(48));
+                    tlp.rightMargin = dp(8);
+                    box.addView(thumb, tlp);
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed preview bytes and keep metadata visible.
+            }
+        }
+        LinearLayout meta = column();
+        String name = preview.optString("name", "Last save");
+        TextView titleView = label(name, 14, gold);
+        titleView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        titleView.setSingleLine(true);
+        titleView.setEllipsize(TextUtils.TruncateAt.END);
+        meta.addView(titleView);
+        String detail = preview.optString("detail", "");
+        if (!detail.isEmpty()) {
+            TextView detailView = label(detail, 12, text);
+            detailView.setSingleLine(true);
+            detailView.setEllipsize(TextUtils.TruncateAt.END);
+            meta.addView(detailView);
+        }
+        box.addView(meta, new LinearLayout.LayoutParams(0, -2, 1));
+        box.setEnabled(canPlay);
+        box.setContentDescription("Continue last save · " + name + (detail.isEmpty() ? "" : " · " + detail));
+        if (canPlay) {
+            box.setOnClickListener(v -> activity.prepareAndStart(true));
+        }
+        LinearLayout.LayoutParams lp = sideBySide
+            ? new LinearLayout.LayoutParams(0, -2, 1.4f)
+            : new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(dp(4), dp(2), dp(4), dp(4));
+        parent.addView(box, lp);
     }
 
     private void gamePage() {
@@ -488,15 +602,70 @@ final class MobileLauncher {
         }, "nvf-launcher-news").start();
     }
 
+    private TextView countdownDigitView() {
+        TextView v = new TextView(activity);
+        v.setText("00");
+        v.setTextSize(12);
+        v.setTextColor(gold);
+        v.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        v.setSingleLine(true);
+        v.setShadowLayer(dp(3), 0f, 0f, (gold & 0x00FFFFFF) | 0x70000000);
+        return v;
+    }
+
+    private LinearLayout countdownSegment(TextView value, String unit) {
+        LinearLayout cell = row();
+        cell.setGravity(Gravity.CENTER_VERTICAL);
+        cell.setPadding(dp(4), dp(2), dp(4), dp(2));
+        GradientDrawable box = new GradientDrawable();
+        box.setColor(0xFF0C0906);
+        box.setStroke(Math.max(1, dp(1)), (gold & 0x00FFFFFF) | 0x66000000);
+        box.setCornerRadius(dp(4));
+        cell.setBackground(box);
+        cell.addView(value);
+        TextView suffix = new TextView(activity);
+        suffix.setText(unit);
+        suffix.setTextSize(9);
+        suffix.setTextColor(weak);
+        suffix.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        suffix.setSingleLine(true);
+        LinearLayout.LayoutParams ulp = new LinearLayout.LayoutParams(-2, -2);
+        ulp.leftMargin = dp(1.5f);
+        cell.addView(suffix, ulp);
+        return cell;
+    }
+
+    private TextView countdownColon() {
+        TextView sep = new TextView(activity);
+        sep.setText(":");
+        sep.setTextSize(12);
+        sep.setTextColor((gold & 0x00FFFFFF) | 0xAA000000);
+        sep.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        sep.setPadding(dp(2), 0, dp(2), 0);
+        return sep;
+    }
+
     private void updateCountdown() {
         root.removeCallbacks(tick);
         JSONObject next = news == null ? null : news.optJSONObject("next");
-        if (next == null) { countdown.setText(""); return; }
-        try {
-            String shown = (String) send("countdown", "version", next.getString("version"), "at", next.getLong("at"), "now", System.currentTimeMillis() / 1000);
-            countdown.setText(shown);
-            if (!shown.isEmpty() && resumed) root.postDelayed(tick, 1000);
-        } catch (IOException | JSONException e) { countdown.setText(""); }
+        if (next == null) { countdownBadge.setVisibility(View.GONE); return; }
+        String version = next.optString("version", "");
+        long at = next.optLong("at", 0L);
+        long now = System.currentTimeMillis() / 1000L;
+        CountdownFormat.Snapshot snap = CountdownFormat.of(version, at, now);
+        if (snap == null) {
+            countdownBadge.setVisibility(View.GONE);
+            return;
+        }
+        countdownHeader.setText(snap.header);
+        countdownDaysBox.setVisibility(snap.showDays ? View.VISIBLE : View.GONE);
+        countdownDaysSep.setVisibility(snap.showDays ? View.VISIBLE : View.GONE);
+        countdownDays.setText(snap.days);
+        countdownHours.setText(snap.hours);
+        countdownMinutes.setText(snap.minutes);
+        countdownSeconds.setText(snap.seconds);
+        countdownBadge.setVisibility(View.VISIBLE);
+        if (resumed) root.postDelayed(tick, 1000);
     }
 
     // JNI calls this on the worker. Android supplies DNS, HTTPS and the device trust store.

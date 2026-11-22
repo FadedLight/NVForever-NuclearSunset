@@ -130,6 +130,16 @@ impl Config {
     pub fn hit(&self, point: Vec2, size: Vec2, playing: bool, editing: bool) -> Option<Target> {
         self.hit_filtered(point, size, playing, editing, |_| true)
     }
+    /// Whether `point` falls inside button `i`'s visual/hit geometry.
+    pub fn button_hit(&self, point: Vec2, size: Vec2, i: usize, editing: bool) -> bool {
+        if !editing && !self.buttons[i].visible {
+            return false;
+        }
+        let t = Target::Button(i);
+        self.appearance
+            .geometry(self.diameter(t, size))
+            .contains((point - self.center(t, size)).to_array())
+    }
     /// Shared active-control predicate for ordinary routing and owned overlay admission.
     pub fn hit_filtered(
         &self,
@@ -235,6 +245,13 @@ impl Config {
         ));
         fresh.stick.scale = super::profiles::stick_scale(name);
         self.stick = fresh.stick;
+        let default_gyro = fresh.buttons[super::gyro::BUTTON].clone();
+        let mut mirrored_gyro = default_gyro.clone();
+        mirrored_gyro.center.x = 1.0 - mirrored_gyro.center.x;
+        let current_gyro = &self.buttons[super::gyro::BUTTON];
+        if *current_gyro == default_gyro || *current_gyro == mirrored_gyro {
+            self.buttons[super::gyro::BUTTON] = if name == "left" { mirrored_gyro } else { default_gyro };
+        }
         self.southpaw = name == "left";
         self.preset_name = name.into();
         // A preset is placement only: aiming, appearance, unknown actions and slots survive.
@@ -443,7 +460,14 @@ pub struct Editor {
     pub styles: bool,
     pub tray: bool,
     pub slot: usize,
+    pub collapsed: bool,
+    pub docked_bottom: bool,
     drag: Option<(u64, Vec2)>,
+}
+impl Editor {
+    pub fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
 }
 #[derive(Resource, Default)]
 pub struct Layout {
@@ -470,15 +494,46 @@ pub const EDIT_ACTIONS: [&str; 13] = [
     "Aiming",
     "Style / profiles",
 ];
-pub fn editor_rect(index: usize, size: Vec2) -> Rect {
-    let width = (size.x * 0.4).max(288.0).min(size.x * 0.75);
-    let h = 52.0_f32.min(size.y * 0.15);
-    let x = (size.x - width) * 0.5 + (index % 3) as f32 * width / 3.0;
-    let y = (size.y - h * 5.0) * 0.5 + (index / 3) as f32 * h;
+/// [design: docs/design/android.md] Compact 5x3 edge-docked editor toolbar leaving
+/// the middle of the screen completely open for placing controls.
+pub fn editor_rect_in(index: usize, size: Vec2, docked_bottom: bool) -> Rect {
+    let width = (size.x - 16.0).clamp(280.0, 680.0);
+    let h = (size.y * 0.105).clamp(32.0, 40.0);
+    let panel_top = if docked_bottom {
+        (size.y - h * 3.0 - 8.0).max(8.0)
+    } else {
+        8.0
+    };
+    let cell_w = width / 5.0;
+    let x = (size.x - width) * 0.5 + (index % 5) as f32 * cell_w;
+    let y = panel_top + (index / 5) as f32 * h;
     Rect::from_corners(
         Vec2::new(x + 2.0, y + 2.0),
-        Vec2::new(x + width / 3.0 - 2.0, y + h - 2.0),
+        Vec2::new(x + cell_w - 2.0, y + h - 2.0),
     )
+}
+#[cfg(test)]
+pub fn editor_rect(index: usize, size: Vec2) -> Rect {
+    editor_rect_in(index, size, false)
+}
+pub fn editor_panel_rect(size: Vec2, docked_bottom: bool) -> Rect {
+    let first = editor_rect_in(0, size, docked_bottom);
+    let last = editor_rect_in(14, size, docked_bottom);
+    Rect::from_corners(first.min - Vec2::splat(4.0), last.max + Vec2::splat(4.0))
+}
+pub fn editor_toggle_rect(size: Vec2, collapsed: bool, docked_bottom: bool) -> Rect {
+    if collapsed {
+        let w = 116.0_f32.min((size.x - 16.0).max(64.0));
+        let h = 38.0_f32.min((size.y * 0.12).max(28.0));
+        let x = (size.x - w) * 0.5;
+        let y = if docked_bottom { (size.y - h - 6.0).max(6.0) } else { 6.0 };
+        Rect::from_corners(Vec2::new(x, y), Vec2::new(x + w, y + h))
+    } else {
+        editor_rect_in(13, size, docked_bottom)
+    }
+}
+pub fn editor_dock_rect(size: Vec2, docked_bottom: bool) -> Rect {
+    editor_rect_in(14, size, docked_bottom)
 }
 // Historical coordinates are retained only to prove the removed shortcuts stay absent.
 #[cfg(test)]
@@ -502,9 +557,11 @@ impl Layout {
             styles: false,
             tray: false,
             slot: 0,
+            collapsed: false,
+            docked_bottom: false,
             drag: None,
         });
-        self.message = "Drag a control to move it. Select it, then change its size.".into();
+        self.message = "Drag a control to move it. Panel hides while dragging; tap Hide tools to collapse.".into();
     }
     pub fn open_tray(&mut self) -> Result<(),String> {
         if !self.config.tray_supported {return Err("This tray uses a newer version; kept unchanged".into())}
@@ -539,8 +596,28 @@ impl Layout {
         let mut done = false;
         match t.phase {
             TouchPhase::Started => {
-                let actions = if e.tray {4} else if e.aiming || e.styles {
+                let main_page = !e.tray && !e.aiming && !e.styles;
+                if main_page && editor_toggle_rect(size, e.collapsed, e.docked_bottom).contains(t.position) {
+                    e.drag = None;
+                    e.collapsed = !e.collapsed;
+                    self.message = if e.collapsed {
+                        "Tools collapsed. Drag controls anywhere; tap Show tools to reopen.".into()
+                    } else {
+                        "Drag a control to move it. Panel hides while dragging; tap Hide tools to collapse.".into()
+                    };
+                    self.editor = Some(e);
+                    return;
+                }
+                if main_page && !e.collapsed && editor_dock_rect(size, e.docked_bottom).contains(t.position) {
+                    e.drag = None;
+                    e.docked_bottom = !e.docked_bottom;
+                    self.editor = Some(e);
+                    return;
+                }
+                let actions = if e.tray { 4 } else if e.aiming || e.styles {
                     12
+                } else if e.collapsed {
+                    0
                 } else {
                     EDIT_ACTIONS.len()
                 };
@@ -548,7 +625,7 @@ impl Layout {
                     let rect = if e.tray {super::tray_editor::action_rect_with(i,size,self.tray_safe)} else if e.aiming {
                         super::aiming::editor_rect(i, size)
                     } else {
-                        editor_rect(i, size)
+                        editor_rect_in(i, size, e.docked_bottom)
                     };
                     rect.contains(t.position)
                 }) {
@@ -1129,5 +1206,53 @@ mod tests {
             assert!(c.movement_area(c.stick.center));
             assert!(!c.look_area(c.stick.center));
         }
+    }
+
+    #[test]
+    fn gyro_default_starts_at_middle_left() {
+        let c = Config::default();
+        let gyro = c.buttons[super::super::gyro::BUTTON].center;
+        assert!(gyro.x < 0.2, "gyro x={} should be on the left edge", gyro.x);
+        assert!((0.35..=0.55).contains(&gyro.y), "gyro y={} should be near middle vertically", gyro.y);
+    }
+
+    #[test]
+    fn edge_docked_editor_leaves_screen_center_open_and_collapses_or_hides_while_dragging() {
+        use bevy::input::touch::{TouchInput, TouchPhase};
+        let size = Vec2::new(792.0, 363.0);
+        let center = size * 0.5;
+        for bottom in [false, true] {
+            let panel = editor_panel_rect(size, bottom);
+            assert!(!panel.contains(center), "docked_bottom={bottom} panel {panel:?} must not obstruct screen center {center}");
+        }
+        let mut layout = Layout::default();
+        layout.open(true);
+        let send = |layout: &mut Layout, id: u64, phase: TouchPhase, pos: Vec2| {
+            layout.event(&TouchInput { phase, position: pos, window: Entity::PLACEHOLDER, id, force: None }, size);
+        };
+        // Toggle dock bottom <-> top
+        let dock_pt = editor_dock_rect(size, false).center();
+        send(&mut layout, 1, TouchPhase::Started, dock_pt);
+        send(&mut layout, 1, TouchPhase::Ended, dock_pt);
+        assert!(layout.editor.as_ref().unwrap().docked_bottom);
+        // Collapse toolbar
+        let collapse_pt = editor_toggle_rect(size, false, true).center();
+        send(&mut layout, 2, TouchPhase::Started, collapse_pt);
+        send(&mut layout, 2, TouchPhase::Ended, collapse_pt);
+        assert!(layout.editor.as_ref().unwrap().collapsed);
+        // Drag a control directly into the screen center; dragging() is true while moving
+        let stick = layout.config.center(Target::Stick, size);
+        send(&mut layout, 3, TouchPhase::Started, stick);
+        assert!(layout.editor.as_ref().unwrap().dragging());
+        send(&mut layout, 3, TouchPhase::Moved, center);
+        assert!(layout.editor.as_ref().unwrap().dragging());
+        send(&mut layout, 3, TouchPhase::Ended, center);
+        assert!(!layout.editor.as_ref().unwrap().dragging());
+        assert!((layout.config.center(Target::Stick, size) - center).length() < 2.0);
+        // Re-expand toolbar via compact edge toggle
+        let expand_pt = editor_toggle_rect(size, true, true).center();
+        send(&mut layout, 4, TouchPhase::Started, expand_pt);
+        send(&mut layout, 4, TouchPhase::Ended, expand_pt);
+        assert!(!layout.editor.as_ref().unwrap().collapsed);
     }
 }

@@ -225,7 +225,7 @@ impl RecipeTiles {
             let (action,pane,key)=match what {
                 RecipeTile::Row(index)=>{let i=self.row_at(index)?;(Action::Row(i),Some(RECIPES),self.rows[RECIPES].get(index)?.tile)}
                 RecipeTile::Arrow(by)=>(Action::Workbench(RecipeInput::Filter(by)),None,picked.tile),
-                RecipeTile::Title=>(Action::Workbench(RecipeInput::Filter(1)),None,picked.tile),
+                RecipeTile::Title=>(Action::CategoryHeader,None,picked.tile),
                 RecipeTile::Accept=>(Action::Workbench(RecipeInput::Accept),None,picked.tile),
                 RecipeTile::Exit=>(Action::Workbench(RecipeInput::Exit),None,picked.tile),
                 _=>{for pane in [RECIPES,INGREDIENTS] {
@@ -233,6 +233,37 @@ impl RecipeTiles {
                 }return None},
             };
             return Some(NormalHit {source:Source::Tile(menu,key),action,pane,row_step:0.0})
+        }
+        // Padded touch hit boxes around category filter arrows and title bar.
+        const HEADER_PAD: f64 = 16.0;
+        for c in candidates.iter().rev() {
+            let r = c.region();
+            if r.width <= 0.0 || r.height <= 0.0 {
+                continue;
+            }
+            if at.0 < r.left - HEADER_PAD || at.0 >= r.left + r.width + HEADER_PAD
+                || at.1 < r.top - HEADER_PAD || at.1 >= r.top + r.height + HEADER_PAD {
+                continue;
+            }
+            match self.clicked(ui, c.under) {
+                Some(RecipeTile::Arrow(by)) => {
+                    return Some(NormalHit {
+                        source: Source::Direct(menu, c.under),
+                        action: Action::Workbench(RecipeInput::Filter(by)),
+                        pane: None,
+                        row_step: 0.0,
+                    });
+                }
+                Some(RecipeTile::Title) => {
+                    return Some(NormalHit {
+                        source: Source::Direct(menu, c.under),
+                        action: Action::CategoryHeader,
+                        pane: None,
+                        row_step: 0.0,
+                    });
+                }
+                _ => {}
+            }
         }
         for pane in [RECIPES,INGREDIENTS] {
             if let Some(hit)=self.list_tile(ui,pane).and_then(|list|crate::menu::normal_services::native_pane(ui,frame,list,pane,point)){return Some(hit)}

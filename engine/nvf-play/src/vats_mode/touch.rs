@@ -45,7 +45,7 @@ struct Contact {
 #[derive(Clone, Copy)]
 struct Request { contact: Contact, geometry: Geometry, stay: Stay }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct State {
     mode: Mode,
     geometry: Option<Geometry>,
@@ -58,6 +58,19 @@ pub struct State {
     highlight: Option<Body>,
     progress: f32,
     queued: Option<bool>,
+}
+impl State {
+    pub fn for_platform(android: bool) -> Self {
+        Self {
+            mode: if android { Mode::Tap } else { Mode::Off },
+            geometry: None, stay: None, contact: None, retired: Vec::new(),
+            overflow: false, hardware_hidden: false, pending: None,
+            highlight: None, progress: 0.0, queued: None,
+        }
+    }
+}
+impl Default for State {
+    fn default() -> Self { Self::for_platform(cfg!(target_os = "android")) }
 }
 impl State {
     pub fn mode(&self) -> Mode { self.mode }

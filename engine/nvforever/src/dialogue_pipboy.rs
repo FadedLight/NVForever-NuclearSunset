@@ -30,17 +30,41 @@ struct Sources<'w> {
     world: Option<Res<'w, ActorWorld>>,
     data: Option<Res<'w, GameData>>,
     body: Option<Res<'w, PlayerBody>>,
+    sim: Option<Res<'w, nvf_play::sim::SimState>>,
     script: Option<Res<'w, nvf_play::script::ScriptState>>,
     #[cfg(feature = "dialogue-model-capture")]
     capture: Option<Res<'w, crate::dialogue_capture::CaptureWorn>>,
 }
 
 impl Sources<'_> {
-    fn worn(&self) -> Option<&[FormId]> {
-        if let Some(body) = self.body.as_deref() { return Some(body.worn()); }
+    /// Fallback Pip-Boy lookup from the player's actual equipped inventory when
+    /// `PlayerBody::worn()` has not yet synced (e.g., first-person or dialogue entry).
+    fn sim_pipboy(&self) -> Option<Vec<FormId>> {
+        let (sim, world) = (self.sim.as_deref()?, self.world.as_deref()?);
+        let player = sim.world.peek(FormId::PLAYER_REF)?;
+        let equipped: Vec<FormId> = player
+            .inventory
+            .as_ref()?
+            .equipped()
+            .into_iter()
+            .filter(|id| world.actors.armors.get(id).is_some_and(|a| a.slots & slot::PIPBOY != 0))
+            .collect();
+        (!equipped.is_empty()).then_some(equipped)
+    }
+
+    fn worn(&self) -> Option<std::borrow::Cow<'_, [FormId]>> {
+        if let Some(body) = self.body.as_deref() {
+            if !body.worn().is_empty() {
+                return Some(std::borrow::Cow::Borrowed(body.worn()));
+            }
+            if let Some(sim_worn) = self.sim_pipboy() {
+                return Some(std::borrow::Cow::Owned(sim_worn));
+            }
+            return Some(std::borrow::Cow::Borrowed(body.worn()));
+        }
         #[cfg(feature = "dialogue-model-capture")]
-        if let Some(capture) = self.capture.as_deref() { return Some(&capture.0); }
-        None
+        if let Some(capture) = self.capture.as_deref() { return Some(std::borrow::Cow::Borrowed(&capture.0)); }
+        self.sim_pipboy().map(std::borrow::Cow::Owned)
     }
 
     fn look(&self) -> Option<&fnv_game::chargen::Look> {
@@ -62,14 +86,15 @@ struct Provider {
 impl Provider {
     fn matches(&self, sources: &Sources<'_>) -> bool {
         sources.world.as_ref().is_some_and(|world|
-            self.body == sources.body.is_some() && Some(self.worn.as_slice()) == sources.worn()
+            self.body == sources.body.is_some()
+                && sources.worn().as_deref() == Some(self.worn.as_slice())
                 && self.look.as_ref() == sources.look()
                 && self.change == world.change(FormId::PLAYER_REF.0))
     }
 
     fn read(sources: &Sources<'_>) -> Option<Self> {
         let world = sources.world.as_deref()?;
-        Some(Self {body:sources.body.is_some(), worn:sources.worn()?.to_vec(),
+        Some(Self {body:sources.body.is_some(), worn:sources.worn()?.into_owned(),
             look:sources.look().cloned(),change:world.change(FormId::PLAYER_REF.0)})
     }
 }
@@ -91,6 +116,7 @@ struct Scene {
     screen_material: Handle<NifMaterial>,
     glass: Arc<Posed>,
     blockers: Vec<Arc<Posed>>,
+    power_button: Option<Arc<Posed>>,
     uv: Rect,
     projection: Option<ProjectionKey>,
     rejected: Option<ProjectionKey>,
@@ -198,35 +224,62 @@ fn resolved_model_path(world: &ActorWorld, worn: &[FormId], look: Option<&fnv_ac
         .map(|p| p.model)
 }
 
-/// Fit all actual housing vertices, not just the glass, in either display aspect.
+/// [design: docs/design/android.md] Frame the Wrist Terminal straight-on and tightly
+/// around the glass so dialogue text fills nearly the full height and side width of
+/// the screen with no awkward tilt angle while keeping the bezel & power button visible.
 fn fit(glass: &Posed, shapes: &[Arc<Posed>], aspect: f32) -> Option<(Transform, f32, f32)> {
     let center = glass.middle()?;
-    let normal = glass.triangles.iter().find_map(|&[a,b,c]|
-        (glass.points[b]-glass.points[a]).cross(glass.points[c]-glass.points[a]).try_normalize())?;
+    // Area-weighted average normal across the whole glass mesh avoids corner-triangle tilt.
+    let normal = glass.triangles.iter().fold(Vec3::ZERO, |acc, &[a, b, c]| {
+        acc + (glass.points[b] - glass.points[a]).cross(glass.points[c] - glass.points[a])
+    }).try_normalize()?;
     let uv_center = glass.uvs.iter().copied().sum::<Vec2>() / glass.uvs.len() as f32;
     let here = glass.at_uv(uv_center)?;
-    let down = glass.at_uv(uv_center + Vec2::new(0.0, 0.01))? - here;
-    let up = -down.try_normalize()?;
+    let raw_down = glass.at_uv(uv_center + Vec2::new(0.0, 0.05))
+        .and_then(|b| glass.at_uv(uv_center - Vec2::new(0.0, 0.05)).map(|t| b - t))
+        .or_else(|| glass.at_uv(uv_center + Vec2::new(0.0, 0.01)).map(|b| b - here))?;
+    // Orthogonalize `up` against `normal` so the screen horizon stays completely level.
+    let raw_up = -raw_down;
+    let up = (raw_up - normal * raw_up.dot(normal)).try_normalize()?;
     let orientation = Transform::from_translation(normal).looking_at(Vec3::ZERO, up);
     if !orientation.rotation.is_finite() { return None; }
     let right = orientation.rotation * Vec3::X;
     let up = orientation.rotation * Vec3::Y;
+    let mut glass_width: f32 = 0.0;
+    let mut glass_height: f32 = 0.0;
+    for point in &glass.points {
+        let p = *point - center;
+        glass_width = glass_width.max(p.dot(right).abs());
+        glass_height = glass_height.max(p.dot(up).abs());
+    }
     let mut width: f32 = 0.0;
     let mut height: f32 = 0.0;
-    let mut depth: f32 = 0.0;
+    let mut front_depth: f32 = 0.0;
+    let mut back_depth: f32 = 0.0;
     for shape in shapes {
         for point in &shape.points {
-            let p = *point-center;
+            let p = *point - center;
             width = width.max(p.dot(right).abs());
             height = height.max(p.dot(up).abs());
-            depth = depth.max(p.dot(normal).abs());
+            let d = p.dot(normal);
+            if d > 0.0 {
+                front_depth = front_depth.max(d);
+            } else {
+                back_depth = back_depth.max(-d);
+            }
         }
     }
-    let distance = depth + (height.max(width/aspect) / (FOV*0.5).tan())*1.08;
-    if !distance.is_finite() || distance <= depth || !aspect.is_finite() || aspect <= 0.0 { return None; }
-    let transform = Transform::from_translation(center+normal*distance).looking_at(center, up);
+    // Only geometry in front of the glass needs camera clearance; behind-screen cuff
+    // geometry must not push the camera back and shrink the dialogue screen.
+    let clearance = if glass_height > 0.0 { front_depth.min(glass_height * 0.45) } else { front_depth };
+    let frame_w = if glass_width > 0.0 { (glass_width * 1.12).min(width.max(glass_width)) } else { width };
+    let frame_h = if glass_height > 0.0 { (glass_height * 1.04).min(height.max(glass_height)) } else { height };
+    let distance = clearance + (frame_h.max(frame_w / aspect) / (FOV * 0.5).tan()) * 1.005;
+    if !distance.is_finite() || distance <= clearance || !aspect.is_finite() || aspect <= 0.0 { return None; }
+    let transform = Transform::from_translation(center + normal * distance).looking_at(center, up);
     if !transform.translation.is_finite() || !transform.rotation.is_finite() { return None; }
-    Some((transform, ((distance-depth)*0.1).max(0.001), distance+depth+(width+height).max(1.0)))
+    let total_depth = front_depth.max(back_depth);
+    Some((transform, ((distance - clearance) * 0.1).max(0.001), distance + total_depth + (width + height).max(1.0)))
 }
 
 fn prepare(
@@ -240,7 +293,7 @@ fn prepare(
     if !owned.provider.as_ref().is_some_and(|p| p.matches(&sources)) { return; }
     if owned.attempted { return; }
     let Ok(window) = windows.get(request.stamp.window) else { return; };
-    let physical = Rect::from_corners(Vec2::ZERO, window.resolution.physical_size().as_vec2());
+    let physical = Rect::from_corners(Vec2::ZERO, window.resolution.physical_size().as_vec2()).inflate(0.5);
     if !window.focused || !physical.contains(request.stamp.display.min)
         || !physical.contains(request.stamp.display.max)
         || request.target != nvf_play::pipboy::TARGET { return; }
@@ -259,20 +312,29 @@ fn prepare(
         * Affine3A::from_rotation_x(-std::f32::consts::FRAC_PI_2);
     let mut prepared = Vec::new();
     for shape in &model.shapes {
+        if shape.name.as_deref().is_some_and(fnv_actor::mesh::is_light_effect_shape) {
+            continue;
+        }
         let part = shape.name.as_deref().and_then(pipboy_arm::part);
-        if part == Some(PipBoyPart::ScreenLit) { continue; }
+        // Skip ScreenLit and Glare in dialogue so the text screen stays crisp and opaque
+        // without the bright middle glare washout.
+        if matches!(part, Some(PipBoyPart::ScreenLit | PipBoyPart::Glare)) { continue; }
         let transform = place * model.root * shape.transform;
-        let Some(mesh) = shape.cpu.as_deref() else { return; };
-        let Some(pose) = pipboy_arm::pointer_pose(mesh, None, Mat4::from(transform)) else { return; };
-        prepared.push((shape, part, transform, Arc::new(pose)));
+        let pose = shape.cpu.as_deref()
+            .and_then(|mesh| pipboy_arm::pointer_pose(mesh, None, Mat4::from(transform)))
+            .map(Arc::new);
+        if part == Some(PipBoyPart::Screen) && pose.is_none() {
+            return;
+        }
+        prepared.push((shape, part, transform, pose));
     }
     let screens = prepared.iter().filter(|(_,p,_,_)| *p == Some(PipBoyPart::Screen)).collect::<Vec<_>>();
     if screens.len() != 1 { return; }
-    let glass = screens[0].3.clone();
+    let Some(glass) = screens[0].3.clone() else { return; };
     let bounds = glass.uvs.iter().copied().fold(None, |bounds: Option<Rect>, uv|
         Some(bounds.map_or(Rect::from_corners(uv,uv), |r| Rect::from_corners(r.min.min(uv),r.max.max(uv)))));
     let Some(uv) = bounds.filter(|r| r.min.is_finite() && r.max.is_finite() && r.width()>0.0 && r.height()>0.0) else { return; };
-    let all = prepared.iter().map(|(_,_,_,p)| p.clone()).collect::<Vec<_>>();
+    let all = prepared.iter().filter_map(|(_,_,_,p)| p.clone()).collect::<Vec<_>>();
     let display = request.stamp.display.size();
     let Some((camera_transform, near, far)) = fit(&glass, &all, display.x/display.y) else { return; };
     let size = display.ceil().as_uvec2();
@@ -286,12 +348,17 @@ fn prepare(
     let mut materials = Vec::new();
     let mut screen_material = None;
     let mut blockers = Vec::new();
+    let mut power_button = None;
     for (shape, part, transform, pose) in prepared {
         let mut material = shape.material.clone();
         if let Some(source) = models.materials.get(&shape.material) {
             let copy = match part {
-                Some(PipBoyPart::Screen) => Some(pipboy_arm::menus_material(source, request.image.clone())),
-                Some(PipBoyPart::Glare) => Some(pipboy_arm::glare_material(source)),
+                Some(PipBoyPart::Screen) => {
+                    let mut m = pipboy_arm::menus_material(source, request.image.clone());
+                    // Keep dialogue screen text crisp without blur/noise washout.
+                    m.extension.pipboy_b = Vec4::ZERO;
+                    Some(m)
+                }
                 _ => None,
             };
             if let Some(copy) = copy {
@@ -300,16 +367,24 @@ fn prepare(
                 if part == Some(PipBoyPart::Screen) { screen_material = Some(material.clone()); }
             }
         }
-        if !matches!(part,Some(PipBoyPart::Screen|PipBoyPart::Glare)) { blockers.push(pose); }
+        let is_power = shape.name.as_deref()
+            .is_some_and(|name| name.to_ascii_lowercase().contains("powerbutton"));
+        if let Some(pose) = pose {
+            if is_power && power_button.is_none() {
+                power_button = Some(pose.clone());
+            }
+            if !matches!(part,Some(PipBoyPart::Screen|PipBoyPart::Glare)) { blockers.push(pose); }
+        }
         commands.spawn((Name::new(format!("Dialogue Pip-Boy {}",shape.name.as_deref().unwrap_or("shape"))),
             Mesh3d(shape.mesh.clone()), MeshMaterial3d(material), Transform::from_matrix(Mat4::from(transform)),
             layer.clone(), ChildOf(root)));
     }
+    let msaa = if cfg!(target_os = "android") { Msaa::Off } else { Msaa::Sample4 };
     let camera = commands.spawn((Name::new("Dialogue Pip-Boy camera"), Camera3d::default(),
         Camera {order:-3,clear_color:ClearColorConfig::Custom(Color::NONE),..default()},
         RenderTarget::Image(ImageRenderTarget::from(image.clone())),
         Projection::Perspective(PerspectiveProjection {fov:FOV,near,far,..default()}),
-        bevy::core_pipeline::tonemapping::Tonemapping::Linear, Msaa::Sample4,
+        bevy::core_pipeline::tonemapping::Tonemapping::Linear, msaa,
         AmbientLight {color:Color::WHITE,brightness:150.0,..default()}, camera_transform,
         layer.clone(), ChildOf(root))).id();
     commands.spawn((DirectionalLight {illuminance:3000.0,shadow_maps_enabled:false,..default()},
@@ -321,7 +396,7 @@ fn prepare(
         for material in materials { models.materials.remove(material.id()); }
         return;
     };
-    owned.scene = Some(Scene {root,camera,image,materials,screen_material,glass,blockers,uv,
+    owned.scene = Some(Scene {root,camera,image,materials,screen_material,glass,blockers,power_button,uv,
         projection:None,rejected:None});
     info!("dialogue Pip-Boy: resolved {path}, actual NIF bind pose, independent layer17");
 }
@@ -332,7 +407,7 @@ fn camera_signature(
 ) -> Option<ProjectionKey> {
     let (camera,transform,target) = cameras.get(scene.camera).ok()?;
     let window = windows.get(request.stamp.window).ok()?;
-    let physical = Rect::from_corners(Vec2::ZERO,window.physical_size().as_vec2());
+    let physical = Rect::from_corners(Vec2::ZERO,window.physical_size().as_vec2()).inflate(0.5);
     if !camera.is_active || !window.focused || !physical.contains(request.stamp.display.min)
         || !physical.contains(request.stamp.display.max)
         || !matches!(target,RenderTarget::Image(image) if image.handle == scene.image) { return None; }
@@ -369,6 +444,19 @@ fn publish(
         let uv_to_canvas = Affine2::from_scale_angle_translation(scale,0.0,current.canvas.min-uv.min*scale);
         let Some((map,scale)) = GlassMap::new(scene.glass.clone(),scene.blockers.clone(),camera,transform,
             current.stamp.display,current.canvas,uv_to_canvas) else { continue; };
+        let btn_size = (56.0 * current.stamp.density).max(48.0);
+        let margin = (8.0 * current.stamp.density).max(6.0);
+        let fallback_power = Rect::from_corners(
+            Vec2::new(
+                (current.stamp.display.max.x - margin - btn_size).max(current.stamp.display.min.x),
+                (current.stamp.display.max.y - margin - btn_size).max(current.stamp.display.min.y),
+            ),
+            Vec2::new(
+                (current.stamp.display.max.x - margin).max(current.stamp.display.min.x + 1.0),
+                (current.stamp.display.max.y - margin).max(current.stamp.display.min.y + 1.0),
+            ),
+        );
+        let map = map.with_power_button(scene.power_button.clone(), Some(fallback_power), current.stamp.density);
         let Some(mut material) = materials.get_mut(&scene.screen_material) else { break; };
         material.base.uv_transform = Affine2::from_scale(current.target.as_vec2().recip()) * uv_to_canvas;
         let stamp = current.stamp;

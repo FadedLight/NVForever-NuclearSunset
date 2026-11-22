@@ -882,7 +882,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 210] = [
+    const KNOWN: [(&str, &str); 212] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -1053,6 +1053,7 @@ mod android_profile_tests {
         ("dialogue-subtitle-text-size", "Gameplay"),
         ("dialogue-touch-choice", "Gameplay"),
         ("dialogue-speaker-side", "Gameplay"),
+        ("dialogue-device-side-v1", "Gameplay"),
         ("dialogue-theme-v1", "Gameplay"),
         ("dialogue-background-opacity-v1", "Gameplay"),
         ("dialogue-background-tint-v1", "Gameplay"),
@@ -1082,6 +1083,7 @@ mod android_profile_tests {
         ("touch-pipboy-size-v1", "Gameplay"),
         ("touch-pipboy-tab-swipes", "Gameplay"),
         ("hud-scale-v2", "Display"),
+        ("settings-menu-scale-v1", "Display"),
         ("barter-menu-size-v1", "Display"),
         ("repair-menu-size-v1", "Display"),
         ("workbench-menu-size-v1", "Display"),
@@ -1473,13 +1475,13 @@ mod android_profile_tests {
             ("touch-vats-targeting-v1", "Movement and gestures"),
             ("touch-practice-v1", "Touch layout and guide"), ("touch-gyro-v1", "Gyroscope"),
             ("touch-hotbar", "Inventory and quick access"), ("touch-dialogue", "Dialogue"),
-            ("menu-scale", "Interface size"),
+            ("menu-scale", "Interface size"), ("settings-menu-scale-v1", "Interface size"),
+            ("mobile-performance", "Mobile performance"),
         ] {
             assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at(key)))));
             assert_eq!(mobile.placement_of(at(key)).unwrap().heading, Some(heading));
         }
-        assert!(!touch.contains(&ViewEntry::Row(RowId::Setting(at("mobile-performance")))));
-        assert_eq!(mobile.placement_of(at("mobile-performance")).unwrap().path(), "Display > Mobile performance");
+        assert_eq!(mobile.placement_of(at("mobile-performance")).unwrap().path(), "Mobile > Mobile performance");
         let chooser = RowId::Setting(at("touch-pipboy-dismiss-side-v2"));
         assert!(touch.contains(&ViewEntry::Row(chooser)));
         assert!(touch.contains(&ViewEntry::Row(RowId::Setting(at("touch-pipboy-dismiss-travel-v1")))));
@@ -1520,8 +1522,8 @@ mod android_profile_tests {
         assert_eq!(app.world().resource::<Settings>().values(app.world()), baseline);
         let original_index = app.world().resource::<Settings>().index("mobile-thermal-auto").unwrap();
         let id = RowId::Setting(original_index);
-        let (scope, chosen, _) = view::normalize(&mobile, &list, SettingsScope::Tab(MOBILE_TAB), Some(id), &mobile_visibility(&list), &Found::default(), &view::Folding::default());
-        assert_eq!((scope, chosen), (SettingsScope::Tab("Display"), Some(id)));
+        let (scope, chosen, _) = view::normalize(&mobile, &list, SettingsScope::Tab("Display"), Some(id), &mobile_visibility(&list), &Found::default(), &view::Folding::default());
+        assert_eq!((scope, chosen), (SettingsScope::Tab(MOBILE_TAB), Some(id)));
         assert_eq!(settings::flip(app.world_mut(), original_index), Some(true));
         assert!(app.world().resource::<Consent>().0);
         let changed = settings::changed_rows(app.world(), &baseline);
@@ -1530,7 +1532,7 @@ mod android_profile_tests {
         let found = view::search(&mobile, &list, "mobile-thermal-auto", |r| r.name());
         assert_eq!(found, [id]);
         assert_eq!(view::listing(&mobile, &found)[0], view::ViewEntry::Crumb(Placement {
-            tab: "Display", subgroup: None, heading: Some("Mobile performance"),
+            tab: MOBILE_TAB, subgroup: None, heading: Some("Mobile performance"),
         }));
         assert_eq!(app.world().resource::<Settings>().list().iter().map(|s| (s.key, s.group)).collect::<Vec<_>>(),
             list.iter().map(|s| (s.key, s.group)).collect::<Vec<_>>());

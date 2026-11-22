@@ -154,24 +154,31 @@ fn normal_point(app:&mut App,wanted:impl Fn(normal::Target)->bool)->Vec2 {
     let f=app.world().resource::<Fixture>().0;
     let ui=&app.world().resource::<crate::script::ScriptState>().rt.as_ref().unwrap().game.ui_tree;
     let native=app.world().resource::<crate::tiles::barter_menu::BarterTiles>();
-    if native.menu().is_some() && (model(app).quantity.is_none() || native.normal_touch_quantity(ui)) {
-        let menu=if model(app).quantity.is_some(){ui.menu(crate::tiles::menus::QUANTITY_MENU).unwrap()}else{native.menu().unwrap()};
+    let tiled_qty = model(app).quantity.is_some() && crate::tiles::menus::normal_touch_quantity_shown(ui);
+    if tiled_qty || (native.menu().is_some() && model(app).quantity.is_none()) {
+        let menu=if tiled_qty {ui.menu(crate::tiles::menus::QUANTITY_MENU).unwrap()}else{native.menu().unwrap()};
         for c in fnv_ui::input::hit_candidates(ui,menu,&fnv_ui::input::no_measure) {
             let r=c.region();if r.width<=0.0 || r.height<=0.0{continue}
             let p=crate::interface::to_menu_frame(Vec2::new((r.left+r.width/2.0) as f32,
                 (r.top+r.height/2.0) as f32)*(f.size.y/960.0),f.size,Vec2::splat(0.5));
-            if native.normal_touch_hit(ui,model(app),p,f.size).is_some_and(|h|wanted(h.target)){return p}
+            let hit = if tiled_qty {
+                crate::tiles::menus::normal_touch_quantity_hit(ui, p, f.size)
+            } else {
+                native.normal_touch_hit(ui, model(app), p, f.size)
+            };
+            if hit.is_some_and(|h|wanted(h.target)){return p}
         }
     } else {
         let world=app.world_mut();
         let mut q=world.query::<(&ComputedNode,&bevy::ui::UiGlobalTransform,
             Option<&crate::menu::RowButton>,Option<&crate::menu::CmdButton>,Option<&crate::menu::AmountMeter>,
-            Option<&bevy::ui::CalculatedClip>)>();
-        for (node,t,row,command,meter,clip) in q.iter(world) {
+            Option<&crate::menu::CategoryTitle>,Option<&bevy::ui::CalculatedClip>)>();
+        for (node,t,row,command,meter,cat_title,clip) in q.iter(world) {
             if node.size().min_element()<=0.0{continue}
             let target=if let Some(r)=row{normal::Target::Row(r.0,r.1)}
                 else if let Some(c)=command{normal::Target::Command(c.0)}
-                else if meter.is_some(){normal::Target::Meter(0.5)}else{continue};
+                else if meter.is_some(){normal::Target::Meter(0.5)}
+                else if let Some(ct)=cat_title{normal::Target::CategoryHeader(ct.0)}else{continue};
             if wanted(target) {
                 let mut rect=Rect::from_center_size(t.translation,node.size());
                 if let Some(clip)=clip {
@@ -453,4 +460,91 @@ fn normal_barter_native_same_row_replacement_stock_retires_held_quote_then_fresh
     normal_command(&mut app,Command::AmountCancel);
     assert!(model(&app).quantity.is_none());
     assert_eq!(offered(&app),0);
+}
+
+#[test]
+fn handbuilt_barter_with_tiled_quantity_menu_supports_full_touch_without_softlock() {
+    // Reproduces the exact Android default: hand-built BarterMenu (TileMenus.barter == false)
+    // with tiled QuantityMenu (TileMenus.quantity == true).
+    let (mut app, stock) = normal_scene(false);
+    let q_xml = r#"<menu name="QuantityMenu"><rect name="NOGLOW_BRANCH"><image name="QM_Background"><x>0</x><y>0</y><width>1280</width><height>960</height></image><rect name="QM_MainRect"><x>270</x><y>295</y><width>740</width><height>370</height><rect name="QM_AmountMeter"><x>149</x><y>115</y><width>391</width><height>24</height><target>1</target><user0>1</user0><user2>1</user2><user3>1</user3><user4>5</user4></rect><image name="QM_DecreaseArrow"><x>130</x><y>110</y><width>18</width><height>35</height><target>1</target></image><image name="QM_IncreaseArrow"><x>549</x><y>110</y><width>18</width><height>35</height><target>1</target></image><image name="QM_OkButton"><x>580</x><y>155</y><width>85</width><height>35</height><target>1</target></image><image name="QM_CancelButton"><x>580</x><y>200</y><width>85</width><height>35</height><target>1</target></image></rect></rect></menu>"#;
+    {
+        let mut script = app.world_mut().resource_mut::<crate::script::ScriptState>();
+        let game = &mut script.rt.as_mut().unwrap().game;
+        let src = fnv_ui::MemSource::default().with("menus\\quantity_menu.xml", q_xml);
+        game.ui_tree.load_menu(&src, "menus\\quantity_menu.xml").unwrap();
+        game.ui_files = Some(Box::new(src));
+        game.ui_tree.update();
+    }
+    app.world_mut().resource_mut::<crate::tiles::vanilla::TileMenus>().quantity = true;
+    app.update();
+    // Open quantity prompt by tapping the 8-stack item row.
+    let p = normal_point(&mut app, |t| matches!(t, normal::Target::Row(Side::Container, _)));
+    normal_tap_at(&mut app, p);
+    assert!(model(&app).quantity.is_some());
+    assert_eq!(model(&app).quantity.unwrap().amount, 8);
+    // Tap decrease arrow (-)
+    let dec = normal_point(&mut app, |t| t == normal::Target::Command(Command::AmountStep(-1)));
+    normal_tap_at(&mut app, dec);
+    assert_eq!(model(&app).quantity.unwrap().amount, 7);
+    // Tap increase arrow (+)
+    let inc = normal_point(&mut app, |t| t == normal::Target::Command(Command::AmountStep(1)));
+    normal_tap_at(&mut app, inc);
+    assert_eq!(model(&app).quantity.unwrap().amount, 8);
+    // Tap OK to confirm
+    let ok = normal_point(&mut app, |t| t == normal::Target::Command(Command::AmountOk));
+    normal_tap_at(&mut app, ok);
+    assert!(model(&app).quantity.is_none());
+    assert_eq!(offered(&app), 8);
+    // Open again on player's 8-stack and tap outside QM_MainRect (backdrop cancel)
+    let p2 = normal_point(&mut app, |t| matches!(t, normal::Target::Row(Side::Player, _)));
+    normal_tap_at(&mut app, p2);
+    assert!(model(&app).quantity.is_some());
+    normal_tap_at(&mut app, Vec2::new(10.0, 10.0));
+    assert!(model(&app).quantity.is_none(), "tapping outside tiled QuantityMenu cancels without soft-lock");
+    assert_eq!(count(&mut app, stock, GOODS), 8);
+}
+
+#[test]
+fn container_quantity_menu_supports_touch_adjust_confirm_and_cancel() {
+    let (mut app, stock) = normal_scene(false);
+    let next = {
+        let mut sim = app.world_mut().resource_mut::<crate::sim::SimState>();
+        MenuModel::open_container(&mut sim.world, stock).unwrap()
+    };
+    let index = next.list(Side::Container).rows.iter().position(|r| r.item == GOODS).unwrap();
+    crate::script::engine_menu_opened(Some(&mut app.world_mut().resource_mut::<crate::script::ScriptState>()), next.mode);
+    app.world_mut().resource_mut::<ActiveMenu>().0 = Some(next);
+    app.world_mut().write_message(MenuInput(Command::Hover(Side::Container, index)));
+    app.world_mut().write_message(MenuInput(Command::One));
+    for _ in 0..3 { app.update(); }
+    assert!(matches!(model(&app).mode, Mode::Container(_)));
+    assert_eq!(model(&app).quantity.unwrap().amount, 8);
+    let dec = normal_point(&mut app, |t| t == normal::Target::Command(Command::AmountStep(-1)));
+    normal_tap_at(&mut app, dec);
+    assert_eq!(model(&app).quantity.unwrap().amount, 7);
+    let ok = normal_point(&mut app, |t| t == normal::Target::Command(Command::AmountOk));
+    normal_tap_at(&mut app, ok);
+    assert!(model(&app).quantity.is_none());
+    assert_eq!(count(&mut app, PLAYER, GOODS), 15);
+    assert_eq!(count(&mut app, stock, GOODS), 1);
+}
+
+#[test]
+fn barter_category_header_horizontal_swipe_switches_categories() {
+    let (mut app, _) = normal_scene(false);
+    let p = normal_point(&mut app, |t| t == normal::Target::CategoryHeader(Side::Player));
+    assert_eq!(model(&app).category[Side::Player as usize], Category::All);
+    // Swipe right -> next category (+1)
+    edge(&mut app, 310, TouchPhase::Started, p); app.update();
+    edge(&mut app, 310, TouchPhase::Moved, p + Vec2::new(40.0, 0.0)); app.update();
+    edge(&mut app, 310, TouchPhase::Ended, p + Vec2::new(45.0, 0.0)); app.update(); app.update();
+    let after_right = model(&app).category[Side::Player as usize];
+    assert_ne!(after_right, Category::All, "right swipe on Items header advances category");
+    // Swipe left -> back (-1) to All
+    let p2 = normal_point(&mut app, |t| t == normal::Target::CategoryHeader(Side::Player));
+    edge(&mut app, 311, TouchPhase::Started, p2); app.update();
+    edge(&mut app, 311, TouchPhase::Moved, p2 - Vec2::new(40.0, 0.0)); app.update();
+    edge(&mut app, 311, TouchPhase::Ended, p2 - Vec2::new(45.0, 0.0)); app.update(); app.update();
+    assert_eq!(model(&app).category[Side::Player as usize], Category::All, "left swipe on Items header reverses category");
 }

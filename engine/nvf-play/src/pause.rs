@@ -513,6 +513,13 @@ pub struct Paused(pub bool);
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FormOver(pub bool);
 
+/// Whether the active [`FormOver`] overlay is a text-entry form (such as the desktop
+/// bug-report form) that wants the soft keyboard. Non-text overlays (Customize Touch
+/// Layout, Controls Help, DLSS download dialog) leave this `false` so Android never
+/// pops up the on-screen keyboard over them.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormTextInput(pub bool);
+
 /// Where a form over the pause menu stands among the interface's roots: above the pause
 /// menu (`PauseRoot`'s 110 and its boxes' 111-113) and the tile menus over it (Mods, 115),
 /// under the loading screen (200).
@@ -1235,6 +1242,57 @@ pub fn letters_changed(w: &mut World) {
 /// The Menu Font row's choices, Original first (the default).
 const MENU_FONTS: [&str; 2] = ["Original", "Sharp"];
 
+/// Settings menu UI scale key in `[Settings]` (7-choice list: 80%..=200%, default 100%).
+pub const SETTINGS_MENU_SCALE_KEY: &str = "settings-menu-scale-v1";
+const SETTINGS_MENU_SCALES: [f32; 7] = [0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0];
+
+/// Independent UI scale for the pause Settings page, taking effect immediately.
+/// Defaults to `1.0` (100%, identical to desktop proportions).
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct SettingsMenuScale(f32);
+
+impl Default for SettingsMenuScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+impl SettingsMenuScale {
+    pub fn scale(self) -> f32 {
+        if self.0.is_finite() { self.0.clamp(0.8, 2.0) } else { 1.0 }
+    }
+}
+
+fn settings_menu_scale_names() -> Vec<String> {
+    SETTINGS_MENU_SCALES.iter().map(|s| format!("{:.0}%", s * 100.0)).collect()
+}
+
+fn settings_menu_scale_chosen(w: &World) -> String {
+    let scale = w.get_resource::<SettingsMenuScale>().map_or(1.0, |s| s.scale());
+    settings_menu_scale_names()[crate::settings::nearest(&SETTINGS_MENU_SCALES, scale)].clone()
+}
+
+fn take_settings_menu_scale(w: &mut World, text: &str) -> bool {
+    let names = settings_menu_scale_names();
+    let Some(i) = crate::settings::choice_of(text, &names, |v| {
+        crate::settings::nearest(&SETTINGS_MENU_SCALES, v)
+    }) else {
+        return false;
+    };
+    w.get_resource_or_insert_with(SettingsMenuScale::default).0 = SETTINGS_MENU_SCALES[i];
+    if let Some(mut v) = w.get_resource_mut::<PauseView>() {
+        v.drawn = None;
+    }
+    true
+}
+
+/// Scope interface units for the pause Settings page when `scale != 1.0`.
+/// At the default `1.0` (100%), returns `None` so desktop and default Android
+/// use the untouched `menu_scale()` unit scope.
+fn settings_units(scale: f32) -> Option<crate::interface::HudUnits> {
+    (scale != 1.0).then(|| crate::interface::units_at(crate::interface::menu_scale() * scale))
+}
+
 fn menu_font_chosen(w: &World) -> String {
     MENU_FONTS[usize::from(w.get_resource::<MenuFont>().is_some_and(|f| f.sharp))].to_string()
 }
@@ -1275,7 +1333,6 @@ pub struct PauseView {
     /// The settings page's window's lines ([`window_lines`]), set before the keys and the
     /// pointer are read each frame; 0 until then (taken as [`window_lines`]).
     lines: usize,
-    mobile: Option<touch::Layout>,
     /// What the settings page lists: a tab (or the search, the Changed list).
     scope: SettingsScope,
     /// Where the settings page's keys are: the rows or the rail.
@@ -1336,9 +1393,9 @@ impl PauseView {
     /// The window's lines from the layout, before the keys and the pointer are read; a new
     /// count is logged, and the first line shown is brought into the new window by
     /// `settings_now` (`settings_view::follow`) [design: #2377].
-    fn set_lines(&mut self) {
+    fn set_lines(&mut self, settings_scale: f32) {
+        let _units = settings_units(settings_scale);
         let lines = window_lines();
-        let lines = self.mobile.map_or(lines, |layout| layout.lines(self.scope));
         if lines != self.lines {
             info!("pause menu: settings window of {lines} lines");
             self.lines = lines;
@@ -1470,7 +1527,10 @@ struct Drawn {
     scroll: usize,
     /// The settings page's window's lines ([`PauseView::lines`]).
     lines: usize,
-    mobile: Option<touch::Layout>,
+    /// Touch enhancements active on the desktop settings layout (Android / touch fixtures).
+    touch: bool,
+    /// Settings menu UI scale as `f32::to_bits()` (1.0 = exact desktop).
+    settings_scale: u32,
     /// The list rows: each one's row, choices and chosen one.
     lists: Vec<(usize, Vec<String>, String)>,
     /// The list rows that show their choices by other words or hold some out of reach
@@ -1501,6 +1561,10 @@ struct Drawn {
 }
 
 impl Drawn {
+    fn scale(&self) -> f32 {
+        if self.settings_scale == 0 { 1.0 } else { f32::from_bits(self.settings_scale) }
+    }
+
     /// Why Controls row `c` is greyed (Sprint's binding with its switch off);
     /// `None`: it is not.
     fn control_greyed(&self, c: ControlRow) -> Option<&'static str> {
@@ -1662,6 +1726,28 @@ impl Plugin for PausePlugin {
             crate::settings::ChoiceList { names: |_| MENU_FONTS.iter().map(|n| (*n).to_string()).collect(), chosen: menu_font_chosen, pick: take_menu_font, save: menu_font_chosen, load: take_menu_font, ask_keep: false },
         );
         app.init_resource::<MenuFont>();
+        app.init_resource::<SettingsMenuScale>();
+        add_choice_list(
+            app,
+            Setting {
+                key: SETTINGS_MENU_SCALE_KEY,
+                group: "Display",
+                label: "Settings menu UI scale",
+                note: "Size of the pause settings menu, independent of Menu scale. Takes effect immediately.",
+                switches: "",
+                get: |_| false,
+                set: |_, _| {},
+                slider: None,
+            },
+            crate::settings::ChoiceList {
+                names: |_| settings_menu_scale_names(),
+                chosen: settings_menu_scale_chosen,
+                pick: take_settings_menu_scale,
+                save: settings_menu_scale_chosen,
+                load: take_settings_menu_scale,
+                ask_keep: false,
+            },
+        );
         // The vector letters' glow, set from their laid-out size (`crate::interface::GLOW_RINGS`);
         // the highlight boxes drawn under what they box.
         app.add_systems(PostUpdate, crate::interface::glow_offsets.after(bevy::ui::UiSystems::Layout));
@@ -1681,6 +1767,7 @@ impl Plugin for PausePlugin {
             .init_resource::<PauseInputAid>()
             .init_resource::<crate::bindings::KeyboardCapture>()
             .init_resource::<FormOver>()
+            .init_resource::<FormTextInput>()
             .init_resource::<ReportEntry>()
             .init_resource::<ModsEntry>()
             .init_resource::<crate::tiles::mods::ModsPage>()
@@ -1892,6 +1979,7 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
         return;
     }
     let f = &look.faces;
+    let _units = matches!(d.page, Page::Settings { .. }).then(|| settings_units(d.scale())).flatten();
     // The settings list's place, clear of the categories.
     let lb = ListBox::of(d.view_w as f32, rail_width(f, &d.rail, d.device.1));
     commands.spawn((PauseRoot, full(), GlobalZIndex(110))).with_children(|root| {
@@ -1917,10 +2005,6 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
                 root.spawn((full(), BackgroundColor(Color::srgba(0.30, 0.24, 0.14, SCREEN_ALPHA))));
             }
         }
-        if let (Some(layout), Page::Settings { selected }) = (d.mobile, d.page) {
-            touch::paint(root, d, look, settings, selected, layout, glyphs);
-            return;
-        }
         // The page at the UI scale, in the middle of the view (`crate::interface::menu_frame`,
         // #1631); the sheet and the screen above keep to the view.
         crate::interface::in_spread_frame(root, crate::interface::MIDDLE, |root| {
@@ -1945,7 +2029,12 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
                 Page::Main | Page::Mods => {}
             }
             // The column: the keys' list on the first page, else half bright but for the page's entry.
-            let top = (page_h() - d.column.len() as f32 * ITEM) / 2.0;
+            let mut top = ((page_h() - d.column.len() as f32 * ITEM) / 2.0).max(12.0);
+            if matches!(d.page, Page::Settings { .. }) && d.scale() > 1.0 {
+                let extra = 2 + usize::from(d.report.is_some());
+                let max_top = back_top() - (d.column.len() + extra + 1) as f32 * ITEM;
+                top = top.min(max_top).max(20.0);
+            }
             let on_column = d.page == Page::Main && d.confirm.is_none();
             let lit = d.page_entry();
             for (i, (label, ok)) in d.column.iter().enumerate() {
@@ -2048,30 +2137,24 @@ struct KeepLine;
 /// links under the note.
 fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: &[Setting], selected: Option<RowId>, lb: ListBox, glyphs: &crate::pad::PadGlyphs) {
     let f = &look.faces;
-    let top = if let Some(mobile) = d.mobile {
-        let top = mobile.top(d.scope);
-        root.spawn((touch::Surface::Rows, from_middle(lb.left, top, lb.width, d.lines as f32 * OPTION_ROW)));
-        top
-    } else {
-        rail_column(root, f, d, glyphs);
-        OPTIONS_TOP
-    };
+    rail_column(root, f, d, glyphs);
+    let top = OPTIONS_TOP;
     let left = lb.left;
     let entries = &d.entries;
+    let lines = d.lines.max(1);
+    if d.touch {
+        root.spawn((touch::Surface::Rows, from_middle(lb.left, top, lb.width, lines as f32 * OPTION_ROW)));
+    }
     if entries.is_empty() {
         root.spawn(from_middle(left, top, lb.width, OPTION_ROW)).with_children(|t| sm_text(t, &f.entry, tr(empty_words(d.scope)), 10.0, BASE, color(Shade::Dim)));
     }
     // The search's line over the rows, their whole width [design: #1953].
     if let Some((query, typing)) = &d.search {
-        let search_top = d.mobile.map_or(SEARCH_TOP, |_| top - OPTION_ROW);
-        search_line(root, f, query, *typing, left, lb.width - 10.0, search_top);
+        search_line(root, f, query, *typing, left, lb.width - 10.0, SEARCH_TOP);
     }
-    let lines = d.lines.max(1);
     let first = d.scroll.min(entries.len().saturating_sub(lines));
     let drawn = crate::settings_view::drawn_slots(entries, first, lines);
-    if d.mobile.is_none() {
-        scroll_bar(root, look, entries.len(), first, top, lb, lines);
-    }
+    scroll_bar(root, look, entries.len(), first, top, lb, lines);
     for (n, k) in drawn.clone().enumerate() {
         let y = top + n as f32 * OPTION_ROW;
         match entries[k] {
@@ -2089,14 +2172,6 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
         None => selected.map_or_else(String::new, |id| note_of(list, id, d)),
     };
     root.spawn((SwitchNote, Text::new(note.clone()), Node { display: Display::None, ..default() }));
-    if let Some(mobile) = d.mobile {
-        mobile.note(root, f, &note, lb, d.scope);
-        if let Some((o, names)) = d.dropdown.and_then(|o| Some((o, d.list(o.row)?.0))) {
-            let w = lb.width.min(650.0);
-            mobile.choices_panel(root, d, f, o, names, lb.left + (lb.width - w) / 2.0, w);
-        }
-        return;
-    }
     let shown = (entries.len() - first.min(entries.len())).min(lines) as f32;
     let note_top = top + shown * OPTION_ROW + NOTE_GAP;
     let appearance_row = selected.and_then(|id| match id { RowId::Setting(i) => list.get(i), _ => None })
@@ -2131,9 +2206,9 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
     let shown = names.len().min(DROP_ROWS);
     let h = shown as f32 * DROP_ITEM + 2.0 * LINE;
     let row_top = top + n as f32 * OPTION_ROW;
-    let y = if row_top + OPTION_ROW + h > 950.0 { row_top - h } else { row_top + OPTION_ROW };
+    let y = if row_top + OPTION_ROW + h > page_h() - 10.0 { (row_top - h).max(10.0) } else { row_top + OPTION_ROW };
     let (line, _) = highlight_colors();
-    root.spawn((Node { border: UiRect::all(u(LINE)), ..from_middle(left + lb.row().list_left(), y, LIST_WIDTH, h) }, BorderColor::all(line), BackgroundColor(Color::BLACK), GlobalZIndex(111))).with_children(|b| {
+    root.spawn((touch::Surface::Choices, Node { border: UiRect::all(u(LINE)), ..from_middle(left + lb.row().list_left(), y, LIST_WIDTH, h) }, BorderColor::all(line), BackgroundColor(Color::BLACK), GlobalZIndex(111))).with_children(|b| {
         for (k, name) in names.iter().enumerate().skip(o.first).take(shown) {
             let name = fit_text(|t| f.entry.font.width(t), &on_page(d.choice_words(o.row, k, name)), LIST_WIDTH - 2.0 * LINE - 2.0 * VALUE_PAD);
             let name = name.as_str();
@@ -2154,7 +2229,7 @@ fn settings_page(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, l
 fn heading_line(root: &mut ChildSpawnerCommands, look: &PauseLook, d: &Drawn, p: crate::settings_layout::Placement, on: bool, lb: ListBox, y: f32, crumb: bool) {
     let (count, open) = d.heading(p);
     let name = if crumb { [Some(p.tab), p.subgroup, p.heading].into_iter().flatten().map(on_page).collect::<Vec<_>>().join(" > ") } else { on_page(p.heading.unwrap_or(p.tab)) };
-    title_line(root, look, &name, count, open, Some((PauseButton::Row(RowId::Heading(p)), on)), lb, y, d.mobile.is_some());
+    title_line(root, look, &name, count, open, Some((PauseButton::Row(RowId::Heading(p)), on)), lb, y);
 }
 
 /// A category's or a crumb's line (module notes of [`heading_line`]): the arrow (right while
@@ -2163,7 +2238,7 @@ fn heading_line(root: &mut ChildSpawnerCommands, look: &PauseLook, d: &Drawn, p:
 /// owner 2026-11-15, the menu overhaul: no rule under the words; the fifth build: "no hover or
 /// selection box" on the category titles].
 #[allow(clippy::too_many_arguments)]
-fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, count: usize, open: bool, button: Option<(PauseButton, bool)>, lb: ListBox, y: f32, mobile: bool) {
+fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, count: usize, open: bool, button: Option<(PauseButton, bool)>, lb: ListBox, y: f32) {
     let f = &look.faces;
     // The aids read a closed category as "Screen (3)".
     let read = if open { words.to_string() } else { format!("{words} ({count})") };
@@ -2179,7 +2254,7 @@ fn title_line(root: &mut ChildSpawnerCommands, look: &PauseLook, words: &str, co
         // fifth build; 2026-11-16: the hover box back], its right edge where the heading
         // links' words end (right-aligned in the list, `ENTRY_BOX_PAD` in) [design: owner
         // 2026-11-16, "aligned with the hints"].
-        let right = if mobile { lb.width - 64.0 } else { lb.row().value_left() - LABEL_GAP };
+        let right = lb.row().value_left() - LABEL_GAP;
         let words = fit_text(|t| f.title.font.width(t), words, right - x);
         sm_text(r, &f.title, &words, x, BASE + 2.0, bright);
         if button.is_some_and(|(_, on)| on) {
@@ -2281,7 +2356,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
     let f = &look.faces;
     let x = lb.row();
     let width = |t: &str| f.entry.font.width(t);
-    let parts = |kind| if d.mobile.is_some() { touch::parts(lb.width, kind) } else { row_parts(x, kind) };
+    let parts = |kind| row_parts(x, kind);
     let node = boxed(from_middle(lb.left, y, lb.width, OPTION_ROW), on);
     match id {
         RowId::Setting(i) => {
@@ -2302,7 +2377,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
                     let value = slider.text(v);
                     let parts = parts(ValueKind::Slider(width(tr_str(&value))));
                     sm_text(r, &f.entry, &fit_text(width, label, parts.label_room()), parts.label.0, BASE + 2.0, label_shade);
-                    slider_row(r, look, &parts, id, v, &value, value_shade, disabled.is_none(), d.mobile.is_some());
+                    slider_row(r, look, &parts, id, v, &value, value_shade, disabled.is_none(), d.touch);
                     return;
                 }
                 if let Some((_, chosen)) = d.list(i) {
@@ -2335,7 +2410,7 @@ fn row_line(root: &mut ChildSpawnerCommands, d: &Drawn, look: &PauseLook, list: 
                     };
                     let parts = parts(ValueKind::Slider(width(tr_str(&value))));
                     sm_text(r, &f.entry, &fit_text(width, name, parts.label_room()), parts.label.0, BASE + 2.0, color(Shade::Bright));
-                    slider_row(r, look, &parts, id, crate::bindings::sensitivity_part(m), &value, Shade::Bright, true, d.mobile.is_some());
+                    slider_row(r, look, &parts, id, crate::bindings::sensitivity_part(m), &value, Shade::Bright, true, d.touch);
                     return;
                 }
                 let vw = crate::pad::button_width(&f.entry, &value, glyphs);
@@ -2482,8 +2557,17 @@ fn list_row(r: &mut ChildSpawnerCommands, look: &PauseLook, parts: &RowParts, i:
 /// page lists bright, the others dim, the box round the line the keys are on (F6)
 /// [design: #1953]. Defaults and Back keep their place at the bottom right.
 fn rail_column(root: &mut ChildSpawnerCommands, f: &Faces, d: &Drawn, glyphs: &crate::pad::PadGlyphs) {
-    let lines = d.rail.iter().filter(|r| !matches!(r, RailItem::Defaults | RailItem::Back));
-    for (i, item) in lines.enumerate() {
+    let lines: Vec<RailItem> = d.rail.iter().copied().filter(|r| !matches!(r, RailItem::Defaults | RailItem::Back)).collect();
+    let count = lines.len().max(1) as f32;
+    let avail_bottom = back_top() - ITEM - 10.0;
+    let (rail_top, rail_step) = if OPTIONS_TOP + count * ITEM <= avail_bottom {
+        (OPTIONS_TOP, ITEM)
+    } else {
+        let lifted = (avail_bottom - count * ITEM).max(20.0);
+        let step = ((avail_bottom - lifted) / count).clamp(32.0, ITEM);
+        (lifted, step)
+    };
+    for (i, item) in lines.iter().enumerate() {
         let name = rail_label(*item, d.device.1);
         let w = SUB_WIDTH.max(f.title.font.width(name) + 20.0);
         // The line shown and the line under the pointer bright; the keys' line boxed
@@ -2497,7 +2581,7 @@ fn rail_column(root: &mut ChildSpawnerCommands, f: &Faces, d: &Drawn, glyphs: &c
         } else {
             BoxLook::None
         };
-        right_entry_look(root, &f.title, name, from_right(SUB_RIGHT, OPTIONS_TOP + i as f32 * ITEM, w, ITEM), w, shade, look, PauseButton::Rail(*item), glyphs);
+        right_entry_look(root, &f.title, name, from_right(SUB_RIGHT, rail_top + i as f32 * rail_step, w, ITEM), w, shade, look, PauseButton::Rail(*item), glyphs);
     }
 }
 
@@ -3745,8 +3829,8 @@ fn choose(
     }
     let list = settings.list();
     let layout = layout.refresh(list);
-    view.mobile = touch.layout(layout.tab_names().len());
-    view.set_lines();
+    let settings_scale = touch.scale();
+    view.set_lines(settings_scale);
     let lines = view.lines();
     let device = bindings.as_ref().map_or(InputDevice::KeyboardMouse, |b| b.device);
     let vis = Visibility::of(device, colours.as_deref()).with_hidden(hidden.as_deref());
@@ -4113,7 +4197,7 @@ fn choose(
         rows = e;
     }
     let touch_action = touch.read(&view, *page, &rows, pending.as_ref().map(|p| p.row), false);
-    let drop_rows = view.mobile.map_or(DROP_ROWS, touch::Layout::choices);
+    let drop_rows = DROP_ROWS;
     let mut clicked = None;
     // A list takes the row the pointer moves onto (not one it rests on while the keys
     // move the choice, nor the one a redrawn page puts under it).
@@ -4851,6 +4935,11 @@ fn choose(
             by = next as i64 - first as i64;
             scrolled = true;
         }
+        if let Some(track_y) = touch_action.track {
+            first = w.first_at(n, track_y);
+            by = 0;
+            scrolled = true;
+        }
         if view.bar_dragging {
             if mouse.pressed(MouseButton::Left) {
                 if let Some(p) = meters.iter().find(|(b, _)| **b == PauseButton::ScrollTrack).and_then(|(_, at)| at.normalized) {
@@ -5019,7 +5108,7 @@ fn open_dropdown(view: &mut PauseView, i: usize) {
     if view_disabled(view, i) { return; }
     let Some((names, chosen)) = view.drawn.as_ref().and_then(|d| d.list(i)) else { return };
     let at = names.iter().position(|n| n == chosen).unwrap_or(0);
-    let shown = view.mobile.map_or(DROP_ROWS, touch::Layout::choices);
+    let shown = DROP_ROWS;
     let first = (at + 1).saturating_sub(shown).min(names.len().saturating_sub(shown));
     info!("pause menu: the list of {} choice(s) open", names.len());
     view.dropdown = Some(Dropdown { row: i, at, first });
@@ -5087,6 +5176,7 @@ fn settings_now(world: &mut World, list: &[Setting], selected: Option<RowId>) ->
         let sel = sv::reselect(&before, &entries, selected).filter(|id| sv::slot_of(&entries, *id).is_some()).or(sel);
         (scope, sel, entries, sv::rail(l))
     });
+    let settings_scale = world.get_resource::<SettingsMenuScale>().map_or(1.0, |s| s.scale());
     let mut view = world.resource_mut::<PauseView>();
     view.scope = scope;
     // The Changed list: logged as its rows change [design: #1953].
@@ -5099,7 +5189,7 @@ fn settings_now(world: &mut World, list: &[Setting], selected: Option<RowId>) ->
     } else {
         view.changed_logged = None;
     }
-    view.set_lines();
+    view.set_lines(settings_scale);
     let lines = view.lines();
     let at = sel.and_then(|id| sv::slot_of(&entries, id));
     let first = view.scroll.min(entries.len().saturating_sub(lines));
@@ -5124,6 +5214,9 @@ fn settings_now(world: &mut World, list: &[Setting], selected: Option<RowId>) ->
 
 /// What the page shows now.
 fn drawn_now(world: &mut World) -> Drawn {
+    let settings_scale = world.get_resource::<SettingsMenuScale>().map_or(1.0, |s| s.scale());
+    let on_settings = matches!(*world.resource::<Page>(), Page::Settings { .. });
+    let _units = on_settings.then(|| settings_units(settings_scale)).flatten();
     let view_w = world.query_filtered::<&bevy::window::Window, With<bevy::window::PrimaryWindow>>().iter(world).next().filter(|w| w.height() > 0.0).map_or(VIEW_W, |w| 960.0 * w.width() / w.height()) * crate::interface::menu_room();
     // In the page's units: wider where a smaller menu scale leaves room (`page_h`).
     let view_w = view_w.round() as u32;
@@ -5251,7 +5344,8 @@ fn drawn_now(world: &mut World) -> Drawn {
         aim: world.get_resource::<crate::bindings::Bindings>().map_or(1.0, |b| b.aim_sensitivity()),
         scroll: view.scroll,
         lines: view.lines(),
-        mobile: view.mobile.filter(|_| matches!(page, Page::Settings { .. })),
+        touch: matches!(page, Page::Settings { .. }) && world.get_resource::<SettingsTouch>().is_some_and(|t| t.enabled()),
+        settings_scale: if matches!(page, Page::Settings { .. }) { settings_scale.to_bits() } else { 1.0f32.to_bits() },
         lists,
         looks,
         dropdown: view.dropdown.filter(|_| matches!(page, Page::Settings { .. })),
@@ -5478,7 +5572,6 @@ fn close(mut commands: Commands, mut paused: ResMut<Paused>, mut page: ResMut<Pa
     view.colours_shown = None;
     *list = LoadList::default();
     view.drawn = None;
-    view.mobile = None;
     view.confirm = None;
     view.dragging = None;
     view.bar_dragging = false;
@@ -5500,6 +5593,32 @@ fn request_resume(world: &mut World) {
     let now = world.resource::<Time<Real>>().elapsed_secs_f64();
     if world.resource_mut::<crate::graphics_resume::GraphicsResume>().request(now) {
         release_resume(world);
+    }
+}
+
+/// Close the pause menu cleanly from an external toggle (such as tapping the
+/// on-screen Pause touch button while paused), returning from any pause subpage.
+pub fn close_pause(world: &mut World) {
+    if !world.get_resource::<Paused>().is_some_and(|p| p.0) {
+        return;
+    }
+    if let Some(mut page) = world.get_resource_mut::<Page>() {
+        *page = Page::Main;
+    }
+    if let Some(mut view) = world.get_resource_mut::<PauseView>() {
+        view.confirm = None;
+    }
+    if world.contains_resource::<crate::graphics_resume::GraphicsResume>()
+        && world.contains_resource::<Time<Real>>()
+    {
+        request_resume(world);
+    } else {
+        if let Some(mut next) = world.get_resource_mut::<NextState<PlayState>>() {
+            next.set(PlayState::Playing);
+        }
+        if let Some(mut paused) = world.get_resource_mut::<Paused>() {
+            paused.0 = false;
+        }
     }
 }
 

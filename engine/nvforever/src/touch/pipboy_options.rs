@@ -11,8 +11,13 @@ pub(super) struct Options {
     pub wheel: bool,
     pub travel: u16,
 }
+impl Options {
+    pub(super) fn for_platform(android: bool) -> Self {
+        Self { left: android, right: android, close: false, graphics: !android, wheel: true, travel: 120 }
+    }
+}
 impl Default for Options {
-    fn default() -> Self { Self { left: false, right: false, close: false, graphics: true, wheel: true, travel: 120 } }
+    fn default() -> Self { Self::for_platform(cfg!(target_os = "android")) }
 }
 pub(super) const SIDE_KEY:&str="touch-pipboy-dismiss-side-v2";
 pub(super) const TRAVEL_KEY:&str="touch-pipboy-dismiss-travel-v1";

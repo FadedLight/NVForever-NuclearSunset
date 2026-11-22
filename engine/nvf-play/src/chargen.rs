@@ -720,6 +720,7 @@ fn draw_menus(
     glyphs: Res<crate::pad::PadGlyphs>,
     traits: Option<Res<crate::tiles::trait_menu::TraitTiles>>,
     tags: Option<Res<crate::tiles::tag_menu::TagTiles>>,
+    soft_keyboard: Option<Res<crate::soft_keyboard::SoftKeyboard>>,
 ) {
     // The drawing's own decision, this frame's (`crate::tiles::trait_menu::drawn`): the menu
     // goes the frame its tiles draw, and comes back whole, its sheet as it stands, when they
@@ -760,13 +761,16 @@ fn draw_menus(
     let st = st.into_inner();
     let kit = st.kit.get_or_insert_with(|| draw::Kit::load(data.as_deref(), &mut images, bc));
     let mut c = draw::Ctx { kit, data: data.as_deref(), images: &mut images, bc, glyphs: &glyphs };
-    let root = Node {
-        position_type: PositionType::Absolute,
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
-        ..default()
+    let root = match &view {
+        View::Name(_) => name::root_node(soft_keyboard.is_some_and(|k| k.enabled)),
+        View::List(_) => Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
     };
     commands.spawn((root, GlobalZIndex(crate::interface::TOP_MENU_Z), crate::interface::top_menu_backing(), ChargenRoot)).with_children(|r| match &view {
         View::Name(m) => name::spawn(r, m, &mut c),

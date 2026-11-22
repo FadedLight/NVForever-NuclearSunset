@@ -58,9 +58,17 @@ fn prepare(
     // The speaker-side panel is preferred. When the published model there is
     // too small for the real device text and 48-unit rows, the same model takes
     // the whole safe area instead of dropping straight to Normal.
+    let clamp_display = |logical: Rect, density: f32, physical: Vec2| -> Rect {
+        let raw = crate::dialogue_split::device_display(logical, density);
+        Rect::from_corners(raw.min.clamp(Vec2::ZERO, physical), raw.max.clamp(Vec2::ZERO, physical))
+    };
     if let (Some(panel), Some(request), Some(view), Some(art)) = (split.panel, request.as_deref(), view.as_deref(), art.as_deref()) {
+        let panel_display = windows.get(request.stamp.window).ok().map_or_else(
+            || crate::dialogue_split::device_display(panel, request.stamp.density),
+            |(_, w)| clamp_display(panel, request.stamp.density, w.physical_size().as_vec2()),
+        );
         if owned.owner == Some(request.stamp.owner) && owned.generation == request.stamp.generation
-            && request.stamp.display == crate::dialogue_split::device_display(panel, request.stamp.density)
+            && request.stamp.display == panel_display
             && view.matches(request) && art.ready(request.stamp.kind)
             && !crate::dialogue_touch::device_canvas::usable(request, view, &menu, &touch, Some(art)) {
             owned.refused = Some(panel);
@@ -77,7 +85,7 @@ fn prepare(
             if !minimum.is_finite() || !maximum.is_finite() || !maximum.cmpgt(minimum).all() {return None;}
             let logical = split.panel.filter(|panel| owned.refused != Some(*panel))
                 .unwrap_or(Rect::from_corners(minimum,maximum));
-            let display = crate::dialogue_split::device_display(logical, density);
+            let display = clamp_display(logical, density, window.physical_size().as_vec2());
             let scale = scale.as_ref().map_or(1.0, |s| s.0);
             (positive_rect(display) && density.is_finite() && density > 0.0
                 && scale.is_finite() && scale > 0.0 && window.focused)

@@ -1084,9 +1084,13 @@ pub(crate) fn feed(
         let valid=aid_at.is_none() && !aid_click
             && inputs.active.as_ref().and_then(|a|a.0.as_ref()).is_some_and(|m|
             inputs.normal_gate.allows(n,m,&rt.game)
-                && inputs.barter.as_ref().is_some_and(|tiles|
-                    tiles.normal_touch_hit(&rt.game.ui_tree,m,n.point,n.frame.size)
-                        .is_some_and(|h|h.source==n.source && crate::menu::normal_touch::same_target(h.target,n.target))))
+                && (if m.quantity.is_some() && super::menus::normal_touch_quantity_shown(&rt.game.ui_tree) {
+                    super::menus::normal_touch_quantity_hit(&rt.game.ui_tree,n.point,n.frame.size)
+                } else {
+                    inputs.barter.as_ref().and_then(|tiles|
+                        tiles.normal_touch_hit(&rt.game.ui_tree,m,n.point,n.frame.size))
+                })
+                .is_some_and(|h|h.source==n.source && crate::menu::normal_touch::same_target(h.target,n.target)))
             && matches!(n.source,crate::menu::normal_touch::Source::Tile(menu,_) if taking.contains(&menu));
         if valid {*inputs.normal_event=Some(n);}
         else if let Some(state)=inputs.normal.as_mut(){state.finish_native(n.token,false);}

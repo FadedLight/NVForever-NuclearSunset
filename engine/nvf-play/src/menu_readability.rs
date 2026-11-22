@@ -11,15 +11,24 @@ pub struct MenuReadability {
     pub repair: f32,
     pub workbench: f32,
 }
+impl MenuReadability {
+    pub fn for_platform(android: bool) -> Self {
+        let size = if android { 1.50 } else { 1.0 };
+        Self { barter: size, repair: size, workbench: size }
+    }
+}
 impl Default for MenuReadability {
-    fn default() -> Self { Self { barter: 1.0, repair: 1.0, workbench: 1.0 } }
+    fn default() -> Self { Self::for_platform(cfg!(target_os = "android")) }
 }
 fn fit(value: f32) -> f32 {
     if !value.is_finite() { return 1.0; }
-    (value.clamp(0.5, 1.5) * 20.0).round() / 20.0
+    (value.clamp(0.5, 2.0) * 20.0).round() / 20.0
 }
-fn part(value: f32) -> f32 { fit(value) - 0.5 }
-fn of_part(value: f32) -> f32 { fit(0.5 + value) }
+fn part(value: f32) -> f32 { (fit(value) - 0.5) / 1.5 }
+fn of_part(value: f32) -> f32 {
+    let v = if value.is_finite() { value.clamp(0.0, 1.0) } else { 1.0 / 3.0 };
+    fit(0.5 + v * 1.5)
+}
 fn show(value: f32) -> String { format!("{:.0}%", of_part(value) * 100.0) }
 impl MenuReadability {
     pub fn size(self, kind: MenuKind) -> f32 {
@@ -61,16 +70,16 @@ fn set_size(world: &mut World, kind: MenuKind, value: f32) {
 pub fn register(app: &mut App, group: &'static str) {
     app.init_resource::<MenuReadability>();
     settings::add_setting(app, Setting::slider("barter-menu-size-v1", group, "Buying and selling size",
-        "Text and row size in the normal buying and selling menus. Other menus keep their own sizes.",
-        Slider::choice(21, |w| part(w.resource::<MenuReadability>().barter),
+        "Text and row size in the normal buying and selling menus (50-200%; 150% default on Android). Other menus keep their own sizes.",
+        Slider::choice(31, |w| part(w.resource::<MenuReadability>().barter),
             |w,v| set_size(w, MenuKind::Barter, v), show)));
     settings::add_setting(app, Setting::slider("repair-menu-size-v1", group, "Repair menu size",
-        "Text and row size in repair menus. Buying, selling and workbenches keep their own sizes.",
-        Slider::choice(21, |w| part(w.resource::<MenuReadability>().repair),
+        "Text and row size in repair menus (50-200%; 150% default on Android). Buying, selling and workbenches keep their own sizes.",
+        Slider::choice(31, |w| part(w.resource::<MenuReadability>().repair),
             |w,v| set_size(w, MenuKind::Repair, v), show)));
     settings::add_setting(app, Setting::slider("workbench-menu-size-v1", group, "Workbench menu size",
-        "Text and row size at workbenches, campfires and reloading benches. Other menus keep their own sizes.",
-        Slider::choice(21, |w| part(w.resource::<MenuReadability>().workbench),
+        "Text and row size at workbenches, campfires and reloading benches (50-200%; 150% default on Android). Other menus keep their own sizes.",
+        Slider::choice(31, |w| part(w.resource::<MenuReadability>().workbench),
             |w,v| set_size(w, MenuKind::Workbench, v), show)));
 }
 

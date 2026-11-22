@@ -29,9 +29,9 @@ fn availability_enabled(app: &mut App, on: bool) {
     }
     assert_eq!(app.world().resource::<TouchDialogue>().enabled, on);
 }
-fn availability_children() -> [&'static str; 9] {
+fn availability_children() -> [&'static str; 10] {
     ["dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice",
-        "dialogue-speaker-side", "dialogue-theme-v1", "dialogue-background-opacity-v1",
+        "dialogue-speaker-side", "dialogue-device-side-v1", "dialogue-theme-v1", "dialogue-background-opacity-v1",
         "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]
 }
 #[test]
@@ -52,11 +52,15 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
         let side=settings.disabled_status(app.world(),settings.index("dialogue-speaker-side").unwrap());
         assert_eq!(side,(!matches!(name,"Retro Console"|"Wrist Terminal"))
             .then_some("Available with Field Notes, Retro Console and Wrist Terminal."),"{name}: speaker side");
+        let dev_side=settings.disabled_status(app.world(),settings.index("dialogue-device-side-v1").unwrap());
+        assert_eq!(dev_side,(!matches!(name,"Retro Console"|"Wrist Terminal"))
+            .then_some("Available with Retro Console and Wrist Terminal."),"{name}: device side");
     }
     assert!(crate::settings::pick(app.world_mut(),theme_row,"Field Notes"));
     for key in availability_children() {
         let settings = app.world().resource::<crate::settings::Settings>();
-        assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), None, "{key}");
+        let expected = (key == "dialogue-device-side-v1").then_some("Available with Retro Console and Wrist Terminal.");
+        assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), expected, "{key}");
     }
     let row = availability_row(&app, "dialogue-theme-v1");
     assert!(crate::settings::pick(app.world_mut(), row, "Wrist Terminal"), "real registered callback positive first");

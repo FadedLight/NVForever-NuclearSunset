@@ -4,13 +4,15 @@ use super::*;
 fn every_menu_size_is_independent_finite_and_reaches_both_ends() {
     let mut sizes = MenuReadability::default();
     assert_eq!(sizes.size(MenuKind::Barter), 1.0);
-    sizes.barter = 1.5;
-    assert_eq!(sizes.size(MenuKind::Barter), 1.5);
+    assert_eq!(MenuReadability::for_platform(true), MenuReadability { barter: 1.50, repair: 1.50, workbench: 1.50 });
+    assert_eq!(MenuReadability::for_platform(false), MenuReadability { barter: 1.0, repair: 1.0, workbench: 1.0 });
+    sizes.barter = 2.0;
+    assert_eq!(sizes.size(MenuKind::Barter), 2.0);
     assert_eq!(sizes.size(MenuKind::Repair), 1.0);
     assert_eq!(sizes.size(MenuKind::Workbench), 1.0);
-    assert_eq!((fit(-1.0), fit(9.0), fit(f32::NAN)), (0.5, 1.5, 1.0));
-    for i in 0..21 {
-        let value = settings::choice_part(i, 21);
+    assert_eq!((fit(-1.0), fit(9.0), fit(f32::NAN)), (0.5, 2.0, 1.0));
+    for i in 0..31 {
+        let value = settings::choice_part(i, 31);
         assert!((of_part(value) - (0.5 + i as f32 * 0.05)).abs() < 0.001);
         assert!((part(of_part(value)) - value).abs() < 0.001);
     }

@@ -390,6 +390,12 @@ fn existing_feedback_updates_to_live_hud_palette_without_replacing_geometry() {
     assert_eq!(colour.0, Color::srgb(41.0 / 255.0, 117.0 / 255.0, 233.0 / 255.0));
 }
 
+#[test]
+fn android_defaults_vats_targeting_to_tap_while_desktop_keeps_off() {
+    assert_eq!(State::for_platform(true).mode(), Mode::Tap);
+    assert_eq!(State::for_platform(false).mode(), Mode::Off);
+}
+
 include!("live_camera_tests.rs");
 
 include!("deadeye_tests.rs");

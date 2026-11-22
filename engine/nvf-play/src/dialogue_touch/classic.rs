@@ -12,14 +12,6 @@ struct Atlas {
     size:UVec2,
     clear:[Rect;4],
     seeds:[UVec2;4],
-    header_x:[f32;6],
-    header_y:[f32;2],
-    world_x:[f32;4],
-    world_y:[f32;4],
-    controls_x:[f32;4],
-    controls_y:[f32;2],
-    right_x:[f32;4],
-    right_y:[f32;6],
     speech:Rect,
     responses:Rect,
     caps:Rect,
@@ -41,16 +33,11 @@ impl Template {
 
 // Bounds and seeds identify the actual connected near-black openings, not a
 // rectangular cutout. Separate inset rectangles keep text off rounded corners.
-// Atlas cuts cross only the dark header gaps and straight bars of the openings.
 const WIDE:Atlas=Atlas {
     size:UVec2::new(1774,887),
     clear:[rect(42.,181.,554.,637.),rect(613.,181.,1737.,279.),
         rect(620.,326.,1734.,821.),rect(45.,737.,121.,782.)],
     seeds:[UVec2::new(283,390),UVec2::new(1188,230),UVec2::new(1170,549),UVec2::new(85,761)],
-    header_x:[0.,411.,420.,1224.,1230.,1774.], header_y:[0.,148.],
-    world_x:[0.,100.,495.,585.], world_y:[148.,235.,580.,672.],
-    controls_x:[0.,63.,100.,585.], controls_y:[672.,887.],
-    right_x:[585.,666.,1685.,1774.], right_y:[148.,204.,252.,360.,795.,887.],
     speech:rect(630.,190.,1720.,268.), responses:rect(637.,341.,1717.,804.),
     caps:rect(50.,744.,115.,775.), red:rect(447.,754.,484.,792.),
     trade:rect(416.,713.,513.,801.),
@@ -62,10 +49,6 @@ const LEGACY:Atlas=Atlas {
     clear:[rect(38.,231.,587.,813.),rect(631.,235.,1409.,393.),
         rect(633.,440.,1409.,1020.),rect(38.,920.,130.,982.)],
     seeds:[UVec2::new(300,500),UVec2::new(1000,310),UVec2::new(1000,700),UVec2::new(80,950)],
-    header_x:[0.,140.,150.,392.,408.,1447.], header_y:[0.,194.],
-    world_x:[0.,110.,520.,610.], world_y:[194.,300.,745.,854.],
-    controls_x:[0.,60.,108.,610.], controls_y:[854.,1087.],
-    right_x:[610.,690.,1350.,1447.], right_y:[194.,262.,366.,490.,970.,1087.],
     speech:rect(665.,249.,1373.,376.), responses:rect(666.,466.,1376.,994.),
     caps:rect(42.,924.,126.,978.), red:rect(469.,950.,507.,982.),
     trade:rect(469.,950.,507.,982.),
@@ -186,91 +169,23 @@ fn clear_opening(rgba:&mut [u8],size:UVec2,bounds:Rect,seed:UVec2,seen:&mut [boo
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct Part {pub(crate) source:Rect,pub(crate) destination:Rect}
 
-/// [design] The smallest readable caps glyph, in logical units.
-pub(crate) const CAPS_MIN:f32=12.0;
-/// Source pixels at the art's outer edge repeated under a safe-area inset.
-const EDGE:f32=4.0;
-
-/// Piecewise-linear placement of atlas breakpoints along one axis.
-#[derive(Clone,Copy,Debug,PartialEq)]
-struct Axis<const N:usize> {src:[f32;N],dst:[f32;N]}
-impl<const N:usize> Axis<N> {
-    /// Native length at `scale`, except `flex` (segment index, length) entries.
-    fn place(src:[f32;N],start:f32,scale:f32,flex:&[(usize,f32)])->Option<Self> {
-        let mut dst=[start;N];
-        for i in 1..N {
-            let length=flex.iter().find(|(j,_)|*j==i-1).map_or((src[i]-src[i-1])*scale,|(_,l)|*l);
-            if !length.is_finite() || length<0. {return None;}
-            dst[i]=dst[i-1]+length;
-        }
-        Some(Self {src,dst})
-    }
-    fn map(&self,v:f32)->f32 {
-        let i=(1..N).find(|&i|v<=self.src[i]).unwrap_or(N-1);
-        let (a,b,c,d)=(self.src[i-1],self.src[i],self.dst[i-1],self.dst[i]);
-        c+(v-a)*(d-c)/(b-a)
-    }
-    fn segments(&self)->impl Iterator<Item=((f32,f32),(f32,f32))>+'_ {
-        (1..N).map(|i|((self.src[i-1],self.src[i]),(self.dst[i-1],self.dst[i])))
-    }
-}
-#[derive(Clone,Copy,Debug,PartialEq)]
-struct Band<const X:usize,const Y:usize> {x:Axis<X>,y:Axis<Y>}
-impl<const X:usize,const Y:usize> Band<X,Y> {
-    fn map(&self,r:Rect)->Rect {
-        Rect::new(self.x.map(r.min.x),self.y.map(r.min.y),self.x.map(r.max.x),self.y.map(r.max.y))
-    }
-    fn parts(&self)->impl Iterator<Item=Part>+'_ {
-        self.y.segments().flat_map(move|((sy0,sy1),(dy0,dy1))| self.x.segments().map(move|((sx0,sx1),(dx0,dx1))|
-            Part {source:Rect::new(sx0,sy0,sx1,sy1),destination:Rect::new(dx0,dy0,dx1,dy1)}))
-            .filter(|p|p.destination.size().min_element()>0.)
-    }
-}
-
-#[derive(Clone,Copy,Debug,PartialEq)]
-enum Controls {
-    Native(Band<4,2>),
-    Taller {counter:Band<4,4>,panel:Band<2,4>},
-}
-
-impl Controls {
-    fn counter(&self,r:Rect)->Rect {
-        match self {Self::Native(b)=>b.map(r),Self::Taller {counter,..}=>counter.map(r)}
-    }
-
-    fn panel(&self,r:Rect)->Rect {
-        match self {Self::Native(b)=>b.map(r),Self::Taller {panel,..}=>panel.map(r)}
-    }
-
-    fn parts(&self)->impl Iterator<Item=Part>+'_ {
-        let (native,counter,panel)=match self {
-            Self::Native(b)=>(Some(b),None,None),
-            Self::Taller {counter,panel}=>(None,Some(counter),Some(panel)),
-        };
-        native.into_iter().flat_map(Band::parts).chain(counter.into_iter().flat_map(Band::parts))
-            .chain(panel.into_iter().flat_map(Band::parts))
-    }
-}
-
 /// Caps text metrics per unit of glyph size, for the exact value drawn.
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct CapsText {pub(crate) left:f32,pub(crate) width:f32,pub(crate) height:f32}
 impl CapsText {
     /// Logical start of the first glyph inside the counter opening.
     pub(crate) fn left(&self,size:f32)->f32 {self.left*size+1.}
-    /// Logical width the value needs, including its softened overhang and margin.
-    pub(crate) fn needed(&self,size:f32)->f32 {self.width*size+4.}
 }
 
-/// Geometry is window-logical relative to a safe origin. Every hardware band
-/// samples the supplied art at one scale; the ordinary camera and dialogue own the
-/// holes. `bleed` repeats the outer edge under the safe-area insets so the art
-/// reaches every window edge while text and targets stay inside the safe canvas.
+/// [design: docs/design/android.md] Full-viewport Classic dialogue layout: the
+/// entire `dialogue/classic.png` image stretches cleanly to 100% × 100% of the
+/// window (zero black borders, no edge-only strip stretching) and every opening
+/// and interactive region maps proportionally inside that stretched image.
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub(crate) struct Layout {
     pub(crate) template:Template,
     pub(crate) size:Vec2,
-    pub(crate) scale:f32,
+    pub(crate) full:Rect,
     pub(crate) world:Rect,
     pub(crate) speech:Rect,
     pub(crate) responses:Rect,
@@ -279,128 +194,54 @@ pub(crate) struct Layout {
     pub(crate) wells:[Rect;3],
     pub(crate) red_button:Rect,
     pub(crate) trade:Rect,
-    bleed:[f32;4],
-    header:Band<6,2>,
-    world_band:Band<4,4>,
-    controls:Controls,
-    right:Band<4,6>,
 }
 impl Layout {
     /// `bleed` is the left, top, right and bottom safe-area inset around `size`.
     pub(crate) fn new(template:Template,size:Vec2,bleed:[f32;4],caps:CapsText)->Option<Self> {
         if !size.is_finite() || size.min_element()<=0. || bleed.iter().any(|b|!b.is_finite() || *b<0.)
             || !caps.width.is_finite() || caps.width<=0. || !caps.height.is_finite() || caps.height<=0. {return None;}
-        // One scale fits the whole atlas; the spare length goes to flexible segments.
         let atlas=template.atlas();
         let source=atlas.size.as_vec2();
-        let s=(size/source).min_element();
-        let spare=(size-source*s).max(Vec2::ZERO);
-        // Glyphs follow the counter opening's height; a longer value widens the
-        // opening (its plain interior) rather than shrinking or truncating digits.
-        let native_caps_height=atlas.caps.height()*s;
-        let native_caps_size=native_caps_height/caps.height;
-        // The wide sheet's counter is shallow on narrow screens. Borrow only
-        // the missing height from the world window's straight section.
-        let (caps_size,extra_height)=if template==Template::Wide && native_caps_size<CAPS_MIN {
-            (CAPS_MIN,CAPS_MIN*caps.height-native_caps_height)
-        } else {
-            (native_caps_size,0.)
-        };
-        let extra_width=(caps.needed(caps_size)-atlas.caps.width()*s).max(0.);
-        let [_,h1,h2,h3,h4,_]=atlas.header_x;
-        let gap_scale=s+spare.x/(h2-h1+h4-h3);
-        let header=Band {
-            x:Axis::place(atlas.header_x,0.,s,&[(1,(h2-h1)*gap_scale),(3,(h4-h3)*gap_scale)])?,
-            y:Axis::place(atlas.header_y,0.,s,&[])?,
-        };
-        let top=header.y.dst[1];
-        let world_band=Band {
-            x:Axis::place(atlas.world_x,0.,s,&[(1,(atlas.world_x[2]-atlas.world_x[1])*s+extra_width)])?,
-            y:Axis::place(atlas.world_y,top,s,&[(1,(atlas.world_y[2]-atlas.world_y[1])*s+spare.y-extra_height)])?,
-        };
-        let [x0,x1,x2,x3]=atlas.controls_x;
-        let [y0,y3]=atlas.controls_y;
-        let footer=world_band.y.dst[3];
-        let counter_width=(x2-x1)*s+extra_width;
-        let controls=if extra_height>0. {
-            // Split at the blank strip between the readout and vents. The
-            // counter stretches through its straight center; the rest of the
-            // footer takes the same height in blank metal below the controls.
-            const SEAM:f32=142.;
-            let counter=Band {
-                x:Axis::place([x0,x1,x2,SEAM],0.,s,&[(1,counter_width)])?,
-                y:Axis::place([y0,748.,771.,y3],footer,s,&[(1,23.*s+extra_height)])?,
-            };
-            let panel=Band {
-                x:Axis::place([SEAM,x3],counter.x.dst[3],s,&[])?,
-                y:Axis::place([y0,810.,821.,y3],footer,s,&[(1,11.*s+extra_height)])?,
-            };
-            Controls::Taller {counter,panel}
-        } else {
-            Controls::Native(Band {
-                x:Axis::place(atlas.controls_x,0.,s,&[(1,counter_width)])?,
-                y:Axis::place(atlas.controls_y,footer,s,&[])?,
-            })
-        };
-        let left=world_band.x.dst[3];
-        let [rx0,rx1,rx2,rx3]=atlas.right_x;
-        let fixed_right=(rx1-rx0+rx3-rx2)*s;
-        // Speech keeps one 48-unit row; responses take the rest of the column.
-        let [ry0,ry1,ry2,ry3,ry4,ry5]=atlas.right_y;
-        let fixed_column=(ry1-ry0+ry3-ry2+ry5-ry4)*s;
-        let speech_fixed=(ry1-atlas.speech.min.y+atlas.speech.max.y-ry2)*s;
-        let speech_open=((ry2-ry1)*s+spare.y*0.25).max(48.-speech_fixed);
-        let right=Band {
-            x:Axis::place(atlas.right_x,left,s,&[(1,size.x-left-fixed_right)])?,
-            y:Axis::place(atlas.right_y,top,s,&[(1,speech_open),(3,size.y-top-fixed_column-speech_open)])?,
-        };
+        // Stretch the entire supplied image across 100% x 100% of the window.
+        let full=Rect::new(-bleed[0],-bleed[1],size.x+bleed[2],size.y+bleed[3]);
+        let full_size=full.size();
+        if !full_size.is_finite() || full_size.min_element()<=0. {return None;}
+        let scale=full_size/source;
+        let map=|r:Rect| Rect::new(
+            full.min.x+r.min.x*scale.x,
+            full.min.y+r.min.y*scale.y,
+            full.min.x+r.max.x*scale.x,
+            full.min.y+r.max.y*scale.y,
+        );
+        let safe=Rect::from_corners(Vec2::ZERO,size);
         let [portrait,speech_well,responses_well,counter_well]=atlas.clear;
-        let world=world_band.map(portrait);
-        let speech=right.map(atlas.speech);
-        let responses=right.map(atlas.responses);
-        let caps_rect=controls.counter(atlas.caps);
-        let red=controls.panel(atlas.red);
-        let plate=controls.panel(atlas.trade);
+        let world=map(portrait);
+        let wells=[map(speech_well),map(responses_well),map(counter_well)];
+        let speech=map(atlas.speech).intersect(safe);
+        let responses=map(atlas.responses).intersect(safe);
+        let caps_rect=map(atlas.caps);
+        let red=map(atlas.red);
+        let plate=map(atlas.trade);
         let minimum=Rect::from_center_size(red.center(),Vec2::splat(48.));
-        let trade=Rect::from_corners(plate.min.min(minimum.min),plate.max.max(minimum.max));
-        let wells=[right.map(speech_well),right.map(responses_well),controls.counter(counter_well)];
-        let valid=|r:Rect|r.min.cmpge(Vec2::ZERO).all() && r.max.cmple(size+0.01).all();
-        if [world,speech,responses,caps_rect,trade].into_iter().any(|r|!valid(r))
-            || world.size().min_element()<48. || speech.width()<48. || speech.height()<47.99
-            || responses.width()<160. || responses.height()<96. || caps_size<CAPS_MIN
-            || caps_rect.width()<caps.needed(caps_size)-0.01 || trade.intersect(caps_rect).size().min_element()>0.
-            || [world,speech,responses].into_iter().any(|r|trade.intersect(r).size().min_element()>0.) {return None;}
-        Some(Self {template,size,scale:s,world,speech,responses,caps:caps_rect,caps_size,wells,red_button:red,trade,bleed,
-            header,world_band,controls,right})
+        let trade=Rect::from_corners(plate.min.min(minimum.min),plate.max.max(minimum.max)).intersect(full);
+        // Scale caps glyphs to fit both the counter height and width cleanly without truncation.
+        let max_by_height=caps_rect.height()/caps.height;
+        let max_by_width=((caps_rect.width()-4.0).max(1.0))/caps.width;
+        let caps_size=max_by_height.min(max_by_width);
+        if !caps_size.is_finite() || caps_size<=0.0 {return None;}
+        let inside_full=|r:Rect| r.min.cmpge(full.min-0.01).all() && r.max.cmple(full.max+0.01).all();
+        if [world,speech,responses,caps_rect,trade].into_iter().any(|r| !inside_full(r) || r.width()<=0. || r.height()<=0.)
+            || world.size().min_element()<48. || speech.width()<48. || speech.height()<24.
+            || responses.width()<140. || responses.height()<96. || trade.size().min_element()<47.99
+            || trade.intersect(caps_rect).size().min_element()>0.
+            || [world,speech,responses].into_iter().any(|r| trade.intersect(r).size().min_element()>0.) {return None;}
+        Some(Self {template,size,full,world,speech,responses,caps:caps_rect,caps_size,wells,red_button:red,trade})
     }
 
-    /// Every drawn crop: the banded casing, then its outer edge under each inset.
+    /// Single full-atlas stretched casing covering 100% x 100% of the window.
     pub(crate) fn parts(&self)->impl Iterator<Item=Part>+'_ {
-        self.header.parts().chain(self.world_band.parts()).chain(self.controls.parts()).chain(self.right.parts())
-            .flat_map(move|part|std::iter::once(part).chain(self.bleed_of(part).into_iter().flatten()))
-    }
-
-    fn bleed_of(&self,part:Part)->[Option<Part>;8] {
-        let [left,top,right,bottom]=self.bleed;
-        let (s,d)=(part.source,part.destination);
-        let near=|a:f32,b:f32|(a-b).abs()<0.01;
-        let x=[(left>0. && near(d.min.x,0.)).then_some((s.min.x,s.min.x+EDGE,-left,0.)),
-            (right>0. && near(d.max.x,self.size.x)).then_some((s.max.x-EDGE,s.max.x,self.size.x,self.size.x+right))];
-        let y=[(top>0. && near(d.min.y,0.)).then_some((s.min.y,s.min.y+EDGE,-top,0.)),
-            (bottom>0. && near(d.max.y,self.size.y)).then_some((s.max.y-EDGE,s.max.y,self.size.y,self.size.y+bottom))];
-        let mut out=[None;8];
-        let mut n=0;
-        let mut push=|source:Rect,destination:Rect| {out[n]=Some(Part {source,destination});n+=1;};
-        for (sx0,sx1,dx0,dx1) in x.into_iter().flatten() {
-            push(Rect::new(sx0,s.min.y,sx1,s.max.y),Rect::new(dx0,d.min.y,dx1,d.max.y));
-            for (sy0,sy1,dy0,dy1) in y.into_iter().flatten() {
-                push(Rect::new(sx0,sy0,sx1,sy1),Rect::new(dx0,dy0,dx1,dy1));
-            }
-        }
-        for (sy0,sy1,dy0,dy1) in y.into_iter().flatten() {
-            push(Rect::new(s.min.x,sy0,s.max.x,sy1),Rect::new(d.min.x,dy0,d.max.x,dy1));
-        }
-        out
+        let source=Rect::from_corners(Vec2::ZERO,self.template.size().as_vec2());
+        std::iter::once(Part {source,destination:self.full})
     }
 }
 
@@ -487,8 +328,8 @@ pub(super) mod tests {
             // Main admits TEX only when its companion DDS also exists.
             std::fs::write(texture.with_extension("dds"), []).unwrap();
         }
-        let data=GameData {vfs:std::sync::Arc::new(fnv_vfs::Vfs::open(&files.0,&[]).unwrap()),
-            schema:std::sync::Arc::new(fnv_nif::Schema::load_dir(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"),"/../../schemas/nif"))).unwrap())};
+        let data=GameData::new(std::sync::Arc::new(fnv_vfs::Vfs::open(&files.0,&[]).unwrap()),
+            std::sync::Arc::new(fnv_nif::Schema::load_dir(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"),"/../../schemas/nif"))).unwrap()));
         (files,data)
     }
     #[test]
@@ -572,67 +413,36 @@ pub(super) mod tests {
                 let (Val::Px(x),Val::Px(y),Val::Px(w),Val::Px(h))=(node.left,node.top,node.width,node.height) else{panic!("actual positioned atlas piece");};
                 assert!(x>=-0.01 && y>=-0.01 && w>0. && h>0.);
                 assert!((x+w)*scale<=width+0.01 && (y+h)*scale<=360.01);
-                let uv=image.rect.unwrap();assert!(uv.min.cmpge(Vec2::ZERO).all());
-                assert!(uv.max.cmple(template.size().as_vec2()).all());
+                let uv=image.rect.unwrap();
+                assert_eq!(uv,Rect::from_corners(Vec2::ZERO,template.size().as_vec2()));
             }
-            assert_eq!(count,layout.parts().count());
-            assert_eq!(count,5+9+12+15,"header, world, extended controls and dialogue bands without insets");
+            assert_eq!(count,1,"single full-screen stretched classic casing image");
         }}
     }
 
-    /// Independently sampled identifiable hardware, including rounded corners.
-    const HARDWARE:[Rect;11]=[
-        rect(130.,12.,386.,140.),rect(425.,13.,1000.,139.),rect(1030.,22.,1205.,142.),
-        rect(1418.,10.,1580.,139.),rect(1610.,34.,1744.,142.),rect(415.,713.,513.,801.),
-        rect(33.,729.,61.,747.),rect(101.,772.,135.,797.),
-        rect(20.,154.,94.,229.),rect(501.,587.,579.,663.),rect(1692.,154.,1762.,202.),
-    ];
-
     #[test]
-    fn classic_fills_every_aspect_without_borders_keeping_hardware_native_and_text_inside_openings() {
+    fn classic_stretches_entire_image_to_fill_every_aspect_with_zero_black_borders() {
         // Logical windows: 20:9, 19.5:9, 16:9, 4:3, a phone and a tablet in portrait,
-        // each with a cutout/status/navigation inset the art must still cover.
+        // each with a cutout/status/navigation inset the stretched image must cover 100% x 100%.
         let cases=[
             (Vec2::new(880.,396.),[34.,0.,34.,16.]),(Vec2::new(845.,390.),[0.,0.,32.,20.]),
             (Vec2::new(800.,450.),[0.;4]),(Vec2::new(1024.,768.),[0.,0.,0.,20.]),
             (Vec2::new(393.,873.),[0.,28.,0.,24.]),(Vec2::new(800.,1280.),[0.,24.,0.,0.]),
         ];
-        let mut response_widths=Vec::new();
         for (window,[l,t,r,b]) in cases {
             let safe=window-Vec2::new(l+r,t+b);
             let layout=Layout::new(Template::Wide,safe,[l,t,r,b],caps(5)).unwrap_or_else(||panic!("Classic admitted at {window}"));
             let parts:Vec<_>=layout.parts().collect();
-            // Every point of the window, insets included, lies under a casing crop.
-            let mut y=0.5;
-            while y<window.y {
-                let mut x=0.5;
-                while x<window.x {
-                    let p=Vec2::new(x,y)-Vec2::new(l,t);
-                    assert!(parts.iter().any(|part|part.destination.contains(p)),"uncovered {x},{y} in {window}");
-                    x+=2.0;
-                }
-                y+=2.0;
-            }
-            // Each hardware witness is fully contained in one uniformly scaled crop.
-            for h in HARDWARE {
-                let part=parts.iter().find(|p|p.source.contains(h.min) && p.source.contains(h.max))
-                    .unwrap_or_else(||panic!("hardware cut by a flex seam: {h:?} at {window}"));
-                let scale=part.destination.size()/part.source.size();
-                assert!((scale.x-layout.scale).abs()<0.001 && (scale.y-layout.scale).abs()<0.001,
-                    "{:?} stretched to {scale} instead of {} at {window}",part.source,layout.scale);
-            }
-            let plate=layout.controls.panel(WIDE.trade);
-            assert!(layout.trade.contains(plate.min) && layout.trade.contains(plate.max));
-            let inside=|r:Rect|r.min.cmpge(Vec2::splat(-0.01)).all() && r.max.cmple(safe+0.01).all();
-            assert!([layout.world,layout.speech,layout.responses,layout.caps,layout.trade].into_iter().all(inside));
+            assert_eq!(parts.len(),1,"entire classic.png stretches as a single full-screen image");
+            let full=parts[0];
+            assert_eq!(full.source,Rect::from_corners(Vec2::ZERO,WIDE.size.as_vec2()));
+            assert_eq!(full.destination,Rect::new(-l,-t,safe.x+r,safe.y+b));
+            assert!((full.destination.width()-window.x).abs()<0.01 && (full.destination.height()-window.y).abs()<0.01);
             for (text,well) in [(layout.speech,layout.wells[0]),(layout.responses,layout.wells[1]),(layout.caps,layout.wells[2])] {
-                assert!(well.contains(text.min) && well.contains(text.max),"{text:?} outside {well:?} at {window}");
+                assert!(well.inflate(0.01).contains(text.min) && well.inflate(0.01).contains(text.max),"{text:?} outside {well:?} at {window}");
             }
-            assert!(layout.speech.height()>=47.99 && layout.responses.height()>=96. && layout.responses.width()>=160.);
-            response_widths.push(layout.responses.width()/safe.x);
+            assert!(layout.speech.height()>=24. && layout.responses.height()>=96. && layout.responses.width()>=140.);
+            assert!(layout.trade.size().min_element()>=47.99);
         }
-        // Only canvases wider than the 2:1 sheet add horizontal space; 16:9
-        // and 4:3 instead add height while keeping native hardware shapes.
-        assert!(response_widths[0]>response_widths[2] && response_widths[1]>response_widths[3]);
     }
 }

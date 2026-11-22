@@ -9,12 +9,13 @@ use bevy::{ecs::system::SystemParam, input::touch::{TouchInput, TouchPhase},
 
 pub use super::barter_touch::Frame;
 const SLOP: f32 = 12.0;
+const HEADER_SWIPE: f32 = 28.0;
 const MAX_IDS: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Target { Row(Side, usize), Command(Command), Meter(f32), Pane(Side) }
+pub(crate) enum Target { Row(Side, usize), Command(Command), Meter(f32), Pane(Side), CategoryHeader(Side) }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Source { Node(Entity), Tile(fnv_ui::TileId, fnv_ui::TileId) }
+pub(crate) enum Source { Node(Entity), Tile(fnv_ui::TileId, fnv_ui::TileId), Direct(fnv_ui::TileId, fnv_ui::TileId) }
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Hit { pub source: Source, pub target: Target, pub pane: Option<Side>, pub row_step:f32 }
 
@@ -86,7 +87,7 @@ struct MeterRequest { origin:Vec2, shape:MeterShape, pulse:bool }
 struct MeterReceipt { token:u64,epoch:u64,window:Entity,id:u64,guard:Guard,amount:i32 }
 struct Contact { window:Entity,id:u64,stamp:Stamp,origin:Vec2,previous:Vec2,
     hit:Hit,guard:Guard,dragged:bool,vertical:bool,remainder:f64,meter:Option<MeterContact> }
-struct Tap { frame:Frame,id:u64,point:Vec2,source:Source,target:Target,
+struct Tap { frame:Frame,id:u64,origin:Vec2,point:Vec2,source:Source,target:Target,swipe:bool,
     guard:Guard,commands:[Option<Command>;2],meter:Option<MeterRequest> }
 struct Scroll { frame:Frame,id:u64,mode:Mode,category:[Category;2],side:Side,
     pixels:f64,rows:i64,native:bool }
@@ -126,10 +127,10 @@ impl NormalBarter {
         }
         let command=Command::Amount(amount);
         if let Some(t)=self.pending.as_mut().filter(|t|t.frame==f && t.id==c.id && t.meter.is_some()) {
-            t.point=point;t.source=hit.source;t.target=hit.target;t.commands=[Some(command),None];
+            t.origin=c.origin;t.point=point;t.source=hit.source;t.target=hit.target;t.swipe=false;t.commands=[Some(command),None];
             t.meter=Some(MeterRequest {origin:c.origin,shape:meter.shape,pulse});
         } else {
-            self.pending=Some(Tap {frame:f,id:c.id,point,source:hit.source,target:hit.target,
+            self.pending=Some(Tap {frame:f,id:c.id,origin:c.origin,point,source:hit.source,target:hit.target,swipe:false,
                 guard:c.guard.clone(),commands:[Some(command),None],
                 meter:Some(MeterRequest {origin:c.origin,shape:meter.shape,pulse})});
         }
@@ -178,14 +179,15 @@ struct Admission<'w,'s> {
 }
 impl Admission<'_,'_> {
     fn allows(&self,f:Frame,id:u64,m:&MenuModel)->bool {
-        matches!(m.mode,Mode::Barter(_)) && self.live.allows(f,id)
+        (matches!(m.mode,Mode::Barter(_)) || m.quantity.is_some()) && self.live.allows(f,id)
             && super::barter_touch::menu_allows(self.script.as_deref(),self.creator.as_deref(),m)
     }
 }
 type NodeData=(&'static ComputedNode,&'static UiGlobalTransform,&'static ComputedUiTargetCamera,
     &'static InheritedVisibility,Option<&'static CalculatedClip>,
     Option<&'static RowButton>,Option<&'static CmdButton>,Option<&'static AmountMeter>,
-    Option<&'static RenderedRow>,Option<&'static FocusPolicy>);
+    Option<&'static RenderedRow>,Option<&'static FocusPolicy>,
+    Option<&'static super::CategoryTitle>,Option<&'static super::look::QuantityBackdrop>);
 #[derive(SystemParam)]
 struct Geometry<'w,'s> {
     stack:Option<Res<'w,UiStack>>,
@@ -196,7 +198,11 @@ struct Geometry<'w,'s> {
     readability:Option<Res<'w,crate::menu_readability::MenuReadability>>,
 }
 impl Geometry<'_,'_> {
-    fn text_size(&self)->f32 {super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)}
+    fn text_size_for(&self,m:Option<&MenuModel>)->f32 {
+        if m.is_some_and(|m|matches!(m.mode,Mode::Barter(_))) {
+            super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)
+        } else {1.0}
+    }
     fn meter(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,
         origin:Vec2,point:Vec2)->Option<(Hit,MeterShape)> {
         let mut hit=self.hit(script,f,m,origin)?;
@@ -208,7 +214,7 @@ impl Geometry<'_,'_> {
                 if !basis.iter().all(|v|v.is_finite()){return None}
                 (node.normalize_point(*at,point*f.density)?.x+0.5,MeterShape::Node(basis))
             }
-            Source::Tile(..)=>{
+            Source::Tile(..)|Source::Direct(..)=>{
                 let ui=&script?.rt.as_ref()?.game.ui_tree;
                 let b=crate::tiles::menus::meter_box(ui)?;
                 let bounds=[b.left,b.top,b.width,b.height];
@@ -222,8 +228,19 @@ impl Geometry<'_,'_> {
     }
 
     fn hit(&self,script:Option<&crate::script::ScriptState>,f:Frame,m:&MenuModel,point:Vec2)->Option<Hit> {
+        let text_size = self.text_size_for(Some(m));
+        // Tiled QuantityMenu can appear over a hand-built Barter, Container, or Inventory
+        // menu (e.g. Android's default TileMenus includes QuantityMenu but not BarterMenu).
+        // Hit-test the tiled QuantityMenu independently of BarterTiles so touch never soft-locks.
+        if m.quantity.is_some() {
+            if let Some(rt) = script.and_then(|s| s.rt.as_ref()) {
+                if crate::tiles::menus::normal_touch_quantity_shown(&rt.game.ui_tree) {
+                    return crate::tiles::menus::normal_touch_quantity_hit(&rt.game.ui_tree, point, f.size);
+                }
+            }
+        }
         if let Some(tiles)=self.tiles.as_ref().filter(|t|t.menu().is_some()) {
-            if tiles.normal_text_scale()!=self.text_size(){return None}
+            if tiles.normal_text_scale()!=text_size{return None}
             let rt=script?.rt.as_ref()?;
             if m.quantity.is_none() || tiles.normal_touch_quantity(&rt.game.ui_tree) {
                 return tiles.normal_touch_hit(&rt.game.ui_tree,m,point,f.size);
@@ -231,14 +248,14 @@ impl Geometry<'_,'_> {
         }
         let physical=point*f.density;
         for &entity in self.stack.as_ref()?.uinodes.iter().rev() {
-            let Ok((node,transform,camera,visible,clip,row,command,meter,painted,focus))=self.nodes.get(entity) else {continue};
+            let Ok((node,transform,camera,visible,clip,row,command,meter,painted,focus,cat_title,backdrop))=self.nodes.get(entity) else {continue};
             if camera.get()!=Some(f.camera) || !visible.get() || !node.size().is_finite()
                 || node.size().min_element()<=0.0 || !node.contains_point(*transform,physical)
                 || clip.is_some_and(|c|!c.contains_point(physical)) {continue}
             let mut ancestor=Some(entity);
             let mut current=false;
             while let Some(parent)=ancestor {
-                if let Ok(painted)=self.menus.get(parent) {current=painted.guard.matches(m) && painted.text_size==self.text_size();break}
+                if let Ok(painted)=self.menus.get(parent) {current=painted.guard.matches(m) && painted.text_size==text_size;break}
                 ancestor=self.parents.get(parent).ok().map(ChildOf::parent);
             }
             if !current {continue}
@@ -254,6 +271,10 @@ impl Geometry<'_,'_> {
             else if meter.is_some() {
                 let part=node.normalize_point(*transform,physical)?.x+0.5;
                 Target::Meter(part.clamp(0.0,1.0))
+            } else if m.quantity.is_none() && cat_title.is_some() {
+                Target::CategoryHeader(cat_title.unwrap().0)
+            } else if m.quantity.is_some() && backdrop.is_some() {
+                Target::Command(Command::AmountCancel)
             } else {
                 if focus.is_some_and(|f|*f==FocusPolicy::Block){return None}
                 continue
@@ -289,9 +310,9 @@ impl Bridge<'_,'_> {
     pub fn prepare(&mut self,f:Frame) {
         self.state.pending=None;self.state.scroll=None;self.state.armed=None;self.state.native=None;
         self.state.observe_neutral(f.neutral);self.state.barrier=false;
-        let mode=self.active.as_ref().and_then(|a|a.0.as_ref()).map(|m|m.mode)
-            .filter(|m|matches!(m,Mode::Barter(_)));
-        let stamp=Stamp::of(f,self.geometry.text_size());
+        let active_m = self.active.as_ref().and_then(|a|a.0.as_ref());
+        let mode=active_m.filter(|m|matches!(m.mode,Mode::Barter(_)) || m.quantity.is_some()).map(|m|m.mode);
+        let stamp=Stamp::of(f,self.geometry.text_size_for(active_m));
         if self.state.stamp!=Some(stamp) || self.state.mode!=mode || !f.admitted || f.fresh
             || self.options.as_ref().is_some_and(|o|!o.enabled) {
             let had_owner=self.state.contact.is_some() || self.state.pending.is_some() || self.state.armed.is_some();
@@ -338,7 +359,7 @@ impl Bridge<'_,'_> {
                 self.state.retire(e.window,e.id);return true
             }
             if let Some(hit)=self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
-                .filter(|h|matches!(h.source,Source::Tile(..)) || h.row_step.is_finite() && h.row_step>0.0) {
+                .filter(|h|matches!(h.source,Source::Tile(..)|Source::Direct(..)) || h.row_step.is_finite() && h.row_step>0.0) {
                 let meter=if matches!(hit.target,Target::Meter(_)) {
                     if m.quantity.is_none(){self.state.retire(e.window,e.id);return true}
                     let Some((_,shape))=self.geometry.meter(self.admission.script.as_deref(),f,m,e.position,e.position) else {
@@ -346,7 +367,7 @@ impl Bridge<'_,'_> {
                     };
                     Some(MeterContact {shape,repaint:false})
                 } else {None};
-                let c=Contact {window:e.window,id:e.id,stamp:Stamp::of(f,self.geometry.text_size()),
+                let c=Contact {window:e.window,id:e.id,stamp:Stamp::of(f,self.geometry.text_size_for(Some(m))),
                     origin:e.position,previous:e.position,hit,guard:Guard::of(m,hit.target),
                     dragged:false,vertical:false,remainder:0.0,meter};
                 if c.meter.is_some(){self.state.meter(f,&c,e.position,hit,false);}
@@ -356,7 +377,7 @@ impl Bridge<'_,'_> {
         }
         if !self.state.contact.as_ref().is_some_and(|c|c.window==e.window && c.id==e.id){return true}
         let mut c=self.state.contact.take().unwrap();
-        if e.phase==TouchPhase::Canceled || c.stamp!=Stamp::of(f,self.geometry.text_size())
+        if e.phase==TouchPhase::Canceled || c.stamp!=Stamp::of(f,self.geometry.text_size_for(Some(m)))
             || c.guard.mode!=m.mode || c.guard.category!=m.category || c.guard.quantity!=m.quantity {
             self.state.pending=None;self.state.scroll=None;self.state.barrier=true;
             self.state.draining=Some(e.window);
@@ -407,11 +428,53 @@ impl Bridge<'_,'_> {
         }
         c.previous=e.position;
         if e.phase==TouchPhase::Ended {
-            if !c.dragged && c.guard.matches(m) {
+            if let Target::CategoryHeader(side) = c.hit.target {
+                let d = e.position - c.origin;
+                if c.guard.matches(m) && d.x.abs() >= HEADER_SWIPE && d.x.abs() >= d.y.abs() {
+                    let dir = if d.x < 0.0 { -1 } else { 1 };
+                    let source = match c.hit.source {
+                        Source::Tile(menu, tile) => Source::Direct(menu, tile),
+                        other => other,
+                    };
+                    self.state.pending = Some(Tap {
+                        frame: f,
+                        id: e.id,
+                        origin: c.origin,
+                        point: e.position,
+                        source,
+                        target: Target::CategoryHeader(side),
+                        swipe: true,
+                        guard: c.guard,
+                        commands: [Some(Command::Category(side, dir)), None],
+                        meter: None,
+                    });
+                } else if !c.dragged && c.guard.matches(m) {
+                    if let Some(hit) = self.geometry.hit(self.admission.script.as_deref(), f, m, e.position)
+                        .filter(|h| h.source == c.hit.source && same_target(h.target, c.hit.target))
+                    {
+                        let source = match hit.source {
+                            Source::Tile(menu, tile) => Source::Direct(menu, tile),
+                            other => other,
+                        };
+                        self.state.pending = Some(Tap {
+                            frame: f,
+                            id: e.id,
+                            origin: c.origin,
+                            point: e.position,
+                            source,
+                            target: hit.target,
+                            swipe: false,
+                            guard: c.guard,
+                            commands: [Some(Command::Category(side, 1)), None],
+                            meter: None,
+                        });
+                    }
+                }
+            } else if !c.dragged && c.guard.matches(m) {
                 if let Some(hit)=self.geometry.hit(self.admission.script.as_deref(),f,m,e.position)
                     .filter(|h|h.source==c.hit.source && same_target(h.target,c.hit.target)) {
-                    self.state.pending=Some(Tap {frame:f,id:e.id,point:e.position,
-                        source:hit.source,target:hit.target,guard:c.guard,
+                    self.state.pending=Some(Tap {frame:f,id:e.id,origin:c.origin,point:e.position,
+                        source:hit.source,target:hit.target,swipe:false,guard:c.guard,
                         commands:commands(hit.target,m),meter:None});
                 }
             }
@@ -433,7 +496,7 @@ impl Bridge<'_,'_> {
     pub fn consume_touch_return(&mut self,e:&TouchInput)->bool {
         let Some(f)=self.state.return_frame.filter(|f|f.window==e.window) else{return false};
         let Some(m)=self.active.as_ref().and_then(|a|a.0.as_ref()) else{return false};
-        if e.phase!=TouchPhase::Started || !matches!(m.mode,Mode::Barter(_))
+        if e.phase!=TouchPhase::Started || (!matches!(m.mode,Mode::Barter(_)) && m.quantity.is_none())
             || !self.admission.live.allows_consumed_return(f,e.id)
             || !super::barter_touch::menu_allows(self.admission.script.as_deref(),
                 self.admission.creator.as_deref(),m) {return false}
@@ -450,6 +513,7 @@ fn commands(t:Target,m:&MenuModel)->[Option<Command>;2] {
             [v.first().copied(),v.get(1).copied()]
         }
         Target::Command(c)=>[Some(c),None],
+        Target::CategoryHeader(side)=>[Some(Command::Category(side,1)),None],
         Target::Meter(part)=>[m.quantity.map(|q|Command::Amount(super::model::amount_at(part,q.max))),None],
         Target::Pane(_)=>[None,None],
     }
@@ -461,8 +525,10 @@ fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
     mut tiles:Option<ResMut<crate::tiles::barter_menu::BarterTiles>>,mut out:MessageWriter<MenuInput>,
     readability:Option<Res<crate::menu_readability::MenuReadability>>) {
     if state.scroll.is_none() && state.pending.is_none(){return}
-    let text_size=super::readability::size(readability.as_deref(),crate::menu_readability::MenuKind::Barter);
     let Some(m)=active.0.as_mut() else{state.cancel();return};
+    let text_size=if matches!(m.mode,Mode::Barter(_)) {
+        super::readability::size(readability.as_deref(),crate::menu_readability::MenuKind::Barter)
+    } else {1.0};
     if let Some(s)=state.scroll.take() {
         if state.frame==Some(s.frame) && state.stamp==Some(Stamp::of(s.frame,text_size))
             && s.mode==m.mode && s.category==m.category && m.quantity.is_none()
@@ -483,10 +549,10 @@ fn dispatch(mut state:ResMut<NormalBarter>,mut active:ResMut<ActiveMenu>,
     let Some(tap)=state.pending.take() else{return};
     if state.frame!=Some(tap.frame) || state.stamp!=Some(Stamp::of(tap.frame,text_size)) || !live.allows(tap.frame,tap.id)
         || !super::barter_touch::menu_allows(script.as_deref(),creator.as_deref(),m) {return}
-    if matches!(tap.source,Source::Tile(..)) && script.as_ref().is_none_or(|s|s.rt.is_none()){return}
+    if matches!(tap.source,Source::Tile(..)|Source::Direct(..)) && script.as_ref().is_none_or(|s|s.rt.is_none()){return}
     state.next=state.next.wrapping_add(1).max(1);
     let token=state.next;let epoch=state.epoch;
-    let native=(matches!(tap.source,Source::Tile(..)) && tap.meter.is_none_or(|m|m.pulse)).then_some(NativeTap {
+    let native=(matches!(tap.source,Source::Tile(..)) && !tap.swipe && tap.meter.is_none_or(|m|m.pulse)).then_some(NativeTap {
         token,frame:tap.frame,id:tap.id,point:tap.point,source:tap.source,target:tap.target,text_size });
     state.armed=Some(Armed {token,epoch,tap});
     if let Some(native)=native {state.native=Some(native);}
@@ -504,8 +570,11 @@ pub(crate) struct NativeAdmission<'w,'s> {
 }
 impl NativeAdmission<'_,'_> {
     pub(crate) fn allows(&self,n:NativeTap,m:&MenuModel,game:&fnv_game::Game<'_>)->bool {
-        matches!(m.mode,Mode::Barter(_)) && self.options.as_ref().is_none_or(|o|o.enabled)
-            && n.text_size==super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)
+        let expected_size = if matches!(m.mode,Mode::Barter(_)) {
+            super::readability::size(self.readability.as_deref(),crate::menu_readability::MenuKind::Barter)
+        } else {1.0};
+        (matches!(m.mode,Mode::Barter(_)) || m.quantity.is_some()) && self.options.as_ref().is_none_or(|o|o.enabled)
+            && n.text_size==expected_size
             && self.live.allows(n.frame,n.id)
             && super::barter_touch::game_allows(Some(game),self.creator.as_deref(),m)
     }
@@ -551,19 +620,26 @@ impl Commits<'_,'_> {
         if s.armed.as_ref()?.token!=token{return None}
         let a=s.armed.take()?;*self.applied=None;
         let live=a.epoch==s.epoch && !s.hidden && s.frame==Some(a.tap.frame)
-            && s.stamp==Some(Stamp::of(a.tap.frame,self.geometry.text_size()))
+            && s.stamp==Some(Stamp::of(a.tap.frame,self.geometry.text_size_for(Some(m))))
             && self.options.as_ref().is_none_or(|o|o.enabled)
             && self.live.allows(a.tap.frame,a.tap.id)
             && super::barter_touch::menu_allows(script,self.creator.as_deref(),m);
         if !live {if a.tap.meter.is_some(){s.cancel();}return None}
         let refreshed=m.refresh(world).is_ok() && a.tap.guard.matches(m);
+        let source_matches = |actual: Source, expected: Source| {
+            actual == expected
+                || matches!((actual, expected), (Source::Tile(m1, t1), Source::Direct(m2, t2)) if m1 == m2 && t1 == t2)
+        };
         let geometry=refreshed && if let Some(request)=a.tap.meter {
             self.geometry.meter(script,a.tap.frame,m,request.origin,a.tap.point)
-                .is_some_and(|(h,shape)|h.source==a.tap.source && shape==request.shape
+                .is_some_and(|(h,shape)|source_matches(h.source,a.tap.source) && shape==request.shape
                     && same_target(h.target,a.tap.target) && commands(h.target,m)==a.tap.commands)
+        } else if a.tap.swipe {
+            self.geometry.hit(script,a.tap.frame,m,a.tap.origin)
+                .is_some_and(|h|source_matches(h.source,a.tap.source) && same_target(h.target,a.tap.target))
         } else {
             self.geometry.hit(script,a.tap.frame,m,a.tap.point)
-                .is_some_and(|h|h.source==a.tap.source && same_target(h.target,a.tap.target))
+                .is_some_and(|h|source_matches(h.source,a.tap.source) && same_target(h.target,a.tap.target))
         };
         if !geometry {
             if a.tap.meter.is_some(){s.cancel();}

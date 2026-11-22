@@ -154,8 +154,7 @@ impl BarterTiles {
     pub(crate) fn normal_touch_value(&self,side:Side)->f64 {self.view.value(side)}
 
     pub(crate) fn normal_touch_quantity(&self, ui: &Ui) -> bool {
-        super::menus::quantity_built(ui).yes() && ui.menu(super::menus::QUANTITY_MENU)
-            .is_some_and(|menu| fnv_ui::input::shown(ui, menu))
+        super::menus::normal_touch_quantity_shown(ui)
     }
 
     /// The ordinary native list's painted/clipped hit data. Disabled-side focus
@@ -166,64 +165,84 @@ impl BarterTiles {
         use crate::menu::{model::Command, normal_touch::{Hit, Source, Target}};
         use fnv_ui::input::{hit_candidates, no_measure, top_hit};
         if self.normal_quote.as_ref()!=m.trade.as_ref(){return None}
-        let at=super::input::to_menu_units(point,window,Vec2::splat(0.5));
-        let menu=if m.quantity.is_some() { ui.menu(super::menus::QUANTITY_MENU)? } else {self.menu()?};
-        let mut candidates=hit_candidates(ui,menu,&no_measure);
-        if m.quantity.is_none() {
-            for c in &mut candidates {
-                match self.view.clicked(ui,c.under) {
-                    Some(MenuTile::Focus(_))=>c.event=None,
-                    Some(MenuTile::Row(..))=>c.event=Some(c.under),
-                    _=>{}
-                }
-            }
-        }
-        let Some(picked)=top_hit(ui,&candidates,at) else {
-            // The ordinary inactive-column focus rectangle can also be empty.
-            // Its actual clipped area remains a browse pane, never an action.
-            let c=candidates.iter().rev().find(|c|{
-                let r=c.region();
-                r.width>0.0 && r.height>0.0 && at.0>=r.left && at.0<r.left+r.width
-                    && at.1>=r.top && at.1<r.top+r.height
-                    && matches!(self.view.clicked(ui,c.under),Some(MenuTile::Focus(_)))
-            })?;
-            let Some(MenuTile::Focus(side))=self.view.clicked(ui,c.under) else{return None};
-            return Some(Hit {source:Source::Tile(menu,c.under),target:Target::Pane(side),pane:Some(side),row_step:0.0});
-        };
         if m.quantity.is_some() {
-            use super::menus::QuantityTile;
-            let target=match super::menus::quantity_tile(ui,picked.tile)? {
-                QuantityTile::Ok=>Target::Command(Command::AmountOk),
-                QuantityTile::Cancel=>Target::Command(Command::AmountCancel),
-                QuantityTile::Decrease=>Target::Command(Command::AmountStep(-1)),
-                QuantityTile::Increase=>Target::Command(Command::AmountStep(1)),
-                QuantityTile::Meter=>{
-                    let b=super::menus::meter_box(ui)?;
-                    if !b.width.is_finite() || b.width<=0.0{return None}
-                    Target::Meter(((at.0-b.left)/b.width).clamp(0.0,1.0) as f32)
-                }
-            };
-            return Some(Hit {source:Source::Tile(menu,picked.tile),target,pane:None,row_step:0.0});
+            return super::menus::normal_touch_quantity_hit(ui, point, window);
         }
-        let what=self.view.clicked(ui,picked.tile)?;
-        let (target,pane,key)=match what {
-            MenuTile::Row(side,index)=>{
-                let index=self.view.row_at(m,side,index)?;
-                let shown=self.shown.as_ref()?;
-                let painted=shown.common.lists[side as usize].rows.get(index)?;
-                let now=m.list(side).rows.get(index)?;
-                let price=now.price.map_or_else(||"--".into(),barter::price_text);
-                if painted.text!=crate::menu::look::row_text(now)
-                    || shown.rows[side as usize].get(index)!=Some(&(price,now.bartered)) {return None}
-                (Target::Row(side,index),Some(side),self.view.rows[side as usize].get(index)?.tile)
+        let at=super::input::to_menu_units(point,window,Vec2::splat(0.5));
+        let menu=self.menu()?;
+        let mut candidates=hit_candidates(ui,menu,&no_measure);
+        for c in &mut candidates {
+            match self.view.clicked(ui,c.under) {
+                Some(MenuTile::Focus(_))=>c.event=None,
+                Some(MenuTile::Row(..))=>c.event=Some(c.under),
+                _=>{}
             }
-            MenuTile::Arrow(side,by)=>(Target::Command(Command::Category(side,by)),None,picked.tile),
-            MenuTile::Accept=>(Target::Command(Command::Accept),None,picked.tile),
-            MenuTile::Exit=>(Target::Command(Command::Close),None,picked.tile),
-            MenuTile::Focus(side)=>(Target::Pane(side),Some(side),picked.tile),
-            _=>return None,
-        };
-        Some(Hit {source:Source::Tile(menu,key),target,pane,row_step:0.0})
+        }
+        if let Some(picked)=top_hit(ui,&candidates,at) {
+            if let Some(what)=self.view.clicked(ui,picked.tile) {
+                let (target,pane,key)=match what {
+                    MenuTile::Row(side,index)=>{
+                        let index=self.view.row_at(m,side,index)?;
+                        let shown=self.shown.as_ref()?;
+                        let painted=shown.common.lists[side as usize].rows.get(index)?;
+                        let now=m.list(side).rows.get(index)?;
+                        let price=now.price.map_or_else(||"--".into(),barter::price_text);
+                        if painted.text!=crate::menu::look::row_text(now)
+                            || shown.rows[side as usize].get(index)!=Some(&(price,now.bartered)) {return None}
+                        (Target::Row(side,index),Some(side),self.view.rows[side as usize].get(index)?.tile)
+                    }
+                    MenuTile::Arrow(side,by)=>(Target::Command(Command::Category(side,by)),None,picked.tile),
+                    MenuTile::Title(side)=>(Target::CategoryHeader(side),None,picked.tile),
+                    MenuTile::Accept=>(Target::Command(Command::Accept),None,picked.tile),
+                    MenuTile::Exit=>(Target::Command(Command::Close),None,picked.tile),
+                    MenuTile::Focus(side)=>(Target::Pane(side),Some(side),picked.tile),
+                    _=>return None,
+                };
+                return Some(Hit {source:Source::Tile(menu,key),target,pane,row_step:0.0});
+            }
+        }
+        // Padded finger targets around category arrows and titles so small header
+        // arrows and labels are easy to tap or swipe without resizing the artwork.
+        const HEADER_PAD: f64 = 16.0;
+        for c in candidates.iter().rev() {
+            let r = c.region();
+            if r.width <= 0.0 || r.height <= 0.0 {
+                continue;
+            }
+            if at.0 < r.left - HEADER_PAD || at.0 >= r.left + r.width + HEADER_PAD
+                || at.1 < r.top - HEADER_PAD || at.1 >= r.top + r.height + HEADER_PAD {
+                continue;
+            }
+            match self.view.clicked(ui, c.under) {
+                Some(MenuTile::Arrow(side, by)) => {
+                    return Some(Hit {
+                        source: Source::Direct(menu, c.under),
+                        target: Target::Command(Command::Category(side, by)),
+                        pane: None,
+                        row_step: 0.0,
+                    });
+                }
+                Some(MenuTile::Title(side)) => {
+                    return Some(Hit {
+                        source: Source::Direct(menu, c.under),
+                        target: Target::CategoryHeader(side),
+                        pane: None,
+                        row_step: 0.0,
+                    });
+                }
+                _ => {}
+            }
+        }
+        // The ordinary inactive-column focus rectangle can also be empty.
+        // Its actual clipped area remains a browse pane, never an action.
+        let c=candidates.iter().rev().find(|c|{
+            let r=c.region();
+            r.width>0.0 && r.height>0.0 && at.0>=r.left && at.0<r.left+r.width
+                && at.1>=r.top && at.1<r.top+r.height
+                && matches!(self.view.clicked(ui,c.under),Some(MenuTile::Focus(_)))
+        })?;
+        let Some(MenuTile::Focus(side))=self.view.clicked(ui,c.under) else{return None};
+        Some(Hit {source:Source::Tile(menu,c.under),target:Target::Pane(side),pane:Some(side),row_step:0.0})
     }
 
     /// Scroll this exact native view, without changing focus or selected item.

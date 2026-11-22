@@ -672,6 +672,9 @@ pub struct ViewInput {
     pub pick: Option<usize>,
     /// A click meant to skip the line being said.
     pub skip: bool,
+    /// A quick-exit action (such as tapping the Pip-Boy power button) that leaves
+    /// dialogue only when a normal exit/goodbye option is available.
+    pub leave: bool,
 }
 
 impl ViewInput {
@@ -988,8 +991,8 @@ pub(crate) fn input(
                 act = Some((Act::Choose(i), if by_tiles { "tile click" } else { "click" }));
             } else if confirm {
                 act = Some((Act::Choose(selected), "Enter"));
-            } else if keys.just_pressed(Tab) {
-                act = Some((Act::Leave { force: false }, "Tab"));
+            } else if asked.leave || keys.just_pressed(Tab) {
+                act = Some((Act::Leave { force: false }, if asked.leave { "power button" } else { "Tab" }));
             }
         }
     }

@@ -142,7 +142,7 @@ fn show(
     };
     let size = window.single().map(|w| Extent3d { width: w.physical_width().max(1), height: w.physical_height().max(1), depth_or_array_layers: 1 }).unwrap_or(Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 });
     let Some(view) = spawn_monitor(&mut commands, &mut models, &mut plain, &model,
-        &picture.image, TARGET, size, MONITOR_LAYER, "Terminal", false, -4, false, PLACE) else {
+        &picture.image, TARGET, size, MONITOR_LAYER, "Terminal", false, -4, false, true, PLACE) else {
         warn!("terminal view: {MONITOR_MODEL} has no screen:0 shape; the screen is drawn flat");
         drawn.warned = true;
         return;
@@ -179,6 +179,47 @@ struct RenderedMonitor {
     shapes: usize,
 }
 
+/// [design: docs/design/android.md] Fit the Retro Console dialogue camera straight-on
+/// and tightly around the screen glass + power button (ignoring rear CRT tube depth)
+/// so the console fills almost the full height and side width of the screen.
+fn fitted_dialogue_camera(
+    glass: &Posed,
+    button: Option<&Posed>,
+    model_bounds: (Vec3, Vec3),
+    place_inv: Affine3A,
+    aspect: f32,
+) -> Option<(Vec3, Vec3, f32)> {
+    if !aspect.is_finite() || aspect <= 0.0 { return None; }
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for &p in &glass.points {
+        let local = place_inv.transform_point3(p);
+        min = min.min(local);
+        max = max.max(local);
+    }
+    if let Some(btn) = button {
+        for &p in &btn.points {
+            let local = place_inv.transform_point3(p);
+            min = min.min(local);
+            max = max.max(local);
+        }
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return fitted_camera(model_bounds, aspect);
+    }
+    let center = (min + max) * 0.5;
+    let half = (max - min) * 0.5;
+    let tangent = (FOV * 0.5).tan();
+    let frame_x = half.x * 1.12;
+    let frame_z = half.z * 1.08;
+    let front_y = (center.y - min.y).max(0.0);
+    let distance = front_y + (frame_z / tangent).max(frame_x / (tangent * aspect)).max(1.1) * 1.01;
+    let eye = center - Vec3::Y * distance;
+    let back_y = (model_bounds.1.y - center.y).max(half.y).max(1.0);
+    let far = distance + back_y + 2.0;
+    (eye.is_finite() && far.is_finite()).then_some((eye, center, far))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_monitor(
     commands: &mut Commands,
@@ -193,13 +234,9 @@ fn spawn_monitor(
     block_housing: bool,
     camera_order: isize,
     fit_model: bool,
+    with_glare: bool,
     placement: Vec3,
 ) -> Option<RenderedMonitor> {
-    let (eye, aim, far) = if fit_model {
-        fitted_camera(model.bounds?, size.width as f32 / size.height as f32)?
-    } else {
-        (Vec3::new(0.0, -DISTANCE, -DROP), Vec3::new(0.0, 0.0, -DROP), 200.0)
-    };
     let mut glass = None;
     let mut button = None;
     let mut blockers = Vec::new();
@@ -212,6 +249,9 @@ fn spawn_monitor(
     let mut entities = Vec::new();
     for s in &model.shapes {
         let name = s.name.as_deref().unwrap_or("");
+        if !with_glare && name.eq_ignore_ascii_case("glare:0") {
+            continue;
+        }
         let world = place * model.root * s.transform;
         let mut material = s.material.clone();
         let mut glare = None;
@@ -265,6 +305,15 @@ fn spawn_monitor(
             commands.entity(e).despawn();
         }
         return None;
+    };
+    let (eye, aim, far) = if fit_model {
+        let Some(cam) = fitted_dialogue_camera(&glass, button.as_ref(), model.bounds?, place.inverse(), size.width as f32 / size.height as f32) else {
+            for e in entities { commands.entity(e).despawn(); }
+            return None;
+        };
+        cam
+    } else {
+        (Vec3::new(0.0, -DISTANCE, -DROP), Vec3::new(0.0, 0.0, -DROP), 200.0)
     };
     let shapes = entities.len();
     let to = |p: Vec3| place.transform_point3(p);

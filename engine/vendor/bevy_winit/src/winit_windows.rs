@@ -430,6 +430,18 @@ fn pointer_supported() -> Result<bool, ExternalError> {
     .unwrap_or(false))
 }
 
+#[cfg(target_os = "android")]
+pub(crate) fn attempt_grab(
+    _winit_window: &WinitWindow,
+    _grab_mode: CursorGrabMode,
+) -> Result<(), ExternalError> {
+    // Android NativeActivity has no desktop cursor-grab API; winit returns
+    // ExternalError::NotSupported even for CursorGrabMode::None during initial
+    // CursorOptions synchronization.
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
 pub(crate) fn attempt_grab(
     winit_window: &WinitWindow,
     grab_mode: CursorGrabMode,

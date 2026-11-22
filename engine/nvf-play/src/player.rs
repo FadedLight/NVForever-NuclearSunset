@@ -637,7 +637,7 @@ fn grab_cursor(
     let message_box = tweaks.as_ref().is_some_and(|t| t.no_pointer_in_message_box) && panel.is_some_and(|p| p.view.is_some()) && window.focused && !driven;
     let message_box = message_box || (tweaks.as_ref().is_some_and(|t| t.no_pointer_in_dialogue) && talk.is_some_and(|t| t.view.is_some()) && window.focused && !driven);
     let visible = (cfg!(target_os = "android") || (!grab && (wanted || driven || !window.focused || hud_cursor) && !over_lock.is_some_and(|o| o.0))) && !message_box;
-    if cursor.grab_mode != mode || cursor.visible != visible {
+    if !cfg!(target_os = "android") && (cursor.grab_mode != mode || cursor.visible != visible) {
         cursor.grab_mode = mode;
         cursor.visible = visible;
     }

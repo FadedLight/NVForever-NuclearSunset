@@ -388,7 +388,7 @@ pub(super) fn install(app: &mut App) {
             key: "touch-direct-pipboy-v1",
             group: "Controls",
             label: "Direct Pip-Boy swipe",
-            note: "With the bottom swipe enabled, drag the actual arm up or down. Release settles open or closed. Cancel restores its starting state; screen-only menus keep the usual swipe.",
+            note: "With the bottom swipe on, drag the Pip-Boy arm up or down directly. Release settles open or closed.",
             switches: "",
             get: |w| w.resource::<Options>().direct,
             set: |w, v| {

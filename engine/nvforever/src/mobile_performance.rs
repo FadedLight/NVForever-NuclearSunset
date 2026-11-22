@@ -349,7 +349,7 @@ pub fn register(app: &mut App) {
             key: "mobile-thermal-auto",
             group: "Display",
             label: "Automatic thermal adjustment",
-            note: "Off by default; while hot, lower the frame limit and selected FSR resolution, then recover gradually after cooling. Saved choices stay; native stays native and missing feedback uses manual settings.",
+            note: "While hot, temporarily lower the frame limit and FSR quality, then recover when cool. Saved choices stay.",
             switches: "",
             get: |w| w.resource::<ThermalSettings>().automatic,
             set: |w, automatic| w.resource_mut::<ThermalSettings>().automatic = automatic,
@@ -1031,7 +1031,10 @@ mod tests {
         let settings = app.world().resource::<Settings>();
         for key in [PRESET_KEY, RESOLUTION_KEY, "mobile-fps", "mobile-thermal-auto", "mobile-thermal-status"] {
             let setting = &settings.list()[settings.index(key).unwrap()];
-            assert!(setting.note.chars().count() <= 200, "{key}: {}", setting.note.chars().count());
+            assert!(settings::note_over_budget(setting.note).is_none(), "{key}: {:?}", settings::note_over_budget(setting.note));
+            assert!(setting.note.chars().count() <= 200, "{key}: {} chars", setting.note.chars().count());
         }
+        let auto = &settings.list()[settings.index("mobile-thermal-auto").unwrap()];
+        assert!(auto.note.chars().count() <= 120, "mobile-thermal-auto should fit cleanly within two lines: {} chars", auto.note.chars().count());
     }
 }

@@ -22,6 +22,11 @@ cursor is inside the client area before a warp, even without a motion event. The
 query itself changes neither focus nor cursor position. Every pre-existing
 module retains `forbid`; the rest of the new cursor consumer inherits `deny`.
 
+In `bevy_winit/src/winit_windows.rs`, `attempt_grab` is a no-op returning
+`Ok(())` on `target_os = "android"`, because Android `NativeActivity` has no
+desktop cursor-grab API and winit otherwise logs `Unable to ungrab cursor` and
+`Could not set cursor grab mode` during initial `CursorOptions` sync.
+
 Source: crates.io `bevy_winit` 0.20.1, archive SHA-256
 `397c685e6ab6d4d87b89fb4ce11993c223d0e3c7b34c415cb4b9f69f213d85b6`.
 

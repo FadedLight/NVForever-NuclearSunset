@@ -64,7 +64,7 @@ fn original_model(data: &nvf_assets::GameData, path: &str) {
 }
 
 fn actor_provider(app: &mut App, game: &fnv_install::GameInstall, args: &Args) {
-    let opened = crate::world::open_plugins(&game.data, None, &["FalloutNV.esm".into()]);
+    let opened = crate::world::open_plugins(&game.data, &[], &["FalloutNV.esm".into()]);
     assert!(
         opened.dropped.is_empty() && opened.plugins.len() == 1,
         "original master required"
@@ -278,7 +278,7 @@ pub fn run() {
         "supported logical widths 640/800 and densities 1/2"
     );
     let install = fnv_install::GameInstall::open(&args.game).expect("original game install");
-    crate::setup::install_fonts(&install);
+    crate::setup::install_fonts(&install, None);
     assert!(
         args.output.is_absolute(),
         "absolute new output directory required"

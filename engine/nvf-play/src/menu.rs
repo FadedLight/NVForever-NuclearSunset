@@ -536,9 +536,14 @@ fn keep_menu_state(
 const RAISE_START_FRAMES: u8 = 3;
 
 fn release_cursor(mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>) {
+    if cfg!(target_os = "android") {
+        return;
+    }
     if let Ok(mut c) = cursor.single_mut() {
-        c.visible = true;
-        c.grab_mode = CursorGrabMode::None;
+        if !c.visible || c.grab_mode != CursorGrabMode::None {
+            c.visible = true;
+            c.grab_mode = CursorGrabMode::None;
+        }
     }
 }
 
@@ -1430,6 +1435,43 @@ mod wheel_hold_tests {
         assert!(app.world().resource::<WheelHold>().held(), "a jitter keeps the hold");
         step(&mut app, false, WHEEL_HOLD_TRAVEL);
         assert!(!app.world().resource::<WheelHold>().held());
+    }
+
+    #[test]
+    fn release_cursor_skips_redundant_mutation_when_already_released() {
+        let mut app = App::new();
+        app.add_systems(Update, release_cursor);
+        let entity = app
+            .world_mut()
+            .spawn((
+                PrimaryWindow,
+                CursorOptions {
+                    visible: true,
+                    grab_mode: CursorGrabMode::None,
+                    ..default()
+                },
+            ))
+            .id();
+        // Clear initial Added tick so the next update only flags actual writes.
+        app.world_mut().clear_trackers();
+        app.update();
+        let changed = app
+            .world_mut()
+            .query_filtered::<Entity, Changed<CursorOptions>>()
+            .iter(app.world())
+            .any(|e| e == entity);
+        assert!(!changed, "already-released cursor should not be marked changed");
+
+        app.world_mut()
+            .entity_mut(entity)
+            .get_mut::<CursorOptions>()
+            .unwrap()
+            .grab_mode = CursorGrabMode::Locked;
+        app.world_mut().clear_trackers();
+        app.update();
+        let cursor = app.world().get::<CursorOptions>(entity).unwrap();
+        assert_eq!(cursor.grab_mode, CursorGrabMode::None);
+        assert!(cursor.visible);
     }
 }
 

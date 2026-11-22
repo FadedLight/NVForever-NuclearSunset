@@ -1814,71 +1814,73 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     if startup.loads_streamline() {
         app.add_plugins(dlss::DlssInitPlugin);
     }
-    app.add_plugins(
-        DefaultPlugins
-            .set(task_pools(cpu_placed.pool_threads))
-            // Bevy's own renderer plugin, with the GPU the DLSS loader checked asked for by
-            // name when it pinned one (dlss/ "Adapter pin"); otherwise `RenderPlugin::default()`.
-            .set(dlss::render_plugin())
-            .set(ImagePlugin {
-                default_sampler: ImageSamplerDescriptor {
-                    address_mode_u: ImageAddressMode::Repeat,
-                    address_mode_v: ImageAddressMode::Repeat,
-                    anisotropy_clamp: if graphics.anisotropic { 16 } else { 1 },
-                    ..ImageSamplerDescriptor::linear()
+    let default_plugins = DefaultPlugins
+        .set(task_pools(cpu_placed.pool_threads))
+        // Bevy's own renderer plugin, with the GPU the DLSS loader checked asked for by
+        // name when it pinned one (dlss/ "Adapter pin"); otherwise `RenderPlugin::default()`.
+        .set(dlss::render_plugin())
+        .set(ImagePlugin {
+            default_sampler: ImageSamplerDescriptor {
+                address_mode_u: ImageAddressMode::Repeat,
+                address_mode_v: ImageAddressMode::Repeat,
+                anisotropy_clamp: if graphics.anisotropic { 16 } else { 1 },
+                ..ImageSamplerDescriptor::linear()
+            },
+        })
+        // Sound goes through nvf_play::audio_out, which follows the output device.
+        .disable::<bevy::audio::AudioPlugin>()
+        // Parts of Bevy the game never uses: sprites and 2D text (their layout,
+        // bounds and picking), world serialization, Bevy's own animation (actors are
+        // posed by nvf_play's clips), the clipboard and the UI widgets (the menus are
+        // bevy_ui nodes with their own controls). Each adds systems that run every
+        // frame (#1381). Kept: the sprite renderer, whose resources bevy_ui_render
+        // reads, and glTF and scenes, as PbrPlugin registers a glTF extension.
+        .disable::<bevy::sprite::SpritePlugin>()
+        .disable::<bevy::world_serialization::WorldSerializationPlugin>()
+        .disable::<bevy::animation::AnimationPlugin>()
+        .disable::<bevy::clipboard::ClipboardPlugin>()
+        .disable::<bevy::ui_widgets::ButtonPlugin>()
+        .disable::<bevy::ui_widgets::CheckboxPlugin>()
+        .disable::<bevy::ui_widgets::TextInputPlugin>()
+        .disable::<bevy::ui_widgets::ListBoxPlugin>()
+        .disable::<bevy::ui_widgets::MenuPlugin>()
+        .disable::<bevy::ui_widgets::DialogPlugin>()
+        .disable::<bevy::ui_widgets::ModalDialogPlugin>()
+        .disable::<bevy::ui_widgets::popover::PopoverPlugin>()
+        .disable::<bevy::ui_widgets::RadioGroupPlugin>()
+        .disable::<bevy::ui_widgets::ScrollAreaPlugin>()
+        .disable::<bevy::ui_widgets::ScrollbarPlugin>()
+        .disable::<bevy::ui_widgets::SliderPlugin>()
+        .disable::<bevy::ui_widgets::TabPlugin>()
+        .disable::<bevy::input_focus::pointer_focus::PointerFocusPlugin>()
+        // The console's lines go to the run log too (crash.rs).
+        .set(bevy::log::LogPlugin { custom_layer: crash::file_layer, fmt_layer: crash::console_layer, filter: reports::log_filter(), ..default() })
+        .set(WindowPlugin {
+            // Desktop screenshots use exact pixels; Android UI follows its display density.
+            primary_window: Some(Window {
+                title: "NVForever".into(),
+                mode: args.window.mode(),
+                resolution: if cfg!(target_os = "android") {
+                    bevy::window::WindowResolution::new(w, h)
+                } else {
+                    bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
                 },
-            })
-            // Sound goes through nvf_play::audio_out, which follows the output device.
-            .disable::<bevy::audio::AudioPlugin>()
-            // Parts of Bevy the game never uses: sprites and 2D text (their layout,
-            // bounds and picking), world serialization, Bevy's own animation (actors are
-            // posed by nvf_play's clips), the clipboard and the UI widgets (the menus are
-            // bevy_ui nodes with their own controls). Each adds systems that run every
-            // frame (#1381). Kept: the sprite renderer, whose resources bevy_ui_render
-            // reads, and glTF and scenes, as PbrPlugin registers a glTF extension.
-            .disable::<bevy::sprite::SpritePlugin>()
-            .disable::<bevy::world_serialization::WorldSerializationPlugin>()
-            .disable::<bevy::animation::AnimationPlugin>()
-            .disable::<bevy::clipboard::ClipboardPlugin>()
-            .disable::<bevy::ui_widgets::ButtonPlugin>()
-            .disable::<bevy::ui_widgets::CheckboxPlugin>()
-            .disable::<bevy::ui_widgets::TextInputPlugin>()
-            .disable::<bevy::ui_widgets::ListBoxPlugin>()
-            .disable::<bevy::ui_widgets::MenuPlugin>()
-            .disable::<bevy::ui_widgets::DialogPlugin>()
-            .disable::<bevy::ui_widgets::ModalDialogPlugin>()
-            .disable::<bevy::ui_widgets::popover::PopoverPlugin>()
-            .disable::<bevy::ui_widgets::RadioGroupPlugin>()
-            .disable::<bevy::ui_widgets::ScrollAreaPlugin>()
-            .disable::<bevy::ui_widgets::ScrollbarPlugin>()
-            .disable::<bevy::ui_widgets::SliderPlugin>()
-            .disable::<bevy::ui_widgets::TabPlugin>()
-            .disable::<bevy::input_focus::pointer_focus::PointerFocusPlugin>()
-            // The console's lines go to the run log too (crash.rs).
-            .set(bevy::log::LogPlugin { custom_layer: crash::file_layer, fmt_layer: crash::console_layer, filter: reports::log_filter(), ..default() })
-            .set(WindowPlugin {
-                // Desktop screenshots use exact pixels; Android UI follows its display density.
-                primary_window: Some(Window {
-                    title: "NVForever".into(),
-                    mode: args.window.mode(),
-                    resolution: if cfg!(target_os = "android") {
-                        bevy::window::WindowResolution::new(w, h)
-                    } else {
-                        bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
-                    },
-                    position: args.window_at.map_or(WindowPosition::Automatic, WindowPosition::At),
-                    // Taking over a load: shown once its loading screen is up (handoff.rs).
-                    visible: args.handoff.is_none(),
-                    // Measuring frame times: not held to the display's refresh.
-                    present_mode: if args.log_frame_times.is_some() { bevy::window::PresentMode::AutoNoVsync } else { default() },
-                    // `NVF_SWAPCHAIN_LATENCY=<n>`: frames the swapchain may queue (images: n + 1;
-                    // Bevy's 2 otherwise), for measuring frame generation's pacing.
-                    desired_maximum_frame_latency: std::env::var("NVF_SWAPCHAIN_LATENCY").ok().and_then(|v| v.trim().parse::<u32>().ok()).and_then(std::num::NonZeroU32::new),
-                    ..default()
-                }),
+                position: args.window_at.map_or(WindowPosition::Automatic, WindowPosition::At),
+                // Taking over a load: shown once its loading screen is up (handoff.rs).
+                visible: args.handoff.is_none(),
+                // Measuring frame times: not held to the display's refresh.
+                present_mode: if args.log_frame_times.is_some() { bevy::window::PresentMode::AutoNoVsync } else { default() },
+                // `NVF_SWAPCHAIN_LATENCY=<n>`: frames the swapchain may queue (images: n + 1;
+                // Bevy's 2 otherwise), for measuring frame generation's pacing.
+                desired_maximum_frame_latency: std::env::var("NVF_SWAPCHAIN_LATENCY").ok().and_then(|v| v.trim().parse::<u32>().ok()).and_then(std::num::NonZeroU32::new),
                 ..default()
             }),
-    )
+            ..default()
+        });
+    // Android handles controllers natively via ControllerDevices.java; gilrs does not support Android.
+    #[cfg(target_os = "android")]
+    let default_plugins = default_plugins.disable::<bevy::gilrs::GilrsPlugin>();
+    app.add_plugins(default_plugins)
     .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))

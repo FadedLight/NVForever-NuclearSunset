@@ -423,7 +423,7 @@ pub(super) fn install(app: &mut App) {
     install_insets(app);
     settings::add_setting(app, Setting {
         key: "touch-pipboy-swipe-v1", group: "Controller", label: "Bottom swipe handle",
-        note: "Show a safe bottom swipe band. Drag upward or diagonally up and release to open the chosen destination. Controls keep priority; Android system navigation stays available.",
+        note: "Show a bottom swipe band. Drag up to open the chosen target; controls and system gestures keep priority.",
         switches: "",
         get: |w| w.resource::<Options>().enabled, set: |w,v| w.resource_mut::<Options>().enabled = v, slider: None,
     });
@@ -667,5 +667,27 @@ mod tests {
             Some("unchanged")
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn swipe_setting_notes_fit_two_line_budget() {
+        let mut app = App::new();
+        app.init_resource::<settings::Settings>();
+        install(&mut app);
+        super::super::pipboy_drag::install(&mut app);
+        let list = app.world().resource::<settings::Settings>();
+        for key in ["touch-pipboy-swipe-v1", "touch-direct-pipboy-v1"] {
+            let setting = &list.list()[list.index(key).unwrap()];
+            assert!(
+                settings::note_over_budget(setting.note).is_none(),
+                "{key}: {:?}",
+                settings::note_over_budget(setting.note)
+            );
+            assert!(
+                setting.note.chars().count() <= 120,
+                "{key} should fit cleanly within two lines: {} chars",
+                setting.note.chars().count()
+            );
+        }
     }
 }

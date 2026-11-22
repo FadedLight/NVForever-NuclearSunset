@@ -218,6 +218,9 @@ type Loaded = Result<(&'static GameData, f64), String>;
 pub struct ScriptState {
     loader: Option<Mutex<Receiver<Loaded>>>,
     pub rt: Option<Runtime>,
+    /// Items whose pick-up sound a script's gift plays (`ScriptEffect::ItemSound`), taken
+    /// by `crate::world_sounds`.
+    pub given_sounds: Vec<FormId>,
     /// Why scripts are not running (switched off, data failed), for the log.
     pub off: Option<String>,
     trace: Option<TraceLog>,
@@ -400,7 +403,7 @@ impl ScriptState {
         let write = (!unattended || own_home).then(|| fnv_install::EngineHome::default_root().map(|r| fnv_install::EngineHome::new(r).mods())).flatten();
         fnv_game::mod_files::update_roots(|r| r.write = write);
         let loader = off.is_none().then(|| Mutex::new(start_loading(d, refs)));
-        ScriptState { loader, rt: None, off, trace, aids, aids_started: false, gates: HashMap::new(), auto_close, no_messages, on_screen: None, walks: Vec::new(), new_game, start: GameStart::default(), used: Vec::new(), console: Vec::new(), console_out: Vec::new(), query_job: crate::query_job::QueryJob::from_env(), pending_game: None, held: false, mod_log: None }
+        ScriptState { loader, rt: None, off, trace, aids, aids_started: false, gates: HashMap::new(), auto_close, no_messages, on_screen: None, walks: Vec::new(), new_game, start: GameStart::default(), used: Vec::new(), console: Vec::new(), console_out: Vec::new(), query_job: crate::query_job::QueryJob::from_env(), pending_game: None, held: false, mod_log: None, given_sounds: Vec::new() }
     }
 
     /// The player answers the script's open menu: `Some(b)` picks button b (0 = first) of
@@ -2565,6 +2568,7 @@ pub(crate) fn run_scripts(
                 info!("script: the player uses furniture {reference:08X} (a script's Activate)");
                 sit.write(crate::furniture::UseFurniture { reference });
             }
+            ScriptEffect::ItemSound(item) => st.given_sounds.push(item),
             ScriptEffect::OpenTerminal(reference) => {
                 info!("script: terminal {reference:08X} opens (a script's Activate)");
                 terminals.write(crate::terminal::OpenTerminal { reference });
@@ -2641,7 +2645,14 @@ fn hold_player(
     (blackjack, poker, caravan, wheel, slots): (Option<Res<crate::blackjack::BlackjackScreen>>, Res<crate::poker::PokerScreen>, Option<Res<crate::caravan::CaravanScreen>>, Option<Res<crate::companion_wheel::WheelScreen>>, Option<Res<crate::slots::SlotsScreen>>),
     state: Res<State<PlayState>>,
     mut next: ResMut<NextState<PlayState>>,
+    (mod_list, bug_log): (Option<Res<crate::mod_list::ModList>>, Option<Res<crate::bug_log::BugLog>>),
 ) {
+    // Our Mod List and Bug Log panels hold `Menu` too; without this they were sent back to
+    // `Playing` (and closed) the frame they opened [observed 2026-11-21: "bug log: open",
+    // then the pointer hidden and the world running on].
+    if mod_list.is_some_and(|m| m.open) || bug_log.is_some_and(|b| b.open) {
+        return;
+    }
     // The pause menu is also a `PlayState::Menu` without an engine menu: it is its own.
     // So are the wait menu (`crate::wait`), a terminal (`crate::terminal`), the
     // lockpicking menu (`crate::lockpick`), the console (`crate::console`), the recipe
@@ -2816,7 +2827,7 @@ impl ScriptState {
             choices_passed: None,
             activate_pick: None,
         };
-        ScriptState { loader: None, rt: Some(rt), off: None, trace: None, aids: Vec::new(), aids_started: false, gates: HashMap::new(), auto_close: None, no_messages: false, on_screen: None, walks: Vec::new(), new_game: false, start: GameStart::default(), used: Vec::new(), console: Vec::new(), console_out: Vec::new(), query_job: None, pending_game: None, held: false, mod_log: None }
+        ScriptState { loader: None, rt: Some(rt), off: None, trace: None, aids: Vec::new(), aids_started: false, gates: HashMap::new(), auto_close: None, no_messages: false, on_screen: None, walks: Vec::new(), new_game: false, start: GameStart::default(), used: Vec::new(), console: Vec::new(), console_out: Vec::new(), query_job: None, pending_game: None, held: false, mod_log: None, given_sounds: Vec::new() }
     }
 
     /// The player answered the open menu: it closes after this frame's scripts.

@@ -707,7 +707,16 @@ pub(crate) fn shape_emissive_mult(props: &Props, alpha_mode: AlphaMode) -> f32 {
 /// threshold [hypothesis, fitted to the same frames and nif.md's section].
 pub(crate) fn shape_emissive_rule(props: &Props, alpha_mode: AlphaMode) -> Vec4 {
     if !props.unlit {
-        return Vec4::ZERO;
+        // w: a lit shape's emitted light only fills it up to its surface colour, never past
+        // it, when its emissive multiplier is at most 1 and nothing drives the colour (no
+        // material clip, no External Emittance): the original adds the emissive colour to the
+        // lighting sum, which is held to 1, before it multiplies the texture [hypothesis,
+        // nif.md §6 "Emissive light"; observed 2026-11-20: Tale of Two Landscapes'
+        // `poolwasteland03.nif` pool surface, emissive (1.0, 0.88, 0.0) x 1 and no glow
+        // map, drew as a neon yellow puddle far over its texture]. Neon and signs authored
+        // over 1 keep their full light.
+        let ordinary = props.emissive_mult.unwrap_or(1.0) <= 1.0 && !props.animated_emissive && !props.external_emittance;
+        return Vec4::new(0.0, 0.0, 0.0, if ordinary { 1.0 } else { 0.0 });
     }
     let cutout = props.alpha.is_some() && matches!(alpha_mode, AlphaMode::Mask(_));
     Vec4::new(if !props.external_emittance || cutout { 1.0 } else { 0.0 }, if cutout { 1.0 } else { 0.0 }, 0.0, 0.0)
@@ -1619,6 +1628,23 @@ mod tests {
             assert_eq!(lit.emissive_parts().1, 30.0);
             assert_eq!(shape_emissive(&lit, AlphaMode::Opaque).unwrap().red, 30.0);
             assert_eq!(shape_emissive_rule(&Props { emissive_mult: Some(4.0), ..lit }, AlphaMode::Mask(0.5)), Vec4::ZERO);
+        }
+    }
+
+    /// An ordinary lit emitter (multiplier at most 1, nothing driving it) has its light held to
+    /// its surface colour (`w`), as the muck pool of `poolwasteland03.nif`; neon over 1, a clip-
+    /// driven colour and External Emittance keep their full light.
+    #[test]
+    fn ordinary_lit_emitters_are_held_to_their_surface() {
+        let pool = Props { emissive: Some([1.0, 0.88, 0.0]), emissive_mult: Some(1.0), ..Default::default() };
+        assert_eq!(shape_emissive_rule(&pool, AlphaMode::Opaque), Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert_eq!(shape_emissive_rule(&Props { emissive_mult: None, ..pool.clone() }, AlphaMode::Opaque).w, 1.0);
+        for other in [
+            Props { emissive_mult: Some(2.0), ..pool.clone() },
+            Props { animated_emissive: true, ..pool.clone() },
+            Props { external_emittance: true, ..pool.clone() },
+        ] {
+            assert_eq!(shape_emissive_rule(&other, AlphaMode::Opaque).w, 0.0);
         }
     }
 

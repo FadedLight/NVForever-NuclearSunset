@@ -13,6 +13,10 @@ impl LayerSet {
         self.0[(layer / 64) as usize] |= 1 << (layer % 64);
     }
 
+    pub fn remove(&mut self, layer: u8) {
+        self.0[(layer / 64) as usize] &= !(1 << (layer % 64));
+    }
+
     pub fn contains(&self, layer: u8) -> bool {
         self.0[(layer / 64) as usize] & (1 << (layer % 64)) != 0
     }

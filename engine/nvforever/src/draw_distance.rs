@@ -16,6 +16,11 @@
 //! - **Shadows**: `--shadow-distance` (the sun's shadow cascades end at the slider's part
 //!   of it).
 //! - **Grass**: `--grass-distance` and `--grass-fade-range` together.
+//! - **Distant trees**: `--tree-distance` (fTreeLoadDistance, the billboards beyond the
+//!   loaded cells, `treelod.rs`); 0% draws none [design: owner 2026-11-20, the distances were
+//!   on the command line only]. A change chooses the billboards' cells again at once (they
+//!   are built again over the next frames) and is kept in `Args`, which a new worldspace's
+//!   LOD is made from (`worldspace.rs`).
 //!
 //! How it culls: Bevy's visibility range, which cell fades (`fade.rs`) and door fades
 //! (`door_fade.rs`) already give every streamed mesh. A mesh at rest (fully faded in)
@@ -78,6 +83,9 @@ pub struct DrawDistances {
     pub shadow_full: f32,
     /// `--grass-distance` and `--grass-fade-range`.
     pub grass_full: (f32, f32),
+    /// The distant trees' slider (0 to 1: 0 draws none) and `--tree-distance`.
+    pub trees: f32,
+    pub tree_full: f32,
 }
 
 impl DrawDistances {
@@ -91,6 +99,8 @@ impl DrawDistances {
             reach: full_reach(args.radius),
             shadow_full: args.shadow_distance.max(0.0),
             grass_full: (args.grass_distance.max(0.0), args.grass_fade_range.max(0.0)),
+            trees: 1.0,
+            tree_full: args.tree_distance.max(0.0),
         }
     }
 
@@ -286,6 +296,36 @@ pub fn set_grass(world: &mut World, v: f32) {
     g.fade_range = range * v;
 }
 
+/// How far distant trees are drawn at slider part `v` of `full` (`--tree-distance`), game
+/// units: 0 draws none (`treelod.rs`).
+pub fn tree_distance(full: f32, v: f32) -> f32 {
+    full.max(0.0) * v.clamp(0.0, 1.0)
+}
+
+/// Distant trees are drawn out to `v` of `--tree-distance` from now (module notes): kept in
+/// `Args` for the next worldspace's LOD, and the billboards' cells chosen again at once (the
+/// ones drawn go and are built again over the next frames, `treelod::update_distant_trees`).
+pub fn set_trees(world: &mut World, v: f32) {
+    let dist = {
+        let mut d = world.resource_mut::<DrawDistances>();
+        d.trees = v;
+        tree_distance(d.tree_full, v)
+    };
+    if let Some(mut args) = world.get_resource_mut::<Args>() {
+        args.tree_distance = dist;
+    }
+    if !world.contains_resource::<crate::lod::LodState>() {
+        return;
+    }
+    world.resource_scope(|world, mut lod: Mut<crate::lod::LodState>| {
+        if lod.settings.trees != dist {
+            lod.settings.trees = dist;
+            lod.trees.clear(&mut world.commands());
+        }
+    });
+    world.flush();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,7 +353,23 @@ mod tests {
     }
 
     fn distances() -> DrawDistances {
-        DrawDistances { objects: 1.0, actors: 0.5, items: 0.25, shadows: 1.0, grass: 1.0, reach: full_reach(2), shadow_full: 8000.0, grass_full: (7000.0, 1000.0) }
+        DrawDistances { objects: 1.0, actors: 0.5, items: 0.25, shadows: 1.0, grass: 1.0, reach: full_reach(2), shadow_full: 8000.0, grass_full: (7000.0, 1000.0), trees: 1.0, tree_full: 40_000.0 }
+    }
+
+    /// The distant trees' slider: a part of `--tree-distance`, 0 none [design: owner
+    /// 2026-11-20].
+    #[test]
+    fn the_tree_slider_is_a_part_of_the_command_lines_distance() {
+        assert_eq!(tree_distance(40_000.0, 1.0), 40_000.0, "100%: as before the slider");
+        assert_eq!(tree_distance(40_000.0, 0.5), 20_000.0);
+        assert_eq!(tree_distance(40_000.0, 0.0), 0.0, "0%: none");
+        assert_eq!(tree_distance(40_000.0, 1.5), 40_000.0, "never past the command line's");
+        assert_eq!(tree_distance(-1.0, 0.5), 0.0);
+        // Without the LOD or Args (a run with neither): the slider's part is still kept.
+        let mut w = World::new();
+        w.insert_resource(distances());
+        set_trees(&mut w, 0.25);
+        assert_eq!(w.resource::<DrawDistances>().trees, 0.25);
     }
 
     #[test]

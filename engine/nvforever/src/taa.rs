@@ -222,7 +222,16 @@ fn prepare(
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
     views: Query<(Entity, &ExtractedView, &Msaa, &TemporalAa, Option<&ViewPrepassTextures>)>,
+    stale: Query<Entity, (With<TaaView>, Without<TemporalAa>)>,
 ) {
+    // A camera whose TAA was turned off (the anti-aliasing choice, or an upscaler taking
+    // over in `graphics::apply`) keeps its render entity: drop its pass state, or
+    // `taa_pass` keeps blending the frozen history of the last TAA frame into every frame.
+    // [observed: upstream issue #2955, a faint still picture over the view after switching
+    // to FSR or DLSS in game, gone after a save load.]
+    for entity in &stale {
+        commands.entity(entity).remove::<TaaView>();
+    }
     let mut seen = Vec::new();
     for (entity, view, msaa, taa, prepass) in &views {
         seen.push(entity);
@@ -280,7 +289,7 @@ fn prepare(
 
 /// This frame blended into the history: into the picture and into the next history.
 pub(crate) fn taa_pass(
-    view: ViewQuery<(&ViewTarget, &TaaView, &ViewPrepassTextures, &Msaa)>,
+    view: ViewQuery<(&ViewTarget, &TaaView, &ViewPrepassTextures, &Msaa), With<TemporalAa>>,
     pipelines: Res<TaaPipelines>,
     cache: Res<PipelineCache>,
     device: Res<RenderDevice>,

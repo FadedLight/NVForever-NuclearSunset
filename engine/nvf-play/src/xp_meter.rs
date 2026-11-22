@@ -108,6 +108,9 @@ const LEVEL_UP_SECONDS: f32 = 2.0 * LEVEL_UP_FADE + LEVEL_UP_HOLD;
 /// From the level-up sound to the level-up menu, counted while the HUD is up [owner,
 /// 2026-10-24: "play this sound then wait 5 seconds before showing the level up screen"].
 pub const LEVEL_UP_DELAY: f32 = 5.0;
+/// Seconds (HUD up, out of menus) that actors still searching for the player hold the
+/// level-up menu after the fight has settled (`level_up`) [design, issue #3030].
+pub const MAX_SEARCH_HOLD: f32 = 60.0;
 /// The level-up sound, when the bar is filled [owner, 2026-10-24: "when the xp bar is
 /// filled it should play the ui_leveluptext.wav"; observed: SOUN `UILevelUpText` names it].
 const LEVEL_UP_SOUND: &str = "UILevelUpText";
@@ -369,6 +372,7 @@ fn level_up(
     mut since_sound: Local<Option<f32>>,
     mut waiting: Local<usize>,
     tweaks: Option<Res<crate::tweaks::TweakSettings>>,
+    mut settled_for: Local<f32>,
 ) {
     let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) else {
         *since_sound = None;
@@ -419,10 +423,23 @@ fn level_up(
         }
         *waiting = hunters;
     }
-    if hunters > 0 || after.is_some_and(|a| !a.settled()) {
+    let settled = after.is_none_or(|a| a.settled());
+    if !settled {
+        *settled_for = 0.0;
         return;
     }
+    *settled_for += time.delta_secs();
+    // Searchers hold the menu only so long once the fight is over: a search that never
+    // ends must not keep a level from the player for good [design, upstream issue #3030:
+    // "CAnt level up stuck at level 1 xp 466/200"].
+    if hunters > 0 && *settled_for < MAX_SEARCH_HOLD {
+        return;
+    }
+    if hunters > 0 {
+        info!("xp: level up taken with {hunters} actors still searching ({MAX_SEARCH_HOLD:.0} s after the fight settled)");
+    }
     *since_sound = None;
+    *settled_for = 0.0;
     let (level, max) = with_world(rt, &mut sim, |rt| (experience::level_up(&mut rt.game), experience::max_level(&rt.game)));
     info!("xp: level up taken: level {level} (cap {max})");
 }

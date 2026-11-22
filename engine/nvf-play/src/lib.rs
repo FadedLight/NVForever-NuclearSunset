@@ -98,6 +98,9 @@ pub mod poker;
 pub mod menu;
 pub mod menu_shapes;
 pub mod mod_log;
+pub mod bug_hunt;
+pub mod bug_log;
+pub mod mod_list;
 pub mod gas_traps;
 pub mod grass_fire;
 pub mod mines;
@@ -430,6 +433,9 @@ impl Plugin for PlayPlugin {
             .add_plugins(poker::PokerPlugin)
             .add_plugins((crime::CrimePlugin, reputation::ReputationPlugin, knockouts::KnockoutsPlugin, after_combat::AfterCombatPlugin))
             .add_plugins(console::ConsolePlugin)
+            .add_plugins(mod_list::ModListPlugin)
+            .add_plugins(bug_log::BugLogPlugin)
+            .add_plugins(bug_hunt::BugHuntPlugin)
             .add_plugins(editor::EditorPlugin)
             .add_plugins(location_markers::LocationMarkersPlugin)
             .add_plugins(collision_view::CollisionViewPlugin)

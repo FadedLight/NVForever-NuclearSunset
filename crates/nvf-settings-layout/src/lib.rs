@@ -208,7 +208,27 @@ pub const SECTIONS: &[Section] = &[
     section("Graphics", Some("Shadows"), &["sun-shadows", "shadow-filter", "shadow-resolution", "shadow-distance", "fine-shadows", "cloud-shadows", "terrain-shadows"]),
     section("Graphics", Some("Lighting and Effects"), &["ambient-occlusion", "light-shafts", "heat-haze", "desert-haze", "bloom", "grade", "glow", "eye-adaptation", "neon-glow"]),
     section("Graphics", Some("Water"), &["water-reflections", "water-mirror"]),
-    section("Graphics", Some("Detail and Distance"), &["distant-lod", "grass", "anisotropic", "terrain-height-blend", "terrain-anti-tiling", "mesh-terrain-blend", "smooth-terrain", "object-distance", "actor-distance", "item-distance", "grass-distance"]),
+    // The Texture size limit (the GPU memory budget's cap) beside the other list, and the
+    // distant trees' slider after the other distances [design: owner 2026-11-20].
+    section(
+        "Graphics",
+        Some("Detail and Distance"),
+        &[
+            "distant-lod",
+            "grass",
+            "anisotropic",
+            "terrain-height-blend",
+            "terrain-anti-tiling",
+            "mesh-terrain-blend",
+            "texture-size-limit",
+            "smooth-terrain",
+            "object-distance",
+            "actor-distance",
+            "item-distance",
+            "grass-distance",
+            "tree-distance",
+        ],
+    ),
     section("Graphics", Some("World and Animation"), &["head-tracking", "foot-ik", "sky-clock"]),
     // The owner's own layout of the movement work (tech/movement-inertia, 2026-11-15).
     section(NVF_FEATURES_TAB, Some("Advanced Movement"), &["advanced-movement", "movement-weight"]),
@@ -587,6 +607,9 @@ pub const SECTIONS: &[Section] = &[
             "tweak-no-chem-wore-off",
             "tweak-no-explosion-blur",
             "tweak-no-interior-fog",
+            // NVForever's own, after its interior one [design: owner 2026-11-20, "there is just
+            // too much fog"].
+            "tweak-outdoor-fog-distance",
             "tweak-scale-explosion-shake",
             "tweak-explosion-shake",
             "tweak-shift-screenshot-hides",
@@ -823,7 +846,9 @@ pub const SECTIONS: &[Section] = &[
     group_section(
         "Cheats",
         "Travel, Rest and Skills",
-        &["tweak-console-homes", "tweak-fast-travel-enemies", "tweak-god-mode-free-crafting", "tweak-reallocate-skill-points", "tweak-sleep-in-owned-beds", "tweak-wait-anywhere"],
+        // No Invisible Walls is NVForever's own [design: owner 2026-11-20, "remove any barriers
+        // in the games"].
+        &["tweak-console-homes", "tweak-fast-travel-enemies", "tweak-god-mode-free-crafting", "tweak-reallocate-skill-points", "tweak-sleep-in-owned-beds", "tweak-wait-anywhere", "tweak-no-invisible-walls"],
     ),
     // Tweaks > Misc.
     group_section(
@@ -925,7 +950,8 @@ pub const SECTIONS: &[Section] = &[
             "tweak-region-borders-message-only",
         ],
     ),
-    section("Debug", None, &["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "scope-3d"]),
+    // Show collision: the console's tcg as a row [design: owner 2026-11-20].
+    section("Debug", None, &["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "collision-view", "scope-3d"]),
 ];
 
 /// Rows that cannot apply while another row is off: (the row, the row it needs, why), the
@@ -951,6 +977,7 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("eye-adaptation", "glow", "Needs Light Glow (HDR)."),
     ("neon-glow", "glow", "Needs Light Glow (HDR)."),
     ("grass-distance", "grass", "Needs Grass."),
+    ("tree-distance", "distant-lod", "Needs Distant Terrain and Objects."),
     ("fps-counter-fps", "fps-counter", "Needs the Frame Rate Counter."),
     ("fps-counter-graph", "fps-counter", "Needs the Frame Rate Counter."),
     ("fps-counter-split", "fps-counter", "Needs the Frame Rate Counter."),

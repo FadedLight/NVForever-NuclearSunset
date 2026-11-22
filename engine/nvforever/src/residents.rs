@@ -1207,6 +1207,42 @@ fn recently_loaded(loaded_at: &HashMap<FormId, f64>, now: f64) -> HashSet<FormId
     loaded_at.iter().filter(|(_, at)| now - **at <= RECENTLY_LOADED_HOURS).map(|(a, _)| *a).collect()
 }
 
+/// Where a load door of the loaded cells (`key`, in worldspace `world`) leads, for the
+/// residents ([`Core::take_cells`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BeyondDoor {
+    /// An interior other than `key` (the original's Mid-Low level).
+    Interior(FormId),
+    /// The exterior cell of another worldspace the door lands in (TTW's Oasis gate, #3052).
+    OtherWorld(FormId),
+}
+
+fn beyond_door(refs: &RefTable, world: u32, key: CellKey, tp: &fnv_sim::refs::Teleport) -> Option<BeyondDoor> {
+    let c = refs.teleport_cell(tp)?;
+    match refs.world_of(c) {
+        None => (key != CellKey::Interior(c.0)).then_some(BeyondDoor::Interior(c)),
+        Some(w) if w.0 != world => Some(BeyondDoor::OtherWorld(c)),
+        // The same worldspace: its cells join when they load.
+        Some(_) => None,
+    }
+}
+
+/// The persistent actors of exterior cell `cell` (a worldspace's persistent references
+/// are filed under the exterior cell containing them, `RefTable::from_index`). Only
+/// persistent ones: the original keeps them in memory wherever they are, so they have a
+/// Low process [documented: GECK wiki (JIP) GetActorsByProcessingLevel, Low "everyone
+/// else"; hypothesis: that this includes a persistent actor of an unloaded worldspace];
+/// an unloaded cell's temporary actors are not handed over.
+fn persistent_actors_in(refs: &RefTable, cell: FormId) -> Vec<FormId> {
+    refs.by_cell
+        .get(&cell)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(|r| is_actor(refs, *r) && refs.get(*r).is_some_and(|p| p.in_persistent_group || p.flags & fnv_sim::refs::FLAG_PERSISTENT != 0))
+        .collect()
+}
+
 /// The interiors a load door of the loaded cells leads into (the original's Mid-Low
 /// level, as `Core::take_cells` finds them).
 fn interiors_behind_doors(world: &WorldData, streamer: &Streamer, refs: &RefTable) -> HashSet<u32> {
@@ -1674,11 +1710,16 @@ impl Core {
                 CellKey::Interior(id) => (world.index.cells.get(&id), None),
             };
             let mut behind_doors = Vec::new();
+            let mut other_worlds = Vec::new();
             for r in cell.into_iter().flat_map(|c| c.refs.iter()).chain(persistent.into_iter().flatten()) {
                 if is_actor(refs, FormId(*r)) {
                     self.add(refs, FormId(*r), None);
                 } else if let Some(tp) = refs.get(FormId(*r)).and_then(|d| d.teleport.as_ref()) {
-                    behind_doors.extend(refs.teleport_cell(tp).filter(|c| refs.world_of(*c).is_none() && key != CellKey::Interior(c.0)));
+                    match beyond_door(refs, world.world, key, tp) {
+                        Some(BeyondDoor::Interior(c)) => behind_doors.push(c),
+                        Some(BeyondDoor::OtherWorld(c)) => other_worlds.push(c),
+                        None => {}
+                    }
                 }
             }
             // The original's Mid-Low level: the actors of the interiors reached by doors
@@ -1695,6 +1736,22 @@ impl Core {
                 if self.list.len() > had {
                     let names: Vec<&str> = self.list[had..].iter().map(|r| r.label.as_str()).collect();
                     info!("ai: {} behind a door from the loaded cells, in {}: {}", names.len(), c.edid.as_deref().unwrap_or("an interior"), names.join(", "));
+                }
+            }
+            // Through a load door into another worldspace (#3052: TTW's Oasis gate, whose
+            // Birch must walk out to MS10BirchGreetsMarker): the persistent actors of the
+            // cell the door lands in, at the Low level, once, as that cell's own would be
+            // if it loaded. One cell per door, so a few actors, not a worldspace's all.
+            for c in other_worlds {
+                let had = self.list.len();
+                for r in persistent_actors_in(refs, c) {
+                    self.add(refs, r, None);
+                }
+                if self.list.len() > had {
+                    let names: Vec<&str> = self.list[had..].iter().map(|r| r.label.as_str()).collect();
+                    let space = refs.world_of(c).map_or(0, |w| w.0);
+                    let cell_name = world.index.cells.get(&c.0).and_then(|c| c.edid.as_deref()).unwrap_or("an exterior cell");
+                    info!("ai: {} behind a load door into worldspace {space:08X}, in {cell_name}: {}", names.len(), names.join(", "));
                 }
             }
         }
@@ -3787,7 +3844,7 @@ fn drawn_twice<K: Copy>(bodies: impl IntoIterator<Item = (u32, K, [f32; 3])>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{carries_cell, drawn_twice, level_for, newly_loaded, recently_loaded, RunEnd, StopRun, RECENTLY_LOADED_HOURS};
+    use super::{beyond_door, carries_cell, drawn_twice, level_for, newly_loaded, persistent_actors_in, recently_loaded, BeyondDoor, RunEnd, StopRun, RECENTLY_LOADED_HOURS};
     use crate::world::CellKey;
     use fnv_ai::ProcessLevel;
     use fnv_sim::FormId;
@@ -3826,6 +3883,59 @@ mod tests {
         // An interior and back to the same worldspace.
         assert_eq!(newly_loaded(&mut seen, &mut world, NORTH, [CellKey::Interior(0x0010_E03B)].into()), vec![CellKey::Interior(0x0010_E03B)]);
         assert_eq!(newly_loaded(&mut seen, &mut world, NORTH, squares(&[(1, 0), (2, 0)])).len(), 2);
+    }
+
+    /// #3052: the Oasis gate (TTW) is a load door from the Capital Wasteland into the
+    /// Oasis worldspace. Its far side is handed over: Birch, persistent in the cell the
+    /// door lands in, joins; a temporary actor there does not; a door into the loaded
+    /// worldspace itself adds nothing, and interiors stay as they were. FormIDs of the
+    /// Oasis side as in the NS load order [observed: `fnvtool world refs --world Oasis`,
+    /// `esm decode` of 0x060A2433]; the Wasteland cell and the interior are made up.
+    #[test]
+    fn a_load_door_into_another_worldspace_hands_over_the_persistent_actors_beyond_it() {
+        use fnv_sim::refs::{PlacedRef, Teleport};
+        use fnv_sim::RefTable;
+        const WASTELAND: u32 = 0x0607_EA1F;
+        const OASIS: u32 = 0x060A_0C2B;
+        const OASIS_CELL: u32 = 0x060A_0C35; // OasisCell01, grid (-3, 28)
+        const WASTE_CELL: u32 = 0x0000_7001; // made up: Wasteland (-3, 28)
+        const INTERIOR: u32 = 0x0000_7002; // made up
+        const OASIS_DOOR: u32 = 0x060A_2432; // OasisDoorToWasteland
+        const BIRCH: u32 = 0x0602_A2C5; // MS10BirchRef, persistent
+        const TEMP: u32 = 0x0000_7003; // made up: a temporary actor in the same cell
+        let placed = |id: u32, sig: &[u8; 4], cell: u32, persistent: bool, pos: [f32; 3]| PlacedRef {
+            id: FormId(id), sig: *sig, edid: None, base: FormId(1), cell: Some(FormId(cell)), stored_in: Some(FormId(cell)), plugin: 0,
+            flags: if persistent { fnv_sim::refs::FLAG_PERSISTENT } else { 0 }, in_persistent_group: persistent, pos, rot: [0.0; 3],
+            scale: None, count: None, ammo: None, health: None, owner: None, lock: None, teleport: None, enable_parent: None, linked: None,
+            patrol_idle: None, patrol_topic: None, merchant_container: None, marker_reputation: None, open_by_default: false, primitive: None,
+            activate_parents: Vec::new(), parent_activate_only: false, prompt: None, radiation: None, radius: None, encounter_zone: None,
+            level_modifier: None, map_marker: None, radio: None,
+        };
+        let mut refs = RefTable::default();
+        refs.cell_world.insert(FormId(OASIS_CELL), FormId(OASIS));
+        refs.cell_world.insert(FormId(WASTE_CELL), FormId(WASTELAND));
+        refs.world_grid.insert(FormId(OASIS), [((-3, 28), FormId(OASIS_CELL))].into());
+        refs.world_grid.insert(FormId(WASTELAND), [((-3, 28), FormId(WASTE_CELL))].into());
+        for r in [
+            placed(OASIS_DOOR, b"REFR", OASIS_CELL, true, [-9852.8, 117007.5, 18115.4]),
+            placed(BIRCH, b"ACHR", OASIS_CELL, true, [-8668.9, 115603.5, 17961.0]),
+            placed(TEMP, b"ACHR", OASIS_CELL, false, [-8700.0, 115700.0, 17960.0]),
+            placed(0x0000_7004, b"REFR", INTERIOR, false, [0.0; 3]),
+        ] {
+            refs.by_cell.entry(r.cell.unwrap()).or_default().push(r.id);
+            refs.refs.insert(r.id, r);
+        }
+        // WastelandDoorToOasis's XTEL: OasisDoorToWasteland, landing at (-9784.8, 116970.3).
+        let gate = Teleport { door: FormId(OASIS_DOOR), pos: [-9784.8, 116970.25, 17974.3], rot: [0.0; 3], no_alarm: false };
+        let here = CellKey::Exterior((-3, 28));
+        assert_eq!(beyond_door(&refs, WASTELAND, here, &gate), Some(BeyondDoor::OtherWorld(FormId(OASIS_CELL))));
+        assert_eq!(persistent_actors_in(&refs, FormId(OASIS_CELL)), vec![FormId(BIRCH)], "Birch, not the temporary actor");
+        // Standing in the Oasis itself, the same door adds nothing: its cells load.
+        assert_eq!(beyond_door(&refs, OASIS, here, &gate), None);
+        // Interiors as before, the interior one stands in excepted.
+        let inside = Teleport { door: FormId(0x0000_7004), pos: [0.0; 3], rot: [0.0; 3], no_alarm: false };
+        assert_eq!(beyond_door(&refs, WASTELAND, here, &inside), Some(BeyondDoor::Interior(FormId(INTERIOR))));
+        assert_eq!(beyond_door(&refs, WASTELAND, CellKey::Interior(INTERIOR), &inside), None);
     }
 
     /// #2461: a reference with two bodies is reported with both, one with one body is

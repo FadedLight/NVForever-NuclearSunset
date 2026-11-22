@@ -135,6 +135,9 @@ mod pipboy_ready;
 mod player_body;
 mod stealth_field;
 mod stray_commands;
+mod nvr_look;
+mod height_fog;
+mod cinema;
 mod post;
 mod quality;
 mod quality_probe;
@@ -1131,6 +1134,17 @@ fn main() -> AppExit {
             }
             None => (l.mod_archives(), false),
         };
+        // An archive an active plugin's name claims is mounted anyway (`fnv_vfs`'s plugin
+        // archives: `<stem>.bsa`, `<stem> - *`, `<stem>N…`, `<stem> *`), so it is no warning.
+        let stems: Vec<String> = l.profile_plugins().unwrap_or_default().iter().map(|p| p.rsplit_once('.').map_or(p.as_str(), |(s, _)| s).to_ascii_lowercase()).collect();
+        let claimed = |a: &str| {
+            let a = a.to_ascii_lowercase();
+            stems.iter().any(|s| a.strip_prefix(s.as_str()).is_some_and(|r| {
+                let r = r.trim_start_matches(|c: char| c.is_ascii_digit());
+                r == ".bsa" || r.starts_with(' ')
+            }))
+        };
+        let archives: Vec<String> = archives.into_iter().filter(|a| !claimed(a)).collect();
         if !archives.is_empty() {
             let shown: Vec<&str> = archives.iter().take(5).map(String::as_str).collect();
             eprintln!(

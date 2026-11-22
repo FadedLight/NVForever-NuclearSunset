@@ -186,6 +186,12 @@ pub mod ended {
     pub const CUT: &str = "cut";
 }
 
+/// The special topic an actor says when a speech challenge fails (Fallout 3 and New
+/// Vegas masters both have one named so) [documented: GECK wiki, Topics Tab].
+fn is_speech_failure(edid: &str) -> bool {
+    edid.eq_ignore_ascii_case("SpeechChallengeFailure")
+}
+
 /// Whether a New Vegas Speech check passes: the player's level against the needed
 /// one, when the line's condition tests Speech (`None` for other skills, perks and
 /// lines without the numbers).
@@ -1109,6 +1115,14 @@ impl<'a> Game<'a> {
             if link.from.is_some() && dv.topic(&topic).is_none_or(|d| d.topic_type != crate::data::topic_type::TOPIC) {
                 continue;
             }
+            // SpeechChallengeFailure is what an actor says when a speech challenge fails
+            // [documented: GECK wiki, Topics Tab], not a player choice: its lines' Link From
+            // names the challenge's topic, which made it an entry labelled with its own name.
+            // [observed: upstream issue #3024, TTW Megaton, Lucas Simms; Fallout3.esm has 74
+            // such lines.] Until the failure roll is modelled it is never offered.
+            if link.from.is_some() && dv.topic(&topic).is_some_and(|d| d.edid.as_deref().is_some_and(is_speech_failure)) {
+                continue;
+            }
             let player_line = |d: &InfoDef| link.from.is_none() || d.info_type == crate::data::topic_type::TOPIC;
             let found = match link.from {
                 None => self.select_choice_line(actor, listener, topic, player_line),
@@ -1678,6 +1692,13 @@ mod list_order_tests {
     }
 
     use super::ListKey;
+
+    #[test]
+    fn the_speech_failure_topic_is_known_by_name() {
+        assert!(super::is_speech_failure("SpeechChallengeFailure"));
+        assert!(super::is_speech_failure("speechchallengefailure"));
+        assert!(!super::is_speech_failure("MegTownFatherChoice"));
+    }
 
     #[test]
     fn priority_then_newest_learned_then_record_order() {

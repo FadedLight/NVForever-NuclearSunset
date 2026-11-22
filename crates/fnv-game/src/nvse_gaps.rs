@@ -1215,11 +1215,17 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // 0-7 DATA, 8-16 the lighting template inherit flags (LNAM bits 0-8)
         // [documented: the page's table; hypothesis: LNAM's order]; SetCellFlag's change
         // first (`crate::nvse_jip8`).
+        // A cell only: any other form reads 0, as SetCellFlag ignores one. A worldspace's
+        // DATA is its own flags (bit 0 Small World), not a cell's, and Desert Natural
+        // Weathers passes one on purpose (`Call DNWeathersOnCellEnterSCRIPT TestMap01` on
+        // load) expecting "not interior" [documented: the page's parameter is a cell;
+        // observed: reading WRLD DATA set its PlayerIsInInterior and looped its snow
+        // script's clean-up; hypothesis: the original's 0 for a non-cell].
         "getcellflag" => {
-            let c = form(args, 0).unwrap_or(FormId(0));
+            let c = form(args, 0).filter(|&c| g.data.sig(c) == Some(*b"CELL"));
             let k = num(args, 1, -1.0);
             let (sub, k) = if k >= 8.0 { ("LNAM", k - 8.0) } else { ("DATA", k) };
-            let flags = crate::nvse::record_value(g, c, sub, "").and_then(|v| v.num().ok()).unwrap_or(0.0);
+            let flags = c.and_then(|c| crate::nvse::record_value(g, c, sub, "")).and_then(|v| v.num().ok()).unwrap_or(0.0);
             bit(flags, k)
         }
         // XCIM [observed: gaps4, Doc's house 0001507A].

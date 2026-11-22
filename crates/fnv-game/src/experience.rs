@@ -238,6 +238,10 @@ pub fn hunters(g: &Game) -> usize {
         .actors
         .iter()
         .filter(|(id, a)| a.state.in_combat() && !g.is_dead(**id) && (a.targets.contains_key(&me) || a.alarms.iter().any(|x| x.owner == me)))
+        // Only actors still about: one left behind in a cell that was let go keeps its
+        // awareness but hunts nobody [observed: upstream issue #3030, "level up waits: 3
+        // actors fighting or searching" after "the fight is over", then no level-up].
+        .filter(|(id, _)| g.present(**id) && g.cell_of(**id).is_some_and(|c| g.loaded_cells.contains(&c)))
         .count()
 }
 

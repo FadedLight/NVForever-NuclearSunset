@@ -405,7 +405,13 @@ fn fragment(
         @if(!TERRAIN_HEIGHT_BLEND && !TERRAIN_ANTI_TILING) {
             for (var k = 0u; k < min(counts.x, 6u); k += 1u) {
                 let texel = layer_diffuse(k, in.instance_index, uv);
-                let share = saturate(opacity[k]) * texel.a;
+                // The painted opacity alone: a landscape diffuse's alpha is not a blend mask.
+                // Nuclear Sunset's DXT5 landscape textures carry other data there (0.41 on
+                // average in RockCanyonRubbleDirt01, "NS C NSALVO T 11.bsa"), which hid
+                // their layers and left a hard seam where one quadrant's base meets the
+                // neighbour's layer of it [observed 2026-11-21, Goodsprings NW/NE edge;
+                // hypothesis: the original ignores it as vanilla DXT1 textures have none].
+                let share = saturate(opacity[k]);
                 var layer_n = plain;
                 @if(VERTEX_TANGENTS) if (counts.y & (1u << k)) != 0u {
                     layer_n = apply_normal_mapping(standard.flags, tbn, false, is_front, layer_normal(k, in.instance_index, uv));
@@ -428,7 +434,8 @@ fn fragment(
             for (var k = 0u; k < n; k += 1u) {
                 let texel = layer_diffuse(k, in.instance_index, uv);
                 texels[k] = texel;
-                paint[k] = saturate(opacity[k]) * texel.a;
+                // The painted opacity alone (see the plain path above).
+                paint[k] = saturate(opacity[k]);
                 @if(VERTEX_TANGENTS) if (counts.y & (1u << k)) != 0u {
                     layer_n[k] = apply_normal_mapping(standard.flags, tbn, false, is_front, layer_normal(k, in.instance_index, uv));
                 }

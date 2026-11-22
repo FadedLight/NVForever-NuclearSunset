@@ -38,6 +38,7 @@ const BPTD2: u32 = 0xA15;
 const CELL: u32 = 0xA16;
 const WATR: u32 = 0xA17;
 const WATR2: u32 = 0xA18;
+const WRLD: u32 = 0xA19;
 
 fn f32b(v: f32) -> Vec<u8> {
     v.to_le_bytes().to_vec()
@@ -133,6 +134,8 @@ fn plugin_bytes() -> Vec<u8> {
         edid(b"WATR", WATR2, "TestWater2", &[sub(b"DATA", vec![0, 0])]),
     ]
     .concat();
+    // A worldspace with DATA bit 0 (Small World), as FalloutNV.esm's TestMap01.
+    let wrld = edid(b"WRLD", WRLD, "TestWorld", &[sub(b"DATA", vec![0x01])]);
     [
         tes4(),
         top(b"NPC_", &npcs),
@@ -151,6 +154,7 @@ fn plugin_bytes() -> Vec<u8> {
         top(b"BPTD", &bptd),
         top(b"CELL", &group(0i32.to_le_bytes(), 2, &group(0i32.to_le_bytes(), 3, &cell))),
         top(b"WATR", &watr),
+        top(b"WRLD", &wrld),
     ]
     .concat()
 }
@@ -390,6 +394,10 @@ fn cells_and_water() {
     q(&mut g, "SetCellFlag TestCell 4 1");
     assert_eq!(n(&mut g, "GetCellFlag TestCell 4"), 1.0);
     assert_eq!((n(&mut g, "GetCellFlag TestCell 1"), n(&mut g, "GetCellFlag TestCell 5"), n(&mut g, "GetCellFlag TestCell 16")), (0.0, 1.0, 1.0));
+    // Not a cell: a worldspace's own DATA (Small World) is not the interior bit, nor is a
+    // water's DATA anything [hypothesis: 0, as SetCellFlag ignores a non-cell; Desert
+    // Natural Weathers' load block passes TestMap01 and expects "not interior"].
+    assert_eq!((n(&mut g, "GetCellFlag TestWorld 0"), n(&mut g, "GetCellFlag TestWater 0")), (0.0, 0.0));
     // Water form and effect, read by GetCellWaterForm and GetWaterFormEffect.
     assert_eq!(n(&mut g, "GetCellWaterForm TestCell"), f64::from(WATR));
     q(&mut g, "SetCellWaterForm TestCell TestWater2");

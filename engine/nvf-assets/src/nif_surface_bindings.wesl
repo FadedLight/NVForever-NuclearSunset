@@ -37,8 +37,10 @@ struct NifSurface {
     // refraction); 0: it does not move.
     fire_period: f32,
     // x 1 skips the image-space emissive scale; y holds each channel on the soft path
-    // (0: no hold); z, w unused [hypothesis, nif.md §6 "Unlit shapes that are pictures,
-    // and cut-out signs"]. Same fields in the same order as NifSurfaceUniform.
+    // (0: no hold); z an unlit shape's vertex colours are display values; w 1: a lit
+    // shape's emitted light only fills it up to its surface colour (nif_spawn.rs
+    // `shape_emissive_rule`) [hypothesis, nif.md §6 "Unlit shapes that are pictures,
+    // and cut-out signs", "Emissive light"]. Same fields in the same order as NifSurfaceUniform.
     emissive_rule: vec4<f32>,
     // Holes: x the value (alpha units, negative: no holes), y the edge band's width.
     holes: vec4<f32>,
@@ -538,7 +540,9 @@ struct NifSurface {
         } else {
             texel = detail_sample(instance_index, pair, diffuse_sampler, uv, ddx, ddy);
         }
-        let share = o * texel.a;
+        // The painted opacity alone, as terrain.wesl: a landscape diffuse's alpha is not a
+        // blend mask (Nuclear Sunset's DXT5 landscape textures carry other data there).
+        let share = o;
         if share == 0.0 {
             continue;
         }

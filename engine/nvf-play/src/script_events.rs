@@ -46,7 +46,15 @@ pub enum ScriptEffect {
     /// OnActivate blocks end in `Activate` on every branch [observed: FalloutNV.esm SCPT
     /// 0x001746C1 on Lucky38MrHouseTerminal]; before, nothing opened (#1532).
     OpenTerminal(u32),
+    /// Caps a script gave the player with the "added" line shown: their pick-up sound, as
+    /// caps taken by hand (`crate::world_sounds`) [observed: upstream issue #3095, caps
+    /// from a container play `ITMBottlecapsUp`, script-given ones played nothing;
+    /// hypothesis: the original plays it].
+    ItemSound(FormId),
 }
+
+/// Caps (the base game's Caps001).
+const CAPS: FormId = FormId(0xF);
 
 /// A short line for the top left of the view (`crate::corner_messages`). A message
 /// record's line has the record's icon and time; the others have neither.
@@ -387,7 +395,7 @@ pub fn effects(events: &[Event], skip: &BTreeSet<usize>, ctx: &dyn EffectCtx) ->
             EventKind::QuestCompleted { quest } => out.extend(ctx.quest_title(*quest).map(|n| ScriptEffect::Quest(QuestNotice::Completed(n)))),
             EventKind::QuestFailed { quest } => out.extend(ctx.quest_title(*quest).map(|n| ScriptEffect::Quest(QuestNotice::Failed(n)))),
             // The player's tweak: no line for caps [design: docs/design/tweaks.md].
-            EventKind::ItemAdded { to, item: FormId(0xF), silent: false, .. } if *to == player && ctx.tweaks().is_some_and(|t| t.no_caps_added_message) => {}
+            EventKind::ItemAdded { to, item: CAPS, silent: false, .. } if *to == player && ctx.tweaks().is_some_and(|t| t.no_caps_added_message) => {}
             EventKind::ItemAdded { to, item, count, silent: false } if *to == player => match added.iter_mut().find(|(i, _)| i == item) {
                 Some((_, n)) => *n += count,
                 None => added.push((*item, *count)),
@@ -414,6 +422,10 @@ pub fn effects(events: &[Event], skip: &BTreeSet<usize>, ctx: &dyn EffectCtx) ->
     // The player's tweak sets how long these lines stay [design: docs/design/tweaks.md].
     let seconds = ctx.tweaks().map(|t| t.item_added_seconds).filter(|s| *s > 0.0);
     let line = |text: String| ScriptEffect::Notify(Note { text, icon: None, seconds });
+    // Once for the batch (the caps-quiet tweak dropped them above already).
+    if added.iter().any(|(i, _)| *i == CAPS) {
+        out.push(ScriptEffect::ItemSound(CAPS));
+    }
     if added.len() >= MANY {
         let total: i32 = added.iter().map(|(_, n)| n).sum();
         out.push(line(format!("{} items added ({total} in all)", added.len())));
@@ -1049,6 +1061,13 @@ mod tests {
             EventKind::ItemAdded { to: FormId::PLAYER_REF, item: FormId(0x15169), count: 1, silent: true },
         ];
         assert_eq!(run(silent), vec![]);
+        // Caps a script gives: their sound once, then the line (#3095); silent caps: neither.
+        let caps = vec![
+            EventKind::ItemAdded { to: FormId::PLAYER_REF, item: super::CAPS, count: 25, silent: false },
+            EventKind::ItemAdded { to: FormId::PLAYER_REF, item: super::CAPS, count: 5, silent: false },
+        ];
+        assert_eq!(run(caps), vec![ScriptEffect::ItemSound(super::CAPS), ScriptEffect::Notify("form F (30) added".into())]);
+        assert_eq!(run(vec![EventKind::ItemAdded { to: FormId::PLAYER_REF, item: super::CAPS, count: 5, silent: true }]), vec![]);
     }
 
     #[test]

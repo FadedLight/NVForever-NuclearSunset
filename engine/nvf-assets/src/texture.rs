@@ -12,7 +12,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::asset::AssetHandleProvider;
 use fnv_dds::{to_rgba8, Dds, Format};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 /// The interpretation requested by a texture consumer. Linear data is never
@@ -201,6 +201,49 @@ pub fn set_anisotropy(clamp: u16) {
     ANISOTROPY.store(clamp.clamp(1, 16), Ordering::Relaxed);
 }
 
+/// The largest side a texture made from now on keeps; 0: no cap. Set by the GPU memory
+/// budget (nvforever `memory_budget.rs`) when the card's memory runs short.
+static MAX_SIDE: AtomicU32 = AtomicU32::new(0);
+
+/// Cap the side of textures made from now on (0: no cap). Textures already made keep
+/// their size until their cache lets them go.
+pub fn set_max_texture_side(side: u32) {
+    MAX_SIDE.store(side, Ordering::Relaxed);
+}
+
+/// The current cap on a texture's side (0: none).
+pub fn max_texture_side() -> u32 {
+    MAX_SIDE.load(Ordering::Relaxed)
+}
+
+/// How many of a texture's largest mip levels to leave out so that its largest side is at
+/// most `cap`: a file that carries its smaller levels needs no resampling, the next level
+/// down is the same picture at half the size. Never leaves out the last level, and for a
+/// block-compressed texture (`block`) stops before a level whose sides are not multiples of
+/// 4, which the GPU does not take as a block texture's base. `cap` 0: none left out.
+/// [observed 2026-11-20: Nuclear Sunset outdoors at 4K held 7673 MB of a 6085 MB GPU budget
+/// on an 8 GB card and every GPU pass slowed tenfold; most of its textures are 2048-4096
+/// with full mip chains]
+pub fn levels_to_skip(w: u32, h: u32, count: usize, cap: u32, block: bool) -> usize {
+    if cap == 0 {
+        return 0;
+    }
+    let side = |k: usize| ((w >> k).max(1), (h >> k).max(1));
+    let mut k = 0;
+    while k + 1 < count {
+        let (lw, lh) = side(k);
+        if lw.max(lh) <= cap {
+            break;
+        }
+        let (nw, nh) = side(k + 1);
+        if block && (nw % 4 != 0 || nh % 4 != 0) {
+            break;
+        }
+        k += 1;
+    }
+    k
+}
+
 pub fn sampler() -> ImageSampler {
     ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
@@ -229,17 +272,26 @@ pub fn dds_image_top(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Ima
 }
 
 fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
-    crate::guard::guarded(|| dds_image_unguarded(bytes, usage, bc_supported, top_only))
+    let cap = max_texture_side();
+    crate::guard::guarded(|| dds_image_unguarded(bytes, usage, bc_supported, top_only, cap))
 }
 
-fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
+fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool, cap: u32) -> Result<DecodedTexture, String> {
     let srgb = usage == TextureUsage::Color;
     let dds = Dds::parse(bytes).map_err(|e| e.to_string())?;
     if dds.header.is_cubemap() {
         return Err("cube map (not used by the viewer)".into());
     }
-    let (w, h) = (dds.header.width, dds.header.height);
-    let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][..] };
+    // Under a size cap (GPU memory short) the largest levels a file carries are left out
+    // and the texture starts at the first level that fits; `skip` offsets every level's size.
+    let block = matches!(dds.format, Format::Dxt1 | Format::Dxt3 | Format::Dxt5 | Format::Bc5U | Format::Bc5S);
+    let skip = if top_only {
+        0
+    } else {
+        levels_to_skip(dds.header.width, dds.header.height, dds.levels[0].len(), cap, block)
+    };
+    let (w, h) = dds.header.level_dims(skip as u32);
+    let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][skip..] };
     let (format, data) = match dds.format {
         Format::Dxt1 | Format::Dxt3 | Format::Dxt5 => {
             if w % 4 != 0 || h % 4 != 0 {
@@ -247,7 +299,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
                 // (a mod's 179×196 DXT5, dds.md §3) is decoded here instead [#2164].
                 let mut out = Vec::new();
                 for (m, l) in levels.iter().enumerate() {
-                    let (lw, lh) = dds.header.level_dims(m as u32);
+                    let (lw, lh) = dds.header.level_dims((m + skip) as u32);
                     out.extend(fnv_dds::decode_blocks(dds.format, lw, lh, l).ok_or("block data too short")?);
                 }
                 let format = if srgb { TextureFormat::Rgba8UnormSrgb } else { TextureFormat::Rgba8Unorm };
@@ -278,7 +330,7 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
             } else {
                 let mut out = Vec::new();
                 for (m, level) in levels.iter().enumerate() {
-                    let (lw, lh) = dds.header.level_dims(m as u32);
+                    let (lw, lh) = dds.header.level_dims((m + skip) as u32);
                     let pixels = fnv_dds::decode_bc5(dds.format, lw, lh, level).ok_or("invalid BC5 block data")?;
                     for [r, g] in pixels {
                         if usage == TextureUsage::Normal {
@@ -1178,6 +1230,38 @@ pub(crate) mod bc5_tests {
         let mut block = [0; 16]; block[0] = 255;
         let normal = dds_texture(&dds(b"ATI2", 4, 4, 1, &block), TextureUsage::Normal, true, false).unwrap();
         assert_eq!(normal.image.data.as_deref(), Some([255, 0, 128, 255].repeat(16).as_slice()));
+    }
+
+    #[test]
+    fn a_size_cap_leaves_out_the_largest_levels() {
+        // No cap, or already small enough: nothing left out.
+        assert_eq!(levels_to_skip(4096, 4096, 13, 0, true), 0);
+        assert_eq!(levels_to_skip(1024, 1024, 11, 2048, true), 0);
+        // 4096 under a 2048 cap starts one level down; under 1024, two.
+        assert_eq!(levels_to_skip(4096, 4096, 13, 2048, true), 1);
+        assert_eq!(levels_to_skip(4096, 2048, 13, 1024, true), 2);
+        // A file without its smaller levels cannot be shrunk this way.
+        assert_eq!(levels_to_skip(4096, 4096, 1, 1024, true), 0);
+        // Never past the last level.
+        assert_eq!(levels_to_skip(64, 64, 3, 4, false), 2);
+        // A block texture stops before a base whose sides are not multiples of 4.
+        assert_eq!(levels_to_skip(8, 8, 4, 1, true), 1);
+        assert_eq!(levels_to_skip(8, 8, 4, 1, false), 3);
+    }
+
+    #[test]
+    fn a_capped_texture_uploads_from_the_first_level_that_fits() {
+        // BC1: 8 bytes a 4x4 block. 16x16 with three levels: 16 blocks, 4, 1.
+        let payload: Vec<u8> = [vec![1; 16 * 8], vec![2; 4 * 8], vec![3; 8]].concat();
+        let bytes = dds(b"DXT1", 16, 16, 3, &payload);
+        let full = dds_image_unguarded(&bytes, TextureUsage::Color, true, false, 0).unwrap().image;
+        assert_eq!((full.width(), full.height(), full.texture_descriptor.mip_level_count), (16, 16, 3));
+        let capped = dds_image_unguarded(&bytes, TextureUsage::Color, true, false, 8).unwrap().image;
+        assert_eq!((capped.width(), capped.height(), capped.texture_descriptor.mip_level_count), (8, 8, 2));
+        assert_eq!(capped.data.as_deref(), Some([vec![2; 4 * 8], vec![3; 8]].concat().as_slice()));
+        // A font sheet (top level only) is never capped.
+        let top = dds_image_unguarded(&bytes, TextureUsage::Color, true, true, 8).unwrap().image;
+        assert_eq!((top.width(), top.texture_descriptor.mip_level_count), (16, 1));
     }
 
     #[test]

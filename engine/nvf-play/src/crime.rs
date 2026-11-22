@@ -27,7 +27,7 @@ use crate::corner_messages::CornerMessages;
 use crate::lockpick::LockOpened;
 use crate::script::{with_world, ScriptState};
 use crate::script_events::Note as Corner;
-use crate::sfx::PlaySound;
+use crate::sfx::{PlaySound, Sfx};
 use crate::sim::SimState;
 use crate::{PlaySet, RefChanged};
 use bevy::prelude::*;
@@ -166,6 +166,7 @@ fn show_notes(
     corner: Option<ResMut<CornerMessages>>,
     mut sounds: MessageWriter<PlaySound>,
     tweaks: Option<Res<crate::tweaks::TweakSettings>>,
+    sfx: Option<Res<Sfx>>,
 ) {
     let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) else { return };
     let notes = rt.game.crimes.take_notes();
@@ -200,8 +201,17 @@ fn show_notes(
                 if let Some(c) = corner.as_deref_mut() {
                     c.push(Corner { text: line, icon: setting(image).map(|i| i.to_ascii_lowercase()), seconds: None });
                 }
-                if let Some(s) = sim.forms.by_edid(sound) {
-                    sounds.write(PlaySound { sound: s, at: None });
+                // SOUN records are not in the form store's Editor ID index; the sound effects'
+                // own list has them (as `xp_meter::play_sound`). [observed: upstream issue
+                // #3095, `by_edid("UIKarmaUp")` was always None, so no karma sound played.]
+                let found = sfx.as_deref().and_then(|x| {
+                    x.forms.sounds.iter().find(|(_, s)| s.edid.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(sound))).map(|(f, _)| *f)
+                });
+                match found {
+                    Some(s) => {
+                        sounds.write(PlaySound { sound: s, at: None });
+                    }
+                    None => warn!("crime: karma sound {sound} not found"),
                 }
             }
             Note::Crime { kind, victim, seen_by, hostile } => {

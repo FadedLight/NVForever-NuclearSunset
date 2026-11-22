@@ -449,7 +449,7 @@ impl Plugin for ConsolePlugin {
             .init_resource::<SearchIndex>()
             .init_resource::<RenderToggles>()
             .init_resource::<ShowFirstPerson>()
-            .add_systems(Update, (toggle, typing, search_ready, replies, script_lines, click, draw, outline).chain().in_set(PlaySet::Ui).in_set(ConsoleSet))
+            .add_systems(Update, (toggle, typing, search_ready, replies, script_lines, hunt_lines, click, draw, outline).chain().in_set(PlaySet::Ui).in_set(ConsoleSet))
             .add_systems(OnExit(PlayState::Menu), close_on_exit);
     }
 }
@@ -525,6 +525,13 @@ fn script_lines(mut c: ResMut<Console>, mut script: Option<ResMut<crate::script:
     }
 }
 
+/// The bug hunter's lines (`crate::bug_hunt`).
+fn hunt_lines(mut c: ResMut<Console>, mut h: ResMut<crate::bug_hunt::BugHunt>) {
+    for line in std::mem::take(&mut h.out) {
+        c.print(line);
+    }
+}
+
 fn close_on_exit(mut c: ResMut<Console>, mut commands: Commands, roots: Query<Entity, With<ConsoleRoot>>) {
     if c.open {
         c.open = false;
@@ -551,7 +558,7 @@ fn typing(
     (mut index, play, mut poker, location): (ResMut<SearchIndex>, Res<PlayWorld>, MessageWriter<crate::poker::OpenPoker>, Option<Res<crate::Location>>),
     (mut saves, mut loads, save_cfg, mut save_log): (MessageWriter<crate::save::SaveRequest>, MessageWriter<crate::save::LoadRequest>, Res<crate::save::SaveConfig>, ResMut<crate::save::SaveLog>),
     (pipboy, data, player): (Option<Res<crate::pipboy::data::DataState>>, Option<Res<nvf_assets::GameData>>, Option<Res<crate::player::Player>>),
-    (mut view, mut editor): (ResMut<crate::collision_view::CollisionView>, ResMut<crate::editor::Editor>),
+    (mut view, mut editor, mut hunt): (ResMut<crate::collision_view::CollisionView>, ResMut<crate::editor::Editor>, ResMut<crate::bug_hunt::BugHunt>),
 ) {
     let typed: Vec<KeyboardInput> = typed.read().filter(|e| switching.as_ref().is_none_or(|s| s.allows(e))).cloned().collect();
     if !c.open {
@@ -721,7 +728,7 @@ fn typing(
                     c.print("help <text>: records and functions whose name or Editor ID contains it (not case sensitive); \"two words\" for a phrase, several words must all match");
                     c.print("prid <ref>, coc <cell>, cow <world> <x> <y>, coe <x> <y>, tgm, cls, save <name>, load [name], saves, set <var> to <value>, editor (editor mode on/off), editor select|move|turn|place|delete|undo, editor save <Name.esp>, editor why [topic] (why the selected actor says what it says). Click something to select it; calls without a reference run on it.");
                     c.print("Quests and info: sq, sqt, movetoqt [n], sqs <quest>, sqv <quest>, sv, caqs, inv, getavinfo <av>, setgs <setting> <value>, cam, qqq, advlevel (level up), poker [casino] (a poker table)");
-                    c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes)");
+                    c.print("Toggles: tcl (collision), tai (actors' AI), tdetect, tgm, tscr (scripts), tg (grass), ts (sky), tws (water), tt (trees), tlv (leaves), ToggleLODLand, ToggleNavmesh, tlik (head tracking), temo (emotions), tcg [radius] (collision shapes), bughunt [radius|notes|show|off] (collision and clipping report)");
                     c.print("bat <file> (console lines from a text file), rbat [file] (record lines for bat), scof [file] (write the console to a file), slpm [1-5] (a practice lock), [ref.]mfg expression|phoneme|modifier <id> <0-100>, mfg reset");
                     c.print("plm <x> <y> <z> [name] [0-9] (a marker seen through walls), clm (clear them), s1st (first-person model in third person), [ref.]setvel x|y|z <speed>, tst <global>, prc, tlv (tree leaves), ClearScreenBlood");
                 } else {
@@ -835,6 +842,15 @@ fn typing(
                     c.print(view.state());
                 }
                 Some(_) => c.print("tcg [radius]: the collision shapes within radius game units of the camera"),
+            },
+            // The bug hunter (`crate::bug_hunt`): collision and clipping problems round the
+            // player or the Bug Log's notes, to a report.
+            "bughunt" => match crate::bug_hunt::Ask::parse(rest) {
+                Ok(a) => {
+                    c.print("Hunting...");
+                    hunt.asked.push(a);
+                }
+                Err(e) => c.print(format!("{e}; bughunt [radius] | notes [radius] | show | off")),
             },
             "click" => {
                 let xy: Vec<f32> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();

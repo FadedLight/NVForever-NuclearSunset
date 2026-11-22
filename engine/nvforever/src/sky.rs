@@ -2074,6 +2074,25 @@ pub fn interior_clip(sky: Res<SkyState>, mut cam: Query<&mut Projection, With<Fl
 /// [design: docs/design/tweaks.md].
 const NO_FOG_FAR: f32 = 1_000_000.0;
 
+/// An interior's fog far distance as drawn. An unset range (far not beyond near, as XCLL
+/// fog 0..0) is no fog, as a weather's is outdoors (module docs) [observed: upstream issue
+/// #3038, TTW's zGrandmaSparkle has XCLL fog 0..0, no lighting template, and drew entirely
+/// in its black fog colour; hypothesis: the original shows such a room unfogged].
+fn interior_fog_far(near: f32, far: f32, no_interior_fog: bool) -> f32 {
+    if no_interior_fog || far <= near { NO_FOG_FAR } else { far }
+}
+
+#[cfg(test)]
+mod interior_fog_tests {
+    #[test]
+    fn an_unset_interior_fog_range_is_no_fog() {
+        assert_eq!(super::interior_fog_far(0.0, 0.0, false), super::NO_FOG_FAR);
+        assert_eq!(super::interior_fog_far(500.0, 200.0, false), super::NO_FOG_FAR);
+        assert_eq!(super::interior_fog_far(0.0, 3000.0, false), 3000.0);
+        assert_eq!(super::interior_fog_far(0.0, 3000.0, true), super::NO_FOG_FAR);
+    }
+}
+
 /// The sky's colours now, for GetCurrentSkyColor (`fnv_game::nvse_jg9`); none in an
 /// interior, which shows no sky.
 pub fn tell_sky_colors(sky: Res<SkyState>, mut script: Option<ResMut<nvf_play::script::ScriptState>>) {
@@ -2137,7 +2156,7 @@ pub fn update_sky(
         }
         fog.color = c(l.fog_color);
         // The player's tweak pushes interior fog out of sight [design: docs/design/tweaks.md].
-        let far = if tweaks.as_ref().is_some_and(|t| t.no_interior_fog) { NO_FOG_FAR } else { l.fog_far };
+        let far = interior_fog_far(l.fog_near, l.fog_far, tweaks.as_ref().is_some_and(|t| t.no_interior_fog));
         fog.falloff = crate::fog::falloff(l.fog_near.max(0.0), far, l.fog_power, false, 1.0);
         info!("interior lighting: fog {:.0}..{:.0} power {:.2}", l.fog_near, l.fog_far, l.fog_power);
         return;
@@ -2222,6 +2241,9 @@ pub fn update_sky(
     // No fog: the fog colour's alpha scales the whole effect, so zero turns it off.
     let range = sky.fog_override.map(|(n, f)| (n, f, 1.0)).or_else(|| sky.fog());
     let (near, far, strength) = range.unwrap_or((0.0, 0.0, 0.0));
+    // The player's Outdoor Fog Distance tweak (1: the weather's own) [design: owner 2026-11-20].
+    let spread = if sky.fog_override.is_some() { 1.0 } else { tweaks.as_ref().map_or(1.0, |t| t.outdoor_fog_distance).clamp(1.0, 4.0) };
+    let (near, far) = (near * spread, far * spread);
     fog.color = to_color(sky.color(ColorType::Fog)).with_alpha(strength);
     let power = sky.fog_power();
     fog.falloff = crate::fog::falloff(near.max(0.0), far, power, true, sky.emissive_scale() * emissive_mod);

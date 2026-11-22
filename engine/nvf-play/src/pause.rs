@@ -622,6 +622,8 @@ pub fn mods_open(paused: &Paused, page: &Page) -> bool {
 const MODS_LABEL: &str = "Mods";
 /// The Console entry's word [design: our own].
 const CONSOLE_LABEL: &str = "Console";
+/// The Mod List entry's words [design: our own].
+const MOD_LIST_LABEL: &str = "Mod List";
 
 /// The saves the load page lists, newest first, and the chosen one's thumbnail.
 #[derive(Resource, Default)]
@@ -812,6 +814,11 @@ enum Entry {
     Console,
     /// Only with [`ModsEntry`], before Quit [design].
     Mods,
+    /// The load order's plugins and what NVForever made of each (`crate::mod_list`); the
+    /// game goes on and the panel opens [design: owner 2026-11-20].
+    ModList,
+    /// The owner's local bug notes (`crate::bug_log`); never sent anywhere.
+    BugLog,
     Quit,
 }
 
@@ -825,6 +832,8 @@ fn entries(mods: bool, console: bool) -> Vec<Entry> {
     if mods {
         v.push(Entry::Mods);
     }
+    v.push(Entry::ModList);
+    v.push(Entry::BugLog);
     v.push(Entry::Quit);
     v
 }
@@ -838,6 +847,8 @@ impl Entry {
             Entry::Settings => "Settings",
             Entry::Console => CONSOLE_LABEL,
             Entry::Mods => MODS_LABEL,
+            Entry::ModList => MOD_LIST_LABEL,
+            Entry::BugLog => "Bug Log",
             Entry::Quit => "Quit",
         }
     }
@@ -4342,6 +4353,8 @@ fn choose(
                 take = Some(Entry::Settings);
             } else if act("mods") && mods {
                 take = Some(Entry::Mods);
+            } else if act("mod-list") {
+                take = Some(Entry::ModList);
             } else if keys.just_pressed(KeyCode::Escape) {
                 take = Some(Entry::Continue);
             }
@@ -4395,6 +4408,28 @@ fn choose(
                     commands.queue(|w: &mut World| {
                         if let Some(mut c) = w.get_resource_mut::<crate::console::Console>() {
                             c.open_asked = true;
+                        }
+                    });
+                    if !resume.pending() {
+                        commands.queue(request_resume);
+                    }
+                }
+                Some(Entry::ModList) => {
+                    info!("pause menu: mod list");
+                    commands.queue(|w: &mut World| {
+                        if let Some(mut m) = w.get_resource_mut::<crate::mod_list::ModList>() {
+                            m.open_asked = true;
+                        }
+                    });
+                    if !resume.pending() {
+                        commands.queue(request_resume);
+                    }
+                }
+                Some(Entry::BugLog) => {
+                    info!("pause menu: bug log");
+                    commands.queue(|w: &mut World| {
+                        if let Some(mut m) = w.get_resource_mut::<crate::bug_log::BugLog>() {
+                            m.open_asked = true;
                         }
                     });
                     if !resume.pending() {
@@ -5480,7 +5515,7 @@ mod tests {
     #[test]
     fn the_console_entry_stands_where_help_was() {
         let labels: Vec<&str> = super::entries(true, true).iter().map(|e| e.label()).collect();
-        assert_eq!(labels, ["Continue", "Save", "Load", "Settings", CONSOLE_LABEL, MODS_LABEL, "Quit"]);
+        assert_eq!(labels, ["Continue", "Save", "Load", "Settings", CONSOLE_LABEL, MODS_LABEL, MOD_LIST_LABEL, "Bug Log", "Quit"]);
         assert!(!super::entries(false, false).contains(&Entry::Console));
     }
 
@@ -6412,8 +6447,8 @@ mod tests {
     #[test]
     fn the_mods_entry_stands_before_quit_only_when_a_mod_added_one() {
         let labels = |mods| entries(mods, false).iter().map(|e| e.label()).collect::<Vec<_>>();
-        assert_eq!(labels(false), ["Continue", "Save", "Load", "Settings", "Quit"]);
-        assert_eq!(labels(true), ["Continue", "Save", "Load", "Settings", "Mods", "Quit"]);
+        assert_eq!(labels(false), ["Continue", "Save", "Load", "Settings", "Mod List", "Bug Log", "Quit"]);
+        assert_eq!(labels(true), ["Continue", "Save", "Load", "Settings", "Mods", "Mod List", "Bug Log", "Quit"]);
         assert!(Page::Mods.opened_by("Mods"));
         assert!(!Page::Mods.opened_by("Settings"));
         assert_eq!(Page::Mods.settings_row(), None);

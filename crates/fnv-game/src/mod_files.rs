@@ -23,6 +23,10 @@ pub type Lookup = Arc<dyn Fn(&str) -> u8 + Send + Sync>;
 /// The host's reader of a Data path, archives included.
 pub type Reader = Arc<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
 
+/// The host's loose files under a Data folder (lower case, `\`-separated whole paths): the
+/// files a Mod Organizer 2 merge holds there, which no read root has on disk.
+pub type Lister = Arc<dyn Fn(&str) -> Vec<String> + Send + Sync>;
+
 /// Where the files are: `read` in order (NVForever's layer first, then the game's Data),
 /// `write` the layer, and `lookup` the host's answer for a path in the archives too
 /// (0 none, 1 a loose file, 2 inside an archive).
@@ -34,6 +38,8 @@ pub struct Roots {
     pub write: Option<PathBuf>,
     pub lookup: Option<Lookup>,
     pub reader: Option<Reader>,
+    /// The host's loose files under a folder ([`Lister`]), for the listings.
+    pub list: Option<Lister>,
     /// The archives the host loaded, by file name (IsBSALoaded, `nvse_jg8`).
     pub archives: Vec<String>,
 }
@@ -150,6 +156,7 @@ pub fn data_dir() -> Option<PathBuf> {
 /// Whether a Data path is a file of the game: in a read root (its parts in any case, as
 /// on Windows; mods spell `Meshes` and `meshes` both) or in an archive.
 pub fn exists(path: &str) -> bool {
+    // (`lookup` is the host's index, a Mod Organizer 2 merge's files included.)
     let r = roots();
     r.read.iter().any(|root| on_disk(root, path).is_some_and(|p| p.is_file()) || find_file(root, path).is_some()) || r.lookup.as_ref().is_some_and(|f| f(path) > 0)
 }
@@ -247,14 +254,22 @@ pub fn files_under(rel: &str) -> Vec<String> {
 /// (`crate::nvse_unlisted2`).
 pub fn entries_in(rel: &str) -> Vec<String> {
     let (mut seen, mut out) = (std::collections::HashSet::new(), Vec::new());
-    for root in roots().read {
-        let Some(dir) = find_dir(&root, rel) else { continue };
+    let r = roots();
+    for root in &r.read {
+        let Some(dir) = find_dir(root, rel) else { continue };
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             if seen.insert(name.to_ascii_lowercase()) {
                 out.push(name);
             }
+        }
+    }
+    // The host's (a Mod Organizer 2 merge's) files and folders directly in it.
+    for p in host_listing(&r, rel) {
+        let first = p.split('\\').next().unwrap_or(&p).to_string();
+        if seen.insert(first.clone()) {
+            out.push(first);
         }
     }
     out
@@ -281,13 +296,28 @@ fn list_files(rel: &str, deep: bool) -> Vec<String> {
         }
     }
     let (mut seen, mut out) = (std::collections::HashSet::new(), Vec::new());
-    for root in roots().read {
-        if let Some(dir) = find_dir(&root, rel) {
+    let r = roots();
+    for root in &r.read {
+        if let Some(dir) = find_dir(root, rel) {
             walk(&dir, "", deep, &mut seen, &mut out);
+        }
+    }
+    // Then the host's own loose files there (a Mod Organizer 2 merge's), after the roots.
+    for name in host_listing(&r, rel) {
+        if (deep || !name.contains('\\')) && seen.insert(name.clone()) {
+            out.push(name);
         }
     }
     out.sort_by_key(|n| n.to_ascii_lowercase());
     out
+}
+
+/// The host's loose files under `rel` ([`Roots::list`]), relative to it, lower case.
+fn host_listing(r: &Roots, rel: &str) -> Vec<String> {
+    let Some(list) = &r.list else { return Vec::new() };
+    let pre = norm(rel);
+    let cut = if pre.is_empty() { 0 } else { pre.len() + 1 };
+    list(&pre).into_iter().filter_map(|p| p.get(cut..).map(str::to_string)).filter(|s| !s.is_empty()).collect()
 }
 
 /// A file under `base` by a Data-relative path, each part matched without regard to
@@ -305,9 +335,15 @@ fn find_file(base: &Path, rel: &str) -> Option<PathBuf> {
 }
 
 /// A loose Data file's bytes through the read roots (the first that has it), the path's
-/// parts matched without regard to case.
+/// parts matched without regard to case; else, when the host answers that the path is a
+/// loose file (a Mod Organizer 2 merge's, which no root holds on disk), through its reader.
 pub fn read_loose(rel: &str) -> Option<Vec<u8>> {
-    roots().read.iter().find_map(|root| std::fs::read(find_file(root, rel)?).ok())
+    let r = roots();
+    let host = rel.replace('/', "\\");
+    r.read
+        .iter()
+        .find_map(|root| std::fs::read(find_file(root, rel)?).ok())
+        .or_else(|| (r.lookup.as_ref().is_some_and(|f| f(&host) == 1)).then(|| r.reader.as_ref().and_then(|f| f(&host))).flatten())
 }
 
 /// Whether NVForever may write `path`: never inside the game's install or the original
@@ -349,7 +385,11 @@ impl ModFiles {
         self.read(rel)
     }
 
-    /// A file's text: this session's write, else NVForever's layer, else the game's Data.
+    /// A file's text: this session's write, else NVForever's layer, else the game's Data,
+    /// else the host's reader: with a Mod Organizer 2 profile merged over Data (`--mo2`)
+    /// a mod's loose `Config` files are in that merge, not in any folder on disk
+    /// [observed: Nuclear Sunset's Immersive Fast Travel Encounters, `Lime/Encounters.ini`
+    /// in its mod's `config\Lime`, read as missing and its start error box shown].
     fn read(&self, rel: &str) -> Option<String> {
         if let Some(t) = self.written.get(&norm(rel)) {
             return Some(t.clone());
@@ -361,7 +401,12 @@ impl ModFiles {
             lower.strip_prefix("config\\").and_then(|_| on_disk(c, &rel["config\\".len()..]))
         });
         on_disk(Path::new(""), &rel)?;
-        config.into_iter().chain(r.read.iter().filter_map(|root| on_disk(root, &rel))).find_map(|p| std::fs::read(p).ok()).map(|b| b.iter().map(|&c| c as char).collect())
+        config
+            .into_iter()
+            .chain(r.read.iter().filter_map(|root| on_disk(root, &rel)))
+            .find_map(|p| std::fs::read(p).ok())
+            .or_else(|| r.reader.as_ref().and_then(|f| f(&rel)))
+            .map(|b| latin1(&b))
     }
 
     /// A file under the game's own folder (JIP's array files): this session's write,

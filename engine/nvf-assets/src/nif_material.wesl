@@ -686,7 +686,13 @@ fn nif_fragment(
             ambient_spec *= pow(max(lights.ambient_color.rgb * view.exposure, vec3(1e-6)), vec3(1.2));
         }
         out.color = vec4(max(out.color.rgb - view.exposure * ambient_spec, vec3(0.0)), out.color.a);
-        @if(!PREPASS_PIPELINE && !TONEMAP_IN_SHADER && !BLEND_MULTIPLY) out.color = vec4(hot_light(out.color.rgb, hot_e), out.color.a);
+        // emissive_rule.w (nif_spawn.rs `shape_emissive_rule`): an ordinary lit emitter's light
+        // only fills the pixel up to its surface colour [hypothesis, nif.md §6 "Emissive light"].
+        @if(!PREPASS_PIPELINE && !TONEMAP_IN_SHADER && !BLEND_MULTIPLY) if surface.emissive_rule.w > 0.5 {
+            out.color = vec4(min(out.color.rgb + hot_e, max(out.color.rgb, pbr_input.material.base_color.rgb)), out.color.a);
+        } else {
+            out.color = vec4(hot_light(out.color.rgb, hot_e), out.color.a);
+        }
     } else {
         out.color = pbr_input.material.base_color;
         // An unlit shape with a non-black emissive colour is drawn at its emissive light:

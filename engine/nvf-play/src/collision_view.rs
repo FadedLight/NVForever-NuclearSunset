@@ -9,7 +9,11 @@
 //!   in search summaries]; `tcg <radius>` switches it on with that radius. The original
 //!   colours by the layer a modeller gave the shape; ours colour by what the shape is in
 //!   our physics [design]. At start: `NVF_COLLISION_VIEW` (`1` the default radius, a
-//!   number above 1 that radius in game units).
+//!   number above 1 that radius in game units). The settings page's Debug row Show
+//!   collision ([`SETTING_KEY`]) switches the same view, kept in `NVForever.ini` like every
+//!   row [design: owner 2026-11-20, in-game settings for what only the console or a variable
+//!   reached]; `NVF_COLLISION_VIEW`, when set, wins over the row's stored state for its run
+//!   ([`env_wins`]), as a test run's switches win (#1382).
 //! - **What**: every collider whose outline passes within the radius
 //!   (`fnv_phys::debug_lines`: terrain, static, keyframed, dynamic awake and asleep,
 //!   characters, hit volumes, ragdolls, gore, trigger-layer volumes), and the script
@@ -32,6 +36,11 @@ use fnv_phys::debug_lines::{Category, CollisionLines};
 
 /// The environment variable that switches the view on at start.
 pub const ENV: &str = "NVF_COLLISION_VIEW";
+/// The settings page's row (Debug › Show collision) and its note.
+pub const SETTING_KEY: &str = "collision-view";
+pub const SETTING_NOTE: &str = "On: the collision shapes near the camera are drawn as coloured lines, as the console's tcg does. Off by default.";
+/// The group the row registers with (the Debug tab, `crate::settings_layout`).
+const SETTING_GROUP: &str = "Debug";
 /// Radius around the camera, game units, when none is given [design: a town block].
 pub const DEFAULT_RADIUS: f32 = 3000.0;
 /// Most segments drawn a frame [design: keeps a dense interior from swamping the frame].
@@ -163,7 +172,41 @@ impl Plugin for CollisionViewPlugin {
         app.insert_resource(view)
             .init_gizmo_group::<CollisionGizmos>()
             .add_systems(Startup, configure)
+            .add_systems(PostStartup, env_wins.after(crate::settings::apply_stored))
             .add_systems(PostUpdate, (switched.run_if(resource_changed::<CollisionView>), draw.run_if(view_on)).chain().after(bevy::transform::TransformSystems::Propagate));
+        crate::settings::add_setting(
+            app,
+            crate::settings::Setting {
+                key: SETTING_KEY,
+                group: SETTING_GROUP,
+                label: "Show collision",
+                note: SETTING_NOTE,
+                switches: "",
+                get: |w| w.get_resource::<CollisionView>().is_some_and(|v| v.on),
+                set: set_from_page,
+                slider: None,
+            },
+        );
+    }
+}
+
+/// The settings row's switch: on with the radius the view has (the console's `tcg <radius>`
+/// keeps its own), off; a state it already has is left alone, its outlines kept.
+fn set_from_page(world: &mut World, on: bool) {
+    if let Some(mut v) = world.get_resource_mut::<CollisionView>() {
+        if v.on != on {
+            v.set(on, None);
+        }
+    }
+}
+
+/// [`ENV`] set for this run wins over the settings row's stored state, read just before
+/// (module notes); said in the log when it did.
+fn env_wins(mut view: ResMut<CollisionView>) {
+    let Some(r) = env_radius(std::env::var(ENV).ok().as_deref()) else { return };
+    if !view.on {
+        view.set(true, Some(r));
+        info!("collision view: on ({ENV} over the settings' stored Show collision)");
     }
 }
 
@@ -350,6 +393,27 @@ mod tests {
         assert_eq!(v.state(), "Collision geometry off");
         v.set(true, Some(f32::NAN));
         assert_eq!(v.radius, 800.0);
+    }
+
+    /// The Debug row Show collision switches the console's view, keeps the radius `tcg <r>`
+    /// gave, leaves a state it already has alone, and its note is within the page's budget.
+    #[test]
+    fn the_settings_row_switches_the_view() {
+        assert_eq!(crate::settings::note_over_budget(SETTING_NOTE), None);
+        let mut w = World::new();
+        let mut v = CollisionView::default();
+        v.set(true, Some(800.0));
+        v.parts = Some(Default::default());
+        w.insert_resource(v);
+        set_from_page(&mut w, true);
+        assert!(w.resource::<CollisionView>().parts.is_some(), "already on: the outlines kept");
+        set_from_page(&mut w, false);
+        assert!(!w.resource::<CollisionView>().on);
+        set_from_page(&mut w, true);
+        let v = w.resource::<CollisionView>();
+        assert!(v.on && v.radius == 800.0, "the console's radius kept");
+        // Without the view (a run without it) the row does nothing.
+        set_from_page(&mut World::new(), true);
     }
 
     #[test]

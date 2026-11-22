@@ -195,7 +195,7 @@ pub fn modified_bright_pass(scale: f32, scale_ratio: f32, clamp_ratio: f32) -> P
 
 /// Set the light glow's strength on [`ImageSpaceGlow`] cameras from the image space now,
 /// and the bright pass ([`bright_pass`]) that goes with a high "Bright Scale".
-fn image_space_glow(
+pub(crate) fn image_space_glow(
     sky: Option<Res<crate::sky::SkyState>>,
     screen: Option<Res<crate::imagespace::ScreenModifiers>>,
     mut cams: Query<(&mut bevy::post_process::bloom::Bloom, Option<&mut BrightPass>), With<ImageSpaceGlow>>,

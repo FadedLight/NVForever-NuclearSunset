@@ -821,7 +821,17 @@ fn objects(
 
     // Scripts: the engine's answers for the sounds already played, StopSound's stops,
     // and the new sounds (`fnv_game::nvse_sound`).
-    if let Some(rt) = script.and_then(|s| s.into_inner().rt.as_mut()) {
+    let mut script = script.map(|s| s.into_inner());
+    // Items a script gave the player with their line shown: their pick-up sound
+    // (`ScriptEffect::ItemSound`, caps: #3095).
+    for item in script.as_mut().map(|s| std::mem::take(&mut s.given_sounds)).unwrap_or_default() {
+        let sound = item_sound(ws, sfx, item, true);
+        info!("world sounds: {item} given by a script, sound {}", sound_name(sfx, sound));
+        if let Some(sound) = sound {
+            out.write(PlaySound { sound, at: None });
+        }
+    }
+    if let Some(rt) = script.and_then(|s| s.rt.as_mut()) {
         for (id, seconds) in script_sounds.heard.drain(..) {
             rt.game.gaps.sounds.heard(id, seconds);
         }

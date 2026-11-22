@@ -1192,6 +1192,26 @@ below cover them all.
 - More: docs/design/graphics-enhanced.md §3.14
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `texture-size-limit`: Texture size limit
+
+- On the page: Largest texture size loaded. Auto: 2048 on cards under 10 GB, lower when
+  graphics memory runs short. Off: full size. New textures at once, all after a load.
+- In full: a list of Auto, 2048, 1024 and Off, kept as its name; Auto by default [design:
+  owner 2026-11-20]. It is the GPU memory budget's texture cap, until then set only by the
+  `NVF_TEXTURE_CAP` variable: a texture loaded under it leaves out its mip levels larger
+  than the size, so it takes less graphics memory and looks softer up close. Auto: 2048 on a
+  GPU budget under 10 GB (an 8 GB card reads 5.6 to 7.4 GB), none above, and down to 1024 when
+  the game holds over 70 % of the budget. 2048 and 1024 start there, the step to 1024 still
+  guarding a full memory. Off: every texture at full size, no steps, as `NVF_TEXTURE_CAP=off`
+  (on an 8 GB card at 4K, Nuclear Sunset outdoors then ran out of graphics memory [observed
+  2026-11-20]). Textures already loaded keep their size until their cache lets them go, so a
+  change applies in full at the next load or start (loading a save starts the game again).
+  While `NVF_TEXTURE_CAP` is set the variable decides the run and the row is greyed; its own
+  choice is kept for the runs without it. The log says `memory budget: texture size limit
+  <choice>: …` when it is taken. Not a setting of the original's (its launcher's texture size,
+  `iTexMipMapSkip` in the preset files, is not read: docs/spec-notes/quality-presets.md).
+- Registered in `engine/nvforever/src/memory_budget.rs`
+
 ### `smooth-terrain`: Smooth terrain
 
 - On the page: Smooths height steps while keeping bumps and ridges: 2 x 2 or 4 x 4 squares
@@ -1251,6 +1271,17 @@ below cover them all.
 - On the page: How far from you grass is drawn, as a part of the farthest grass distance and
   its fade range.
 - Registered in `engine/nvforever/src/settings.rs`
+
+### `tree-distance`: Distant tree distance
+
+- On the page: How far beyond the loaded cells trees are drawn as flat billboards, as a part
+  of the farthest; 0%: none. Lower runs a little faster.
+- In full: a slider from 0% to 100% in steps of 5%, a part of `--tree-distance` (40,000
+  units by default, the game's fTreeLoadDistance) [design: owner 2026-11-20]; 100% draws as
+  before the row. A change chooses the billboards again at once: the distant trees go and are
+  built again over the next frames. Greyed while Distant terrain and objects is off (the
+  billboards are part of the distant LOD). Trees of the loaded cells are not touched.
+- Registered in `engine/nvforever/src/settings.rs` (state in `engine/nvforever/src/draw_distance.rs`)
 
 ## Graphics › World and Animation
 
@@ -1451,6 +1482,18 @@ below cover them all.
 - Command-line switches: `--terrain-wireframe`
 - More: docs/spec-notes/world.md §3 "Smoothing"
 - Registered in `engine/nvforever/src/settings.rs` (drawn by `engine/nvforever/src/terrain_wireframe.rs`)
+
+### `collision-view`: Show collision
+
+- On the page: On: the collision shapes near the camera are drawn as coloured lines, as the
+  console's tcg does. Off by default.
+- In full: the console's `tcg` view as a row [design: owner 2026-11-20]: every collider within
+  3,000 units of the camera (or the radius a `tcg <radius>` gave) drawn as lines coloured by
+  what it is (terrain brown, statics light grey, actors yellow, triggers blue …). Changes at
+  once; the console's `tcg` and the row switch the same view. `NVF_COLLISION_VIEW`, when set,
+  wins over the row's stored state for its run. Costs frame time while on.
+- More: docs/design/console.md
+- Registered in `engine/nvf-play/src/collision_view.rs`
 
 ### `scope-3d`: 3D scopes (test)
 

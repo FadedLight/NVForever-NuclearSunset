@@ -325,7 +325,19 @@ fn mod_file_roots(data: Option<Res<nvf_assets::GameData>>, mut done: Local<bool>
     let mods = fnv_install::EngineHome::default_root().map(|r| fnv_install::EngineHome::new(r).mods());
     let data_dir = vfs.data_dir().to_path_buf();
     let archives: Vec<String> = vfs.archives().map(str::to_string).collect();
+    // With a Mod Organizer 2 profile merged over Data (`--mo2`) the mods' loose files are in
+    // the VFS's index, not under Data on disk: the file readers ask it (`reader`, `lookup`) and
+    // the folder listings list it (`list`), so a mod's own `Config` files and folders are found
+    // as the merge has them [observed: Nuclear Sunset's MAPMO reads its colours from
+    // `Config\Main And Pause Menus Overhaul - Presets.ini` in its mod folder; read as missing,
+    // the HUD and Pip-Boy were coloured 0 0 0, black]. (Walking the 1,665 mod folders on disk
+    // instead was tried: every lookup then walked them, and the start never finished.)
+    let list_vfs = d.vfs.clone();
     fnv_game::mod_files::update_roots(move |r| {
+        r.list = Some(std::sync::Arc::new(move |prefix: &str| {
+            let pre = prefix.to_ascii_lowercase();
+            list_vfs.loose_paths_under(&pre)
+        }));
         r.read = mods.into_iter().chain(std::iter::once(data_dir)).collect();
         r.archives = archives;
         r.reader = Some(std::sync::Arc::new(move |p: &str| reader_vfs.read(p).and_then(Result::ok)));

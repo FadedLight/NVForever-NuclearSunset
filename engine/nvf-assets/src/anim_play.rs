@@ -677,6 +677,11 @@ pub const CARRY_MIN: f32 = 100.0;
 /// multiple of its net cycle travel. Uses `Clip::root_reach`'s 61 samples, at load only.
 pub const ROOT_EXCURSION_RATIO: f32 = 1.5;
 
+/// How far (radians) a clip's root may start with its up axis away from the skeleton's rest
+/// before it plays from the rest instead ([`BlendPlayer`] sampling; upstream issue #2859)
+/// [design: ordinary moves start within a few degrees, the tipped turn clips near 90°].
+pub const TIPPED_ROOT: f32 = std::f32::consts::FRAC_PI_4;
+
 /// The rotation [`BoundClip::root_track`] takes out of a clip's accumulation-root track
 /// `tt`: its start rotation when `clip` has no `Bip01 NonAccum` track (the root's track
 /// then stands in for the pelvis's: the 2ha/2hh `Holster` clips), else the identity
@@ -1126,6 +1131,22 @@ impl BlendPlayer {
                 if let Some((rj, per_cycle, start_z, start_rot)) = bc.root_track {
                     if rj == j {
                         turn_out = Some(start_rot);
+                        // A root that starts tipped far from the skeleton's rest (its up axis
+                        // over 45° off) plays from the rest instead, keeping only its rotation
+                        // relative to its own start: r' = rest × start⁻¹ × r [observed:
+                        // upstream issue #2859, the armed turn clips `2haturnleft.kf` /
+                        // `2haturnright.kf` hold Bip01 with its up axis almost horizontal and
+                        // carry `Bip01 NonAccum`, so the start was kept and NPCs tipped onto
+                        // their side for the turn, then stood up again (owner, 2026-11-20)].
+                        // Turn clips only: getting up and knock-downs start lying down on purpose.
+                        if start_rot == Quat::IDENTITY && bc.clip.name.to_ascii_lowercase().contains("turn") {
+                            if let Some(s) = track.rotation_at(bc.clip.start).map(|[w, x, y, z]| Quat::from_xyzw(x, y, z, w).normalize()).filter(|q| q.is_finite()) {
+                                let rest = b.rotation;
+                                if (s * Vec3::Z).angle_between(rest * Vec3::Z) > TIPPED_ROOT {
+                                    turn_out = Some((s * rest.inverse()).normalize());
+                                }
+                            }
+                        }
                         match bc.carried {
                             // Its travel is the actor's: all of it out of the pose.
                             Some(at) => (t.x, t.y) = (at.x, at.y),

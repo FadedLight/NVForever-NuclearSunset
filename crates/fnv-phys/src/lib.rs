@@ -68,5 +68,5 @@ pub use swim::Stroke;
 pub use water::{PlacedWater, WaterArea};
 pub use world::{
     AddReport, BodyState, DirtyBy, Filter, Key, Owner, PhysParams, PhysWorld, PreparedRef, PreparedTerrain, Queries, QueryConsumer, RayHit,
-    RefPose, RefreshStats, Stats, Stepper, SweepHit, PLACED_SLEEP_SPEED, TERRAIN_SHELL,
+    RefBox, RefPose, RefreshStats, Stats, Stepper, SweepHit, PLACED_SLEEP_SPEED, TERRAIN_SHELL,
 };

@@ -305,8 +305,9 @@ mod tests {
     /// Inertia and Camera Motion in place of weapon sway and head bob, #2843's Shadow
     /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, the
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
-    /// shadows row), by the group it registers with.
-    const KNOWN: [(&str, &str); 138] = [
+    /// shadows row; the owner's 2026-11-20 rows: Texture size limit, Distant tree distance and
+    /// Debug's Show collision), by the group it registers with.
+    const KNOWN: [(&str, &str); 141] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -400,6 +401,7 @@ mod tests {
         ("item-distance", "Display"),
         ("shadow-distance", "Display"),
         ("grass-distance", "Display"),
+        ("tree-distance", "Display"),
         ("upscaler", "Graphics"),
         ("upscaler-quality", "Graphics"),
         ("dlss-model", "Graphics"),
@@ -430,6 +432,7 @@ mod tests {
         ("water-reflections", "Graphics"),
         ("water-mirror", "Graphics"),
         ("quality", "Graphics"),
+        ("texture-size-limit", "Graphics"),
         ("volume-master", "Sound"),
         ("volume-music", "Sound"),
         ("volume-footstep", "Sound"),
@@ -443,6 +446,7 @@ mod tests {
         ("god-mode", "Debug"),
         ("navmesh", "Debug"),
         ("terrain-wireframe", "Debug"),
+        ("collision-view", "Debug"),
         ("send-reports", "Reports"),
         ("reports-delete", "Reports"),
     ];
@@ -553,7 +557,8 @@ mod tests {
         hide-hud-on-load grey-read-notes remember-item-places player-weapon-volume npc-weapon-volume \
         keep-fall-height-on-load no-marker-popup marker-shift-removes marker-removed-on-it clear-marker-within \
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo \
-        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training";
+        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
+        no-invisible-walls outdoor-fog-distance";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -648,7 +653,7 @@ mod tests {
             keys(&list, &l, NVF_FEATURES_TAB),
             ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "sprint", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire", "", "[Quick Loot]", "quick-loot", "quick-loot-scale", "quick-loot-background", "quick-loot-weight", "quick-loot-value", "quick-loot-value-per-weight"]
         );
-        assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "scope-3d"]);
+        assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "collision-view", "scope-3d"]);
         assert!(keys(&list, &l, "Tweaks").is_empty(), "an empty tab is still a tab");
         let at = |k: &str| l.placement_of(list.iter().position(|s| s.key == k).unwrap()).unwrap().path();
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
@@ -663,6 +668,8 @@ mod tests {
         assert_eq!(at("cloud-shadows"), "Graphics > Shadows", "after Longer sun shadows (#2670)");
         assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
+        assert_eq!(at("texture-size-limit"), "Graphics > Detail and Distance", "beside Smooth terrain, the other list");
+        assert_eq!(at("tree-distance"), "Graphics > Detail and Distance", "after the other distances");
         assert_eq!(l.control_placement("bind:Jump").unwrap().path(), "Controls > Movement");
         assert_eq!(l.control_placement("bind:Sprint").unwrap().path(), "Controls > Movement", "beside the movement controls (#3000)");
         // Sprint is not greyed under the Global Toggle, as its Advanced Movement neighbours
@@ -740,8 +747,9 @@ mod tests {
     #[test]
     fn every_tweak_of_1892_has_its_group_and_category() {
         let tweaks = tweak_rows();
-        // 560 less the console and screenshot keys, bindings since 2026-11-16 (Controls).
-        assert_eq!(tweaks.len(), 558);
+        // 560 less the console and screenshot keys, bindings since 2026-11-16 (Controls), and
+        // NVForever's own No Invisible Walls and Outdoor Fog Distance (owner 2026-11-20).
+        assert_eq!(tweaks.len(), 560);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);
@@ -758,6 +766,8 @@ mod tests {
         assert_eq!(at("tweak-no-xp-messages"), "Tweaks > HUD > Messages");
         assert_eq!(at("tweak-weightless-ammo"), "Tweaks > Cheats > Weight");
         assert_eq!(at("tweak-weightless-worn-armor"), "Tweaks > Gameplay > Weight");
+        assert_eq!(at("tweak-outdoor-fog-distance"), "Tweaks > Quality of Life > Screen and Camera", "beside No Interior Fog");
+        assert_eq!(at("tweak-no-invisible-walls"), "Tweaks > Cheats > Travel, Rest and Skills");
         // A row that only matters with another comes right after it.
         let next = |k: &str| list[l.ordered_settings().skip_while(|&i| list[i].key != k).nth(1).unwrap()].key;
         assert_eq!(next("tweak-take-all-confirm"), "tweak-take-all-confirm-min");

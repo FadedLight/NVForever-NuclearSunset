@@ -374,6 +374,8 @@ pub fn register(app: &mut App) {
     register_display(app);
     register_distances(app);
     register_graphics(app);
+    // The texture size cap, until now `NVF_TEXTURE_CAP` only [design: owner 2026-11-20].
+    crate::memory_budget::register_setting(app, GROUP_GRAPHICS);
     // The Quality and Enhanced effects rows over the rows above (#1966).
     crate::quality::register(app, GROUP_GRAPHICS);
     // Renderer edits are latched by the shared settings setters, including Defaults.
@@ -861,6 +863,20 @@ fn register_distances(app: &mut App) {
     ];
     for s in sliders {
         add_setting(app, s);
+    }
+    // The distant trees' billboards (treelod.rs), a part of `--tree-distance`, 0%: none
+    // [design: owner 2026-11-20: the distances on the command line only were hard to reach].
+    if app.world().contains_resource::<LodState>() {
+        add_setting(
+            app,
+            Setting::slider(
+                "tree-distance",
+                GROUP_PICTURE,
+                "Distant tree distance",
+                "How far beyond the loaded cells trees are drawn as flat billboards, as a part of the farthest; 0%: none. Lower runs a little faster.",
+                Slider { get: |w| w.resource::<DrawDistances>().trees, set: draw_distance::set_trees, min: 0.0, step: draw_distance::STEP, shown: None },
+            ),
+        );
     }
     add_choice_list(
         app,

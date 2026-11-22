@@ -49,6 +49,25 @@ impl BlockStatus {
     }
 }
 
+/// Split the blocks after the header (from `start`) by decoding each with the schema; the
+/// blocks and where the last one ends.
+fn split_by_decoding(data: &[u8], header: &Header, schema: &Schema, start: usize) -> Result<(Vec<RawBlock>, usize), NifError> {
+    let mut pos = start;
+    let mut blocks = Vec::with_capacity(header.num_blocks as usize);
+    for i in 0..header.num_blocks as usize {
+        let type_name = header.block_type_name(i).unwrap_or_default();
+        let mut bc = Cursor::new(data.get(pos..).unwrap_or_default());
+        decode_with(schema, header, &type_name, &mut bc).map_err(|e| match e {
+            DecodeFailure::Unknown => NifError::Invalid(format!("block {i} ({type_name}) has no schema definition; cannot split the file")),
+            DecodeFailure::Codec(e) => NifError::Invalid(format!("block {i} ({type_name}): {e}")),
+        })?;
+        let end = pos + bc.pos;
+        blocks.push(RawBlock { type_name, range: pos..end });
+        pos = end;
+    }
+    Ok((blocks, pos))
+}
+
 impl NifFile {
     /// Parse the container. Files without a block-size table (before 20.2.0.5) can only
     /// be split by decoding every block, so they need a schema.
@@ -70,22 +89,37 @@ impl NifFile {
                 let schema = schema.ok_or_else(|| {
                     NifError::Invalid("version without block sizes: a schema is needed to split blocks".into())
                 })?;
-                for i in 0..n {
-                    let type_name = header.block_type_name(i).unwrap_or_default();
-                    let start = c.pos;
-                    let mut bc = Cursor::new(&data[start..]);
-                    decode_with(schema, &header, &type_name, &mut bc).map_err(|e| match e {
-                        DecodeFailure::Unknown => {
-                            NifError::Invalid(format!("block {i} ({type_name}) has no schema definition; cannot split the file"))
-                        }
-                        DecodeFailure::Codec(e) => NifError::Invalid(format!("block {i} ({type_name}): {e}")),
-                    })?;
-                    c.pos = start + bc.pos;
-                    blocks.push(RawBlock { type_name, range: start..c.pos });
-                }
+                let (split, end) = split_by_decoding(data, &header, schema, header_len)?;
+                blocks = split;
+                c.pos = end;
             }
         }
-        let footer = Footer::parse(&mut c)?;
+        let footer = match Footer::parse(&mut c) {
+            Ok(f) => f,
+            // The size table does not add up to the file: the blocks are split by decoding
+            // them instead, as for a file without the table, and the footer read after them
+            // [observed 2026-11-20: Nuclear Sunset's "NS C NSALVO M 00.bsa"
+            // `meshes\clutter\junk\cherrybomb01.nif`: its sizes leave 740 bytes before the end
+            // where the footer's 8 are, read "footer claims 6291554 roots", and the model drew
+            // as the error marker; the original shows it, so it does not trust the table
+            // [hypothesis]].
+            Err(first) if header.block_sizes.is_some() => {
+                let retry = schema.and_then(|s| split_by_decoding(data, &header, s, header_len).ok()).and_then(|(split, end)| {
+                    let mut c2 = Cursor::new(data);
+                    c2.pos = end;
+                    Footer::parse(&mut c2).ok().map(|f| (split, c2, f))
+                });
+                match retry {
+                    Some((split, c2, f)) => {
+                        blocks = split;
+                        c = c2;
+                        f
+                    }
+                    None => return Err(first),
+                }
+            }
+            Err(e) => return Err(e),
+        };
         Ok(NifFile { header, blocks, footer, trailing: c.remaining(), header_len })
     }
 

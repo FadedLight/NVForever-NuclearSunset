@@ -2923,6 +2923,11 @@ fn a_level_is_earned_by_experience_and_waits_for_no_one_hunting_the_player() {
     let mut searching = Awareness { state: State::Alert, ..Default::default() };
     searching.targets.insert(FormId::PLAYER_REF, target);
     g.awareness.actors.insert(npc, searching.clone());
+    // Only an actor in a loaded cell hunts (#3030): one whose cell was let go does not.
+    let cell = g.cell_of(npc).expect("the NPC's cell");
+    g.loaded_cells.remove(&cell);
+    assert_eq!(experience::hunters(&g), 0);
+    g.loaded_cells.insert(cell);
     assert_eq!(experience::hunters(&g), 1);
     // Not when it searches for someone else, nor when it is back to Normal.
     let mut other = searching.clone();
@@ -4421,7 +4426,7 @@ fn compile_script_reads_a_udf_file_and_print_var_names_variables() {
     let reader: fnv_game::mod_files::Reader = std::sync::Arc::new(|p: &str| {
         (p.eq_ignore_ascii_case("nvse\\user_defined_functions\\sub\\add.txt")).then(|| b"begin Function { int iA, int iB }\nSetFunctionValue iA + iB\nend\n".to_vec())
     });
-    fnv_game::mod_files::set_roots(fnv_game::mod_files::Roots { read: Vec::new(), config: None, write: None, lookup: None, reader: Some(reader), archives: Vec::new() });
+    fnv_game::mod_files::set_roots(fnv_game::mod_files::Roots { read: Vec::new(), config: None, write: None, lookup: None, reader: Some(reader), archives: Vec::new(), list: None });
     let f = udf_fixture();
     let mut g = game(&f);
     let ctx = fnv_game::game::RunCtx::default;
@@ -4429,7 +4434,7 @@ fn compile_script_reads_a_udf_file_and_print_var_names_variables() {
     assert_eq!(q(&mut g, "let rF := CompileScript \"Sub/Add.txt\"\nSetFunctionValue (Call rF 2 3)"), Ok(XVal::Num(5.0)));
     assert_eq!(q(&mut g, "let rF := CompileScript \"sub\\add.txt\"\nlet rG := GetUDFFromFile \"Sub/Add.txt\"\nSetFunctionValue (rF == rG)"), Ok(XVal::Num(1.0)), "cached by path");
     assert_eq!(q(&mut g, "SetFunctionValue (CompileScript \"Sub/None.txt\")"), Ok(XVal::Ref(0)), "no file");
-    fnv_game::mod_files::set_roots(fnv_game::mod_files::Roots { read: Vec::new(), config: None, write: None, lookup: None, reader: None, archives: Vec::new() });
+    fnv_game::mod_files::set_roots(fnv_game::mod_files::Roots { read: Vec::new(), config: None, write: None, lookup: None, reader: None, archives: Vec::new(), list: None });
 
     g.console_out.clear();
     q(&mut g, "let fRes := 2.5\nlet aA := ar_List 2, 4\nPrintVar fRes, aA").unwrap();
@@ -5223,7 +5228,9 @@ fn built_in_plugins_report_installed() {
     // A version a mod asks for "at least" is met where none was read in the original.
     assert_eq!(q(&mut g, "GetPluginVersion \"SUP NVSE Plugin\" >= 250"), Ok(XVal::Num(1.0)));
     assert_eq!(q(&mut g, "GetPluginVersion \"CUI\""), Ok(XVal::Num(120.0)));
-    for name in ["yUI", "NVTF", "No Such Plugin"] {
+    // yUI at the version the owner's nvse.log read; Quick Select asks for at least 140.
+    assert_eq!(q(&mut g, "GetPluginVersion \"yUI\" < 140"), Ok(XVal::Num(0.0)));
+    for name in ["ITR", "NVTF", "No Such Plugin"] {
         assert_eq!(q(&mut g, &format!("IsPluginInstalled \"{name}\"")), Ok(XVal::Num(0.0)), "{name}");
         assert_eq!(q(&mut g, &format!("GetPluginVersion \"{name}\"")), Ok(XVal::Num(-1.0)), "{name}");
     }
@@ -5236,17 +5243,17 @@ fn plugin_questions_are_kept_only_when_asked_for() {
     let f = udf_fixture();
     let mut g = game(&f);
     let q = |g: &mut fnv_game::Game, body: &str| g.run_query(&format!("Begin Function {{ }}\nSetFunctionValue ({body})\nEnd\n"), Default::default()).unwrap();
-    q(&mut g, "IsPluginInstalled \"yUI\"");
+    q(&mut g, "IsPluginInstalled \"NVTF\"");
     assert!(g.plugin_questions.is_none());
     g.plugin_questions = Some(Default::default());
-    for body in ["IsPluginInstalled \"yUI\"", "IsPluginInstalled \"yUI\"", "GetPluginVersion \"JIP NVSE Plugin\"", "IsDLLLoaded \"no_such\"", "IsModLoaded \"Nothing.esp\"", "GetModIndex \"Nothing.esp\""] {
+    for body in ["IsPluginInstalled \"NVTF\"", "IsPluginInstalled \"NVTF\"","GetPluginVersion \"JIP NVSE Plugin\"", "IsDLLLoaded \"no_such\"", "IsModLoaded \"Nothing.esp\"", "GetModIndex \"Nothing.esp\""] {
         q(&mut g, body);
     }
     let got = g.plugin_questions.as_mut().unwrap().take();
     let read: Vec<(&str, &str, f64, bool)> = got.iter().map(|x| (x.function.as_str(), x.name.as_str(), x.answer, x.absent())).collect();
     assert_eq!(
         read,
-        [("isplugininstalled", "yUI", 0.0, true), ("getpluginversion", "JIP NVSE Plugin", 57.3, false), ("isdllloaded", "no_such", 0.0, true), ("ismodloaded", "Nothing.esp", 0.0, true), ("getmodindex", "Nothing.esp", 255.0, true)]
+        [("isplugininstalled", "NVTF", 0.0, true), ("getpluginversion", "JIP NVSE Plugin", 57.3, false), ("isdllloaded", "no_such", 0.0, true), ("ismodloaded", "Nothing.esp", 0.0, true), ("getmodindex", "Nothing.esp", 255.0, true)]
     );
 }
 

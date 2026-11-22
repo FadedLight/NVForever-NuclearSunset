@@ -595,3 +595,13 @@ and prebuilt binaries.
   `MaterialBindlessSlab::get_bindless_index_table`, reversed in 0.19.1, which kept freed
   `ExtendedMaterial`s' textures in the slabs. Fixed upstream (bevyengine/bevy#25848);
   Bevy 0.20 has the fix, in `bevy_render::material_bind_groups` (#934).
+
+## gilrs 0.11.2 (MIT OR Apache-2.0, gilrs-project/gilrs) [local patch, not upstream's]
+
+Used by bevy_gilrs for controllers. Change, in `src/gamepad.rs` `Gilrs::next_event_priv`: a
+raw event for a pad id gilrs holds no data for (input from a pad before its `Connected`,
+or a `Connected` past the next id, which gilrs only logged as a "platform implementation
+error") is dropped with one warning per pad (`unknown_warned`) instead of reaching
+`Gilrs::gamepad`, whose `gamepads_data[id]` panicked the game (issue #3097: "index out
+of bounds: the len is 1 but the index is 1", gamepad.rs:474). 0.11.2 is the latest
+release and has the same code.

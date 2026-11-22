@@ -98,7 +98,10 @@ resolve, and the conversion uses 7 (`fnv_collide::nif::HAVOK_SCALE`).
   shapes.
 - **Placement chain**: scene-object-to-root (below the root) ∘ body transform
   (bhkRigidBodyT only) ∘ the shape tree's transforms. A scene-object scale other than 1
-  multiplies the shape's lengths.
+  multiplies the shape's lengths, but not the body translation, which is Havok units × 7
+  only [observed: Nuclear Sunset's `scolparkinglotchunk03bsandy.nif`, 8 bhkRigidBodyT on
+  nodes scaled 0.91–1.99: unscaled, each body's translation cancels its packed vertices'
+  centre to within 1 unit; scaled, one sat 3,400 units off its road piece].
 - **Motion** (`motion_system`, nif.xml hkMotionType names [documented]): 7 FIXED 12,553;
   4 BOX_INERTIA 2,472; 6 KEYFRAMED 1,652; 2 SPHERE_INERTIA 130; 8 THIN_BOX 2 [observed].
   Mapping: FIXED → static, KEYFRAMED → keyframed, the others → dynamic.

@@ -202,6 +202,12 @@ pub struct TweakSettings {
     pub hotkey_toggles_in_hand: bool,
     /// `bDisableInteriorFog`: interior fog is pushed out of sight (from the next cell).
     pub no_interior_fog: bool,
+    /// The player walks through invisible walls (collision layer 27, Invisible Wall); other
+    /// collision stays [design: owner 2026-11-20, "remove any barriers in the games"].
+    pub no_invisible_walls: bool,
+    /// Outdoor fog distance: the weather's fog near and far times this (1: the weather's own,
+    /// up to 4) [design: owner 2026-11-20, "there is just too much fog"].
+    pub outdoor_fog_distance: f32,
     /// `bNoCompassPipsIfNotInDanger`: actors are on the compass only in danger.
     pub compass_pips_in_danger_only: bool,
     /// `bHostilesUseNeutralColorOnCompass`: foes on the compass in the usual colour.
@@ -764,6 +770,8 @@ impl Default for TweakSettings {
             tab_click_sorts: false,
             hotkey_toggles_in_hand: false,
             no_interior_fog: false,
+            outdoor_fog_distance: 1.0,
+            no_invisible_walls: false,
             compass_pips_in_danger_only: false,
             neutral_foes_on_compass: false,
             sneak_label_standing: false,
@@ -1127,6 +1135,20 @@ macro_rules! part {
     };
 }
 
+/// The No Invisible Walls tweak on the player's character, each frame: the character is made
+/// again on every travel with the usual layers.
+fn invisible_walls(tweaks: Res<TweakSettings>, phys: Option<ResMut<crate::phys::PhysState>>) {
+    let Some(mut phys) = phys else { return };
+    let Some(p) = phys.player.as_mut() else { return };
+    let wall = fnv_phys::layers::INVISIBLE_WALL;
+    let on = p.ignore_layers.contains(wall);
+    if tweaks.no_invisible_walls && !on {
+        p.ignore_layers.insert(wall);
+    } else if !tweaks.no_invisible_walls && on {
+        p.ignore_layers.remove(wall);
+    }
+}
+
 pub struct TweaksPlugin;
 
 impl Plugin for TweaksPlugin {
@@ -1139,6 +1161,7 @@ impl Plugin for TweaksPlugin {
             .add_systems(Update, sync.in_set(crate::PlaySet::Input))
             .add_systems(Update, (keys, drop_weapon, radio_volume_keys, last_weapon, hold_breath, repeat_activate, toggle_sight, place_marker_here, clear_near_marker, hide_hud_key, skip_radio_song, toggle_device).in_set(crate::PlaySet::Input))
             .add_systems(Update, objectives_on_arrival.in_set(crate::PlaySet::Ui))
+            .add_systems(Update, invisible_walls.in_set(crate::PlaySet::Input))
             .add_systems(PreUpdate, trigger_dead_zones.before(bevy::input::InputSystems))
             .add_systems(Update, ap_costs.after(crate::PlaySet::Input).after(crate::player::encumbered_walks).before(crate::PlaySet::Physics));
         sound_list!(app, "discovered-sound", "Location Discovered Sound", "The sound a newly discovered place plays: the game's own, or another of its interface sounds. (Stewie's Tweaks bCustomLocationDiscoveredSound)", discovered_sound);
@@ -1523,7 +1546,28 @@ impl Plugin for TweaksPlugin {
         switch!(app, "tab-click-sorts", "Clicking the Tab Sorts", "In the Pip-Boy's items, clicking the open tab sorts by name, value, then weight, most first. (Stewie's Tweaks bClickingActiveTabTogglesSorting)", tab_click_sorts);
         // ---- batch 16 ----
         switch!(app, "hotkey-toggles-in-hand", "Hotkey Draws and Holsters", "Pressing the hotkey of the weapon in hand draws or holsters it. (Stewie's Tweaks bHotkeyHolstersWeaponIfEquipped)", hotkey_toggles_in_hand);
+        switch!(app, "no-invisible-walls", "No Invisible Walls", "You walk through the game's invisible walls (the map's edges and its keep-out walls). Walls, rocks and floors you can see stay solid.", no_invisible_walls);
         switch!(app, "no-interior-fog", "No Interior Fog", "Interiors have no fog (from the next room entered). (Stewie's Tweaks bDisableInteriorFog)", no_interior_fog);
+        add_setting(
+            app,
+            Setting::slider(
+                "tweak-outdoor-fog-distance",
+                GROUP,
+                "Outdoor Fog Distance",
+                "Outdoors, the weather's fog starts and ends this many times farther away: x1.0 is the weather's own, up to x4.0 for a clearer view.",
+                Slider {
+                    get: |w| w.get_resource::<TweakSettings>().map_or(0.0, |t| ((t.outdoor_fog_distance - 1.0) / 3.0).clamp(0.0, 1.0)),
+                    set: |w, v| {
+                        if let Some(mut t) = w.get_resource_mut::<TweakSettings>() {
+                            t.outdoor_fog_distance = 1.0 + 3.0 * v.clamp(0.0, 1.0);
+                        }
+                    },
+                    min: 0.0,
+                    step: 0.05,
+                    shown: Some(|v| format!("x{:.1}", 1.0 + 3.0 * v)),
+                },
+            ),
+        );
         switch!(app, "mark-unspoken", "Mark Strangers", "Someone not yet spoken to ends their prompt with a star. (Stewie's Tweaks bUnspokenNPCIndicator)", game.mark_unspoken);
         switch!(app, "no-caps-added", "No Caps Added Line", "Getting caps shows no line. (Stewie's Tweaks bHideCapsAddedMessages)", game.no_caps_added_message);
         switch!(app, "subtitle-names", "Subtitles Name the Speaker", "General subtitles start with the speaker's name. (Stewie's Tweaks bSubtitlesShowActorNames)", game.subtitle_names);

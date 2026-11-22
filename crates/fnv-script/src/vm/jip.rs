@@ -125,11 +125,16 @@ pub const JIP_NAMES: [&str; 1] = ["JIP NVSE Plugin"];
 ///
 /// UIO has no script functions: the engine reads its `uio\public` lists itself
 /// (`fnv_ui`), which is all the plugin does for a mod that asks whether it is there.
-/// Not reported, though the catalogue has functions of theirs: yUI (its two ySI trait
-/// functions are built, its menus are not, and a mod that finds it goes on to read its
-/// tiles), and the plugins whose registered name no page gives (ITR, One111, ppNVSE,
-/// vheyes-nvse and the smaller ones): ext-version.md §6.
-pub const PLUGINS: [(&str, f64); 15] = [
+/// yUI at 140 [observed: the owner's Nuclear Sunset nvse.log, 2026-11-18, "yUI.dll (yUI;
+/// version 140; infoVersion 1) loaded correctly"]. Its two ySI trait functions are built,
+/// its menus are not. Reported anyway because Nuclear Sunset's Quick Select stops its whole
+/// set-up when `GetPluginVersion "yUI" < 140` (a message box at a new game's start, then
+/// `return`) [observed: NS QuickSelect.esp source, 2026-11-20]; its other yUI paths also
+/// need the `HUDMainMenu/ySI/_ySI` tile at 1, which no built menu sets, so they stay off.
+/// The only other NS plugin asking (MAPMO) prints the version. Not reported: the plugins
+/// whose registered name no page gives (ITR, One111, ppNVSE, vheyes-nvse and the smaller
+/// ones): ext-version.md §6.
+pub const PLUGINS: [(&str, f64); 16] = [
     ("JIP NVSE Plugin", JIP_VERSION),
     ("JIP LN NVSE", JIP_VERSION),
     ("ShowOffNVSE Plugin", 184.0),
@@ -145,6 +150,7 @@ pub const PLUGINS: [(&str, f64); 15] = [
     ("AnhNVSE", UNOBSERVED_VERSION),
     ("Extensions for NVSE", UNOBSERVED_VERSION),
     ("UI Organizer Plugin", UNOBSERVED_VERSION),
+    ("yUI", 140.0),
 ];
 
 /// The version reported for a plugin the engine builds whose own number is neither

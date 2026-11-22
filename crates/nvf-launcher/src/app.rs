@@ -103,6 +103,14 @@ pub struct App {
     tabs: Vec<String>,
     tab_labels: Vec<String>,
     tab: usize,
+    /// The NVForever.ini tab, beside the game's own settings tabs.
+    ini_page: bool,
+    /// `[Game] Path` as the file has it. Not the guessed folder.
+    ini_game: String,
+    /// `[Launcher]` values this program reads.
+    ini_exe: String,
+    ini_news: bool,
+    ini_close: bool,
     words: HashMap<&'static str, &'static [&'static str]>,
     lists: HashMap<&'static str, &'static [&'static str]>,
     stored: BTreeMap<String, String>,
@@ -171,6 +179,11 @@ impl App {
             tab_labels: menu.tabs.iter().map(|(_, l)| l.clone()).collect(),
             rows: menu.rows,
             tab: 0,
+            ini_page: false,
+            ini_game: String::new(),
+            ini_exe: String::new(),
+            ini_news: true,
+            ini_close: false,
             words: catalog::step_words(),
             lists: catalog::list_choices(),
             stored: BTreeMap::new(),
@@ -317,6 +330,10 @@ impl App {
         self.rows = menu.rows;
         self.tab = on.and_then(|on| self.tabs.iter().position(|t| *t == on)).unwrap_or(0);
         self.game_edit = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
+        self.ini_game = self.game_edit.clone();
+        self.ini_exe = ini_get(&self.ini_text, LAUNCHER, "Exe").unwrap_or_default();
+        self.ini_news = self.launcher_flag("News", true);
+        self.ini_close = self.launcher_flag("CloseOnPlay", false);
         // None set: the box starts on Steam's usual folder when the game is there; it is
         // stored only by Save (#2938).
         if self.game_edit.is_empty() {
@@ -1001,38 +1018,55 @@ impl App {
     fn settings_page(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Settings");
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let dirty = !self.edits.is_empty();
-                if ui.add_enabled(dirty, gold_button("Save", dirty)).clicked() {
-                    let r = self.save_settings();
-                    self.after_write(r, Some("Settings saved: the game uses them at its next start."));
-                }
-                if ui.add_enabled(dirty, egui::Button::new("Undo changes")).clicked() {
-                    self.edits.clear();
-                }
-                if dirty {
-                    ui.label(RichText::new(format!("{} changed", self.edits.len())).small().color(GOLD));
-                }
-            });
+            if !self.ini_page {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let dirty = !self.edits.is_empty();
+                    if ui.add_enabled(dirty, gold_button("Save", dirty)).clicked() {
+                        let r = self.save_settings();
+                        self.after_write(r, Some("Settings saved: the game uses them at its next start."));
+                    }
+                    if ui.add_enabled(dirty, egui::Button::new("Undo changes")).clicked() {
+                        self.edits.clear();
+                    }
+                    if dirty {
+                        ui.label(RichText::new(format!("{} changed", self.edits.len())).small().color(GOLD));
+                    }
+                });
+            }
         });
         ui.label(
-            RichText::new("The game's own settings page, kept in NVForever.ini. A row the game has not written yet shows its default once you change it in the game.")
-                .small()
-                .color(WEAK),
+            RichText::new(if self.ini_page {
+                "Values this launcher reads from NVForever.ini. The game's own settings stay on the other tabs."
+            } else {
+                "The game's own settings page, kept in NVForever.ini. A row the game has not written yet shows its default once you change it in the game."
+            })
+            .small()
+            .color(WEAK),
         );
         ui.horizontal_wrapped(|ui| {
             for (i, t) in self.tab_labels.clone().iter().enumerate() {
-                let on = self.tab == i;
+                let on = !self.ini_page && self.tab == i;
                 let b = egui::Button::new(RichText::new(t).strong().color(if on { theme::ON_GOLD } else { theme::TEXT })).fill(if on { GOLD } else { Color32::TRANSPARENT }).stroke(Stroke::NONE);
                 if ui.add(b).clicked() {
                     self.tab = i;
+                    self.ini_page = false;
                 }
+            }
+            let on = self.ini_page;
+            let b = egui::Button::new(RichText::new("NVForever.ini").strong().color(if on { theme::ON_GOLD } else { theme::TEXT })).fill(if on { GOLD } else { Color32::TRANSPARENT }).stroke(Stroke::NONE);
+            if ui.add(b).clicked() {
+                self.ini_page = true;
             }
         });
         ui.separator();
         let tab = self.tabs.get(self.tab).cloned();
+        let ini_page = self.ini_page;
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            if ini_page {
+                self.ini_form(ui);
+                return;
+            }
             if let Some(tab) = tab {
                 if tab == "Graphics" {
                     self.dlss_card(ui);
@@ -1067,6 +1101,95 @@ impl App {
             }
         });
     }
+
+    /// The keys this launcher reads from NVForever.ini, other than the game's own settings tabs.
+    fn ini_form(&mut self, ui: &mut egui::Ui) {
+        if self.home.is_none() {
+            ui.label("No home folder was found, so NVForever.ini cannot be written.");
+            return;
+        }
+        let dirty = self.ini_form_dirty();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(dirty, gold_button("Save", dirty)).on_hover_text("Writes these values into NVForever.ini.").clicked() {
+                self.save_ini_form();
+            }
+            ui.label(RichText::new("Other lines in the file are left as they are.").small().color(WEAK));
+        });
+        if let Some(path) = self.ini_path() {
+            ui.label(RichText::new(path.display().to_string()).small().color(WEAK)).on_hover_text("Linux: ~/.local/share/nvforever (or $XDG_DATA_HOME/nvforever), unless NVFOREVER_HOME is set. Windows: Documents\\My Games\\NVForever. An existing nvforever.ini in that folder is the file used.");
+        }
+        ui.add_space(4.0);
+        ui.label(RichText::new("GAME").small().strong().color(theme::GOLD_TEXT));
+        card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("[Game] Path. The folder that holds Data. Also set on the Game folder page.").small().color(WEAK));
+            ui.add(egui::TextEdit::singleline(&mut self.ini_game).hint_text("Fallout New Vegas folder").desired_width(ui.available_width()));
+        });
+        ui.add_space(4.0);
+        ui.label(RichText::new("LAUNCHER").small().strong().color(theme::GOLD_TEXT));
+        card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.checkbox(&mut self.ini_news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com when the launcher opens.");
+            ui.checkbox(&mut self.ini_close, "Close the launcher when the game starts").on_hover_text("[Launcher] CloseOnPlay.");
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Game program").small()).on_hover_text("[Launcher] Exe. Empty uses the program beside the launcher.");
+                ui.add(egui::TextEdit::singleline(&mut self.ini_exe).desired_width((ui.available_width() - 160.0).max(120.0)));
+                if cfg!(windows) && ui.button("Choose…").clicked() {
+                    if let Some(f) = pick_file("nvforever") {
+                        self.ini_exe = f.display().to_string();
+                    }
+                }
+            });
+        });
+        ui.add_space(4.0);
+        let device = ini_get(&self.ini_text, "Controls", "Input Device").filter(|s| !s.is_empty()).unwrap_or_else(|| "not set".into());
+        ui.label(RichText::new(format!("Input device: {device}")).small().color(WEAK)).on_hover_text("[Controls] Input Device. The game writes this. It is not changed here.");
+    }
+
+    fn ini_form_dirty(&self) -> bool {
+        let game = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
+        let exe = ini_get(&self.ini_text, LAUNCHER, "Exe").unwrap_or_default();
+        self.ini_game.trim() != game
+            || self.ini_exe.trim() != exe
+            || self.ini_news != self.launcher_flag("News", true)
+            || self.ini_close != self.launcher_flag("CloseOnPlay", false)
+    }
+
+    fn save_ini_form(&mut self) {
+        let exe = self.ini_exe.trim().to_string();
+        if !exe.is_empty() && !PathBuf::from(&exe).is_file() {
+            self.message = Some((format!("{exe} is not a file."), true));
+            return;
+        }
+        let game = self.ini_game.trim().to_string();
+        let stored_game = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
+        if game.is_empty() && !stored_game.is_empty() {
+            self.message = Some(("The game folder was left as it is. An empty path is not written.".into(), true));
+            return;
+        }
+        if !game.is_empty() && GameInstall::open(&game).is_err() {
+            self.message = Some((format!("{game} is not a Fallout New Vegas folder."), true));
+            return;
+        }
+        let news_on = self.ini_news;
+        let news = if news_on { "1" } else { "0" };
+        let close = if self.ini_close { "1" } else { "0" };
+        let r = self.write_ini(|t| {
+            let mut t = t;
+            if !game.is_empty() {
+                t = ini_set(&t, "Game", "Path", &game);
+            }
+            t = ini_set(&t, LAUNCHER, "News", news);
+            t = ini_set(&t, LAUNCHER, "CloseOnPlay", close);
+            ini_set(&t, LAUNCHER, "Exe", &exe)
+        });
+        let ok = r.is_ok();
+        self.after_write(r, Some("NVForever.ini saved."));
+        if ok && !news_on {
+            self.news_state = NewsState::Off;
+        }
+    }
+
 
     fn setting_row(&mut self, ui: &mut egui::Ui, key: &str, label: &str, note: &str, kind: Option<&menu::Kind>, greyed: Option<&str>) {
         let stored = self.stored.get(key).cloned();

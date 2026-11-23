@@ -340,7 +340,7 @@ pub fn sound_for(menu: UiMenu, event: UiEvent) -> Choice {
         // menu's [design]. Opening plays `MUSSuccess` (`fx\mus\mus_success.wav`, the
         // archives' `.ogg`) [owner, 2026-10-24: "the sound effect we actually want to play
         // when the level up screen is shown is mus_success.ogg"; observed: SOUN 0x00078594
-        // names it]; `UILevelUpText` is the XP meter's filled bar (`crate::xp_meter`).
+        // names it]; `UILevelUpText` plays with the XP meter's LEVEL UP (`crate::xp_meter`).
         (LevelUp, Opened) => Named("MUSSuccess"),
         (LevelUp, Focus) => Named("UIMenuFocus"),
         (LevelUp, Value { .. } | Picked) => Named("UIMenuPrevNext"),

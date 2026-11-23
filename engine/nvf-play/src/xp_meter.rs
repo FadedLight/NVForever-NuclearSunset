@@ -108,8 +108,8 @@ const LEVEL_UP_SECONDS: f32 = 2.0 * LEVEL_UP_FADE + LEVEL_UP_HOLD;
 /// From the level-up sound to the level-up menu, counted while the HUD is up [owner,
 /// 2026-10-24: "play this sound then wait 5 seconds before showing the level up screen"].
 pub const LEVEL_UP_DELAY: f32 = 5.0;
-/// The level-up sound, when the bar is filled [owner, 2026-10-24: "when the xp bar is
-/// filled it should play the ui_leveluptext.wav"; observed: SOUN `UILevelUpText` names it].
+/// The level-up sound, played when "LEVEL UP" appears (#3438; previously triggered at the
+/// filled pointer [owner, 2026-10-24]; observed: SOUN `UILevelUpText` names `ui_leveluptext.wav`).
 const LEVEL_UP_SOUND: &str = "UILevelUpText";
 
 /// What the meter shows.
@@ -230,12 +230,6 @@ impl Meter {
         self.show.as_ref().is_some_and(|s| s.level_up && s.since_gain >= LEVEL_UP_START)
     }
 
-    /// Keep the owner's sound trigger at the filled pointer, separately from the later
-    /// visual notice [owner 2026-10-24, LEVEL_UP_SOUND; design: separate phases].
-    fn level_up_filled(&self) -> bool {
-        self.show.as_ref().is_some_and(|s| s.level_up && s.since_gain >= FADE + SLIDE)
-    }
-
     /// The meter is gone (the level-up menu waits for this).
     pub fn idle(&self) -> bool {
         self.show.is_none()
@@ -347,7 +341,7 @@ fn play_sound(sfx: Option<&Sfx>, cache: &mut HashMap<&'static str, Option<FormId
     }
 }
 
-/// For an earned level: the level-up sound once the pointer fills (or at once when
+/// For an earned level: the level-up sound when "LEVEL UP" appears (or at once when
 /// no bar is up, as for the second of two levels earned together), then the level-up menu
 /// [`LEVEL_UP_DELAY`] seconds later once the player can take it: in the world, out of
 /// every menu, nobody drawn fighting or searching for them (the owner's rule; counted over
@@ -391,11 +385,16 @@ fn level_up(
         note_wait(&mut waiting, reason);
         return;
     }
-    if *state.get() != PlayState::Playing || !view.shown {
+    if *state.get() != PlayState::Playing || !view.shown || rt.game.in_menu() {
         return;
     }
     let Some(since) = since_sound.as_mut() else {
-        if meter.level_up_filled() || meter.idle() {
+        // When No XP Meter in Combat defers showing the gain in `watch`, hold the
+        // level-up sound too so it plays with the deferred LEVEL UP notice [design].
+        if tweaks.as_ref().is_some_and(|t| t.no_xp_meter_in_combat) && crate::hud::sneak_now(&rt.game) == crate::hud::Sneak::Danger {
+            return;
+        }
+        if meter.level_up_word() || meter.idle() {
             // The player's tweak: every so many levels another sound [design: docs/design/tweaks.md].
             let next = rt.game.player_level() as u32 + 1;
             let own = tweaks.as_deref().and_then(|t| alternate_level_sound(next, (t.level_sound_every_a as u32, &t.level_sound_a), (t.level_sound_every_b as u32, &t.level_sound_b)));
@@ -422,9 +421,6 @@ fn level_up(
         return;
     }
     let g = &rt.game;
-    if g.in_menu() {
-        return;
-    }
     let hunters = match actors.as_deref() {
         Some(a) => crate::after_combat::drawn_hunters(g, &a.living),
         None => experience::hunters(g),
@@ -771,18 +767,227 @@ mod tests {
         assert_eq!(m.show.as_ref().unwrap().to, 1.0);
         assert_eq!(m.texts().unwrap().2, "+60");
         assert!(!run(&mut m, 4.1));
-        assert!(m.level_up_filled());
+        assert!(!m.level_up_word());
         assert_eq!(m.texts().unwrap().2, "+60");
         assert!(!run(&mut m, 2.1));
+        assert!(!m.level_up_word());
         assert_eq!(m.strength(), 0.0);
         assert!(!m.idle());
         assert!(run(&mut m, 1.4));
+        assert!(m.level_up_word());
         assert_eq!(m.texts().unwrap().2, "LEVEL UP");
         assert_eq!(m.strength(), 1.0);
         // The word's moment comes once.
         assert!(!run(&mut m, 1.0));
         run(&mut m, 1.0);
         assert!(m.idle());
+    }
+
+    const XP_SOUND_ID: FormId = FormId(0x9001);
+    const LEVEL_UP_SOUND_ID: FormId = FormId(0x9002);
+
+    fn sync_app(start_xp: f64) -> App {
+        let mut forms = fnv_combat::fx::FxForms::default();
+        forms.sounds.insert(XP_SOUND_ID, fnv_combat::fx::Sound { edid: Some("UIPopUpExperienceUp".into()), ..default() });
+        forms.sounds.insert(LEVEL_UP_SOUND_ID, fnv_combat::fx::Sound { edid: Some(LEVEL_UP_SOUND.into()), ..default() });
+
+        let mut script = ScriptState::over_no_plugins();
+        script.rt.as_mut().unwrap().game.player.xp = start_xp;
+        let sim = SimState::new(&fnv_esm::LoadOrder::new(&[]).unwrap(), &fnv_esm::Schema::default(), &fnv_world::WorldIndex::default());
+
+        let mut app = App::new();
+        app.insert_resource(Time::<()>::default())
+            .insert_resource(State::new(PlayState::Playing))
+            .insert_resource(HudView { shown: true, ..default() })
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Meter>()
+            .init_resource::<crate::music::MusicCues>()
+            .insert_resource(script)
+            .insert_resource(sim)
+            .insert_resource(Sfx::new(forms))
+            .add_message::<PlaySound>()
+            .add_systems(Update, (watch, level_up, draw).chain());
+        // First tick establishes the meter baseline without showing anything.
+        app.update();
+        let _ = drain_sounds(&mut app);
+        app
+    }
+
+    fn drain_sounds(app: &mut App) -> Vec<FormId> {
+        app.world_mut().resource_mut::<bevy::ecs::message::Messages<PlaySound>>().drain().map(|m| m.sound).collect()
+    }
+
+    fn step_app(app: &mut App, dt: f32) -> Vec<FormId> {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+        drain_sounds(app)
+    }
+
+    fn step_many(app: &mut App, seconds: f32) -> Vec<FormId> {
+        let mut played = Vec::new();
+        let steps = (seconds * 60.0).round() as usize;
+        for _ in 0..steps {
+            played.extend(step_app(app, 1.0 / 60.0));
+        }
+        played
+    }
+
+    fn hud_texts(app: &mut App) -> Vec<String> {
+        app.world_mut().query::<&Text>().iter(app.world()).map(|t| t.0.clone()).collect()
+    }
+
+    /// #3438: `UILevelUpText` (and level-up music) must play on the exact frame "LEVEL UP"
+    /// begins displaying, not when the XP pointer finishes gliding 3.2 s earlier, and the
+    /// level-up menu still opens `LEVEL_UP_DELAY` (5 s) after the sound.
+    #[test]
+    fn level_up_sound_syncs_with_level_up_text_and_opens_menu_after_delay() {
+        let mut app = sync_app(150.0);
+        // Spawn the fallback HUD kit once the meter first appears, then step through.
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 210.0;
+        let on_gain = step_app(&mut app, 1.0 / 60.0);
+        assert_eq!(on_gain, vec![XP_SOUND_ID]);
+        assert!(!app.world().resource::<crate::music::MusicCues>().level_up);
+
+        // Past the old filled-pointer moment (4.0 s) and into the post-meter gap (6.5 s):
+        // neither LEVEL UP text nor UILevelUpText has fired yet.
+        assert!(step_many(&mut app, 4.5).is_empty(), "sound must not fire early when the pointer fills");
+        assert!(!app.world().resource::<Meter>().level_up_word());
+        assert!(!app.world().resource::<crate::music::MusicCues>().level_up);
+        assert!(hud_texts(&mut app).contains(&"+60".into()));
+
+        assert!(step_many(&mut app, 2.5).is_empty(), "sound must not fire during the gap before LEVEL UP");
+        assert!(!app.world().resource::<Meter>().level_up_word());
+        assert!(!app.world().resource::<crate::music::MusicCues>().level_up);
+
+        // Advance frame-by-frame until LEVEL UP appears: sound, music cue, and drawn text
+        // must all activate on the exact same frame.
+        let mut trigger_frame_sounds = Vec::new();
+        for _ in 0..30 {
+            let sounds = step_app(&mut app, 1.0 / 60.0);
+            let word_up = app.world().resource::<Meter>().level_up_word();
+            if !sounds.is_empty() || word_up {
+                assert!(word_up, "sound fired before LEVEL UP text appeared");
+                assert_eq!(sounds, vec![LEVEL_UP_SOUND_ID], "LEVEL UP text appeared without UILevelUpText on the same frame");
+                assert!(app.world().resource::<crate::music::MusicCues>().level_up);
+                assert_eq!(hud_texts(&mut app), vec!["LEVEL UP"]);
+                trigger_frame_sounds = sounds;
+                break;
+            }
+        }
+        assert_eq!(trigger_frame_sounds, vec![LEVEL_UP_SOUND_ID]);
+
+        // Through the rest of the LEVEL UP notice (and after meter becomes idle): no double-play,
+        // and the menu stays closed until LEVEL_UP_DELAY (5 s) has elapsed.
+        assert!(step_many(&mut app, 4.5).is_empty(), "no duplicate level-up sound");
+        assert!(app.world().resource::<Meter>().idle());
+        assert!(!app.world().resource::<ScriptState>().rt.as_ref().unwrap().game.in_menu());
+
+        // Crossing 5 s after the sound opens the level-up menu at level 2.
+        assert!(step_many(&mut app, 0.7).is_empty());
+        let g = &app.world().resource::<ScriptState>().rt.as_ref().unwrap().game;
+        assert!(g.in_menu());
+        assert_eq!(g.player_level(), 2.0);
+    }
+
+    #[test]
+    fn repeated_xp_gains_do_not_play_level_up_sound_early_or_twice() {
+        let mut app = sync_app(150.0);
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 210.0;
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+
+        // Step past the old 4.0 s filled-bar mark, then award another XP gain before LEVEL UP.
+        assert!(step_many(&mut app, 4.5).is_empty());
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 230.0;
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+
+        // Still no level-up sound 4.5 s after the second gain; plays once when LEVEL UP appears.
+        assert!(step_many(&mut app, 4.5).is_empty());
+        let played = step_many(&mut app, 3.0);
+        assert_eq!(played, vec![LEVEL_UP_SOUND_ID]);
+
+        // Another XP gain while LEVEL UP is showing does not replay UILevelUpText.
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 250.0;
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+        assert!(step_many(&mut app, 3.0).is_empty());
+    }
+
+    #[test]
+    fn large_frame_step_past_level_up_window_still_plays_sound_once() {
+        let mut app = sync_app(150.0);
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 210.0;
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+
+        // A single frame hitch jumps past the entire 9.18 s meter + LEVEL UP window:
+        // meter becomes idle, and UILevelUpText still plays once rather than being lost.
+        assert_eq!(step_app(&mut app, 10.0), vec![LEVEL_UP_SOUND_ID]);
+        assert!(app.world().resource::<Meter>().idle());
+        assert!(step_app(&mut app, 1.0).is_empty(), "no duplicate sound on subsequent frames");
+    }
+
+    #[test]
+    fn hidden_hud_pauses_both_text_and_sound_and_second_earned_level_plays_when_idle() {
+        // Enough XP for both level 2 (200) and level 3 (550).
+        let mut app = sync_app(0.0);
+        app.world_mut().resource_mut::<HudView>().shown = false;
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.player.xp = 600.0;
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+
+        // While the HUD is hidden, neither LEVEL UP nor UILevelUpText triggers.
+        assert!(step_many(&mut app, 10.0).is_empty());
+        assert!(!app.world().resource::<Meter>().level_up_word());
+
+        // Restore HUD: sound waits for LEVEL UP at 7.2 s.
+        app.world_mut().resource_mut::<HudView>().shown = true;
+        assert!(step_many(&mut app, 6.5).is_empty());
+        assert_eq!(step_many(&mut app, 1.0), vec![LEVEL_UP_SOUND_ID]);
+        assert!(app.world().resource::<Meter>().level_up_word());
+
+        // 5 s later, level 2's menu opens.
+        assert!(step_many(&mut app, 5.2).is_empty());
+        {
+            let mut script = app.world_mut().resource_mut::<ScriptState>();
+            let g = &mut script.rt.as_mut().unwrap().game;
+            assert_eq!(g.player_level(), 2.0);
+            assert!(g.in_menu());
+            // Player finishes level 2's menu; level 3 is still earned with no bar up.
+            g.menu = None;
+        }
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![LEVEL_UP_SOUND_ID], "second earned level plays when meter is idle");
+    }
+
+    #[test]
+    fn no_xp_meter_in_combat_defers_level_up_sound_until_combat_ends() {
+        let mut app = sync_app(150.0);
+        app.insert_resource(crate::tweaks::TweakSettings { no_xp_meter_in_combat: true, ..default() });
+        // Put a hostile actor in combat with the player so sneak_now reports Danger.
+        {
+            let mut script = app.world_mut().resource_mut::<ScriptState>();
+            let g = &mut script.rt.as_mut().unwrap().game;
+            let foe = FormId(0x5000);
+            let a = g.awareness.actors.entry(foe).or_default();
+            a.state = fnv_game::awareness::State::Combat;
+            a.targets.insert(FormId::PLAYER_REF, fnv_game::awareness::Target {
+                band: fnv_game::detection::Band::Detected,
+                value: 100.0,
+                at: [0.0; 3],
+                detected: Some(0.0),
+                hidden_since: None,
+            });
+            assert_eq!(crate::hud::sneak_now(g), crate::hud::Sneak::Danger);
+            g.player.xp = 210.0;
+        }
+
+        // While in Danger with No XP Meter in Combat enabled, both meter and sound wait.
+        assert!(step_many(&mut app, 5.0).is_empty());
+        assert!(app.world().resource::<Meter>().idle());
+
+        // Once combat ends, watch shows the deferred gain and sound waits for LEVEL UP at 7.2 s.
+        app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.awareness.actors.clear();
+        assert_eq!(step_app(&mut app, 1.0 / 60.0), vec![XP_SOUND_ID]);
+        assert!(!app.world().resource::<Meter>().idle());
+        assert!(step_many(&mut app, 6.5).is_empty());
+        assert_eq!(step_many(&mut app, 1.0), vec![LEVEL_UP_SOUND_ID]);
+        assert!(app.world().resource::<Meter>().level_up_word());
     }
 
     #[test]

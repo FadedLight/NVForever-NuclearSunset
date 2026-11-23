@@ -897,7 +897,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 215] = [
+    const KNOWN: [(&str, &str); 219] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -1006,6 +1006,7 @@ mod android_profile_tests {
         ("fine-shadows", "Graphics"),
         ("cloud-shadows", "Graphics"),
         ("terrain-shadows", "Graphics"),
+        ("light-shadows", "Graphics"),
         ("bloom", "Graphics"),
         ("glow", "Graphics"),
         ("eye-adaptation", "Graphics"),
@@ -1023,6 +1024,9 @@ mod android_profile_tests {
         ("light-shafts", "Graphics"),
         ("heat-haze", "Graphics"),
         ("desert-haze", "Graphics"),
+        ("aerial-perspective", "Graphics"),
+        ("night-sky-detail", "Graphics"),
+        ("distant-lights", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-effects", "Graphics"),
         ("water-mirror", "Graphics"),
@@ -1222,7 +1226,7 @@ mod android_profile_tests {
         hide-hud-on-load grey-read-notes remember-item-places player-weapon-volume npc-weapon-volume \
         keep-fall-height-on-load no-marker-popup marker-shift-removes marker-removed-on-it clear-marker-within \
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo \
-        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training";
+        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training keep-chosen-ammo";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -1369,8 +1373,8 @@ mod android_profile_tests {
     #[test]
     fn every_tweak_of_1892_has_its_group_and_category() {
         let tweaks = tweak_rows();
-        // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls).
-        assert_eq!(tweaks.len(), 562);
+        // 565 less the console and screenshot keys, bindings since 2026-11-16 (Controls).
+        assert_eq!(tweaks.len(), 563);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);

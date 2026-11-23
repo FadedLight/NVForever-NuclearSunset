@@ -324,7 +324,7 @@ impl TargetPicker<'_,'_,'_>{
         filter.exclude_layers.insert(layers::INVISIBLE_WALL);
         let h = p.world.queries().ray(eye, dir, REACH, &filter)?;
         // A door, closed, hides what is behind it whatever its collision layer.
-        let s: &SimState = &sim;
+        let s: &SimState = sim;
         let closed_door = |id: u32| s.base_of(id).and_then(|b| s.forms.get(b)).is_some_and(|f| matches!(f.data, BaseData::Door(_))) && s.world.peek(FormId(id)).is_none_or(|st| !st.open);
         through = see_through::actor_behind(&mut p.world, eye, dir, REACH, &h, &filter, closed_door);
         let owner = |o: Owner| match o {

@@ -3996,3 +3996,28 @@ capture setup, so every part of a check that needs an interior is still open.
        neither plant's reading changed. Whether a bullet struck the plant itself was not
        confirmed: the crosshair read no reference at 150 units. These positions are
        meaningful because the same reading followed the grabbed nettles above.
+
+## Added 2026-11-23 (Rad Child's regeneration rate, #3471)
+
+284. **How fast does Rad Child give Health back at each stage of radiation sickness?**
+     (P1: #3471; aid-items.md §3.) The four stage spells carry "Regeneration" of magnitude
+     2, 4, 6 and 8 behind `HasPerk RadChild`; no record gives the unit. Ours [hypothesis]:
+     magnitude Health a second (`fnv_game::aid::REGENERATION_RATE` 1), evenly, from at most
+     1 s after the perk, stopping at the maximum.
+     - Set-up: outside Hardcore, indoors, no fight, god mode off, rads not rising, no Solar
+       Powered, implant, food or chem effect. `ModActorValue Health 1000`, then
+       `DamageActorValue Health 900`, so that no run reaches the maximum; log the maximum
+       too, as the stages' Endurance penalties may move it.
+     - For rads at 250, 450, 650 and 850 (`SetActorValue RadiationRads`), without the perk
+       at the start: wait 2 s and log `GetAV Health` every frame for 10 s (it should not
+       move); `player.AddPerk RadChild` and log `GetAV Health`, `GetAV RadiationRads`,
+       `IsSpellTarget` of the stage's spell and the seconds passed for **60 s**;
+       `player.RemovePerk RadChild` and log 10 s more.
+     - Report per stage: the rise over the 60 s, the size and spacing of the steps (every
+       frame, every second, or longer), the delay after AddPerk and after RemovePerk.
+     - Then with the perk, still logging: rads 450 to 650 and back (does the rate swap at
+       once, is there a jump at the swap); rads 199 (does it stop); Health close under the
+       maximum at one stage (does it stop there); one hour waited at rads 250 with Health
+       damaged by 900 (Health before and after).
+     - If cheap, the same base effect elsewhere: Solar Powered (magnitude 1) outdoors at
+       noon for 60 s and indoors for 10 s.

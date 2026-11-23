@@ -9039,6 +9039,28 @@ order = [[
 ]]
 
 [[scenario]]
+name = "aid-rad-child"
+source = "issue #3471 (docs/spec-notes/aid-items.md §3): Rad Child regenerates Health by the second in a stage of radiation sickness, not once when the stage starts"
+note = "Health 200 damaged by 120, rads 650 (Radiation600, magnitude 6). Without the perk two readings 3 s apart stay at 80; the perk is added at 17 s and taken at 21 s (about 3 s at 6 a second, less the second before its condition is checked, and up to one more after); readings at 24 s and 34 s stay where it stopped (going on would pass 125)"
+areas = ["aid", "perks"]
+paths = ["crates/fnv-game/src/aid.rs", "crates/fnv-game/src/abilities.rs", "crates/fnv-game/src/needs.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_SCRIPT = "3:damage:player:Health:120,3.5:set_av:player:RadiationRads:650", NVF_PLAY_TEST_CONSOLE = "14:player.getav health;14.4:close;17:player.getav health;player.addperk RadChild;17.4:close;21:player.getav health;player.removeperk RadChild;21.4:close;24:player.getav health;24.4:close;34:player.getav health;34.4:close" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 38
+expect = [
+  "test aid: 0x00000014 Health damaged by 120: now 80.0",
+  { re = 'needs: .* 650[\d.]*: Radiation600', label = "Critical radiation sickness" },
+  { re = 'console: GetActorValue on player >> ', count = 5, label = "Health is read five times" },
+]
+order = [[
+  { re = 'console: GetActorValue on player >> 80\.0', label = "no regeneration without the perk" },
+  { re = 'console: GetActorValue on player >> 80\.0', label = "still none 3 s later" },
+  { re = 'console: GetActorValue on player >> (8[5-9]|9\d|1[01]\d|12[0-4])\.', label = "Health has risen with the perk" },
+  { re = 'console: GetActorValue on player >> (8[5-9]|9\d|1[01]\d|12[0-4])\.', label = "the perk gone" },
+  { re = 'console: GetActorValue on player >> (8[5-9]|9\d|1[01]\d|12[0-4])\.', label = "no more 10 s later" },
+]]
+
+[[scenario]]
 name = "aid-hardcore"
 source = "aid leftovers (docs/spec-notes/aid-items.md §11): Hardcore needs, their stage effects, water lowering dehydration and a sleep lowering sleep deprivation"
 areas = ["aid", "wait", "hardcore"]

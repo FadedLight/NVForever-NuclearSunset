@@ -39,6 +39,80 @@ enum NewsState {
     Failed(String),
 }
 
+/// The NVForever.ini tab (#3483): the INI keys this launcher reads that are not rows of the
+/// game's menu.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct IniForm {
+    /// `[Game] Path` as the file has it, not the guessed folder the Game folder page offers.
+    game: String,
+    /// `[Launcher] Exe`; empty starts the program beside the launcher.
+    exe: String,
+    /// `[Launcher] News`.
+    news: bool,
+    /// `[Launcher] CloseOnPlay`.
+    close: bool,
+}
+
+impl IniForm {
+    /// The form as the INI `text` has it, with the launcher's defaults for keys it lacks.
+    fn read(text: &str) -> IniForm {
+        let flag = |key, default| ini_get(text, LAUNCHER, key).map_or(default, |v| v != "0");
+        IniForm {
+            game: Config::from_ini(text).game_dir.map(|p| p.display().to_string()).unwrap_or_default(),
+            exe: ini_get(text, LAUNCHER, "Exe").unwrap_or_default(),
+            news: flag("News", true),
+            close: flag("CloseOnPlay", false),
+        }
+    }
+
+    /// The form as it would be saved: the typed paths without surrounding spaces.
+    fn trimmed(&self) -> IniForm {
+        IniForm { game: self.game.trim().to_string(), exe: self.exe.trim().to_string(), ..self.clone() }
+    }
+
+    /// Why this form cannot be saved over `was` (the INI as read), if it cannot. Only a
+    /// changed folder or program is checked, so a saved one that went missing (an unplugged
+    /// drive) does not stop the other keys being saved. An empty game folder never removes a
+    /// saved one; an empty program clears `Exe`.
+    fn check(&self, was: &IniForm, is_game: impl Fn(&str) -> bool, is_file: impl Fn(&str) -> bool) -> Result<(), String> {
+        let now = self.trimmed();
+        if now.game != was.game {
+            if now.game.is_empty() {
+                return Err("The game folder was left as it is. An empty path is not written.".into());
+            }
+            if !is_game(&now.game) {
+                return Err(format!("{} is not a Fallout: New Vegas folder.", now.game));
+            }
+        }
+        if now.exe != was.exe && !now.exe.is_empty() && !is_file(&now.exe) {
+            return Err(format!("{} is not a file.", now.exe));
+        }
+        Ok(())
+    }
+
+    /// `text` with the keys this form changed from `was` set, as the game tabs' Save writes
+    /// only the rows that changed; every other line is kept. The game folder goes through
+    /// [`Config::to_ini`], as the Game folder page writes it.
+    fn apply(&self, was: &IniForm, text: &str) -> String {
+        let now = self.trimmed();
+        let flag = |on: bool| if on { "1" } else { "0" };
+        let mut t = text.to_string();
+        if now.game != was.game && !now.game.is_empty() {
+            t = Config { game_dir: Some(PathBuf::from(&now.game)), ..Config::default() }.to_ini(&t);
+        }
+        if now.exe != was.exe {
+            t = ini_set(&t, LAUNCHER, "Exe", &now.exe);
+        }
+        if now.news != was.news {
+            t = ini_set(&t, LAUNCHER, "News", flag(now.news));
+        }
+        if now.close != was.close {
+            t = ini_set(&t, LAUNCHER, "CloseOnPlay", flag(now.close));
+        }
+        t
+    }
+}
+
 type NewsResult = Result<(Vec<Post>, Source), String>;
 type NextResult = Result<Option<news::NextRelease>, String>;
 type LatestResult = Result<Option<news::Latest>, String>;
@@ -105,12 +179,8 @@ pub struct App {
     tab: usize,
     /// The NVForever.ini tab, beside the game's own settings tabs.
     ini_page: bool,
-    /// `[Game] Path` as the file has it. Not the guessed folder.
-    ini_game: String,
-    /// `[Launcher]` values this program reads.
-    ini_exe: String,
-    ini_news: bool,
-    ini_close: bool,
+    /// That tab's values as edited ([`IniForm`]).
+    ini: IniForm,
     words: HashMap<&'static str, &'static [&'static str]>,
     lists: HashMap<&'static str, &'static [&'static str]>,
     stored: BTreeMap<String, String>,
@@ -180,10 +250,7 @@ impl App {
             rows: menu.rows,
             tab: 0,
             ini_page: false,
-            ini_game: String::new(),
-            ini_exe: String::new(),
-            ini_news: true,
-            ini_close: false,
+            ini: IniForm::default(),
             words: catalog::step_words(),
             lists: catalog::list_choices(),
             stored: BTreeMap::new(),
@@ -330,10 +397,7 @@ impl App {
         self.rows = menu.rows;
         self.tab = on.and_then(|on| self.tabs.iter().position(|t| *t == on)).unwrap_or(0);
         self.game_edit = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
-        self.ini_game = self.game_edit.clone();
-        self.ini_exe = ini_get(&self.ini_text, LAUNCHER, "Exe").unwrap_or_default();
-        self.ini_news = self.launcher_flag("News", true);
-        self.ini_close = self.launcher_flag("CloseOnPlay", false);
+        self.ini = IniForm::read(&self.ini_text);
         // None set: the box starts on Steam's usual folder when the game is there; it is
         // stored only by Save (#2938).
         if self.game_edit.is_empty() {
@@ -1110,33 +1174,34 @@ impl App {
         }
         let dirty = self.ini_form_dirty();
         ui.horizontal(|ui| {
-            if ui.add_enabled(dirty, gold_button("Save", dirty)).on_hover_text("Writes these values into NVForever.ini.").clicked() {
-                self.save_ini_form();
+            if ui.add_enabled(dirty, gold_button("Save", dirty)).on_hover_text("Writes the values you changed into NVForever.ini.").clicked() {
+                let ctx = ui.ctx().clone();
+                self.save_ini_form(&ctx);
             }
             ui.label(RichText::new("Other lines in the file are left as they are.").small().color(WEAK));
         });
         if let Some(path) = self.ini_path() {
-            ui.label(RichText::new(path.display().to_string()).small().color(WEAK)).on_hover_text("Linux: ~/.local/share/nvforever (or $XDG_DATA_HOME/nvforever), unless NVFOREVER_HOME is set. Windows: Documents\\My Games\\NVForever. An existing nvforever.ini in that folder is the file used.");
+            ui.label(RichText::new(path.display().to_string()).small().color(WEAK)).on_hover_text("The file this tab writes. Its folder is NVFOREVER_HOME when that is set, else Documents\\My Games\\NVForever on Windows, ~/Library/Application Support/NVForever on macOS, and ~/.local/share/nvforever (or $XDG_DATA_HOME/nvforever) on Linux.");
         }
         ui.add_space(4.0);
         ui.label(RichText::new("GAME").small().strong().color(theme::GOLD_TEXT));
         card(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(RichText::new("[Game] Path. The folder that holds Data. Also set on the Game folder page.").small().color(WEAK));
-            ui.add(egui::TextEdit::singleline(&mut self.ini_game).hint_text("Fallout New Vegas folder").desired_width(ui.available_width()));
+            ui.add(egui::TextEdit::singleline(&mut self.ini.game).hint_text("Fallout New Vegas folder").desired_width(ui.available_width()));
         });
         ui.add_space(4.0);
         ui.label(RichText::new("LAUNCHER").small().strong().color(theme::GOLD_TEXT));
         card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.checkbox(&mut self.ini_news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com when the launcher opens.");
-            ui.checkbox(&mut self.ini_close, "Close the launcher when the game starts").on_hover_text("[Launcher] CloseOnPlay.");
+            ui.checkbox(&mut self.ini.news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com when the launcher opens.");
+            ui.checkbox(&mut self.ini.close, "Close the launcher when the game starts").on_hover_text("[Launcher] CloseOnPlay.");
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Game program").small()).on_hover_text("[Launcher] Exe. Empty uses the program beside the launcher.");
-                ui.add(egui::TextEdit::singleline(&mut self.ini_exe).desired_width((ui.available_width() - 160.0).max(120.0)));
+                ui.add(egui::TextEdit::singleline(&mut self.ini.exe).desired_width((ui.available_width() - 160.0).max(120.0)));
                 if cfg!(windows) && ui.button("Choose…").clicked() {
                     if let Some(f) = pick_file("nvforever") {
-                        self.ini_exe = f.display().to_string();
+                        self.ini.exe = f.display().to_string();
                     }
                 }
             });
@@ -1147,49 +1212,29 @@ impl App {
     }
 
     fn ini_form_dirty(&self) -> bool {
-        let game = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
-        let exe = ini_get(&self.ini_text, LAUNCHER, "Exe").unwrap_or_default();
-        self.ini_game.trim() != game
-            || self.ini_exe.trim() != exe
-            || self.ini_news != self.launcher_flag("News", true)
-            || self.ini_close != self.launcher_flag("CloseOnPlay", false)
+        self.ini.trimmed() != IniForm::read(&self.ini_text)
     }
 
-    fn save_ini_form(&mut self) {
-        let exe = self.ini_exe.trim().to_string();
-        if !exe.is_empty() && !PathBuf::from(&exe).is_file() {
-            self.message = Some((format!("{exe} is not a file."), true));
+    /// The tab's Save: the changed keys over the file as it is on disk ([`IniForm::apply`]).
+    fn save_ini_form(&mut self, ctx: &egui::Context) {
+        let was = IniForm::read(&self.ini_text);
+        let form = self.ini.trimmed();
+        if let Err(e) = form.check(&was, |g| GameInstall::open(g).is_ok(), |f| PathBuf::from(f).is_file()) {
+            self.message = Some((e, true));
             return;
         }
-        let game = self.ini_game.trim().to_string();
-        let stored_game = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
-        if game.is_empty() && !stored_game.is_empty() {
-            self.message = Some(("The game folder was left as it is. An empty path is not written.".into(), true));
-            return;
-        }
-        if !game.is_empty() && GameInstall::open(&game).is_err() {
-            self.message = Some((format!("{game} is not a Fallout New Vegas folder."), true));
-            return;
-        }
-        let news_on = self.ini_news;
-        let news = if news_on { "1" } else { "0" };
-        let close = if self.ini_close { "1" } else { "0" };
-        let r = self.write_ini(|t| {
-            let mut t = t;
-            if !game.is_empty() {
-                t = ini_set(&t, "Game", "Path", &game);
-            }
-            t = ini_set(&t, LAUNCHER, "News", news);
-            t = ini_set(&t, LAUNCHER, "CloseOnPlay", close);
-            ini_set(&t, LAUNCHER, "Exe", &exe)
-        });
+        let r = self.write_ini(|t| form.apply(&was, &t));
         let ok = r.is_ok();
         self.after_write(r, Some("NVForever.ini saved."));
-        if ok && !news_on {
-            self.news_state = NewsState::Off;
+        // As the News card's box does: on fetches the news now, off stops showing it.
+        if ok && form.news != was.news {
+            if form.news {
+                self.fetch_news(ctx);
+            } else {
+                self.news_state = NewsState::Off;
+            }
         }
     }
-
 
     fn setting_row(&mut self, ui: &mut egui::Ui, key: &str, label: &str, note: &str, kind: Option<&menu::Kind>, greyed: Option<&str>) {
         let stored = self.stored.get(key).cloned();
@@ -2195,6 +2240,45 @@ mod tests {
         for u in [Upd::Idle, Upd::Working { phase: Phase::Checking, done: 0, total: 0 }, Upd::Failed(String::new())] {
             assert!(!u.refuses_close());
         }
+    }
+
+    /// #3483: the NVForever.ini tab writes only the keys it changed, keeps every other line,
+    /// never writes an empty game folder over a saved one, and checks only a changed folder
+    /// or program, so a saved one that went missing does not stop the other keys being saved.
+    #[test]
+    fn the_ini_tab_writes_only_what_changed() {
+        let text = "; mine\n[Game]\nPath=F:\\FNV\n\n[Launcher]\nExe=D:\\gone\\nvforever.exe\n\n[Settings]\nhud-colour=Amber\n";
+        let was = IniForm::read(text);
+        assert_eq!(was, IniForm { game: "F:\\FNV".into(), exe: "D:\\gone\\nvforever.exe".into(), news: true, close: false });
+        let no = |_: &str| false;
+        let yes = |_: &str| true;
+        // Nothing changed: nothing checked, the text as it was.
+        assert!(was.check(&was, no, no).is_ok());
+        assert_eq!(was.apply(&was, text), text);
+        // CloseOnPlay alone, though neither the saved folder nor the program is there now.
+        let close = IniForm { close: true, ..was.clone() };
+        assert!(close.check(&was, no, no).is_ok());
+        assert_eq!(
+            close.apply(&was, text),
+            "; mine\n[Game]\nPath=F:\\FNV\n\n[Launcher]\nExe=D:\\gone\\nvforever.exe\nCloseOnPlay=1\n\n[Settings]\nhud-colour=Amber\n"
+        );
+        // An empty game folder never removes the saved one; a changed one must be a game.
+        assert!(IniForm { game: "  ".into(), ..was.clone() }.check(&was, yes, yes).is_err());
+        let moved = IniForm { game: " G:\\FNV ".into(), ..was.clone() };
+        assert!(moved.check(&was, no, yes).is_err());
+        assert!(moved.check(&was, yes, no).is_ok());
+        assert!(moved.apply(&was, text).contains("\n[Game]\nPath=G:\\FNV\n\n"));
+        // A changed program must be a file; an empty one clears the key.
+        let exe = IniForm { exe: "C:\\NVF\\nvforever.exe".into(), ..was.clone() };
+        assert!(exe.check(&was, yes, no).is_err());
+        assert!(exe.check(&was, no, yes).is_ok());
+        let cleared = IniForm { exe: String::new(), ..was.clone() };
+        assert!(cleared.check(&was, no, no).is_ok());
+        assert!(cleared.apply(&was, text).contains("\nExe=\n"));
+        // A file without a [Launcher] section gets one at the end.
+        let bare = "[Game]\nPath=F:\\FNV\n";
+        let was = IniForm::read(bare);
+        assert_eq!(IniForm { news: false, ..was.clone() }.apply(&was, bare), "[Game]\nPath=F:\\FNV\n\n[Launcher]\nNews=0\n");
     }
 
     #[test]

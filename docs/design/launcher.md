@@ -55,10 +55,13 @@ without the launcher is the same as before.
   drawn keeps the INI's value, so opening a tab changes nothing. Save writes only the changed keys over the file as it is on disk then.
   After the game's tabs, an **NVForever.ini** tab holds the launcher's own keys, which are not
   rows of the game's menu: `[Game] Path`, `[Launcher] News`, `CloseOnPlay` and `Exe`, with the
-  game-written `[Controls] Input Device` shown but not changed. Its Save writes those keys over
-  the file as it is on disk and leaves every other line. The file is in
-  `~/.local/share/nvforever` (or `$XDG_DATA_HOME/nvforever`) on Linux and
-  `Documents\My Games\NVForever` on Windows; `NVFOREVER_HOME` overrides both.
+  game-written `[Controls] Input Device` shown but not changed. Its Save writes the keys that
+  changed over the file as it is on disk and leaves every other line. Only a changed game
+  folder or program is checked, so one that went missing does not stop the other keys being
+  saved; an empty game folder never removes a saved one. The file is in
+  `Documents\My Games\NVForever` on Windows, `~/Library/Application Support/NVForever` on
+  macOS and `~/.local/share/nvforever` (or `$XDG_DATA_HOME/nvforever`) on Linux;
+  `NVFOREVER_HOME` overrides all three (`fnv_install::EngineHome::default_root`).
 - **Mods**: NVForever's own `plugins.txt` (turn on/off with the box or a click on the name; drag a row anywhere but its box to move it, with a gold line where it lands; FalloutNV.esm stays first). A "New game start" card (`src/start.rs`, #2945) has the
   start quest and intro film as free text with hints (`[General] sCharGenQuest`, `sIntroMovie`
   of the INI, written by its Save start button over the file as it is on disk; an empty field

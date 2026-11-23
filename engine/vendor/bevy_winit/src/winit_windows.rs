@@ -9,12 +9,14 @@ use bevy_window::{
 };
 use tracing::warn;
 
+#[cfg(not(target_os = "android"))]
+use winit::window::CursorGrabMode as WinitCursorGrabMode;
 use winit::{
     dpi::{LogicalSize, PhysicalPosition},
     error::ExternalError,
     event_loop::ActiveEventLoop,
     monitor::{MonitorHandle, VideoModeHandle},
-    window::{CursorGrabMode as WinitCursorGrabMode, Fullscreen, Window as WinitWindow, WindowId},
+    window::{Fullscreen, Window as WinitWindow, WindowId},
 };
 
 use crate::{

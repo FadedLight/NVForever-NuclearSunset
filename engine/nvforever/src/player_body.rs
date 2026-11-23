@@ -78,7 +78,8 @@ use bevy::prelude::*;
 use fnv_actor::first_person::{self, is_first_person_shape, shape_shows, Show};
 use fnv_actor::player_clips::{
     aim_clips, aim_variant, aim_weights, attack_clips, attack_stem, block_clips, blocks, direction_weights, equip_clips, holster_clips, idle_clips, jump_clips,
-    limping_idle_clips, limping_move_clips, limping_turn_clips, move_clips, reload_clips, reload_open_clips, turn_clips, Aim, ClipKeys, Dir, HandEvent, Stance, Transition, WeaponHands, WeaponPhase, UNARMED,
+    limping_idle_clips, limping_move_clips, limping_turn_clips, move_clips, reload_clips, reload_open_clips, toddler_idle_clips, toddler_move_clips,
+    toddler_turn_clips, turn_clips, Aim, ClipKeys, Dir, HandEvent, Stance, Transition, WeaponHands, WeaponPhase, UNARMED,
 };
 use fnv_actor::weapon::AnimType;
 use fnv_actor::Appearance;
@@ -382,17 +383,17 @@ fn shade_light(
 /// A clip choice, for the clip caches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ClipKey {
-    /// Posture; limping (a leg crippled, standing).
-    Idle(Stance, bool),
-    /// Posture, female, running, direction, the weapon drawn; limping.
-    Move(Stance, bool, bool, Dir, Option<&'static str>, bool),
+    /// Posture; limping (a leg crippled, standing); toddler (`SetPCToddler`).
+    Idle(Stance, bool, bool),
+    /// Posture, female, running, direction, the weapon drawn; limping; toddler.
+    Move(Stance, bool, bool, Dir, Option<&'static str>, bool, bool),
     Aim(Stance, &'static str, Aim, bool),
     Block(Stance, &'static str),
     Holster(Stance, &'static str),
     Equip(Stance, &'static str, bool),
     Jump(Stance, Option<&'static str>, Option<Dir>, bool),
-    /// Posture, the weapon drawn, to the left; limping.
-    Turn(Stance, Option<&'static str>, bool, bool),
+    /// Posture, the weapon drawn, to the left; limping; toddler.
+    Turn(Stance, Option<&'static str>, bool, bool, bool),
     /// Weapon prefix, attack clip stem (`attackright`), down the sights.
     Attack(Stance, &'static str, &'static str, bool),
     /// Weapon prefix, WEAP reload animation (`ReloadL`).
@@ -409,22 +410,25 @@ enum ClipKey {
 impl ClipKey {
     /// A crippled leg's choice (standing).
     fn limping(self) -> bool {
-        matches!(self, ClipKey::Idle(Stance::Stand, true) | ClipKey::Move(Stance::Stand, .., true) | ClipKey::Turn(Stance::Stand, .., true))
+        matches!(self, ClipKey::Idle(Stance::Stand, true, false) | ClipKey::Move(Stance::Stand, .., true, false) | ClipKey::Turn(Stance::Stand, .., true, false))
     }
 
     fn candidates(self) -> Vec<String> {
         match self {
-            ClipKey::Idle(Stance::Stand, true) => limping_idle_clips(),
-            ClipKey::Idle(s, _) => idle_clips(s),
-            ClipKey::Move(Stance::Stand, female, fast, d, w, true) => limping_move_clips(female, fast, d, w),
-            ClipKey::Move(s, female, fast, d, w, _) => move_clips(s, female, fast, d, w),
+            ClipKey::Idle(Stance::Stand, _, true) => toddler_idle_clips(Stance::Stand),
+            ClipKey::Idle(Stance::Stand, true, false) => limping_idle_clips(),
+            ClipKey::Idle(s, _, _) => idle_clips(s),
+            ClipKey::Move(Stance::Stand, female, fast, d, w, _, true) => toddler_move_clips(Stance::Stand, female, fast, d, w),
+            ClipKey::Move(Stance::Stand, female, fast, d, w, true, false) => limping_move_clips(female, fast, d, w),
+            ClipKey::Move(s, female, fast, d, w, _, _) => move_clips(s, female, fast, d, w),
             ClipKey::Aim(s, p, a, sights) => aim_clips(s, p, a, sights),
             ClipKey::Block(s, p) => block_clips(s, p),
             ClipKey::Holster(s, p) => holster_clips(s, p),
             ClipKey::Equip(s, p, e) => equip_clips(s, p, e),
             ClipKey::Jump(s, w, d, land) => jump_clips(s, w, d, land),
-            ClipKey::Turn(Stance::Stand, w, left, true) => limping_turn_clips(w, left),
-            ClipKey::Turn(s, w, left, _) => turn_clips(s, w, left),
+            ClipKey::Turn(Stance::Stand, w, left, _, true) => toddler_turn_clips(Stance::Stand, w, left),
+            ClipKey::Turn(Stance::Stand, w, left, true, false) => limping_turn_clips(w, left),
+            ClipKey::Turn(s, w, left, _, _) => turn_clips(s, w, left),
             ClipKey::Attack(s, p, a, sights) => attack_clips(s, p, a, sights),
             ClipKey::Reload(s, p, r) => reload_clips(s, p, r),
             ClipKey::ReloadOpen(s, p, r) => reload_open_clips(s, p, r),
@@ -2338,6 +2342,8 @@ struct Frame {
     female: bool,
     /// A leg is crippled: standing, the body limps (`locomotion\hurt\` clips).
     limping: bool,
+    /// `SetPCToddler 1`: standing, the body plays the toddler walk animation set.
+    toddler: bool,
     /// The weapon prefix, and whether the weapon is out.
     prefix: &'static str,
     /// The weapon's DNAM Hand Grip (1 to 6), `None` for the default.
@@ -2509,7 +2515,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
 
     // The frame's clips.
     let mut want: Vec<(Arc<ClipInfo>, u32, f32, Mode)> = Vec::with_capacity(8);
-    if let Some(c) = rig.clip(ctx, ClipKey::Idle(f.stance, f.limping)) {
+    if let Some(c) = rig.clip(ctx, ClipKey::Idle(f.stance, f.limping, f.toddler)) {
         want.push((c, TAG_IDLE, 1.0, Mode::Loop));
     }
     let mut expected_speed = 0.0;
@@ -2532,7 +2538,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
             if weight <= 0.0 {
                 continue;
             }
-            if let Some(c) = rig.clip(ctx, ClipKey::Move(f.stance, f.female, f.fast, dir, f.drawn, f.limping)) {
+            if let Some(c) = rig.clip(ctx, ClipKey::Move(f.stance, f.female, f.fast, dir, f.drawn, f.limping, f.toddler)) {
                 expected_speed += weight * c.speed.unwrap_or(0.0);
                 want.push((c, TAG_MOVE + i as u32, weight, Mode::Synced));
             }
@@ -2540,7 +2546,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
     } else if f.turn_rate.abs() > TURN_RATE && !first_inertia && !nvf_play::tweaks::NO_TURN_CLIP.load(std::sync::atomic::Ordering::Relaxed) {
         // (The player's No Turning Animation tweak plays none, docs/design/tweaks.md.)
         // Heading grows clockwise: a negative rate turns left.
-        if let Some(c) = rig.clip(ctx, ClipKey::Turn(f.stance, f.drawn, f.turn_rate < 0.0, f.limping)) {
+        if let Some(c) = rig.clip(ctx, ClipKey::Turn(f.stance, f.drawn, f.turn_rate < 0.0, f.limping, f.toddler)) {
             want.push((c, TAG_TURN, 1.0, Mode::Loop));
         }
     }
@@ -3416,7 +3422,7 @@ fn drive_body(
         (Option<Res<nvf_play::aim_zoom::AimZoom>>, Option<Res<nvf_play::combat::Combat>>, Option<ResMut<nvf_play::aim_zoom::TrueSights>>, Option<Res<nvf_play::aim_zoom::Scope>>, Option<ResMut<nvf_play::aim_zoom::Scope3d>>, Option<Res<nvf_play::aim_zoom::LensSway>>),
         (Res<crate::weapon_lower::Ahead>, ResMut<nvf_play::player::Lunge>, Option<Res<nvf_play::console::ShowFirstPerson>>, Option<Res<nvf_play::vats_mode::VatsMode>>, Option<Res<nvf_play::inertia::MovementInertia>>, Option<ResMut<PlayerBlows>>),
     ),
-    (mut driven, parents): (ResMut<nvf_play::player::ViewDriven>, Query<&ChildOf>),
+    (mut driven, parents, mut toddler): (ResMut<nvf_play::player::ViewDriven>, Query<&ChildOf>, Option<ResMut<nvf_play::player::PlayerToddler>>),
 ) {
     let state = &mut *state;
     player.body_view = None;
@@ -3522,6 +3528,7 @@ fn drive_body(
         debug!("player body: {} after {:.2}s in the air (ground {gap} below)", if m.falling { "falling" } else { "down again" }, airborne_before.max(m.airborne));
     }
 
+    let script_scale = sim.as_deref().and_then(|s| s.script_scale(FormId::PLAYER_REF.0)).unwrap_or(1.0).max(nvf_play::sim::MIN_DRAWN_SCALE);
     let third_view = control.third_person_view();
     if let Some(o) = furniture.0.as_ref() {
         // On furniture: the third-person body plays the furniture's clip where the
@@ -3529,7 +3536,7 @@ fn drive_body(
         // not drawn (seen from inside it gets in the way of looking round) [design],
         // unless the body is wanted in first person: then all but its head is, and the
         // view turns only as far as a neck does, so it never looks into the body.
-        let root = Transform { translation: Vec3::from_array(o.pos), rotation: Quat::from_rotation_z(-o.heading), scale: Vec3::splat(body.scale) };
+        let root = Transform { translation: Vec3::from_array(o.pos), rotation: Quat::from_rotation_z(-o.heading), scale: Vec3::splat(body.scale * script_scale) };
         let mut eye = pose_furniture(&mut body.third, o, &idles.third, dt, root, &mut transforms);
         let pelvis = body.third.animator.skel.by_name.get("Bip01 Pelvis").copied();
         // A body on a bed: the frame it lies in is its pelvis's.
@@ -3754,6 +3761,18 @@ fn drive_body(
     let smooth_with = inertia.as_deref().filter(|i| i.smooth_hands());
     let smooth = smooth_with.is_some();
     let advanced = inertia.as_deref().is_none_or(|i| i.advanced);
+    let is_toddler = toddler.as_deref().is_some_and(|t| t.active);
+    if let Some(t) = toddler.as_deref_mut() {
+        t.clip_walk_speed = if t.active {
+            let key = ClipKey::Move(Stance::Stand, body.female, false, Dir::Forward, None, false, true);
+            body.third
+                .clip(&mut ctx, key)
+                .and_then(|c| c.speed)
+                .or_else(|| body.first.as_mut().and_then(|f| f.clip(&mut ctx, key)).and_then(|c| c.speed))
+        } else {
+            None
+        };
+    }
     let frame = Frame {
         inertia: smooth,
         pipboy_manual: pip.manual_pose(),
@@ -3770,6 +3789,7 @@ fn drive_body(
         fast,
         female: body.female,
         limping: limbs.as_deref().is_some_and(|l| l.limping()),
+        toddler: is_toddler,
         prefix,
         grip: m.grip,
         drawn: (m.hands.phase == WeaponPhase::Drawn).then_some(prefix),
@@ -3810,7 +3830,6 @@ fn drive_body(
     // camera node) comes down with the body: Fallout 3's baby stage, CG01 stage 0,
     // `player.SetScale 0.4`, stage 100 `1` [observed: TTW's Fallout3.esm, fnvtool script
     // decompile; owner's TTW run 2026-11-02, the baby was drawn full size].
-    let script_scale = sim.as_deref().and_then(|s| s.script_scale(FormId::PLAYER_REF.0)).unwrap_or(1.0).max(nvf_play::sim::MIN_DRAWN_SCALE);
     if *told_scale != Some(script_scale) {
         if told_scale.is_some() || script_scale != 1.0 {
             info!("player body: drawn at scale {script_scale:.2} (SetScale), race height {:.2}", body.scale);
@@ -4694,7 +4713,7 @@ mod tests {
         {
             let mut pb = app.world_mut().resource_mut::<PlayerBody>();
             let rig = &mut pb.body.as_mut().unwrap().third;
-            rig.clips.insert(ClipKey::Idle(Stance::Stand, false), None);
+            rig.clips.insert(ClipKey::Idle(Stance::Stand, false, false), None);
             rig.variants.insert("test_up.kf".into(), None);
         }
 
@@ -4744,7 +4763,7 @@ mod tests {
         {
             let mut pb = app.world_mut().resource_mut::<PlayerBody>();
             let rig = &mut pb.body.as_mut().unwrap().third;
-            rig.clips.insert(ClipKey::Idle(Stance::Stand, false), None);
+            rig.clips.insert(ClipKey::Idle(Stance::Stand, false, false), None);
         }
         app.update();
         assert_eq!(app.world().resource::<PlayerBody>().body.as_ref().unwrap().third.clips.len(), 1);

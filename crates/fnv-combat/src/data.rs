@@ -662,6 +662,29 @@ impl ArmorStats {
     }
 }
 
+/// Session-only runtime overrides applied on top of authored [`ArmorStats`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ArmorOverride {
+    pub health: Option<i32>,
+    pub dt: Option<f32>,
+    pub dr_raw: Option<i32>,
+    pub slots: Option<u32>,
+}
+
+impl ArmorOverride {
+    /// Return `base` with any overridden fields replaced.
+    pub fn apply(&self, base: &ArmorStats) -> ArmorStats {
+        ArmorStats {
+            edid: base.edid.clone(),
+            name: base.name.clone(),
+            health: self.health.unwrap_or(base.health),
+            dt: self.dt.unwrap_or(base.dt),
+            dr_raw: self.dr_raw.unwrap_or(base.dr_raw),
+            slots: self.slots.unwrap_or(base.slots),
+        }
+    }
+}
+
 /// One effect of an ENCH or SPEL (EFID + EFIT, then its conditions).
 #[derive(Debug, Clone, Serialize)]
 pub struct EffectItem {

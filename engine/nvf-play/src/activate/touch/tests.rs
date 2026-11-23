@@ -114,6 +114,7 @@ fn upstream_hidden_target_policy_cancels_touch_confirmation_until_a_fresh_contac
         source: crate::activate::pick::Source::Bounds,
         crime: false,
         empty: false,
+        through: None,
     };
     let point = ScreenPoint { window: Entity::PLACEHOLDER, id: 801, position: Vec2::splat(100.0) };
     for mode in [Confirmation::Tap, Confirmation::Hold] {

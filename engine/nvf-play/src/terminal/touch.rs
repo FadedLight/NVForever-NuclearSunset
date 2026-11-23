@@ -674,7 +674,7 @@ pub(super) fn input(
                     if let Some(p) = point {
                         match &session.page {
                             Page::Menu(_) => {
-                                if let Some((row, _)) = rows.0.iter().find(|(_, r)| r.contains(p)) {
+                                if let Some((row, _)) = rows.0.rows.iter().find(|(_, r)| r.contains(p)) {
                                     out.write(TerminalInput::Row(*row));
                                     out.write(TerminalInput::Select);
                                 }

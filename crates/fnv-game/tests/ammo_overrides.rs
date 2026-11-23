@@ -272,6 +272,8 @@ fn temp_clone_form_ammo_and_amef_overrides_stay_isolated_and_reach_consumers() {
     assert_eq!(ac.abbrev.as_deref(), Some("PreClone Abbrev"), "inherited pre-clone abbrev");
     assert_eq!(ac.short_name.as_deref(), Some("OwnRnd"), "isolated from post-clone original short name");
     assert!(ac.is_playable(), "isolated from post-clone original non-playable");
+    assert!(!g.world.effective_non_playable(FormId(ammo_clone)), "World::effective_non_playable isolated from post-clone LNSetIsPlayable 0 on original");
+    assert!(g.world.effective_non_playable(FormId(AMMO_A)), "original World::effective_non_playable reflects LNSetIsPlayable 0");
     assert_eq!(ac.effects, vec![FormId(AMEF_DMG), FormId(AMEF_COND)], "inherited pre-clone RCIL list");
     assert_eq!(s(&mut g, &format!("GetAmmoName 2 {ammo_clone:#010X}")), "PreClone Abbrev");
     assert_eq!(s(&mut g, &format!("GetAmmoName 1 {ammo_clone:#010X}")), "OwnRnd");

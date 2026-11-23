@@ -218,7 +218,8 @@ impl Game<'_> {
 
     /// Whether an item form is playable (`IsPlayable` / `LNIsPlayable`): for `WEAP`,
     /// live `DNAM/flags1` bit 7 (`Non-Playable`) overrides take precedence; for other
-    /// items, `playable_overrides` then `FormStore` [design].
+    /// items, `playable_overrides` then `World`'s live item overrides / `FormStore`
+    /// [design].
     pub fn is_item_playable(&self, item: FormId) -> bool {
         if let Some(flags1) = self.weapon_flags1_override(item) {
             return flags1 & (1 << 7) == 0;
@@ -226,12 +227,13 @@ impl Game<'_> {
         if let Some(&playable) = self.playable_overrides.get(&item) {
             return playable;
         }
-        self.world.forms.item(self.unclone(item)).is_some_and(|i| !i.non_playable)
+        self.world.resolve_item(item).is_some() && !self.world.effective_non_playable(item)
     }
 
     /// Whether an item form is marked non-playable (for inventory/equipment filters
     /// such as `GetEquippedItems` and `GetAllItemRefs`), honoring live `DNAM/flags1`
-    /// bit 7 and `playable_overrides` while keeping non-item forms `false`.
+    /// bit 7, `playable_overrides`, and `World`'s live item overrides while keeping
+    /// non-item forms `false`.
     pub fn is_item_non_playable(&self, item: FormId) -> bool {
         if let Some(flags1) = self.weapon_flags1_override(item) {
             return flags1 & (1 << 7) != 0;
@@ -239,7 +241,7 @@ impl Game<'_> {
         if let Some(&playable) = self.playable_overrides.get(&item) {
             return !playable;
         }
-        self.world.forms.item(self.unclone(item)).is_some_and(|i| i.non_playable)
+        self.world.effective_non_playable(item)
     }
 
     /// The weapons whose models scripts changed this session (SetWeaponModel, SetModelPath,
@@ -633,11 +635,12 @@ pub fn call(g: &mut Game, ctx: &RunCtx, name: &str, on: Option<FormId>, args: &[
             "getobjecthealth" => Some(("DATA", "health")),
             // A creature's attack damage is not set [observed: atk1, SetAttackDamage 50 on
             // VStreetCrBrahmin2 still reads 0, though the page names creatures].
-            "getattackdamage" if g.data.sig(f) == Some(*b"CREA") => return Some(Ok(XVal::Num(0.0))),
+            "getattackdamage" if orig_sig == Some(*b"CREA") => return Some(Ok(XVal::Num(0.0))),
             g2 => weapon_field(g2),
         };
         if let (Some((sub, path)), Some(v)) = (target, value) {
             g.field_overrides.insert((f, format!("{sub}/{path}")), v.clone());
+            g.sync_item_field_override(f, sub, path, v);
             return Some(Ok(XVal::Num(0.0)));
         }
         // The flag setters: one bit of DNAM's flags.
@@ -870,7 +873,14 @@ pub fn call(g: &mut Game, ctx: &RunCtx, name: &str, on: Option<FormId>, args: &[
         "getnumloadedmods" => XVal::Num(g.data.load_order.len() as f64),
         // [documented: GetEquipType; observed: nvse-forms, 10mm pistol 2, leather armor 7,
         // stimpak 11, 10mm ammo 0] the item's ETYP.
-        "getequiptype" => num_of(field(g, item(g, 0).unwrap_or(FormId(0)), "ETYP", "")),
+        "getequiptype" => {
+            let f = item(g, 0).unwrap_or(FormId(0));
+            if let Some(d) = g.ingestible_def(f) {
+                XVal::Num(if d.equip_type >= 0 { d.equip_type as f64 } else { 0.0 })
+            } else {
+                num_of(field(g, f, "ETYP", ""))
+            }
+        }
         // [documented: GetRepairList; GetModelPath; GetIconPath].
         "getrepairlist" => form_of(field(g, item(g, 0).unwrap_or(FormId(0)), "REPL", "")),
         // GetTexturePath: the icon (ICON) [observed: nvse-misc, pistol, stimpak, caps, the

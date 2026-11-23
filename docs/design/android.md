@@ -187,15 +187,14 @@ documentation. Neither tag there claims anything about the original game. The gr
   density-scaled tappable power-off quick-exit on both devices), and a retro-terminal
   styled top-right next-release countdown badge (`CountdownFormat.java`,
   `MobileLauncher.java`) in the Android launcher.
+- Wrist Terminal fallback policy (`[design]`): Wrist Terminal reads the worn Pip-Boy
+  from NVForever's live player state; when no worn Pip-Boy is present (such as a new
+  character before receiving one), dialogue falls back to Normal without altering the
+  saved theme so conversation stays playable.
 - Engine library choices: the vendored Android `winit` and Rapier 0.36.1 query refresh
   ([query refresh](../spec-notes/query-refresh-island-lifecycle.md)), the DDS decode
   fallback when BC sampling is missing ([DDS](../spec-notes/dds.md)), NIF numeric
   admission, owned SVG icon families and the launcher icon adaptation.
-
-[hypothesis] One statement touches the original game: a character who is not wearing a
-Pip-Boy, such as a new character before Doc Mitchell gives one, cannot use Wrist
-Terminal and talks on Normal. Wrist Terminal reads the worn Pip-Boy from the live game
-state; why it did not present on the reporting phone was not observed.
 
 [design] No text the game shows is transcribed. Touch labels, help, launcher text and
 companion-wheel refusal messages are NVForever's own wording. Text from the game (dialogue,

@@ -1297,7 +1297,11 @@ fn measure(
         for (topic, who, by) in &held {
             debug!("alert: {} does not say {topic}: {} said a line of that kind {:.0} s ago (group cooldown)", g.data.name(*who), g.data.name(*by), g.awareness.said.iter().rev().find(|s| s.speaker == *by).map_or(0.0, |s| g.time - s.time));
         }
-        (g.awareness.take_changes(), std::mem::take(&mut g.awareness.barks), held.len())
+        let changes = g.awareness.take_changes();
+        // Why each one that went into Combat about someone fights them (#3335: a player's
+        // report showed an actor going for the companion and nothing saying why).
+        let why: Vec<Option<String>> = changes.iter().map(|c| (c.to == State::Combat).then_some(c.about).flatten().and_then(|o| g.hostility_text(c.actor, o))).collect();
+        (changes.into_iter().zip(why).collect::<Vec<_>>(), std::mem::take(&mut g.awareness.barks), held.len())
     });
     if let Some(g) = gauges.as_deref_mut() {
         g.noise = player_noise as f32;
@@ -1396,7 +1400,7 @@ fn measure(
 type Bark = (&'static str, FormId, Option<FormId>);
 
 /// The `alert:` log lines and their counts.
-fn log_alerts(st: &mut Stats, people: &[Person], changes: &[Change], barks: &[Bark], heard: &[(String, DetectionEvent, f64, f32)], events: usize, hurt: usize) {
+fn log_alerts(st: &mut Stats, people: &[Person], changes: &[(Change, Option<String>)], barks: &[Bark], heard: &[(String, DetectionEvent, f64, f32)], events: usize, hurt: usize) {
     let label = |id: FormId| people.iter().find(|p| p.id == id.0).map_or_else(|| format!("{:08X}", id.0), |p| p.label.clone());
     st.events += events;
     st.events_heard += heard.len();
@@ -1404,7 +1408,7 @@ fn log_alerts(st: &mut Stats, people: &[Person], changes: &[Change], barks: &[Ba
     for (who, ev, value, dist) in heard {
         info!("alert: {who} heard a {} event of {} (level {:.0}, value {value:.1}, {dist:.0} units away)", ev.kind.name(), label(ev.owner), ev.level);
     }
-    for c in changes {
+    for (c, why) in changes {
         *st.changes.entry((c.from, c.to)).or_default() += 1;
         if c.to == State::Alert {
             st.alerted.insert(c.actor.0);
@@ -1421,6 +1425,9 @@ fn log_alerts(st: &mut Stats, people: &[Person], changes: &[Change], barks: &[Ba
         };
         let value = c.value.map_or(String::new(), |v| format!(", value {v:.1}"));
         info!("alert: {} {} → {}{what}{value}{away}", label(c.actor), c.from.name(), c.to.name());
+        if let (Some(why), Some(o)) = (why, c.about) {
+            info!("hostility: {} against {}: {why}", label(c.actor), label(o));
+        }
     }
     for (topic, who, line) in barks {
         match line {

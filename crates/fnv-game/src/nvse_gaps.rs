@@ -119,6 +119,8 @@ pub struct GapsState {
     pub always_run_request: Option<bool>,
     /// RunScriptSnippet's snippets waiting: (frames left, source, reference).
     pub snippets: Vec<(u32, String, FormId)>,
+    /// ToggleItemUnique's unique weapon/armor base forms (excluded as repair-part sources).
+    pub unique_items: HashSet<FormId>,
     /// Session weapon-sound overrides (`SetWeaponSound`, `SetPickupSound`/`SetPutdownSound`
     /// on `WEAP`, plus `TempCloneForm` snapshots): `(weapon, slot 0..14) -> Some(SOUN)` or
     /// `None` when cleared.
@@ -667,15 +669,13 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // An actor effect's SPIT, an object effect's or ingestible's ENIT; SetEffectFlag's
         // change first (`crate::nvse_jip8`).
         "geteffectflag" => {
-            let f = form(args, 0).unwrap_or(FormId(0));
-            let sub = if g.data.sig(f) == Some(*b"SPEL") { "SPIT" } else { "ENIT" };
-            let flags = crate::nvse::record_value(g, f, sub, "flags").and_then(|v| v.num().ok()).unwrap_or(0.0);
-            bit(flags, num(args, 1, -1.0))
+            let flags = form(args, 0).map_or(0, |f| g.effect_flags(f));
+            bit(f64::from(flags), num(args, 1, -1.0))
         }
         // MGEF DATA [observed: gaps3, RestoreHealth archetype 0, actor value 16, flags
         // 112 so bits 0–3 read 0].
-        "getbaseeffectarchetype" => XVal::Num(form(args, 0).and_then(|f| g.data.magic_effects.get(&f)).map_or(0, |m| m.archetype) as f64),
-        "getbaseeffectav" => XVal::Num(form(args, 0).and_then(|f| g.data.magic_effects.get(&f)).and_then(|m| m.actor_value).map_or(-1.0, f64::from)),
+        "getbaseeffectarchetype" => XVal::Num(form(args, 0).and_then(|f| g.magic_effect_def(f)).map_or(0, |m| m.archetype) as f64),
+        "getbaseeffectav" => XVal::Num(form(args, 0).and_then(|f| g.magic_effect_def(f)).and_then(|m| m.actor_value).map_or(-1.0, f64::from)),
         "getbaseeffectflag" => {
             // SetBaseEffectFlag's change first (`crate::nvse_jip8`).
             let flags = form(args, 0).map_or(0, |f| g.base_effect_flags(f));
@@ -995,8 +995,24 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let a = subject.unwrap_or(FormId(0));
             XVal::Num(if a == FormId::PLAYER_REF || g.package_actors().contains(&a) { 0.0 } else { 3.0 })
         }
-        // Returns 0 [observed: gaps6]; NVForever keeps every reference it changes.
-        "setpersistent" => zero,
+        // `persistent:0/1`: sets or clears the persistent record flag (0x400) on the
+        // calling reference for the session [documented: GECK wiki SetPersistent;
+        // observed: gaps6, returns 0].
+        "setpersistent" => {
+            if let Some(r) = subject.filter(|&r| r != FormId::PLAYER_REF) {
+                let on = num(args, 0, 0.0) != 0.0;
+                let cur = crate::nvse_other::record_flags_of(g, r)
+                    | if g.persistent(r) { fnv_sim::refs::FLAG_PERSISTENT } else { 0 };
+                let next = if on {
+                    cur | fnv_sim::refs::FLAG_PERSISTENT
+                } else {
+                    cur & !fnv_sim::refs::FLAG_PERSISTENT
+                };
+                g.other.flags.insert(r, next);
+                g.other.persistent_overrides.insert(r, on);
+            }
+            zero
+        }
         // `limb`: the limb's condition to 0 [observed: gaps6, 2 (the left arm) leaves Left
         // Attack Condition 0]; 0 head, 1 torso, 3 right arm, 4–5 legs [hypothesis: the
         // order of the condition values].
@@ -1159,7 +1175,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let Some(b) = form(args, 0) else { return Some(Ok(zero)) };
             let loaded: Vec<FormId> = g.loaded_cells.iter().copied().collect();
             let mut refs: Vec<FormId> = loaded.iter().flat_map(|&c| g.refs_in_cell(c, false)).filter(|&r| base(g, r) == b).collect();
-            refs.extend(g.world.placed.refs.iter().filter(|(_, p)| p.base == b && (p.in_persistent_group || p.flags & fnv_sim::refs::FLAG_PERSISTENT != 0)).map(|(&r, _)| r));
+            refs.extend(g.world.placed.refs.iter().filter(|&(&r, p)| p.base == b && g.persistent(r)).map(|(&r, _)| r));
+            refs.extend(g.other.persistent_overrides.keys().copied().filter(|&r| {
+                g.world.placed.get(r).is_none()
+                    && g.world.peek(r).is_some_and(|s| s.base == b && !s.deleted())
+                    && g.persistent(r)
+            }));
             refs.sort();
             refs.dedup();
             let refs = refs.into_iter().map(|r| XVal::Ref(r.0)).collect();
@@ -1235,8 +1256,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // GetIsPoison; observed: gaps7, Silver Sting 1, the stimpak 0].
         "getispoison" => {
             let f = form(args, 0).unwrap_or(FormId(0));
-            let effects = g.data.effect_items.get(&f).map(Vec::as_slice).unwrap_or_default();
-            yes(!effects.is_empty() && effects.iter().all(|e| g.data.magic_effects.get(&e.effect).is_some_and(|m| m.flags & 0x5 == 0x5)))
+            let effects = g.data.effect_items.get(&g.unclone(f)).map(Vec::as_slice).unwrap_or_default();
+            yes(!effects.is_empty() && effects.iter().all(|e| g.magic_effect_def(e.effect).is_some_and(|m| m.flags & 0x5 == 0x5)))
         }
         "isarmoraddon" => yes(form(args, 0).is_some_and(|f| g.data.sig(f) == Some(*b"ARMA"))),
         // A form type an inventory holds [documented: GetIsItem].
@@ -1291,13 +1312,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // ---- worldspaces and climates ----
         // WRLD CNAM; the setter for the session [observed: gaps8, WastelandNV 0008809B,
         // set to the Strip's and back].
-        "getworldspaceclimate" => match form(args, 0).and_then(|w| crate::nvse::record_value(g, w, "CNAM", "")) {
-            Some(XVal::Ref(c)) => XVal::Ref(c),
-            _ => XVal::Ref(0),
-        },
+        "getworldspaceclimate" => XVal::Ref(form(args, 0).and_then(|w| g.worldspace_climate(w)).map_or(0, |c| c.0)),
         "setworldspaceclimate" => {
             if let (Some(w), Some(c)) = (form(args, 0), form(args, 1)) {
-                g.field_overrides.insert((w, "CNAM/".into()), XVal::Ref(c.0));
+                if g.data.sig(g.unclone(w)) == Some(*b"WRLD") && g.data.sig(g.unclone(c)) == Some(*b"CLMT") {
+                    g.field_overrides.insert((w, "CNAM/".into()), XVal::Ref(c.0));
+                }
             }
             zero
         }
@@ -1413,32 +1433,46 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
             zero
         }
-        // The explosion's form traits, 0 light … 6 placed impact object as GetExplosion-
-        // TraitForm reads them; no form clears it [observed: gaps7].
+        // The explosion's form traits, 0 light … 6 image-space modifier as GetExplosion-
+        // TraitForm reads them; no form clears it [observed: gaps7]. Only EXPL forms (and
+        // their TempCloneForm clones) are accepted; typed slots reject wrong-type forms
+        // while keeping null/omitted clears [hypothesis].
         "setexplosiontraitform" => {
-            let f = form(args, 0).unwrap_or(FormId(0));
-            let key = match num(args, 1, -1.0) as i64 {
-                0 => "DATA/light",
-                1 => "DATA/sound_1",
-                2 => "DATA/sound_2",
-                3 => "DATA/impact_dataset",
-                4 => "INAM/",
-                5 => "EITM/",
-                6 => "MNAM/",
+            let Some(f) = form(args, 0).filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"EXPL")) else {
+                return Some(Ok(zero));
+            };
+            let (key, want): (&str, Option<&[u8; 4]>) = match num(args, 1, -1.0) as i64 {
+                0 => ("DATA/light", Some(b"LIGH")),
+                1 => ("DATA/sound_1", Some(b"SOUN")),
+                2 => ("DATA/sound_2", Some(b"SOUN")),
+                3 => ("DATA/impact_dataset", Some(b"IPDS")),
+                4 => ("INAM/", None),
+                5 => ("EITM/", Some(b"ENCH")),
+                6 => ("MNAM/", Some(b"IMAD")),
                 _ => return Some(Ok(zero)),
             };
-            g.field_overrides.insert((f, key.into()), XVal::Ref(form(args, 2).map_or(0, |e| e.0)));
+            let target = form(args, 2);
+            if let (Some(e), Some(sig)) = (target, want) {
+                if g.data.sig(g.unclone(e)) != Some(*sig) {
+                    return Some(Ok(zero));
+                }
+            }
+            g.field_overrides.insert((f, key.into()), XVal::Ref(target.map_or(0, |e| e.0)));
             zero
         }
-        // EXPL DATA flags; returns 0 [observed: gaps7, 0 both ways].
+        // EXPL DATA flags; returns 0 [observed: gaps7, 0 both ways]. Only EXPL forms (and
+        // their TempCloneForm clones) and flag IDs 1..32 (matching GetExplosionFlag) are
+        // accepted [design].
         "setexplosionflag" => {
-            let Some(f) = form(args, 0) else { return Some(Ok(zero)) };
+            let Some(f) = form(args, 0).filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"EXPL")) else {
+                return Some(Ok(zero));
+            };
             let flags = match crate::nvse::record_value(g, f, "DATA", "flags") {
                 Some(XVal::Num(x)) => x as u64,
                 _ => 0,
             };
             let k = num(args, 1, -1.0);
-            if !(0.0..32.0).contains(&k) {
+            if !(1.0..32.0).contains(&k) {
                 return Some(Ok(zero));
             }
             let new = if num(args, 2, 0.0) != 0.0 { flags | 1 << (k as u64) } else { flags & !(1 << (k as u64)) };
@@ -1524,13 +1558,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         // WRLD INAM [observed: gaps10, WastelandNV 0008809D].
-        "getworldspaceimagespace" => match form(args, 0).and_then(|w| crate::nvse::record_value(g, w, "INAM", "")) {
-            Some(XVal::Ref(r)) => XVal::Ref(r),
-            _ => XVal::Ref(0),
-        },
+        "getworldspaceimagespace" => XVal::Ref(form(args, 0).and_then(|w| g.worldspace_image_space(w)).map_or(0, |i| i.0)),
         "setworldspaceimagespace" => {
             if let (Some(w), Some(i)) = (form(args, 0), form(args, 1)) {
-                g.field_overrides.insert((w, "INAM/".into()), XVal::Ref(i.0));
+                if g.data.sig(g.unclone(w)) == Some(*b"WRLD") && g.data.sig(g.unclone(i)) == Some(*b"IMGS") {
+                    g.field_overrides.insert((w, "INAM/".into()), XVal::Ref(i.0));
+                }
             }
             zero
         }
@@ -1609,8 +1642,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let flags = crate::nvse::record_value(g, c, sub, "").and_then(|v| v.num().ok()).unwrap_or(0.0);
             bit(flags, k)
         }
-        // XCIM [observed: gaps4, Doc's house 0001507A].
-        "getcellimagespace" => json_form(form(args, 0).and_then(|c| g.data.record_field(c, "XCIM", ""))),
+        // XCIM, with SetCellImageSpace first [observed: gaps4, Doc's house 0001507A].
+        "getcellimagespace" => XVal::Ref(form(args, 0).and_then(|c| g.cell_image_space(c)).map_or(0, |i| i.0)),
         // CLMT WLST [observed: gaps4, the Strip's climate 1 weather, 00161241, global
         // none, past the end 0].
         // ClimateAddWeatherType's and ClimateRemoveWeatherType's changes first
@@ -1627,9 +1660,11 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
         }
         // Night outside the climate's sunrise begin to sunset end (TNAM, ten-minute steps)
-        // [observed: gaps4, the Strip's climate at 10 reads 0; hypothesis: the edges].
+        // [observed: gaps4, the Strip's climate at 10 reads 0; hypothesis: the edges, and
+        // an omitted climate falls back to the current climate].
         "isnight" => {
-            let c = form(args, 0).unwrap_or(FormId(0));
+            let c = form(args, 0).or_else(|| crate::nvse_jip12::current_climate(g)).unwrap_or(FormId(0));
+            let c = g.unclone(c);
             let hour = g.world.global(FormId(0x38)).map_or(12.0, f64::from);
             let t = |k: &str| json_num(g.data.record_field(c, "TNAM", k)) / 6.0;
             let (rise, set) = (t("sunrise_begin"), t("sunset_end"));
@@ -1849,7 +1884,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
         }
         // Return 0 [observed: gaps4].
-        "setsoundflag" | "stopsoundalt" => zero,
+        "stopsoundalt" => zero,
         // An unknown patch [observed: gaps2 and gaps4, 0 for both].
         "getoptionalpatch" | "setoptionalpatch" => zero,
         _ => return None,

@@ -264,9 +264,9 @@ Retro Console and Wrist Terminal use the installed Terminal and Pip-Boy models
 with separate dialogue screens; Wrist Terminal uses an enlarged side panel (64% width and
 full safe height) and frames the player's worn Pip-Boy screen tightly
 for extra text room and makes its power button a tappable quick-exit whenever a normal goodbye
-option is available (disabled during forced quest dialogue). A character without a Pip-Boy
-([hypothesis: such as a new character before
-receiving it]) talks on Normal. If a model or template cannot safely present the
+option is available (disabled during forced quest dialogue). A character without a worn
+Pip-Boy (`[design]`, such as a new character before receiving one) talks on Normal. If a
+model or template cannot safely present the
 conversation, Normal keeps dialogue playable, touch-scrollable and exitable with
 the on-screen controls still available, without changing the saved theme.
 Minimal, Classic Glass and Split Panel still load as Normal, Classic and Field

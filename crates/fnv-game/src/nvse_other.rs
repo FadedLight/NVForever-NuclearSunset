@@ -78,11 +78,17 @@ pub struct OtherState {
     pub echo: bool,
     /// SetPlayerCurrentAmmoRounds, for the engine's combat to take.
     pub set_magazine: Option<u32>,
+    /// One-shot `EndVATScam` exit request for the engine (`Game::take_end_vats_cam_request`).
+    pub end_vats_cam_requested: bool,
     /// AddPackageAt's, RemovePackageAt's and RemoveAllPackages' package lists, by actor
     /// base form (`Game::package_list`).
     pub package_lists: HashMap<FormId, Vec<FormId>>,
     /// SetFlagsLow/High's record flags.
     pub flags: HashMap<FormId, u32>,
+    /// Explicit `SetPersistent` session overrides (separate from `flags` so unrelated
+    /// `SetReferenceFlag` / `SetFlagsLow` writes do not clear persistent-group refs whose
+    /// static record lacks bit `0x400`) [design].
+    pub persistent_overrides: HashMap<FormId, bool>,
     /// SetActorBaseFlagsLow/High's 32-bit ACBS flags, by actor base form.
     pub acbs_flags: HashMap<FormId, u32>,
     /// Con_SCOF's file name (nothing is written).
@@ -366,9 +372,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
             zero
         }
-        // [documented: EndVATScam] leaves VATS [hypothesis: NVForever has no VATS camera
-        // yet; nothing to end].
-        "endvatscam" => zero,
+        // [documented: EndVATScam] exits VATS mode and queues a one-shot camera/mode exit
+        // request for the engine (`Game::end_vats_cam`, `Game::take_end_vats_cam_request`).
+        "endvatscam" => {
+            g.end_vats_cam();
+            zero
+        }
         // [documented: ForEachInList] the UDF runs once per form of the list, in order.
         "foreachinlist" => {
             let (Some(l), Some(f)) = (form(args, 0), args.get(1).cloned()) else { return Some(Ok(zero)) };
@@ -548,7 +557,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // equipping does not].
         "setispowerarmor" => {
             let f = form(args, 1).or(subject).map(|f| base(g, f)).unwrap_or(FormId(0));
-            g.other.power_armor.insert(f, num(args, 0, 0.0) != 0.0);
+            g.set_armo_power_armor(f, num(args, 0, 0.0) != 0.0);
             zero
         }
         // Formatted by the VM (`Vm::host_function`), then here.

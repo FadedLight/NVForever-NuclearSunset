@@ -147,11 +147,11 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // set]: ENIT's consume sound.
         "getingestibleconsumesound" => {
             let i = form(args, 0).or(subject).map(|f| base(g, f));
-            XVal::Ref(i.and_then(|i| crate::nvse::record_value(g, i, "ENIT", "sound_consume")).and_then(|v| if let XVal::Ref(r) = v { Some(r) } else { None }).unwrap_or(0))
+            XVal::Ref(i.and_then(|i| g.ingestible_def(i)).and_then(|d| d.consume_sound).map_or(0, |r| r.0))
         }
         "setingestibleconsumesound" => {
             let (Some(s), Some(i)) = (form(args, 0), form(args, 1).or(subject).map(|f| base(g, f))) else { return Some(Ok(zero)) };
-            if g.data.sig(i) != Some(*b"ALCH") {
+            if g.data.sig(g.unclone(i)) != Some(*b"ALCH") {
                 return Some(Ok(zero));
             }
             g.field_overrides.insert((i, "ENIT/sound_consume".into()), XVal::Ref(s.0));

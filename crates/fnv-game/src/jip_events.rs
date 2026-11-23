@@ -278,7 +278,14 @@ impl Game<'_> {
     /// as Just Assorted Mods' sprint relies on: it registers its key handler per key and
     /// removes it with no key before registering again or when the sprint is turned off,
     /// observed in its script source; issue #2952]. Returns whether anything changed.
-    pub(crate) fn jip_set(&mut self, event: String, func: XVal, add: bool, filters: Vec<XVal>, registrar: Option<Arc<Registrar>>) -> bool {
+    pub(crate) fn jip_set(&mut self, event: String, func: XVal, add: bool, mut filters: Vec<XVal>, registrar: Option<Arc<Registrar>>) -> bool {
+        if event == "playgroup" {
+            if let Some(XVal::Str(name)) = filters.get(1) {
+                if let Some(code) = self.anim_group_code(name) {
+                    filters[1] = XVal::Num(f64::from(code));
+                }
+            }
+        }
         let filters_eq = |a: &XVal, b: &XVal| match (event.as_str(), a, b) {
             ("menuclick", XVal::Str(sa), XVal::Str(sb)) => normalize_click_filter(sa) == normalize_click_filter(sb),
             _ => a == b,
@@ -369,6 +376,25 @@ impl Game<'_> {
         }
         let hs = self.jip.handlers.iter().filter(|h| h.event == event && self.jip_matches(h, on, &args)).map(|h| self.jip.attempt(h)).collect();
         self.jip_run(event, hs, on, args)
+    }
+
+    /// Fire JIP's `SetOnAnimActionEventHandler` (`animaction`) for `actor` starting
+    /// `action` (0–13, `GetAnimAction` code) [documented: SetOnAnimActionEventHandler].
+    pub fn fire_anim_action(&mut self, actor: FormId, action: i32) -> usize {
+        if action < 0 {
+            return 0;
+        }
+        self.jip_event("animaction", Some(actor), vec![XVal::Num(f64::from(action))])
+    }
+
+    /// Fire JIP's `SetOnPlayGroupEventHandler` (`playgroup`) for `actor` starting
+    /// animation group `group` [documented: SetOnPlayGroupEventHandler]. Ignores
+    /// internal sentinel codes (`SEQUENCE`, `OPEN_GROUP`, `CLOSE_GROUP`).
+    pub fn fire_play_group(&mut self, actor: FormId, group: u16) -> usize {
+        if matches!(group, crate::anims::SEQUENCE | crate::anims::OPEN_GROUP | crate::anims::CLOSE_GROUP) {
+            return 0;
+        }
+        self.jip_event("playgroup", Some(actor), vec![XVal::Num(f64::from(group))])
     }
 
     /// SetOnMenuClickEventHandler's event: a tile was clicked (task T8). `menu` is the

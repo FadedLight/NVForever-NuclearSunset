@@ -125,11 +125,8 @@ fn radiated_near(game: &Game, space: fnv_nav::Space, at: [f32; 3]) -> Vec<([f32;
         fnv_nav::Space::World(w) | fnv_nav::Space::Interior(w) => FormId(w),
     };
     let mut out: Vec<([f32; 3], f32)> = game
-        .data
-        .radiation_markers
-        .get(&key)
-        .into_iter()
-        .flatten()
+        .radiation_markers_in(key)
+        .iter()
         .filter(|m| m.radius > 0.0 && goal::dist(m.pos, at) <= RADIATION_SEARCH + m.radius && game.world.is_enabled(m.id).unwrap_or(true))
         .map(|m| (m.pos, m.radius))
         .collect();

@@ -433,13 +433,14 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // 1 the projectile's sound, 2 countdown, 3 disable (PROJ DATA) [documented:
         // SetProjectileSound]. A form that is not a sound changes nothing [hypothesis].
         "setexplosionsound" => {
-            let f = of_sig(g, form(args, 0), b"EXPL");
+            let f = form(args, 0).filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"EXPL"));
             let key = match index(args, 1) {
                 Some(1) => "DATA/sound_1",
                 Some(2) => "DATA/sound_2",
                 _ => "",
             };
-            if let (Some(f), Some(s), false) = (f, of_sig(g, form(args, 2), b"SOUN"), key.is_empty()) {
+            let s = form(args, 2).filter(|&s| g.data.sig(g.unclone(s)) == Some(*b"SOUN"));
+            if let (Some(f), Some(s), false) = (f, s, key.is_empty()) {
                 g.field_overrides.insert((f, key.into()), XVal::Ref(s.0));
             }
             zero
@@ -498,7 +499,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // `effect`: the actor effect's type (SPEL SPIT), 0 actor effect, 1 disease,
         // 2 power, 3 lesser power, 4 ability, 5 poison, 10 addiction; -1 for anything
         // else [documented: GetActorEffectType].
-        "getactoreffecttype" => XVal::Num(of_sig(g, form(args, 0), b"SPEL").and_then(|s| g.data.spell_types.get(&s)).map_or(-1.0, |&t| t as f64)),
+        "getactoreffecttype" => XVal::Num(form(args, 0).and_then(|s| g.spell_type(s)).map_or(-1.0, |t| t as f64)),
         // ---- camera shots ----
         // `shot [flags]`: CAMS DATA flags, bits 0-5 [documented: Get/SetCameraShotFlags].
         "getcamerashotflags" => XVal::Num(form(args, 0).and_then(|s| camera_shot(g, s)).map_or(0.0, |c| f64::from(c.flags))),

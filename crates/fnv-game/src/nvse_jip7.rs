@@ -20,6 +20,78 @@ pub struct ProjectileLaunchTraits {
     pub flags: Option<u16>,
 }
 
+/// EXPL DATA flag bits [documented: schemas/fnv/combat.json `ExplosionData.flags`,
+/// GECK wiki `GetExplosionFlag` / `SetExplosionFlag`].
+pub const EXPL_FLAG_RADIUS_BS_UNITS: u32 = 1 << 0;
+pub const EXPL_FLAG_ALWAYS_WORLD_ORIENTATION: u32 = 1 << 1;
+pub const EXPL_FLAG_KNOCK_DOWN_ALWAYS: u32 = 1 << 2;
+pub const EXPL_FLAG_KNOCK_DOWN_BY_FORMULA: u32 = 1 << 3;
+pub const EXPL_FLAG_IGNORE_LOS_CHECK: u32 = 1 << 4;
+pub const EXPL_FLAG_PUSH_SOURCE_REF_ONLY: u32 = 1 << 5;
+pub const EXPL_FLAG_IGNORE_IMAGE_SPACE_SWAP: u32 = 1 << 6;
+
+/// Canonical live session view of an `EXPL` record (or `TempCloneForm` clone of one),
+/// combining `Game::field_overrides` (`SetExplosionTraitForm`, `SetExplosionFlag`,
+/// `SetExplosionTraitNumeric`, `SetExplosionSound`, `SetModelPath`) over the authored
+/// ESM record (`Game::explosion_traits`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExplosionTraits {
+    /// Authored ESM `EXPL` form (identical to the queried id when not a clone).
+    pub original: FormId,
+    pub force: f32,
+    pub damage: f32,
+    pub radius: f32,
+    pub is_radius: f32,
+    pub radiation_level: f32,
+    pub radiation_dissipation_time: f32,
+    pub radiation_radius: f32,
+    pub sound_level: u8,
+    pub flags: u32,
+    pub light: Option<FormId>,
+    pub sound_1: Option<FormId>,
+    pub sound_2: Option<FormId>,
+    pub impact_dataset: Option<FormId>,
+    pub placed_impact: Option<FormId>,
+    pub enchantment: Option<FormId>,
+    pub image_space_modifier: Option<FormId>,
+    pub model: Option<String>,
+}
+
+impl ExplosionTraits {
+    /// Whether flag bit `bit` (0..32) is set in `DATA/flags`.
+    pub fn has_flag(&self, bit: u8) -> bool {
+        bit < 32 && (self.flags & (1u32 << bit)) != 0
+    }
+
+    pub fn radius_in_bs_units(&self) -> bool {
+        self.flags & EXPL_FLAG_RADIUS_BS_UNITS != 0
+    }
+
+    pub fn always_world_orientation(&self) -> bool {
+        self.flags & EXPL_FLAG_ALWAYS_WORLD_ORIENTATION != 0
+    }
+
+    pub fn knock_down_always(&self) -> bool {
+        self.flags & EXPL_FLAG_KNOCK_DOWN_ALWAYS != 0
+    }
+
+    pub fn knock_down_by_formula(&self) -> bool {
+        self.flags & EXPL_FLAG_KNOCK_DOWN_BY_FORMULA != 0
+    }
+
+    pub fn ignore_los(&self) -> bool {
+        self.flags & EXPL_FLAG_IGNORE_LOS_CHECK != 0
+    }
+
+    pub fn push_source_only(&self) -> bool {
+        self.flags & EXPL_FLAG_PUSH_SOURCE_REF_ONLY != 0
+    }
+
+    pub fn ignore_image_space_swap(&self) -> bool {
+        self.flags & EXPL_FLAG_IGNORE_IMAGE_SPACE_SWAP != 0
+    }
+}
+
 /// AMMO DATA flag bits [documented: schemas/fnv/objects.json `AMMO.DATA.flags`].
 pub const AMMO_FLAG_IGNORES_NORMAL_WEAPON_RESISTANCE: u8 = 1 << 0;
 pub const AMMO_FLAG_NON_PLAYABLE: u8 = 1 << 1;
@@ -684,7 +756,12 @@ impl Game<'_> {
                 if let Some(name) = self.name_overrides.get(&source).cloned() {
                     self.name_overrides.insert(clone, name);
                 }
-                self.playable_overrides.insert(clone, t.is_playable());
+                self.set_item_playable(clone, t.is_playable());
+                if let Some(w) = self.world.effective_weight(source) {
+                    self.world.mutate_item_override(clone, |ov| {
+                        ov.weight = Some(w);
+                    });
+                }
                 self.other.jip7.ammo_effects.insert(clone, t.effects);
             }
             Some(sig) if &sig == b"AMEF" => {
@@ -698,12 +775,13 @@ impl Game<'_> {
     }
 
     /// A climate's weathers (WLST), ClimateAddWeatherType's and ClimateRemoveWeatherType's
-    /// changes first.
+    /// changes first (clone-first, original fallback).
     pub fn climate_weathers(&self, climate: FormId) -> Vec<ClimateWeather> {
-        if let Some(v) = self.other.jip7.climate_weathers.get(&climate) {
+        let orig = self.unclone(climate);
+        if let Some(v) = self.other.jip7.climate_weathers.get(&climate).or_else(|| self.other.jip7.climate_weathers.get(&orig)) {
             return v.clone();
         }
-        let list = self.data.record_field(climate, "WLST", "").and_then(Json::as_array);
+        let list = self.data.record_field(orig, "WLST", "").and_then(Json::as_array);
         list.into_iter()
             .flatten()
             .filter_map(|e| {
@@ -998,6 +1076,142 @@ impl Game<'_> {
     fn set_field(&mut self, f: FormId, sub: &str, path: &str, v: XVal) {
         self.field_overrides.insert((f, format!("{sub}/{path}")), v);
     }
+
+    /// Snapshot all canonical `EXPL` fields from `source` onto `clone` at
+    /// `TempCloneForm` creation time so pre-clone edits on `source` carry onto `clone`
+    /// while post-clone edits on `source` stay isolated from already-created clones.
+    pub(crate) fn snapshot_explosion_traits(&mut self, source: FormId, clone: FormId) {
+        let original = self.unclone(source);
+        if self.data.sig(original) != Some(*b"EXPL") {
+            return;
+        }
+        const NUM_FIELDS: [(&str, &str); 9] = [
+            ("DATA", "force"),
+            ("DATA", "damage"),
+            ("DATA", "radius"),
+            ("DATA", "is_radius"),
+            ("DATA", "radiation_level"),
+            ("DATA", "radiation_dissipation_time"),
+            ("DATA", "radiation_radius"),
+            ("DATA", "sound_level"),
+            ("DATA", "flags"),
+        ];
+        const FORM_FIELDS: [(&str, &str); 7] = [
+            ("DATA", "light"),
+            ("DATA", "sound_1"),
+            ("DATA", "sound_2"),
+            ("DATA", "impact_dataset"),
+            ("INAM", ""),
+            ("EITM", ""),
+            ("MNAM", ""),
+        ];
+        let mut snap: Vec<(String, XVal)> = Vec::with_capacity(NUM_FIELDS.len() + FORM_FIELDS.len() + 1);
+        for &(sub, path) in &NUM_FIELDS {
+            let v = match crate::nvse::record_value(self, source, sub, path) {
+                Some(XVal::Num(n)) => XVal::Num(n),
+                Some(XVal::Str(s)) if path == "sound_level" => XVal::Num(f64::from(sound_level_code(&s))),
+                _ => XVal::Num(0.0),
+            };
+            snap.push((format!("{sub}/{path}"), v));
+        }
+        for &(sub, path) in &FORM_FIELDS {
+            let v = match crate::nvse::record_value(self, source, sub, path) {
+                Some(XVal::Ref(r)) => XVal::Ref(r),
+                _ => XVal::Ref(0),
+            };
+            snap.push((format!("{sub}/{path}"), v));
+        }
+        let model = match crate::nvse::record_value(self, source, "MODL", "") {
+            Some(XVal::Str(s)) => XVal::Str(s),
+            _ => XVal::Str(String::new()),
+        };
+        snap.push(("MODL/".into(), model));
+        for (key, val) in snap {
+            self.field_overrides.insert((clone, key), val);
+        }
+    }
+
+    /// Resolve the effective session traits, form slots, flags, and model of an `EXPL`
+    /// form (or `TempCloneForm` of one), reading `Game::field_overrides` first and
+    /// falling back to the authored ESM record. Returns `None` for non-`EXPL` forms.
+    pub fn explosion_traits(&self, explosion: FormId) -> Option<ExplosionTraits> {
+        let original = self.unclone(explosion);
+        if self.data.sig(original) != Some(*b"EXPL") {
+            return None;
+        }
+        let f32_field = |path: &str| match crate::nvse::record_value(self, explosion, "DATA", path) {
+            Some(XVal::Num(n)) if n.is_finite() && (n as f32).is_finite() => n as f32,
+            _ => 0.0,
+        };
+        let sound_level = match crate::nvse::record_value(self, explosion, "DATA", "sound_level") {
+            Some(XVal::Num(n)) if n.is_finite() => (n.trunc() as i64).rem_euclid(256) as u8,
+            Some(XVal::Str(s)) => sound_level_code(&s),
+            _ => 0,
+        };
+        let flags = match crate::nvse::record_value(self, explosion, "DATA", "flags") {
+            Some(XVal::Num(n)) if n.is_finite() && n >= 0.0 => n as u64 as u32,
+            _ => 0,
+        };
+        let form_field = |sub: &str, path: &str| match crate::nvse::record_value(self, explosion, sub, path) {
+            Some(XVal::Ref(id)) if id != 0 => Some(FormId(id)),
+            _ => None,
+        };
+        let model = match crate::nvse::record_value(self, explosion, "MODL", "") {
+            Some(XVal::Str(s)) if !s.trim().is_empty() => Some(s),
+            _ => None,
+        };
+        Some(ExplosionTraits {
+            original,
+            force: f32_field("force"),
+            damage: f32_field("damage"),
+            radius: f32_field("radius"),
+            is_radius: f32_field("is_radius"),
+            radiation_level: f32_field("radiation_level"),
+            radiation_dissipation_time: f32_field("radiation_dissipation_time"),
+            radiation_radius: f32_field("radiation_radius"),
+            sound_level,
+            flags,
+            light: form_field("DATA", "light"),
+            sound_1: form_field("DATA", "sound_1"),
+            sound_2: form_field("DATA", "sound_2"),
+            impact_dataset: form_field("DATA", "impact_dataset"),
+            placed_impact: form_field("INAM", ""),
+            enchantment: form_field("EITM", ""),
+            image_space_modifier: form_field("MNAM", ""),
+            model,
+        })
+    }
+
+    /// Read a single `EXPL` flag bit (`1..32`, matching `GetExplosionFlag`) with session
+    /// overrides applied; `None` for non-`EXPL` forms or out-of-range flag IDs.
+    pub fn explosion_flag(&self, explosion: FormId, bit: u8) -> Option<bool> {
+        if bit == 0 || bit >= 32 {
+            return None;
+        }
+        Some(self.explosion_traits(explosion)?.has_flag(bit))
+    }
+
+    /// Session `SetExplosionTraitNumeric` radius override (`DATA/radius`) directly
+    /// present for `explosion` (or its original when not a snapshotted clone), if any.
+    pub(crate) fn explosion_radius_override(&self, explosion: FormId) -> Option<f32> {
+        let original = self.unclone(explosion);
+        if self.data.sig(original) != Some(*b"EXPL") {
+            return None;
+        }
+        let key = "DATA/radius".to_string();
+        match self.field_overrides.get(&(explosion, key.clone())).or_else(|| self.field_overrides.get(&(original, key))) {
+            Some(XVal::Num(n)) if n.is_finite() && (*n as f32).is_finite() => Some(*n as f32),
+            _ => None,
+        }
+    }
+}
+
+fn sound_level_code(label: &str) -> u8 {
+    match label.to_ascii_lowercase().as_str() {
+        "normal" => 1,
+        "silent" => 2,
+        _ => 0,
+    }
 }
 
 /// The functions of this file; `None` for any other name.
@@ -1007,6 +1221,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
     // Validate the inherited type, but write to the exact session clone. Replacing
     // the clone ID with its original here would edit every user of that original.
     let projectile = |g: &Game, f: Option<FormId>| f.filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"PROJ"));
+    let explosion = |g: &Game, f: Option<FormId>| f.filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"EXPL"));
     let ammo = |g: &Game, f: Option<FormId>| f.filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"AMMO"));
     let amef = |g: &Game, f: Option<FormId>| f.filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"AMEF"));
     let zero = XVal::Num(0.0);
@@ -1098,7 +1313,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         }
         "setexplosiontraitnumeric" => {
             let t = usize::try_from(num(args, 1, -1.0) as i64).ok().and_then(|i| EXPL_NUMERIC.get(i));
-            if let (Some(e), Some(&(path, how))) = (of_sig(g, form(args, 0), b"EXPL"), t) {
+            if let (Some(e), Some(&(path, how))) = (explosion(g, form(args, 0)), t) {
                 if let Some(v) = take(num(args, 2, f64::NAN), how) {
                     g.set_field(e, "DATA", path, XVal::Num(v));
                 }
@@ -1259,10 +1474,8 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // `armor class`: 1 light, 2 medium, 3 heavy [documented: SetArmorClass's table].
         "setarmorclass" => {
             let class = num(args, 1, 0.0) as i64;
-            if let Some(a) = of_sig(g, form(args, 0), b"ARMO").filter(|_| (1..=3).contains(&class)) {
-                let flags = g.num_field(a, "BMDT", "general_flags") as u64 & !(MEDIUM | HEAVY);
-                let flags = flags | if class == 2 { MEDIUM } else if class == 3 { HEAVY } else { 0 };
-                g.set_field(a, "BMDT", "general_flags", XVal::Num(flags as f64));
+            if let Some(a) = form(args, 0).filter(|&a| g.is_armo(a) && (1..=3).contains(&class)) {
+                g.set_armo_class(a, class as u8);
             }
             zero
         }

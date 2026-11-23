@@ -223,3 +223,46 @@ every consumer path reacts immediately in the original game without reloading th
 reference or cell, and the exact precedence when `SetEssential` or `SetFemale` has
 already run on the same actor, remain uncaptured; overrides retain the module's
 session-only lifetime (not saved in `GameSnapshot`).
+
+## 11. Live `ARMO` flag, slot, trait, and repair-list overrides (`armor_overrides.rs`)
+
+[documented: https://geckwiki.com/index.php?title=SetEquipmentSlotsMask,
+https://geckwiki.com/index.php?title=SetEquipmentBipedMask,
+https://geckwiki.com/index.php?title=SetArmorClass,
+https://geckwiki.com/index.php?title=SetIsPowerArmor,
+https://geckwiki.com/index.php?title=SetIsPlayable,
+https://geckwiki.com/index.php?title=SetArmorDT,
+https://geckwiki.com/index.php?title=SetArmorArmorRating,
+https://geckwiki.com/index.php?title=SetRepairList,
+https://geckwiki.com/index.php?title=TempCloneForm; `schemas/fnv/objects.json` ARMO BMDT/DNAM/DATA]
+`ARMO` `BMDT/general_flags` encodes Medium (bit 3), Power Armor (bit 5), Non-Playable
+(bit 6), and Heavy (bit 7) in one byte; `BMDT/biped_flags` encodes the occupied biped
+slot mask; `DNAM/dt` stores Damage Threshold; `DNAM/dr` stores Damage Resistance × 100
+(so `SetArmorArmorRating 2000` sets 20 DR); `DATA/weight` and `DATA/health` store
+weight and full condition health; and `REPL` names the repair `FLST`.
+
+[design] Session overrides written by `SetEquipmentSlotsMask`, `SetEquipmentBipedMask`,
+`SetArmorClass`, `SetIsPowerArmor`, `SetIsPlayable`, `LNSetIsPlayable`, `SetArmorDT`,
+`SetArmorArmorRating`/`SetArmorARAlt`, `SetWeight`, and `SetObjectHealth` stay
+synchronized across `field_overrides`, `OtherState::power_armor`,
+`Game::playable_overrides`, and `fnv_sim::World`'s session-only `ItemOverride` map
+(never serialized in `WorldSnapshot` or `GameSnapshot`), while `SetRepairList` flows
+through `Game::effective_repair_list_form` into `functions::repair_list` and
+`Game::player_repair_list`. Consumers across `fnv-sim` (`equip_at`, `equip_check`,
+`default_choice`, `outfit`, `carried_weight`, `encumbrance`, `stays`), `fnv-game`
+(`worn_armor_class`, `armor_speed_mult`, `body_armor`, `wears_power_armor`, `jury_kind`,
+`get_armor_rating`, `GetCalculatedItemValue`, `GetBaseEquippedWeight`/`GetCalculatedEquippedWeight`,
+`GetEquippedItems`, `GetAllItemRefs`, `RemoveAllItems`, `TestEquippedSlots`,
+`GetArmorEffectiveDT`/`DR`, `IsPowerArmor`, `IsPlayable`, `LNIsPlayable`,
+`GetEquipmentSlotsMask`/`GetEquipmentBipedMask`), and `fnv-combat`
+(`CombatForms::armor_stats_with`, `armor_struck_with`, `armor_values_worn_with_lookup`,
+`item_health_with`) read the same effective values.
+
+[design] `TempCloneForm` on an `ARMO` snapshots the source armor's current live
+overrides onto the clone (`Game::snapshot_armor_overrides`) and registers the clone in
+`World::add_clone_item`, so cloned armor can be equipped, evaluated, and edited
+without leaking changes back to the original or inheriting later edits to the original.
+[hypothesis] Whether every original-game consumer (including worn armor speed, Jury
+Rigging, and already-equipped Power Armor training checks) re-evaluates immediately
+without re-equipping or reloading the cell remains uncaptured; overrides retain the
+module's session-only lifetime.

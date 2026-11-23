@@ -449,6 +449,24 @@ pub fn cube_path(raw_path: &str) -> String {
     format!("{raw_path}{CUBE_KEY}")
 }
 
+/// Why a slot-4 file that is a flat texture (no cube-map flag) is not loaded as a cube
+/// map ([`dds_cube_image`]). A file that says it is a cube map but does not hold six
+/// faces fails with another message, a warning ([`texture_failed`]).
+const NOT_A_CUBE: &str = "a flat texture, not a cube map";
+
+/// Report a texture that did not load (`key`: the cache key, a cube map's with
+/// [`CUBE_KEY`]). A slot-4 file that is a flat texture, not a cube map (6 shapes of the
+/// base and DLC models, docs/spec-notes/nif.md §6 "Environment maps on other shapes"),
+/// is the model's own data, not a broken file: one info line per file, kept out of the
+/// failure list, and its shape is drawn without the environment map. Every other failure
+/// is a warning, as before (`guard::failed`).
+fn texture_failed(failures: &mut Vec<String>, key: &str, error: &str) {
+    match split_cube(key) {
+        (file, true) if error == NOT_A_CUBE => info!("environment map not drawn: {file} is a flat texture, not a cube map"),
+        _ => crate::guard::failed(failures, "texture", format!("{key}: {error}")),
+    }
+}
+
 /// A requested path and whether it asks for a cube map ([`cube_path`]).
 fn split_cube(raw_path: &str) -> (&str, bool) {
     raw_path.strip_suffix(CUBE_KEY).map_or((raw_path, false), |p| (p, true))
@@ -484,8 +502,11 @@ pub fn dds_cube_image(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Im
 
 fn dds_cube_image_unguarded(bytes: &[u8], srgb: bool, bc_supported: bool) -> Result<Image, String> {
     let dds = Dds::parse(bytes).map_err(|e| e.to_string())?;
-    if !dds.header.is_cubemap() || dds.levels.len() != 6 {
-        return Err("not a cube map with six faces".into());
+    if !dds.header.is_cubemap() {
+        return Err(NOT_A_CUBE.into());
+    }
+    if dds.levels.len() != 6 {
+        return Err(format!("a cube map with {} face(s), not six", dds.levels.len()));
     }
     let (w, h) = (dds.header.width, dds.header.height);
     if w != h {
@@ -681,7 +702,7 @@ impl TextureCache {
         drop(entries);
         for (key, error) in self.workers.failed.lock().expect("worker textures").iter_mut() {
             let Some(e) = error.take() else { continue };
-            crate::guard::failed(&mut self.failures, "texture", format!("{}: {e}", key.0));
+            texture_failed(&mut self.failures, &key.0, &e);
             self.map.entry(key.clone()).or_insert(None);
         }
         self.generation += u64::from(n > 0);
@@ -853,7 +874,7 @@ impl TextureCache {
                 Some((images.add(image), lacks_alpha))
             }
             Err(e) => {
-                crate::guard::failed(&mut self.failures, "texture", format!("{path}: {e}"));
+                texture_failed(&mut self.failures, &path, &e);
                 None
             }
         };
@@ -1315,7 +1336,18 @@ mod tests {
         assert_eq!(rgba.texture_descriptor.format, TextureFormat::Rgba8Unorm);
         assert_eq!(rgba.data.as_ref().unwrap().len(), 6 * 4 * 4 * 4);
         assert!(dds_image(&cube, true, true).is_err());
-        assert!(super::dds_cube_image(&dds(b"DXT1", 4, 4, &[0; 8]), true, true).is_err());
+        assert_eq!(super::dds_cube_image(&dds(b"DXT1", 4, 4, &[0; 8]), true, true).err().as_deref(), Some(super::NOT_A_CUBE), "a flat texture");
+        // Five faces flagged (+X..-Z, no +Z... any five): a broken cube, not a flat texture,
+        // so it is a warning, not the flat texture's info line (`texture_failed`).
+        let mut five = dds(b"DXT1", 4, 4, &[0x55; 5 * 8]);
+        five[112..116].copy_from_slice(&0x7E00u32.to_le_bytes());
+        let e = super::dds_cube_image(&five, true, true).unwrap_err();
+        assert_ne!(e, super::NOT_A_CUBE);
+        let mut failures = Vec::new();
+        super::texture_failed(&mut failures, &super::cube_path("textures\\a_e.dds"), &e);
+        assert_eq!(failures.len(), 1, "a five-face cube is a failure: {e}");
+        super::texture_failed(&mut failures, &super::cube_path("textures\\b_e.dds"), super::NOT_A_CUBE);
+        assert_eq!(failures.len(), 1, "a flat slot-4 texture is not");
         assert_eq!(super::split_cube(&super::cube_path("textures\\a_e.dds")), ("textures\\a_e.dds", true));
         assert_eq!(super::split_cube("textures\\a.dds"), ("textures\\a.dds", false));
     }

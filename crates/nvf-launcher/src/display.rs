@@ -106,10 +106,11 @@ pub fn steps(key: &str) -> Option<Vec<String>> {
         "ui-scale" => Some((0..21).map(|i| format!("{}%", 50 + 5 * i)).collect()),
         "menu-scale" => Some((0..11).map(|i| format!("{}%", 50 + 5 * i)).collect()),
         // graphics.rs AA_CHOICES, SHADOW_FILTERS and SHADOW_RESOLUTIONS, shadow_rate.rs
-        // SUN_SHADOW_CHOICES.
+        // SUN_SHADOW_CHOICES, light_shadows.rs CHOICES.
         "anti-aliasing" => Some(["Off", "2x", "4x", "8x", "FXAA", "SMAA", "TAA"].map(String::from).to_vec()),
         "shadow-filter" => Some(["Fast", "Smooth", "Temporal"].map(String::from).to_vec()),
         "shadow-resolution" => Some(["2048", "4096"].map(String::from).to_vec()),
+        "light-shadows" => Some(["Off", "Performance", "Quality"].map(String::from).to_vec()),
         "sun-shadows" => Some(["Off", "Performance", "Quality"].map(String::from).to_vec()),
         // full_detail.rs FullDetail::CHOICES (#2701).
         "full-detail" => Some(["Off", "7 x 7", "9 x 9"].map(String::from).to_vec()),
@@ -414,6 +415,7 @@ mod tests {
         assert!(engine("shadow_rate.rs").contains("pub const SUN_SHADOW_CHOICES: [&str; 3] = [\"Off\", \"Performance\", \"Quality\"];"));
         assert!(gr.contains("pub const AA_CHOICES: [(&str, ScreenAa, Msaa); 7]") && gr.contains("pub const SHADOW_FILTERS: [(&str, ShadowFilteringMethod); 3]"));
         assert!(gr.contains("pub const SHADOW_RESOLUTIONS: [(&str, usize); 2]"));
+        assert!(engine("light_shadows.rs").contains("pub const CHOICES: [&str; 3] = [\"Off\", \"Performance\", \"Quality\"];"));
         let fd = engine("full_detail.rs");
         for w in steps("full-detail").unwrap() {
             assert!(fd.contains(&format!("(\"{w}\", FullDetail::")), "full_detail.rs: {w}");

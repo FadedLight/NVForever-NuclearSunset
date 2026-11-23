@@ -168,7 +168,7 @@ fn composed_production_blend_module_validates_with_key_on_and_off() {
             }
             // Round 9 reuses origin.z; round 6's enabled width and ordinary layouts stay fixed.
             // #2551 added the ordinary `terrain` row (144 bytes); the blend's three rows follow.
-            assert_eq!(surface_sizes, vec![if blend { 192 } else { 160 }], "the ordinary type alone has #2462's env row after the 144 bytes");
+            assert_eq!(surface_sizes, vec![if blend { 192 } else { 176 }], "the ordinary type alone has #2462's env row and #2841's env_how row after the 144 bytes");
             // The blend type reuses the ordinary table and slots (nif_surface_blend.rs notes);
             // round 10a's bindless blend row is longer by the palette's 400 entries.
             if bindless { assert_eq!(index_sizes, vec![if blend { 16 + 4 * nvf_assets::nif_surface_blend::PALETTE_ENTRIES as u32 } else { 28 }], "the ordinary row: four entries, then the window environment map's three (#2462)"); }

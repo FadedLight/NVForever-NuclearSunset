@@ -584,9 +584,9 @@ pub fn list_members(g: &Game, list: FormId) -> Vec<FormId> {
 }
 
 /// The items that can repair `item`: the members of its repair list (WEAP/ARMO `REPL`),
-/// authored and added at run time (docs/spec-notes/repair.md §5).
+/// authored, overridden by `SetRepairList`, and added at run time (docs/spec-notes/repair.md §5).
 pub fn repair_list(g: &Game, item: FormId) -> Vec<FormId> {
-    g.data.repair_lists.get(&item).map(|&l| list_members(g, l)).unwrap_or_default()
+    g.effective_repair_list_form(item).map(|l| list_members(g, l)).unwrap_or_default()
 }
 
 /// 1 when the caller's base form is in the list.

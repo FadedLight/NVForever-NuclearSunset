@@ -1194,7 +1194,7 @@ impl App {
         ui.label(RichText::new("LAUNCHER").small().strong().color(theme::GOLD_TEXT));
         card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.checkbox(&mut self.ini.news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com when the launcher opens.");
+            ui.checkbox(&mut self.ini.news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com (and GitHub) for the news when the launcher opens.");
             ui.checkbox(&mut self.ini.close, "Close the launcher when the game starts").on_hover_text("[Launcher] CloseOnPlay.");
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Game program").small()).on_hover_text("[Launcher] Exe. Empty uses the program beside the launcher.");
@@ -1225,7 +1225,13 @@ impl App {
         }
         let r = self.write_ini(|t| form.apply(&was, &t));
         let ok = r.is_ok();
+        // Changes on the game's tabs not saved yet stay: their Save is hidden on this tab, and
+        // the reload after a write would drop them unseen.
+        let pending = self.edits.clone();
         self.after_write(r, Some("NVForever.ini saved."));
+        if ok {
+            self.edits = pending;
+        }
         // As the News card's box does: on fetches the news now, off stops showing it.
         if ok && form.news != was.news {
             if form.news {

@@ -125,8 +125,8 @@ pub struct CreatorMenu {
     /// Active touch interaction on the character creator (panel controls + 3D preview).
     touch: CreatorTouch,
     kit: Option<view::Kit>,
-    /// The view's width the panel was last drawn for: it stands at the view's right.
-    drawn_w: f32,
+    /// The layout the panel was last drawn for (viewport size, safe insets, menu scale).
+    drawn_layout: Option<view::Layout>,
     /// The look last written into the game.
     written: Option<fnv_actor::Look>,
     /// Opened by the gene projector: drawn in a studio (`Game::race_menu_studio`).
@@ -375,22 +375,28 @@ fn sync(mut st: ResMut<CreatorMenu>, data: Option<Res<CreatorData>>, script: Opt
     st.dirty = true;
 }
 
-/// The view's width in the interface's units.
-fn view_width(window: &Window) -> f32 {
-    960.0 * window.width() / window.height().max(1.0)
+/// The creator's current layout for `window`, `safe`, and the active menu/unit scale.
+fn current_layout(window: Option<&Window>, safe: crate::touch_safe_area::SafeInsets) -> view::Layout {
+    let view_px = window.map_or(Vec2::new(1600.0, 900.0), |w| Vec2::new(w.width(), w.height()));
+    view::Layout::compute(view_px, safe, crate::interface::unit_scale())
 }
 
-/// Convert a logical window point to the creator's interface units.
-fn to_units(window: &Window, pos: Vec2) -> Vec2 {
-    let p = crate::interface::from_menu_frame(pos, Vec2::new(window.width(), window.height()), crate::interface::MIDDLE);
-    let k = 960.0 / window.height().max(1.0);
-    p * k
+/// Convert a logical window point to the creator's layout units.
+fn to_units(window: &Window, layout: view::Layout, pos: Vec2) -> Vec2 {
+    if layout.use_menu_frame {
+        let p = crate::interface::from_menu_frame(pos, Vec2::new(window.width(), window.height()), crate::interface::MIDDLE);
+        let k = 960.0 / window.height().max(1.0);
+        p * k
+    } else {
+        let k = 960.0 / (window.height().max(1.0) * layout.draw_scale.max(0.01));
+        pos * k
+    }
 }
 
-/// The pointer's place in the interface's units.
-fn pointer(window: &Window) -> Option<Vec2> {
+/// The pointer's place in the creator's layout units.
+fn pointer(window: &Window, layout: view::Layout) -> Option<Vec2> {
     // Where the pointer is on the menu as drawn at the UI scale (#1631).
-    Some(to_units(window, window.cursor_position()?))
+    Some(to_units(window, layout, window.cursor_position()?))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -404,7 +410,7 @@ fn input(
     motion: Res<AccumulatedMouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
     (mut touches, touch_capture): (MessageReader<TouchInput>, Option<Res<crate::ui_pointer::TouchUiCapture>>),
-    windows: Query<&Window, With<PrimaryWindow>>,
+    (windows, safe): (Query<&Window, With<PrimaryWindow>>, Option<Res<crate::touch_safe_area::SafeInsets>>),
     pads: crate::pad::ActionPads,
     mut script: Option<ResMut<ScriptState>>,
     mut sim: Option<ResMut<SimState>>,
@@ -488,8 +494,11 @@ fn input(
             m.view.zoom_by(1.0 - zoom * dt);
         }
     }
+    // Hit-testing uses the layout the currently cached `hits` were drawn with.
+    let live_layout = current_layout(windows.single().ok(), safe.as_deref().copied().unwrap_or_default());
+    let hit_layout = st_ref.drawn_layout.unwrap_or(live_layout);
     // The pointer.
-    if let Some(p) = windows.single().ok().and_then(pointer) {
+    if let Some(p) = windows.single().ok().and_then(|w| pointer(w, hit_layout)) {
         let under = view::hit_at(&st_ref.hits, p);
         // A drag that starts on the picture moves the camera until the button is let go.
         let window_h = windows.single().map_or(800.0, |w| w.height().max(1.0));
@@ -552,15 +561,14 @@ fn input(
         }
         if st_ref.scroll_drag {
             if mouse.pressed(MouseButton::Left) {
-                ops.push((Op::ScrollTo(view::first_at(&view::heights(m), p.y)), "drag"));
+                ops.push((Op::ScrollTo(view::first_at_in(&view::heights(m), p.y, hit_layout.rows_top, hit_layout.rows_bottom)), "drag"));
             } else {
                 st_ref.scroll_drag = false;
             }
         }
         if let Some(i) = st_ref.drag {
             if mouse.pressed(MouseButton::Left) {
-                let left = windows.single().map_or(0.0, |w| view::panel_left(view_width(w)));
-                ops.push((Op::Track(i, view::track_fraction(p.x - left)), "drag"));
+                ops.push((Op::Track(i, view::track_fraction(p.x - hit_layout.panel_x)), "drag"));
             } else {
                 st_ref.drag = None;
             }
@@ -580,13 +588,13 @@ fn input(
     // Touch controls directly on the character appearance customizer (panel + 3D preview).
     if let Ok(win) = windows.single() {
         let window_h = win.height().max(1.0);
-        let left = view::panel_left(view_width(win));
-        let row_px = (68.0 * (window_h / 960.0) * crate::interface::menu_scale()).max(24.0);
+        let left = hit_layout.panel_x;
+        let row_px = (68.0 * (window_h / 960.0) * hit_layout.draw_scale).max(24.0);
         for t in touch_events {
             if !t.position.is_finite() || touch_capture.as_ref().is_some_and(|cap| !cap.allows(t.id)) {
                 continue;
             }
-            let p = to_units(win, t.position);
+            let p = to_units(win, hit_layout, t.position);
             let under = view::hit_at(&st_ref.hits, p);
             match t.phase {
                 TouchPhase::Started => {
@@ -602,7 +610,7 @@ fn input(
                     }
                     let mode = match under {
                         Some(HitWhat::Scrollbar) => {
-                            ops.push((Op::ScrollTo(view::first_at(&view::heights(m), p.y)), "touch"));
+                            ops.push((Op::ScrollTo(view::first_at_in(&view::heights(m), p.y, hit_layout.rows_top, hit_layout.rows_bottom)), "touch"));
                             CreatorTouchMode::Scrollbar
                         }
                         None => CreatorTouchMode::CameraOrbit,
@@ -671,7 +679,7 @@ fn input(
                             ops.push((Op::Track(i, view::track_fraction(p.x - left)), "touch drag"));
                         }
                         CreatorTouchMode::Scrollbar => {
-                            ops.push((Op::ScrollTo(view::first_at(&view::heights(m), p.y)), "touch drag"));
+                            ops.push((Op::ScrollTo(view::first_at_in(&view::heights(m), p.y, hit_layout.rows_top, hit_layout.rows_bottom)), "touch drag"));
                         }
                         CreatorTouchMode::CameraOrbit => {
                             m.view.orbit(-step.x / window_h * 3.0, step.y / window_h * 1.5);
@@ -716,8 +724,9 @@ fn input(
             }
         }
     }
+    let rows_room = live_layout.rows_room();
     for (op, how) in ops {
-        let event = apply(st_ref, &mut script, &mut sim, op, how);
+        let event = apply(st_ref, &mut script, &mut sim, op, how, rows_room);
         if let Some(event) = event {
             sounds.write(UiSound { menu: UiMenu::Creator, event });
         }
@@ -728,7 +737,7 @@ fn input(
 }
 
 /// Apply one change; the sound it makes.
-fn apply(st: &mut CreatorMenu, script: &mut Option<ResMut<ScriptState>>, sim: &mut Option<ResMut<SimState>>, op: Op, how: &str) -> Option<UiEvent> {
+fn apply(st: &mut CreatorMenu, script: &mut Option<ResMut<ScriptState>>, sim: &mut Option<ResMut<SimState>>, op: Op, how: &str, rows_room: f32) -> Option<UiEvent> {
     let m = st.model.as_mut()?;
     let before = (m.tab, m.row(), m.on_actions, m.look.clone());
     let mut event = None;
@@ -781,7 +790,7 @@ fn apply(st: &mut CreatorMenu, script: &mut Option<ResMut<ScriptState>>, sim: &m
                 Op::ScrollTo(first) => first,
                 _ => unreachable!(),
             };
-            let first = first.min(view::max_first(&heights));
+            let first = first.min(view::max_first_in(&heights, rows_room));
             if first != m.scroll() {
                 m.set_scroll(first);
                 st.hover_after_scroll = true;
@@ -825,7 +834,7 @@ fn apply(st: &mut CreatorMenu, script: &mut Option<ResMut<ScriptState>>, sim: &m
             }
         }
         Op::Enter => match m.on_actions {
-            Some(a) => return apply(st, script, sim, Op::Act(ACTIONS[a]), how),
+            Some(a) => return apply(st, script, sim, Op::Act(ACTIONS[a]), how, rows_room),
             None => m.on_actions = Some(ACTIONS.len() - 1),
         },
         Op::Act(Action::Randomise) => {
@@ -886,7 +895,7 @@ fn apply(st: &mut CreatorMenu, script: &mut Option<ResMut<ScriptState>>, sim: &m
     if (before.0, before.1) != (m.tab, m.row()) || before.2 != m.on_actions {
         // The chosen row moved (keys, a click, a test aid): scroll it into view.
         if m.on_actions.is_none() {
-            let first = view::reveal(&view::heights(m), m.scroll(), m.row());
+            let first = view::reveal_in(&view::heights(m), m.scroll(), m.row(), rows_room);
             m.set_scroll(first);
         }
     }
@@ -987,16 +996,16 @@ fn draw(
     data: Option<Res<GameData>>,
     mut images: ResMut<Assets<Image>>,
     formats: Option<Res<CompressedImageFormatSupport>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    (windows, safe): (Query<&Window, With<PrimaryWindow>>, Option<Res<crate::touch_safe_area::SafeInsets>>),
     mut font_revision: Local<u32>,
 ) {
-    let view_w = windows.single().map_or(1707.0, view_width);
+    let layout = current_layout(windows.single().ok(), safe.as_deref().copied().unwrap_or_default());
     let revision = crate::cjk_font::revision();
-    if !st.dirty && st.drawn_w == view_w && *font_revision == revision {
+    if !st.dirty && st.drawn_layout == Some(layout) && *font_revision == revision {
         return;
     }
     st.dirty = false;
-    st.drawn_w = view_w;
+    st.drawn_layout = Some(layout);
     *font_revision = revision;
     for e in &roots {
         commands.entity(e).despawn();
@@ -1010,8 +1019,14 @@ fn draw(
     let kit = st.kit.get_or_insert_with(|| view::Kit::load(data.as_deref(), &mut images, bc));
     let root = Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
     let mut hits = Vec::new();
-    // At the UI scale the menu keeps to the view's middle (#1631).
-    commands.spawn((crate::interface::framed_root(root, crate::interface::MIDDLE), GlobalZIndex(30), CreatorRoot)).with_children(|r| hits = view::spawn(r, m, kit, view_w));
+    let _units = (!layout.use_menu_frame).then(|| crate::interface::units_at(layout.draw_scale));
+    let root_node = if layout.use_menu_frame {
+        // At desktop UI scale (<= 100%, no safe insets) the menu keeps to the view's middle (#1631).
+        crate::interface::framed_root(root, crate::interface::MIDDLE)
+    } else {
+        root
+    };
+    commands.spawn((root_node, GlobalZIndex(30), CreatorRoot)).with_children(|r| hits = view::spawn(r, m, kit, layout));
     st.hits = hits;
 }
 
@@ -1247,5 +1262,96 @@ mod tests {
         send_touch(&mut app, window, 6, TouchPhase::Ended, reset_btn);
         app.update();
         assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0], before);
+    }
+
+    #[test]
+    fn creator_high_menu_scale_keeps_done_tabs_and_sliders_clickable_inside_safe_area() {
+        use crate::touch_safe_area::SafeInsets;
+        let view = Vec2::new(960.0, 540.0);
+        let safe = SafeInsets { left: 40.0, top: 12.0, right: 40.0, bottom: 28.0 };
+        for menu_scale in [1.25f32, 1.5, 2.0] {
+            let _scale = crate::interface::units_at(menu_scale);
+            let (mut app, window) = touch_creator_scene();
+            app.world_mut().entity_mut(window).get_mut::<Window>().unwrap().resolution = bevy::window::WindowResolution::new(view.x as u32, view.y as u32);
+            app.insert_resource(safe);
+            app.world_mut().resource_mut::<CreatorMenu>().dirty = true;
+            app.update();
+            app.update();
+
+            let layout = app.world().resource::<CreatorMenu>().drawn_layout.expect("drawn layout");
+            assert!(!layout.use_menu_frame);
+            let hits = app.world().resource::<CreatorMenu>().hits.clone();
+
+            // Verify every tab and every action button (including DONE = Action(3)) lies strictly inside safe bounds.
+            for tab_i in 0..TABS.len() {
+                let h = hits.iter().find(|h| h.what == HitWhat::Tab(tab_i)).expect("tab hit");
+                let r = layout.unit_rect_to_window_px(h.rect, view);
+                assert!(r.min.x >= safe.left - 1.0 && r.max.x <= view.x - safe.right + 1.0, "tab {tab_i} x @ {menu_scale}: {r:?}");
+                assert!(r.min.y >= safe.top - 1.0 && r.max.y <= view.y - safe.bottom + 1.0, "tab {tab_i} y @ {menu_scale}: {r:?}");
+                assert!(r.width() > 20.0 && r.height() > 16.0);
+            }
+            for act_i in 0..ACTIONS.len() {
+                let h = hits.iter().find(|h| h.what == HitWhat::Action(act_i)).expect("action hit");
+                let r = layout.unit_rect_to_window_px(h.rect, view);
+                assert!(r.min.x >= safe.left - 1.0 && r.max.x <= view.x - safe.right + 1.0, "action {act_i} x @ {menu_scale}: {r:?}");
+                assert!(r.min.y >= safe.top - 1.0 && r.max.y <= view.y - safe.bottom + 1.0, "action {act_i} y @ {menu_scale}: {r:?}");
+                assert!(r.width() > 24.0 && r.height() > 20.0, "action {act_i} clickable size @ {menu_scale}: {r:?}");
+            }
+
+            // Tap Face tab using real window-pixel coordinates and verify touch hit-testing switches tabs.
+            let face_hit = hits.iter().find(|h| h.what == HitWhat::Tab(1)).expect("face tab");
+            let face_px = layout.unit_rect_to_window_px(face_hit.rect, view).center();
+            send_touch(&mut app, window, 10, TouchPhase::Started, face_px);
+            send_touch(&mut app, window, 10, TouchPhase::Ended, face_px);
+            app.update();
+            assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().tab, Tab::Face, "Face tab clickable @ {menu_scale}");
+            app.update();
+
+            // Verify scrollable slider body reaches the final slider via scroll and Reset/Done remain pinned & clickable.
+            let face_hits = app.world().resource::<CreatorMenu>().hits.clone();
+            assert!(face_hits.iter().any(|h| h.what == HitWhat::Scrollbar), "scrollbar appears when rows overflow compact viewport @ {menu_scale}");
+            let before = app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0];
+            let track_hit = face_hits.iter().find(|h| h.what == HitWhat::Track(1)).expect("slider 1 visible");
+            let track_px = layout.unit_rect_to_window_px(track_hit.rect, view).center();
+            send_touch(&mut app, window, 11, TouchPhase::Started, track_px);
+            app.update();
+            send_touch(&mut app, window, 11, TouchPhase::Moved, track_px + Vec2::X * 50.0);
+            app.update();
+            send_touch(&mut app, window, 11, TouchPhase::Ended, track_px + Vec2::X * 50.0);
+            app.update();
+            assert!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0] > before, "slider drag works @ {menu_scale}");
+
+            // Scroll via scrollbar bottom and verify the last slider becomes reachable.
+            let bar_hit = face_hits.iter().find(|h| h.what == HitWhat::Scrollbar).expect("scrollbar");
+            let bar_bottom_px = layout.unit_rect_to_window_px(bar_hit.rect, view).max - Vec2::splat(2.0);
+            send_touch(&mut app, window, 12, TouchPhase::Started, bar_bottom_px);
+            send_touch(&mut app, window, 12, TouchPhase::Ended, bar_bottom_px);
+            app.update();
+            app.update();
+            assert!(app.world().resource::<CreatorMenu>().hits.iter().any(|h| matches!(h.what, HitWhat::Track(12))), "last slider reachable after scroll @ {menu_scale}");
+
+            // Tap DONE button (Action(3)) in window pixels — verify hit-test resolves to HitWhat::Action(3) cleanly
+            // and never overlaps any tab or row hit rect; also tap RESET (Action(2)) end-to-end to prove action dispatch.
+            let final_hits = app.world().resource::<CreatorMenu>().hits.clone();
+            let done_hit = final_hits.iter().find(|h| h.what == HitWhat::Action(3)).expect("Done hit");
+            let done_rect = layout.unit_rect_to_window_px(done_hit.rect, view);
+            for other in &final_hits {
+                if matches!(other.what, HitWhat::Tab(_) | HitWhat::Row(_) | HitWhat::Track(_) | HitWhat::Arrow(..) | HitWhat::Action(0..=2)) {
+                    let o = layout.unit_rect_to_window_px(other.rect, view);
+                    assert!(done_rect.intersect(o).is_empty(), "DONE overlaps {:?} @ {menu_scale}: {done_rect:?} vs {o:?}", other.what);
+                }
+            }
+            let done_px = done_rect.center();
+            let win = app.world().entity(window).get::<Window>().unwrap();
+            let done_u = to_units(win, layout, done_px);
+            assert_eq!(view::hit_at(&final_hits, done_u), Some(HitWhat::Action(3)), "DONE button hit-tests cleanly @ {menu_scale}");
+
+            let reset_hit = final_hits.iter().find(|h| h.what == HitWhat::Action(2)).expect("Reset hit");
+            let reset_px = layout.unit_rect_to_window_px(reset_hit.rect, view).center();
+            send_touch(&mut app, window, 13, TouchPhase::Started, reset_px);
+            send_touch(&mut app, window, 13, TouchPhase::Ended, reset_px);
+            app.update();
+            assert_eq!(app.world().resource::<CreatorMenu>().model.as_ref().unwrap().look.facegen.fggs[0], before, "RESET action button works via touch @ {menu_scale}");
+        }
     }
 }

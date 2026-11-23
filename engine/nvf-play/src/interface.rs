@@ -513,6 +513,37 @@ pub fn to_menu_frame(point: Vec2, view: Vec2, anchor: Vec2) -> Vec2 {
     anchor * view * (1.0 - s) + point * s
 }
 
+/// [design: docs/design/android.md] Effective draw scale and safe-area padding for a
+/// centred fixed-dimension menu box (`content_w × content_h` interface units) when
+/// `menu_scale > 1.0` (Android up to 200%) or platform safe-area insets are non-zero.
+/// At `menu_scale <= 1.0` with zero safe insets (all desktop runs), returns `None` so
+/// callers retain their exact desktop layout untouched.
+pub fn fit_centered_box(
+    menu_scale: f32,
+    view_px: Vec2,
+    safe: crate::touch_safe_area::SafeInsets,
+    content_w: f32,
+    content_h: f32,
+) -> Option<(f32, UiRect)> {
+    let scale = if menu_scale.is_finite() && menu_scale > 0.0 { menu_scale } else { 1.0 };
+    let view_w = if view_px.x.is_finite() && view_px.x > 1.0 { view_px.x } else { 1280.0 };
+    let view_h = if view_px.y.is_finite() && view_px.y > 1.0 { view_px.y } else { 720.0 };
+    let clean = |v: f32, cap: f32| if v.is_finite() { v.clamp(0.0, cap) } else { 0.0 };
+    let (l, r) = (clean(safe.left, view_w * 0.45), clean(safe.right, view_w * 0.45));
+    let (t, b) = (clean(safe.top, view_h * 0.45), clean(safe.bottom, view_h * 0.45));
+    let has_safe = l > 0.5 || t > 0.5 || r > 0.5 || b > 0.5;
+    if scale <= 1.0 && !has_safe {
+        return None;
+    }
+    let px_per_u1 = view_h / 960.0;
+    let safe_w_u1 = (view_w - l - r).max(1.0) / px_per_u1;
+    let safe_h_u1 = (view_h - t - b).max(1.0) / px_per_u1;
+    let max_scale = (safe_w_u1 / content_w.max(1.0)).min(safe_h_u1 / content_h.max(1.0));
+    let draw_scale = scale.min(max_scale).max(0.1);
+    let pad = UiRect { left: Val::Px(l), right: Val::Px(r), top: Val::Px(t), bottom: Val::Px(b) };
+    Some((draw_scale, pad))
+}
+
 pub fn at(left: f32, top: f32, width: f32, height: f32) -> Node {
     Node { position_type: PositionType::Absolute, left: u(left), top: u(top), width: u(width), height: u(height), ..default() }
 }
@@ -1492,6 +1523,27 @@ pub(crate) mod tests {
     fn a_caps_only_font_centres_its_glyphs_on_the_cap_height() {
         let face = measured_font(true);
         assert_eq!(x_height(&face), line_base(&face));
+    }
+
+    #[test]
+    fn fit_centered_box_preserves_desktop_and_clamps_high_scale_within_safe_area() {
+        use crate::touch_safe_area::SafeInsets;
+        let desktop = Vec2::new(1600.0, 900.0);
+        assert_eq!(fit_centered_box(1.0, desktop, SafeInsets::default(), 1088.0, 840.0), None);
+        assert_eq!(fit_centered_box(0.8, desktop, SafeInsets::default(), 1088.0, 840.0), None);
+
+        let safe = SafeInsets { left: 48.0, top: 12.0, right: 48.0, bottom: 24.0 };
+        for view in [Vec2::new(1280.0, 720.0), Vec2::new(2400.0, 1080.0), Vec2::new(960.0, 540.0), Vec2::new(800.0, 600.0)] {
+            for scale in [1.25f32, 1.5, 2.0] {
+                let (draw_scale, pad) = fit_centered_box(scale, view, safe, 1088.0, 840.0).expect("clamped");
+                assert!(draw_scale <= scale && draw_scale > 0.1);
+                let px_per_u = (view.y / 960.0) * draw_scale;
+                assert!(1088.0 * px_per_u <= view.x - safe.left - safe.right + 0.5, "{view:?} @ {scale}");
+                assert!(840.0 * px_per_u <= view.y - safe.top - safe.bottom + 0.5, "{view:?} @ {scale}");
+                assert_eq!(pad.left, Val::Px(safe.left));
+                assert_eq!(pad.bottom, Val::Px(safe.bottom));
+            }
+        }
     }
 }
 

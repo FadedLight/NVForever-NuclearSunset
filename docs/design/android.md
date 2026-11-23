@@ -162,9 +162,12 @@ documentation. Neither tag there claims anything about the original game. The gr
   launcher's pages, top-left app icon, read-only folder import, newest-save Continue
   with thumbnail/metadata preview card (`mobile.rs`, `MobileLauncher.java`), Markdown
   news/release formatting (`MarkdownParser.java` / `MarkdownRenderer.java`,
-  700/400-character preview caps), and user-confirmed HTTPS GitHub Releases ARM64 APK
+  700/400-character preview caps), user-confirmed HTTPS GitHub Releases ARM64 APK
   updater (`UpdatePolicy.java`, `ApkUpdateProvider.java`, 512 MiB cap, 5 HTTPS-only
-  redirects, fail-closed `SHA256SUMS.txt` verification when published).
+  redirects, fail-closed `SHA256SUMS.txt` verification when published), and Google's
+  Maven Central mirror ahead of `mavenCentral()` in `android/settings.gradle` as a
+  CI rate-limit resilience fallback (`google()` remains first, `mavenCentral()` and
+  `gradlePluginPortal()` remain fallbacks).
 - Classic dialogue casing: the 1774 × 887 frame and its four apertures
   ([Classic runtime](dialogue-classic-runtime.md)) are project design, not original-game
   observations. The entire `dialogue/classic.png` image stretches cleanly to fill 100% × 100%
@@ -180,7 +183,12 @@ documentation. Neither tag there claims anything about the original game. The gr
   Gyro default position at middle-left `(0.075, 0.48)` (mirrored in southpaw), compact 5×3
   top/bottom-dockable and collapsible touch-editor toolbar that auto-hides while dragging,
   virtual on-screen navigation keys active in Pause and Settings menus alongside direct
-  touch, viewport-fit clamping for Main Menu entries above `100%` `menu-scale`, enlarged
+  touch, viewport-fit clamping for Main Menu entries, the character appearance customizer
+  (`creator.rs` / `creator/view.rs`: pinned header, tabs and action bar with scrollable row
+  viewport inside safe insets and a 168-unit minimum row budget), and sibling chargen,
+  level-up and message-box modals (`chargen.rs`, `chargen/name.rs`, `levelup.rs`,
+  `message_menu.rs`) above `100%` `menu-scale` or within non-zero safe-area insets (keeping
+  desktop `<= 100%` with zero safe insets unchanged), enlarged
   straight-on Wrist Terminal and Retro Console side split (`dialogue-device-side-v1`,
   Right default / Left selectable, 66% width × full safe height, area-weighted normal,
   front-depth clearance, opaque dark screen backdrop, dialogue glare skipped, and

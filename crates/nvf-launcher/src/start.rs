@@ -15,21 +15,30 @@ pub const INTRO_KEY: &str = "sIntroMovie";
 /// [documented: Fallout Wiki, Fallout: New Vegas quest IDs, the `00102037` row and the
 /// VCG00 stage table]
 /// [documented: GECK Wiki, INI Settings, `SCharGenQuest` default `00102037`]
-/// `001FFFF8` is not this quest. That value is a mod's start, and a base-game load
-/// order has no quest there [documented: `engine/nvf-play/src/game_start.rs`].
+/// [documented: `Fallout_default.ini` in the player's game folder,
+/// `SCharGenQuest=00102037`]
+/// `001FFFF8` is not this quest. That value is Tale of Two Wastelands' start, and
+/// FalloutNV.esm has no form there [observed: `fnvtool esm decode`, as recorded at
+/// `not_a_quest` in `engine/nvf-play/src/game_start.rs`].
 pub const DEFAULT_QUEST: &str = "00102037";
 
 /// The intro film a new game plays from `Data\Video` when the film is not turned off.
 ///
-/// [documented: public mod pages that replace `Data\Video\FNVIntro.bik` to change the
-/// new-game intro]
-/// [documented: `engine/nvf-play/src/game_start.rs`, `DEFAULT_INTRO` is
-/// `video\fnvintro.bik` when `sIntroMovie` is absent]
-/// The GECK Wiki's `SIntroMovie` default `Fallout INTRO Vsk.bik` is Fallout 3's film.
-/// New Vegas does not ship that file [documented: `game_start.rs`].
+/// It is the base game's own file, in the game folder the player provides; NVForever
+/// ships no film. A Steam install's `Data\Video` holds `FNVIntro.bik` and no other file,
+/// put there with the game [observed: a Steam install's `Data\Video`, 2026-11-23]. A mod
+/// can replace it with its own `Video\FNVIntro.bik`, and the game then plays that file
+/// (code: `open_film` in `engine/nvf-play/src/intro.rs` reads the loose file that wins
+/// among the data's layers, through `Vfs::loose_path`).
+/// The game's own `Fallout_default.ini` names `sIntroMovie=Fallout INTRO Vsk.bik`, which
+/// that folder does not have [documented: `Fallout_default.ini`]. Without the key
+/// NVForever plays `video\fnvintro.bik` (code: `DEFAULT_INTRO` in
+/// `engine/nvf-play/src/game_start.rs`).
 pub const DEFAULT_FILM: &str = "FNVIntro.bik";
 
-/// Tale of Two Wastelands' master. The start button is offered while the load order has it.
+/// Tale of Two Wastelands' master. The card's TTW switch is always shown; while TTW is on
+/// and this plugin is not on in the load order, the card warns that the start quest is not
+/// found.
 pub const TTW_PLUGIN: &str = "TaleOfTwoWastelands.esm";
 /// TTW's start quest, as its installation guide writes it (`SCharGenQuest=001FFFF8`, `SIntroMovie=`).
 pub const TTW_QUEST: &str = "001FFFF8";

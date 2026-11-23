@@ -59,7 +59,7 @@ without the launcher is the same as before.
   takes its line out, the game's default; "No intro film" writes `sIntroMovie=`). A **TTW on/off**
   switch fills in TTW's values (`001FFFF8`, no film) or the base game's (`00102037` (VCG00),
   `FNVIntro.bik`; docs/spec-notes/new-game-start.md), and the card warns while TTW is on and
-  `TaleOfTwoWastelands.esm` is not on in the list. Opening the page runs
+  `TaleOfTwoWastelands.esm` is not on in the load order. Opening the page runs
   `fnv_install::plugins::sync`, as the game's start does, so new plugins get their lines.
 - **Game folder**: `[Game] Path` with the required-files check, the program to start
   (`[Launcher] Exe`, else `nvforever(.exe)` beside the launcher, else this checkout's

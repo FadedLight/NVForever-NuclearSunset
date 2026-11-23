@@ -1649,7 +1649,7 @@ impl App {
                 }
             });
             if self.start_edit.is_ttw() && ttw != Some(true) {
-                ui.label(RichText::new(format!("{} is not on in the list below: turn it on, or this start quest is not found.", start::TTW_PLUGIN)).small().color(BAD));
+                ui.label(RichText::new(format!("{} is not on in the load order: turn it on, or this start quest is not found.", start::TTW_PLUGIN)).small().color(BAD));
             }
         });
         if save {

@@ -6409,6 +6409,10 @@ impl<'a> Game<'a> {
     /// whose duration has passed finish [hypothesis: aid-items.md §6]. The conditions are
     /// checked first, whatever the time since the last check: the hours of a wait pass
     /// with the game's own time standing still, and Solar Powered would heal all night.
+    /// Known limit: they are checked once, with the clock already at the end of the
+    /// step, for all its seconds. A jump of several hours (SetGameHour, fast travel) from
+    /// 17:00 to 20:00 heals nothing with Solar Powered; from 3:00 to 9:00 it heals for all
+    /// six hours. A wait steps hour by hour.
     pub fn advance_effects(&mut self, seconds: f64) {
         if seconds > 0.0 {
             self.condition_check_due = self.time;

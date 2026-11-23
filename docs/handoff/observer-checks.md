@@ -4021,3 +4021,9 @@ capture setup, so every part of a check that needs an interior is still open.
        damaged by 900 (Health before and after).
      - If cheap, the same base effect elsewhere: Solar Powered (magnitude 1) outdoors at
        noon for 60 s and indoors for 10 s.
+     - If cheap, on other actors (the engine's change makes them regenerate too): the
+       Legate (`RegenMed`, magnitude 5, given by `VLegateScript`) and one Dead Money
+       hologram (`NVDLC01HologramRegen`, 100). Out of combat, log `IsSpellTarget` of the
+       spell (AddSpell it if 0, and say so), `DamageActorValue Health` by half of its
+       Health, then log `GetAV Health` every frame for **30 s**. Report the rise, the
+       steps and where it stops.

@@ -270,7 +270,12 @@ Food:      fMagicSurvivalSkillBase + fMagicSurvivalSkillMult × Survival / 100  
   (a regeneration, §3, by all of them), and an effect whose time is up finishes
   [hypothesis]. Conditions are checked before each step, with the clock already moved
   [design: the game's own time stands still in the menu, so the once-a-second check
-  would not come round, and Solar Powered would heal all night].
+  would not come round, and Solar Powered would heal all night]. **Known limit**: a
+  jump of several hours in one step (SetGameHour, fast travel) checks conditions once,
+  at the destination, and then advances the whole jump under that answer. Solar Powered
+  from 17:00 to 20:00 heals nothing, and from 3:00 to 9:00 the whole six hours. The
+  Sleep / Wait menu steps hour by hour, so its error is at most an hour. Not split into
+  intervals [design].
 - An effect with a duration whose conditions fail when it is applied (a Stimpak's
   Hardcore heal over time used outside Hardcore) is held inactive, as a spell's is
   (§5.3), and its time runs all the same: it goes when its duration has passed, with no

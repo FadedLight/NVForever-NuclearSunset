@@ -378,7 +378,7 @@ pub(crate) fn discover(state: Option<ResMut<DataState>>, mut script: Option<ResM
     if rt.game.player.found_markers.len() != state.discovered().len() {
         rt.game.set_found_markers(state.discovered().iter().map(|&f| FormId(f)));
     }
-    let found = state.take_newly_found();
+    let found = state.take_newly_found(Some(&rt.game));
     if found.is_empty() {
         return;
     }

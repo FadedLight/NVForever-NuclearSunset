@@ -3748,16 +3748,20 @@ mod tests {
     #[test]
     fn the_prepared_world_map_is_read_with_its_parts_and_the_local_map_is_not() {
         let view = data::MapView::world(WORLD_W, [0.5, 0.5], Vec2::splat(1000.0), 1.0);
-        let mark = |form, uv: Option<[f32; 2]>| data::MapMark { icon: Some((1, true)), highlighted: form == 2, at: Vec2::ZERO, form, name: format!("P{form}"), uv, detail: None, recent: false, outside: None };
+        let mark = |form, uv: Option<[f32; 2]>| data::MapMark { icon: Some((1, true)), custom_icon: None, highlighted: form == 2, at: Vec2::ZERO, form, name: format!("P{form}"), uv, detail: None, recent: false, outside: None };
         let parts = data::WorldParts { view, texture: "w.dds".into(), mag: 1.0, quests: vec![(9, [0.1, 0.2])], custom: None, arrow: Some(([0.5, 0.5], 1.0)), ends: Vec::new(), outline: None, rows: None, want: Vec2::new(5.0, 6.0) };
-        let map = data::MapShown::for_test(vec![mark(1, Some([0.1, 0.1])), mark(2, Some([0.2, 0.2])), mark(3, None)], Some(parts), Vec2::new(5.0, 6.0), Some("P2"), None);
+        let map = data::MapShown::for_test(vec![mark(1, Some([0.1, 0.1])), mark(2, Some([0.2, 0.2])), mark(3, None)], Some(parts.clone()), Vec2::new(5.0, 6.0), Some("P2"), None);
         let view_of = |tab, map: data::MapShown| data::View { tab, place: "Here".into(), when: "now".into(), buttons: Vec::new(), body: Body::Map(Box::new(map)), popup: None };
         let p = |tab, map| Prepared { view: view_of(tab, map), keys: Vec::new(), sel: 0, pointer_pick: false, navigated: 0, challenges: false, filtered: false };
         let s = Shown::of(&p(data::WORLD, map.clone()), true).unwrap();
         let w = s.world.expect("the World Map's parts");
         assert_eq!(w.markers.iter().map(|m| (m.form, m.selected)).collect::<Vec<_>>(), vec![(1, false), (2, true)], "a mark without texture coordinates is not the World Map's");
         assert_eq!((w.picture, w.window, w.usable, w.cursor, w.label.as_deref()), (view.picture(), WORLD_W, Vec2::splat(1000.0), Vec2::new(5.0, 6.0), Some("P2")));
-        assert_eq!(w.markers[0].icon, data::MapMark { icon: Some((1, true)), highlighted: false, at: Vec2::ZERO, form: 1, name: String::new(), uv: None, detail: None, recent: false, outside: None }.picture());
+        assert_eq!(w.markers[0].icon, data::MapMark { icon: Some((1, true)), custom_icon: None, highlighted: false, at: Vec2::ZERO, form: 1, name: String::new(), uv: None, detail: None, recent: false, outside: None }.picture());
+        let custom_mark = data::MapMark { icon: Some((1, true)), custom_icon: Some("Interface\\Icons\\Owned\\custom.dds".into()), highlighted: false, at: Vec2::ZERO, form: 1, name: "P1".into(), uv: Some([0.1, 0.1]), detail: None, recent: false, outside: None };
+        let custom_map = data::MapShown::for_test(vec![custom_mark], Some(parts), Vec2::new(5.0, 6.0), Some("P1"), None);
+        let custom_shown = Shown::of(&p(data::WORLD, custom_map), true).unwrap().world.expect("custom world");
+        assert_eq!(custom_shown.markers[0].icon, "Interface\\Icons\\Owned\\custom.dds");
         assert!(s.rows.is_empty() && s.pane == Pane::None);
         // The question box up: the same page, drawn under it.
         let mut boxed = p(data::WORLD, map.clone());

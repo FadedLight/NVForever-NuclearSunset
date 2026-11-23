@@ -429,6 +429,8 @@ Runtime IDLE file replacement and replay identity have an initial candidate; `Te
 
 JohnnyGuitar batch 7 session UI/menu overrides (`ToggleLevelUpMenu`, `PushUIQuestToTop`, `HideItemBarterEx`, and `SetUIUpdateSound`) now reach their engine consumers (`experience::level_up_due` / `xp_meter`, `pipboy::data` quest list, `menu` / `menu::model::Trade` on open and live refresh, and `quest_messages` notice sound selection; [JohnnyGuitar batch 7](spec-notes/ext-jg7.md)). Original-game capture parity and full mod acceptance remain unqualified.
 
+Session map-marker overrides (`SetCustomMapMarkerIcon`, `SetMapMarkerType`, `SetMapMarkerVisible`, `SetMapMarkerHidden`, `SetMapMarkerTravel`, `SetMapMarkerName`, and `SetMapMarkerRep`) now reach `GetMapMarkerVisible`, `GetCustomMapMarkerIcon`, the Pip-Boy World and Local Maps (`pipboy::data` and `tiles::map_menu`), discovery banners, compass unmapped-place filtering, and HUD marker names ([JohnnyGuitar batch 7](spec-notes/ext-jg7.md), [Lutana batch 2](spec-notes/ext-lutana.md#9-batch-2-2026-11-08-1009-nvse_lu2rs-and-mod_filesrs), [JIP strings](spec-notes/jip-strings.md)). Original-game capture parity and full mod acceptance remain unqualified.
+
 Nested objective teleport-link paths are being qualified with owned headless regressions; complete consumer acceptance remains separate ([notes](spec-notes/objective-teleport-paths.md)).
 
 Script Console dispatch retains signed numeric words and declared string paths on the word reader while real expressions use a bounded source cache. Authored regressions and current validation are recorded in the PR; complete consumer acceptance remains separate ([notes](spec-notes/script-console-dispatch.md)).

@@ -88,8 +88,12 @@ number, a form or a string. [observed: set rest1]:
   value is of another type or the key is missing.
 - **GetValueType** `name key`: 1 number, 2 form, 4 string, 0 none (also for no such map).
 - **GetSize** `name`: the number of keys.
-- **GetKeys**: a list of the keys. In what order is [hypothesis]: NVForever lists them by
-  lower-case key, which matched the order they were set in the probe.
+- **GetKeys**: a list of the keys. The original returns keys in unordered hash-table order
+  (neither insertion order nor alphabetical) [observed: Fallout: New Vegas 1.4.0.525 +
+  xNVSE 6.4.9 + ShowOffNVSE 184 with the 10 official base masters, clean-room script probe
+  `so_08_auxstrmap_keys_order`: inserting `Bravo`, `charlie`, `alpha` returned
+  `alpha,charlie,Bravo`; no DLL or source consulted]. NVForever keeps deterministic
+  lower-case key order [design].
 - **GetAsArray**: a string map of the keys and values.
 - **GetFirst / GetNext**: a `[key, value]` list each; after the last, no array.
 - **GetAll** `0|1`: no array when the store has no map; with `1` a string map of the
@@ -114,9 +118,14 @@ probe rows for the other matrix ones did not compile, in either version (a fault
 probe script). NVForever hands each `_OLD` command to the current one [hypothesis: the same
 for the rows not compared].
 
-IsJumping_BROKEN read 1 for the standing player [observed: rest1.old.isjumping], while the
-current IsJumping did not compile called on a reference. NVForever answers 1 [hypothesis:
-always, as the name says it is broken].
+IsJumping_BROKEN read 1 on the player standing still in the nvfairport save [observed:
+rest1.old.isjumping] and 0 on a grounded standing player in GSDocMitchellHouse [observed:
+Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184 with the 10 official base
+masters, clean-room script probe `so_11_isjumping_broken`: `0`; no DLL or source
+consulted], while the current IsJumping did not compile called on a reference. Because
+both captures stood on the ground, what flips `IsJumping_BROKEN` between `1` and `0`
+remains an open discrepancy; NVForever keeps returning `1` [hypothesis: always 1,
+preserving `L5.ext.rest1` `rest1.old.isjumping`].
 
 ## 5. Pure getters (batch 1)
 

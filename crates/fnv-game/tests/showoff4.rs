@@ -136,6 +136,12 @@ fn json_and_the_ini_cache_go_through_nvforevers_layer() {
     // A form is written as "@plugin:FormID" and read back as the form [documented].
     assert_eq!(n(&mut g, r#"WriteToJSON TestStatic "NVFTest\so4.json" "/form""#), 1.0);
     assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\so4.json" "/form""#), f64::from(STAT));
+    // Missing intermediate objects are NOT auto-created [observed:
+    // so_24_json_write_read_missing_pointer: WriteToJSON '/a/b/c' returns 0].
+    assert_eq!(n(&mut g, r#"WriteToJSON 123 "NVFTest\missing_nested.json" "/a/b/c" 0 1 1 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"TestExpr (ReadFromJSON "NVFTest\missing_nested.json" "/a/b/c" 0 1)"#), 0.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 123 "NVFTest\so4.json" "/missing/b/c" 0 1 1 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\so4.json" "/missing/b/c" 0 1"#), 0.0);
     // A missing file gives no value [observed 2026-11-08: showoff4.readjson.missing].
     assert_eq!(n(&mut g, r#"TestExpr (ReadFromJSON "NVFTest\missing.json")"#), 0.0);
     assert_eq!(n(&mut g, r#"CreateFolder "NVFTest\Sub""#), 1.0);

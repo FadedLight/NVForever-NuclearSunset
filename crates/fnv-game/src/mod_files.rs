@@ -858,10 +858,13 @@ fn xval_to_json(g: &Game, v: &XVal, depth: usize) -> serde_json::Value {
     }
 }
 
-/// Put `value` at a JSON Pointer (RFC 6901) in `root`, making the objects on the way
-/// that are missing [hypothesis: the page does not say what a pointer into a missing
-/// part does]; an array index at or past the end (or `-`) appends. False when the path
-/// runs through a value that is neither an object nor an array.
+/// Put `value` at a JSON Pointer (RFC 6901) in `root`. Does NOT auto-create missing
+/// intermediate objects [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+/// ShowOffNVSE 184 with the 10 official base masters, clean-room script probe
+/// so_24_json_write_read_missing_pointer: `WriteToJSON 123 ... "/a/b/c"` returns 0 and
+/// does not create nested objects; no DLL or source consulted]. An array index at the
+/// final segment equal to `len` (or `-`) appends. False when any intermediate segment is
+/// missing or traverses a non-container value.
 fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Value) -> bool {
     use serde_json::Value as J;
     if pointer.is_empty() {
@@ -874,28 +877,28 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
     let mut value = Some(value);
     for (i, part) in parts.iter().enumerate() {
         let last = i + 1 == parts.len();
-        if cur.is_null() {
-            *cur = J::Object(serde_json::Map::new());
-        }
         cur = match cur {
             J::Object(m) => {
                 if last {
                     m.insert(part.clone(), value.take().unwrap_or(J::Null));
                     return true;
                 }
-                m.entry(part.clone()).or_insert(J::Null)
+                let Some(next) = m.get_mut(part) else { return false };
+                next
             }
             J::Array(items) => {
                 let at = match part.parse::<usize>() {
-                    Ok(n) => n.min(items.len()),
-                    Err(_) if part == "-" => items.len(),
-                    Err(_) => return false,
+                    Ok(n) if last => n.min(items.len()),
+                    Ok(n) if n < items.len() => n,
+                    Err(_) if last && part == "-" => items.len(),
+                    _ => return false,
                 };
-                if at == items.len() {
-                    items.push(J::Null);
-                }
                 if last {
-                    items[at] = value.take().unwrap_or(J::Null);
+                    if at == items.len() {
+                        items.push(value.take().unwrap_or(J::Null));
+                    } else {
+                        items[at] = value.take().unwrap_or(J::Null);
+                    }
                     return true;
                 }
                 &mut items[at]
@@ -1300,7 +1303,9 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
         }
         // `toWrite filepath [jsonPointer] [parserMode] [useCache] [saveFile]
         // [compactFormatting]`: the value converted and put at the pointer of the file's
-        // JSON (a file that is missing or not JSON starts from nothing); cached when
+        // JSON (a file that is missing or not JSON starts from null, so only an empty
+        // root pointer `""` succeeds on a missing/non-JSON file while any non-empty
+        // pointer returns 0 [hypothesis]); cached when
         // asked, saved unless saveFile is 0, minified or indented [documented:
         // WriteToJSON]. Saved into NVForever's layer, never the game's folder
         // (`write_root`). 1 when done [documented: "success"].

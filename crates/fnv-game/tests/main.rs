@@ -97,6 +97,7 @@ mod script_node_mods;
 mod lutana2;
 mod lutana3;
 mod magic_archetypes;
+mod man_on_fire;
 mod npc_doors;
 mod null_call_context;
 mod nvse_itr2;

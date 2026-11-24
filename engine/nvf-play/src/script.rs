@@ -556,6 +556,9 @@ fn start_loading(d: PlayData, refs: &'static RefTable) -> Receiver<Loaded> {
             info!("script build: function table: {:.0} ms", step.elapsed().as_secs_f64() * 1e3);
             let data: &'static GameData = Box::leak(Box::new({
                 let mut data = GameData::build(d.lo, d.schema, table, &json, refs);
+                if d.index.merge_region_lists {
+                    data.enable_hnvse_region_merge(d.lo, d.schema);
+                }
                 // The game INI text the extender's INI functions read (`--mo2`'s profile).
                 data.ini_texts = ini_texts();
                 data

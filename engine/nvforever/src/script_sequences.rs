@@ -50,17 +50,6 @@ fn additive_ref_path(ref_pose: &str) -> String {
     meshes_path(ref_pose)
 }
 
-/// Sample phase for a script-requested animation layer. Legacy `kNVSE.ini` paths already
-/// report frequency-scaled sequence time from `script_sequence_time_for`, so they must
-/// not be multiplied by `frequency` a second time [design].
-fn sequence_sample_phase(game: &fnv_game::Game<'_>, path: &str, clock: f64, frequency: f32) -> f32 {
-    if game.knvse_ini.uses_legacy_anim_time(path) {
-        clock as f32
-    } else {
-        (clock * f64::from(frequency)) as f32
-    }
-}
-
 pub(crate) fn prepare(
     mut script: Option<ResMut<ScriptState>>,
     mut parts: ResMut<ActorParts>,
@@ -99,7 +88,7 @@ pub(crate) fn prepare(
         });
         let clock = g.script_sequence_time_for(FormId::PLAYER_REF, &request.path, request.first);
         let weight = f64::from(request.weight);
-        let phase = sequence_sample_phase(g, &request.path, clock, clip.frequency);
+        let phase = (clock * f64::from(clip.frequency)) as f32;
         if !phase.is_finite() || !weight.is_finite() { continue; }
         let additive = match g.sequence_additive(FormId::PLAYER_REF, request.first, &request.path) {
             Some((ref_pose, ref_time)) if !ref_pose.is_empty() => {
@@ -198,32 +187,5 @@ mod tests {
         assert_eq!(additive_ref_path("meshes/foo/bar.kf"), "meshes\\foo\\bar.kf");
         assert_eq!(additive_ref_path("Meshes\\Foo/Bar.kf"), "meshes\\foo\\bar.kf");
         assert_eq!(additive_ref_path("foo/bar.kf"), "meshes\\foo\\bar.kf");
-    }
-
-    #[test]
-    fn legacy_anim_time_phase_does_not_double_scale_frequency() {
-        use fnv_game::nvse_knvse::SequenceInfo;
-        let forms: &'static fnv_sim::FormStore = Box::leak(Box::new(crate::outfits::tests::actor_forms(vec![])));
-        let refs: &'static fnv_sim::RefTable = Box::leak(Box::default());
-        let mut game = crate::outfits::tests::game(fnv_sim::World::new(forms, refs, Default::default()));
-        game.cfg.frame_seconds = 0.25;
-        game.knvse_ini = fnv_game::knvse_ini::KnvseIni::parse(b"[Anim Fixes]\nsLegacyAnimTimePaths = B42Inject\n");
-        let legacy_path = "B42Inject\\stim.kf";
-        let normal_path = "OtherMod\\stim.kf";
-        let info = SequenceInfo { name: "Stim".into(), accum_root: String::new(), frequency: 2.0, begin: 0.0, end: 1.0, cycle: 2, text_keys: vec![] };
-        game.set_sequence_info(legacy_path, info.clone());
-        game.set_sequence_info(normal_path, info);
-        game.knvse.clock_start.insert(FormId::PLAYER_REF, game.time);
-        // Zero raw sequence clock at t=0 (raw clock starts at frame_seconds).
-        game.knvse.offsets.insert((FormId::PLAYER_REF, legacy_path.to_ascii_lowercase()), -game.cfg.frame_seconds);
-        game.knvse.offsets.insert((FormId::PLAYER_REF, normal_path.to_ascii_lowercase()), -game.cfg.frame_seconds);
-        game.tick(); // 0.25 s raw -> 0.50 s scaled (clamped in 0..=1)
-        let legacy_clock = game.script_sequence_time_for(FormId::PLAYER_REF, legacy_path, false);
-        let legacy_phase = sequence_sample_phase(&game, legacy_path, legacy_clock, 2.0);
-        assert!((legacy_phase - 0.5).abs() < 1e-5, "legacy phase must be 0.5 (not double-scaled to 1.0), got {legacy_phase}");
-        let normal_clock = game.script_sequence_time_for(FormId::PLAYER_REF, normal_path, false);
-        let normal_phase = sequence_sample_phase(&game, normal_path, normal_clock, 2.0);
-        assert!((normal_clock - 0.25).abs() < 1e-5, "non-legacy clock stays raw 0.25, got {normal_clock}");
-        assert!((normal_phase - 0.5).abs() < 1e-5, "non-legacy phase scales once by frequency to 0.5, got {normal_phase}");
     }
 }

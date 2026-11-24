@@ -213,6 +213,7 @@ pub mod script_input;
 pub mod levelup;
 pub mod lockpick;
 pub mod magic_archetypes;
+pub mod man_on_fire;
 pub mod misc_stats;
 pub mod needs;
 pub mod npc_doors;

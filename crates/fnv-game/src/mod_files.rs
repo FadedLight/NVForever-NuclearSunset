@@ -40,18 +40,19 @@ pub struct Roots {
 }
 
 static ROOTS: Mutex<Option<Roots>> = Mutex::new(None);
-static ROOTS_GENERATION: AtomicU64 = AtomicU64::new(0);
+static ROOTS_GEN: AtomicU64 = AtomicU64::new(0);
 
-/// Monotonic counter incremented whenever [`set_roots`] or [`update_roots`] runs.
+/// Monotonic revision bumped whenever process-wide file roots change (`set_roots` /
+/// `update_roots`).
 pub fn roots_generation() -> u64 {
-    ROOTS_GENERATION.load(Ordering::Acquire)
+    ROOTS_GEN.load(Ordering::Acquire)
 }
 
 /// Set the roots for the games made after this (the engine, `fnvtool --config`).
 pub fn set_roots(r: Roots) {
     if let Ok(mut g) = ROOTS.lock() {
         *g = Some(r);
-        ROOTS_GENERATION.fetch_add(1, Ordering::Release);
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -60,7 +61,7 @@ pub fn set_roots(r: Roots) {
 pub fn update_roots(f: impl FnOnce(&mut Roots)) {
     if let Ok(mut g) = ROOTS.lock() {
         f(g.get_or_insert_with(Roots::default));
-        ROOTS_GENERATION.fetch_add(1, Ordering::Release);
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -190,6 +191,8 @@ pub struct ModFiles {
     showoff_json: HashMap<String, serde_json::Value>,
     /// Folders CreateFolder made this session (under the game's folder, lower case).
     folders: std::collections::HashSet<String>,
+    /// Monotonic counter bumped whenever this session's written files change.
+    generation: u64,
     /// Cached `Data\NVSE\Plugins\TTW.ini` `[Karma Titles]` overrides (`OnceLock` so
     /// `&Game` readers stay allocation-free and `Send + Sync`; cleared on session writes)
     /// [design].
@@ -382,6 +385,11 @@ fn norm(p: &str) -> String {
 }
 
 impl ModFiles {
+    /// Monotonic counter bumped on session file writes and deletes.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// [`ModFiles::read`] for the other files of the crate: a Data file's text, this
     /// session's write first.
     pub(crate) fn read_text(&self, rel: &str) -> Option<String> {
@@ -464,6 +472,7 @@ impl ModFiles {
         self.invalidate_plugin_ini_cache(&key);
         self.written_bytes.insert(key.clone(), bytes.to_vec());
         self.written.insert(key, text);
+        self.generation = self.generation.wrapping_add(1);
         true
     }
 
@@ -579,6 +588,9 @@ impl ModFiles {
             if may_write(&p) && std::fs::remove_file(&p).is_ok() {
                 gone = true;
             }
+        }
+        if gone {
+            self.generation = self.generation.wrapping_add(1);
         }
         gone
     }

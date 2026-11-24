@@ -151,6 +151,8 @@ mod critical_damage_hit_tests;
 mod world_blood_tests;
 #[cfg(test)]
 mod weapon_sound_bridge_tests;
+#[cfg(test)]
+mod bullet_snap_tests;
 
 /// The shooter's id for projectiles (the player has no hit volume).
 const PLAYER: ActorId = u64::MAX;
@@ -405,7 +407,7 @@ fn armour_lines(script: Option<&mut ScriptState>, attacker: Option<FormId>, targ
 /// units [design].
 const BLOW_PROBE: f32 = 24.0;
 
-fn blast_hit_info(cause: Option<Cause>, explosion_ref: Option<FormId>) -> HitInfo {
+fn blast_hit_info(cause: Option<Cause>, explosion_ref: Option<FormId>, base_damage: f64) -> HitInfo {
     HitInfo {
         attacker: cause.map(|c| c.actor),
         weapon: cause.map(|c| c.weapon),
@@ -413,6 +415,7 @@ fn blast_hit_info(cause: Option<Cause>, explosion_ref: Option<FormId>) -> HitInf
         location: -1,
         critical: false,
         explosion: true,
+        base_weapon_damage: base_damage,
         ..HitInfo::default()
     }
 }
@@ -1121,6 +1124,10 @@ struct Ghost {
     fresh: bool,
     /// A beam from the muzzle: its start stays on the muzzle while it shows.
     follow: bool,
+    /// Weapon base damage and BulletSnap eligibility/player-impact flag for pass-by snaps.
+    damage: f32,
+    snap_eligible: bool,
+    hit_player: bool,
 }
 
 /// How strongly a shot is drawn with `left` of its `fade` seconds to go: a beam fades
@@ -5011,9 +5018,11 @@ fn melee(
                 critical: d.critical,
                 blocking: blocked,
                 sneak_attack: a.sneaking,
-                base_weapon_damage: f64::from(d.base),
+                base_weapon_damage: f64::from(d.base + d.crit_bonus),
                 hit_pos: Some(hit.point),
-                hit_angles: Some(fnv_game::combat::hit_angles_from_dir(player.look_dir()).unwrap_or([0.0; 3])),
+                // [design] Player melee hits record the player's unit look direction for
+                // `GetHit3DData 1` (unprobed for melee swings in the original; jip-hit-info.md §6).
+                hit_dir: fnv_game::combat::unit_hit_dir(player.look_dir()),
                 limb,
                 ..HitInfo::default()
             };
@@ -5409,9 +5418,9 @@ fn actor_attacks(
             critical: d.critical,
             blocking: blocked,
             sneak_attack: a.sneaking,
-            base_weapon_damage: f64::from(d.base),
+            base_weapon_damage: f64::from(d.base + d.crit_bonus),
             hit_pos: Some(b.point),
-            hit_angles: Some(fnv_game::combat::hit_angles_from_dir(b.dir).unwrap_or([0.0; 3])),
+            hit_dir: fnv_game::combat::unit_hit_dir(b.dir),
             limb: limb_hit(bp.as_ref(), &d, &w),
             ..HitInfo::default()
         };
@@ -5519,9 +5528,12 @@ fn script_shot(sim: &SimState, from: FormId, weapon: FormId, muzzle: Option<[f32
 /// would go on in the new one at the same numbers (#1986). They are dropped, their script
 /// references with them [design]. A charge or mine at rest is a reference of its cell and
 /// stays there. Not gated on play, as the loading screen is up when the travel goes out.
-fn leave_space_shots(mut travel: MessageReader<crate::Travel>, mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut script: Option<ResMut<ScriptState>>, mut visuals: ResMut<ShotVisuals>) {
+fn leave_space_shots(mut travel: MessageReader<crate::Travel>, mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut script: Option<ResMut<ScriptState>>, mut visuals: ResMut<ShotVisuals>, mut snap: Option<ResMut<crate::bullet_snap::BulletSnap>>) {
     if travel.read().count() == 0 {
         return;
+    }
+    if let Some(s) = snap.as_deref_mut() {
+        s.clear_tracking();
     }
     let n = c.flying.len() + c.pending.len() + c.boom.len();
     if n == 0 {
@@ -5617,7 +5629,7 @@ fn fly(
     anim: Res<WeaponAnim>,
     sfx: Option<Res<Sfx>>,
     mut effects: ShotEffects,
-    mut dm: ResMut<crate::dismember::Dismemberment>,
+    (mut dm, mut snap): (ResMut<crate::dismember::Dismemberment>, Option<ResMut<crate::bullet_snap::BulletSnap>>),
 ) {
     sync_condition_penalty(&mut c, script.as_deref());
     let dt = time.delta_secs();
@@ -5776,13 +5788,51 @@ fn fly(
                 if thrown { Some(f.by.weapon) } else { p.default_weapon }
             });
             let rref = f.rref;
-            let ghost = move |to: V3| Ghost { id, proj, rref, owner, from: seen_before, to, speed, travelled: 0.0, beam, left: fade, fade, fresh: true, follow: follow && beam };
+            let snap_active = snap.as_deref().is_some_and(crate::bullet_snap::BulletSnap::active);
+            let snap_damage = c.forms.weapons.get(&f.by.weapon).map_or(0.0, |w| w.base_damage as f32);
+            let snap_supersonic = c.forms.projectiles.get(&f.proj).is_some_and(|p| p.has("Supersonic"));
+            let snap_eligible = f.p.motion == Motion::Missile && !f.p.mine && !f.p.detonates && (f.p.explosion.is_none() || snap_supersonic);
+            let ghost = move |to: V3, hit_player: bool| Ghost { id, proj, rref, owner, from: seen_before, to, speed, travelled: 0.0, beam, left: fade, fade, fresh: true, follow: follow && beam, damage: snap_damage, snap_eligible, hit_player };
             let line = move |to: V3, life: f32| Mark { follow, ..Mark::tracer(seen_before, to, life) };
             let touched_before = f.p.first_contact.is_some();
             let first = f.p.age == 0.0;
             world.only.set(f.by.sure.map(|t| if t == FormId::PLAYER_REF { PLAYER } else { t.0 as ActorId }));
             let events = f.p.step(&world, dt);
             world.only.set(None);
+            if snap_active && !at_once {
+                if let Some(s) = snap.as_deref_mut() {
+                    let to = events
+                        .iter()
+                        .find_map(|e| match e {
+                            ProjEvent::Hit { point, .. } | ProjEvent::Explode { point, .. } | ProjEvent::Expired { point } => Some(*point),
+                            _ => None,
+                        })
+                        .unwrap_or(f.p.pos);
+                    let hit_player = events.iter().any(|e| matches!(e, ProjEvent::Hit { actor: Some(a), .. } if *a == PLAYER));
+                    let is_player_owned = f.by.actor == FormId::PLAYER_REF;
+                    if hit_player {
+                        s.push(crate::bullet_snap::SnapInput::PlayerImpact {
+                            id: f.id,
+                            at: to,
+                            speed: f.p.speed,
+                            damage: snap_damage,
+                            is_player_owned,
+                            eligible: snap_eligible,
+                        });
+                    } else {
+                        s.push(crate::bullet_snap::SnapInput::Segment {
+                            id: f.id,
+                            from: before,
+                            to,
+                            dir: f.dir,
+                            speed: f.p.speed,
+                            damage: snap_damage,
+                            is_player_owned,
+                            eligible: snap_eligible,
+                        });
+                    }
+                }
+            }
             // Its way this frame, from the muzzle on the first, to where it stopped.
             if !gas.is_empty() && !f.by.harmless {
                 let to = events
@@ -5870,7 +5920,7 @@ fn fly(
                             c.marks.push(line(point, hold.unwrap_or(0.08)));
                         }
                         if at_once && f.shown {
-                            c.ghosts.push(ghost(point));
+                            c.ghosts.push(ghost(point, actor == Some(PLAYER)));
                         }
                     }
                     // A harmless shot sets nothing off [design].
@@ -5891,7 +5941,7 @@ fn fly(
                             c.marks.push(line(point, hold.unwrap_or(0.08)));
                         }
                         if at_once && f.shown {
-                            c.ghosts.push(ghost(point));
+                            c.ghosts.push(ghost(point, false));
                         }
                     }
                 }
@@ -5933,6 +5983,7 @@ fn fly(
     }
     // What is drawn this frame: the projectiles in flight where they are seen, and
     // those found at once on their way.
+    let snap_active = snap.as_deref().is_some_and(crate::bullet_snap::BulletSnap::active);
     c.ghosts.retain_mut(|g| {
         if let (true, Some(m)) = (g.follow, anim.muzzle) {
             g.from = m;
@@ -5944,10 +5995,48 @@ fn fly(
             g.left -= dt;
             g.left > 0.0
         } else {
+            let prev = g.travelled;
+            let len = vec::len(vec::sub(g.to, g.from));
             g.travelled += g.speed.max(1.0) * dt;
-            g.travelled < vec::len(vec::sub(g.to, g.from))
+            let finished = g.travelled >= len;
+            if snap_active {
+                if let Some(s) = snap.as_deref_mut() {
+                    let d = vec::sub(g.to, g.from);
+                    let dir = if len > 1e-3 { vec::scale(d, 1.0 / len) } else { [0.0, 1.0, 0.0] };
+                    let is_player_owned = g.owner == FormId::PLAYER_REF;
+                    if g.hit_player {
+                        if finished {
+                            s.push(crate::bullet_snap::SnapInput::PlayerImpact {
+                                id: g.id,
+                                at: g.to,
+                                speed: g.speed,
+                                damage: g.damage,
+                                is_player_owned,
+                                eligible: g.snap_eligible,
+                            });
+                        }
+                    } else {
+                        let seg_from = vec::add(g.from, vec::scale(dir, prev));
+                        let seg_to = vec::add(g.from, vec::scale(dir, g.travelled.min(len)));
+                        s.push(crate::bullet_snap::SnapInput::Segment {
+                            id: g.id,
+                            from: seg_from,
+                            to: seg_to,
+                            dir,
+                            speed: g.speed,
+                            damage: g.damage,
+                            is_player_owned,
+                            eligible: g.snap_eligible,
+                        });
+                    }
+                }
+            }
+            !finished
         }
     });
+    if let Some(s) = snap.as_deref_mut().filter(|s| s.active()) {
+        s.retain_active(|id| c.flying.iter().any(|f| f.id == id) || c.ghosts.iter().any(|g| g.id == id));
+    }
     visuals.flying.clear();
     visuals.flying.extend(c.flying.iter().filter(|f| f.shown).map(|f| ShotVisual { id: f.id, projectile: f.proj, owner: f.by.actor, pos: f.seen.at(f.p.pos, f.p.travelled), dir: f.dir, beam: None, travelled: f.p.travelled, strength: 1.0 }));
     visuals.flying.extend(c.ghosts.iter().map(|g| {
@@ -6052,7 +6141,9 @@ fn fly(
             let d = damage::blast_hit(&c.rules, &c.tuning, raw, dt_v, dr, &ap, &tp);
             log_blast_perks(cause, target, &ap, &tp, &d);
             let dealt = d.dealt;
-            let info = blast_hit_info(cause, expl_ref);
+            // Wave 4D w4d_13_explosion_falloff_outdoor [observed]: GetHitBaseWeaponDamage
+            // includes explosion distance falloff (before difficulty scaling).
+            let info = blast_hit_info(cause, expl_ref, f64::from(raw));
             // The blast's object effect on those it catches (hit-effects.md §1).
             let items: Vec<FormId> = x.enchantment.into_iter().collect();
             // Its limb damage, on the torso and legs (crippled-limbs.md §5): from the damage
@@ -6397,10 +6488,10 @@ fn fly(
             location,
             critical: d.critical,
             sneak_attack: a.sneaking,
-            base_weapon_damage: f64::from(d.base),
+            base_weapon_damage: f64::from(d.base + d.crit_bonus),
             fatigue_damage: f64::from(fatigue),
             hit_pos: Some(p.point),
-            hit_angles: Some(fnv_game::combat::hit_angles_from_dir(p.dir).unwrap_or([0.0; 3])),
+            hit_dir: fnv_game::combat::unit_hit_dir(p.dir),
             limb,
             ..HitInfo::default()
         };
@@ -7055,10 +7146,16 @@ mod tests {
     fn a_blast_hit_is_its_causes_not_the_players() {
         let by = By { actor: FormId(0x000F5704), weapon: FormId(0x000906DA), ammo: None, harmless: false, sure: None, vats: false, sneaking: false };
         let expl = FormId(0xFF00_0042);
-        let info = blast_hit_info(Some(Cause::of(&by)), Some(expl));
-        assert_eq!((info.attacker, info.weapon, info.projectile, info.location, info.critical, info.explosion), (Some(FormId(0x000F5704)), Some(FormId(0x000906DA)), Some(expl), -1, false, true));
-        let none = blast_hit_info(None, None);
-        assert_eq!((none.attacker, none.weapon, none.projectile, none.explosion), (None, None, None, true));
+        let info = blast_hit_info(Some(Cause::of(&by)), Some(expl), 125.0);
+        assert_eq!(
+            (info.attacker, info.weapon, info.projectile, info.location, info.critical, info.explosion, info.base_weapon_damage),
+            (Some(FormId(0x000F5704)), Some(FormId(0x000906DA)), Some(expl), -1, false, true, 125.0)
+        );
+        let none = blast_hit_info(None, None, 100.0);
+        assert_eq!(
+            (none.attacker, none.weapon, none.projectile, none.explosion, none.base_weapon_damage),
+            (None, None, None, true, 100.0)
+        );
     }
 
     /// A grenade's cooldown, played from the shot (the clip's `Release`, 0.867 s) as the

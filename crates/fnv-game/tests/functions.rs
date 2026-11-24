@@ -1215,9 +1215,11 @@ fn image_space_modifiers_play_end_and_are_removed() {
     assert!((g.image_modifiers[1].elapsed - 0.2).abs() < 1e-9);
     let snap = g.snapshot();
     assert_eq!(snap.image_modifiers.len(), 2);
-    // Applied again, it starts again.
+    // Applied again, it stacks a second instance at elapsed 0.0 [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse, probe w1_3656_objectives_unholster_imod in #3679].
     call(&mut g, APPLY, None, &[r(IMAD_FADE)]);
-    assert_eq!(g.image_modifiers[1].elapsed, 0.0);
+    assert_eq!(g.image_modifiers.len(), 3);
+    assert!((g.image_modifiers[1].elapsed - 0.2).abs() < 1e-9);
+    assert_eq!(g.image_modifiers[2].elapsed, 0.0);
     g.frames(29);
     assert_eq!(call(&mut g, ACTIVE, None, &[r(IMAD_FADE)]), 1.0);
     g.frames(1);

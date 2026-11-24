@@ -177,12 +177,32 @@ impl PromptKeys {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WheelHoldSet;
 
+/// Named NVForever option `quantity-select-short-keys` (off by default; #3799):
+/// Shift transfers/drops the full stack, Ctrl transfers/drops a single item skipping
+/// `QuantityMenu`, and picking up a weightless stack (`count > 1`) from a container opens
+/// `QuantityMenu` [documented: JIP LN v57.30 `jip_nvse.ini` `bQttSelectShortKeys`; design:
+/// docs/spec-notes/quantity-select-short-keys.md].
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct QuantitySelectShortKeys(pub bool);
+
+/// Keep the active menu's `qtt_select_short_keys` flag aligned with the live Gameplay
+/// setting (so toggling it from the pause menu takes effect immediately).
+pub(crate) fn sync_quantity_select_short_keys(setting: Option<Res<QuantitySelectShortKeys>>, mut active: ResMut<ActiveMenu>) {
+    let want = setting.as_deref().is_some_and(|s| s.0);
+    if let Some(m) = active.bypass_change_detection().0.as_mut() {
+        if m.qtt_select_short_keys != want {
+            m.qtt_select_short_keys = want;
+        }
+    }
+}
+
 pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.configure_sets(Update, WheelHoldSet.before(MenuSystems)).add_systems(Update, wheel_hold.in_set(WheelHoldSet));
         app.init_resource::<ActiveMenu>()
+            .init_resource::<QuantitySelectShortKeys>()
             .insert_resource(DevKeys::from_env())
             .init_resource::<FreshMenu>()
             .init_resource::<PromptKeys>()
@@ -201,6 +221,7 @@ impl Plugin for MenuPlugin {
                     scripts_open_barter,
                     scripts_open_teammate_containers,
                     open_menus,
+                    sync_quantity_select_short_keys,
                     keep_menu_state,
                     sync_cards,
                     sync_refresh_items_list,
@@ -215,6 +236,19 @@ impl Plugin for MenuPlugin {
             )
             .add_systems(OnEnter(PlayState::Menu), release_cursor)
             .add_systems(OnExit(PlayState::Menu), close_menu);
+        crate::settings::add_setting(
+            app,
+            crate::settings::Setting {
+                key: "quantity-select-short-keys",
+                group: crate::pause::GROUP_MENUS,
+                label: "Quantity select shortcuts",
+                note: "In inventory, container and barter menus, Shift transfers or drops the whole stack, Ctrl acts on one item, and weightless container stacks open the quantity prompt.",
+                switches: "",
+                get: |w| w.resource::<QuantitySelectShortKeys>().0,
+                set: |w, on| w.resource_mut::<QuantitySelectShortKeys>().0 = on,
+                slider: None,
+            },
+        );
         test_aid::setup(app);
     }
 }
@@ -559,6 +593,7 @@ fn menu_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, 
     }
     let Some(m) = active.0.as_ref().filter(|m| m.mode != Mode::Inventory && m.quantity.is_none()) else { return };
     let shift = keys.any_pressed([ShiftLeft, ShiftRight]);
+    let ctrl_single = m.qtt_select_short_keys && keys.any_pressed([ControlLeft, ControlRight]);
     let mut send = |c| {
         out.write(MenuInput(c));
     };
@@ -588,7 +623,7 @@ fn menu_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, 
         }
     }
     if keys.any_just_pressed([Enter, NumpadEnter, Space]) {
-        send(if shift { Command::Stack } else { Command::One });
+        send(if shift { Command::Stack } else if ctrl_single { Command::OneSingle } else { Command::One });
     }
     match m.mode {
         Mode::Barter(_) if keys.just_pressed(KeyA) => send(Command::Accept),
@@ -669,6 +704,7 @@ fn menu_mouse(
     let tiled = tile_menu.is_some_and(|t| t.menu.is_some()) || barter_tiles.is_some_and(|t| t.menu().is_some());
     let hover = !tiled;
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let ctrl_single = m.qtt_select_short_keys && keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     // Only a pointer that moves takes the selection: a redrawn row under a resting
     // pointer leaves the keys' choice alone.
     let pointer_moved = moved.read().count() > 0;
@@ -681,9 +717,12 @@ fn menu_mouse(
             PointerState::Pressed if hover && on_it && shift => {
                 out.write(MenuInput(Command::Stack));
             }
+            PointerState::Pressed if hover && on_it && ctrl_single => {
+                out.write(MenuInput(Command::OneSingle));
+            }
             PointerState::Pressed if hover && !on_it => {
                 out.write(MenuInput(Command::Hover(r.0, r.1)));
-                out.write(MenuInput(if shift { Command::Stack } else { Command::One }));
+                out.write(MenuInput(if shift { Command::Stack } else if ctrl_single { Command::OneSingle } else { Command::One }));
             }
             PointerState::Pressed if hover => {
                 out.write(MenuInput(Command::Select(r.0, r.1)));
@@ -1034,10 +1073,12 @@ fn apply_input(
                     | Command::SetSort(..)
                     | Command::Back
                     | Command::One
+                    | Command::OneSingle
                     | Command::Stack
                     | Command::TakeAll
                     | Command::StoreAll
                     | Command::Drop
+                    | Command::DropSingle
                     | Command::DropStack
                     | Command::Accept
                     | Command::AmountOk
@@ -1065,7 +1106,7 @@ fn apply_input(
         if let Some(event) = crate::ui_sounds::menu_event(cmd, &before, m, &a) {
             sounds.write(crate::ui_sounds::UiSound { menu: crate::ui_sounds::UiMenu::of(m.mode), event });
         }
-        let moves_items = matches!(cmd, Command::One | Command::Stack | Command::TakeAll | Command::StoreAll | Command::Drop | Command::DropStack | Command::Accept | Command::AmountOk);
+        let moves_items = matches!(cmd, Command::One | Command::OneSingle | Command::Stack | Command::TakeAll | Command::StoreAll | Command::Drop | Command::DropSingle | Command::DropStack | Command::Accept | Command::AmountOk);
         if moves_items || a.changed {
             if let Some(s) = m.status.as_deref().filter(|s| !s.is_empty()) {
                 info!("menu: {cmd:?}: {s}");

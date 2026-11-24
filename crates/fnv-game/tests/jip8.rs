@@ -345,7 +345,12 @@ fn weapons() {
     assert_eq!(n(&mut g, "GetWeaponDetectionSoundLevel TestGun"), 2.0);
     q(&mut g, "SetWeaponDetectionSoundLevel TestGun 9");
     assert_eq!(n(&mut g, "GetWeaponDetectionSoundLevel TestGun"), 2.0);
-    // Mods, read by GetWeaponItemMod and the rest; left out, none [documented].
+    // Mods, read by GetWeaponItemMod and the rest; left out or non-IMOD clears to 0
+    // [documented; observed: jip_20_weapon_item_mod_non_imod].
+    q(&mut g, "SetWeaponItemMod TestGun 2 TestMod");
+    assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), f64::from(IMOD));
+    q(&mut g, "SetWeaponItemMod TestGun 2 TestGun");
+    assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), 0.0, "non-IMOD clears slot to 0");
     q(&mut g, "SetWeaponItemMod TestGun 2 TestMod");
     assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), f64::from(IMOD));
     q(&mut g, "SetWeaponItemMod TestGun 2");

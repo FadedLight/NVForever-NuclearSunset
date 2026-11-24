@@ -128,12 +128,14 @@ fn the_cursor_traits() {
 fn the_debug_texts() {
     let f = fixture();
     let mut g = game(&f);
-    // Fresh create returns 1; duplicate name returns -1 without overwriting
-    // [observed: w4c_b4_03_sup6_bobbypin_debugtext].
+    // Fresh create returns 1; duplicate name updates x, y, and text in place (preserving
+    // zoom, matching the documented page) while returning -1 [observed:
+    // w4c_b4_03_sup6_bobbypin_debugtext: dt(1,-1)].
     assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 100 100 \"My Text\""), 1.0);
-    assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 200 200 \"Updated\""), -1.0);
-    let initial = g.sup.debug_texts["MyDebugText1"].clone();
-    assert_eq!((initial.x, initial.y, initial.text.as_str()), (100.0, 100.0, "My Text"));
+    q(&mut g, "DebugTextSetZoom \"MyDebugText1\" 24");
+    assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 200 250 \"Updated\""), -1.0);
+    let updated = g.sup.debug_texts["MyDebugText1"].clone();
+    assert_eq!((updated.x, updated.y, updated.text.as_str(), updated.zoom), (200.0, 250.0, "Updated", 24.0));
     assert_eq!(n(&mut g, "DebugTextExists \"MyDebugText1\""), 1.0);
     q(&mut g, "DebugTextSetPos \"MyDebugText1\" 600 700\nDebugTextSetString \"MyDebugText1\" \"My New Text\"\nDebugTextSetZoom \"MyDebugText1\" 20");
     let t = g.sup.debug_texts["MyDebugText1"].clone();

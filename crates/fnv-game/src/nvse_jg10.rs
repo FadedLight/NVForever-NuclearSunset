@@ -324,10 +324,12 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
             zero
         }
         // `[mode]`: 0 on again, 1 off for all, 2 the player's, 3 NPCs' [documented]; a
-        // mode outside 0–3 leaves the setting unchanged and returns `u32::MAX` (`0xFFFFFFFF`)
-        // [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JohnnyGuitarNVSE 528,
-        // 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
-        // `w4c_b3_10_jg10_safe_edges`: `dm(4.29497e+09,0)`].
+        // mode outside 0–3 leaves the setting unchanged and returns a value formatting as
+        // `4.29497e+09` under `%g` [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+        // JohnnyGuitarNVSE 528, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official
+        // base masters, `w4c_b3_10_jg10_safe_edges`: `dm(4.29497e+09,0)`]; exact `u32::MAX`
+        // (`0xFFFFFFFF`, `4_294_967_295`) is [hypothesis: `%g` rounds `4294967295` to
+        // `4.29497e+09`; exact integer value not printed with `%x` or `%i`].
         "disablemuzzleflashlights" => {
             let m = num(args, 0, 0.0);
             if (0.0..=3.0).contains(&m) && m.fract() == 0.0 {

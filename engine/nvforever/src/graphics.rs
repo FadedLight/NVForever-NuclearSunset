@@ -1855,6 +1855,7 @@ mod tests {
     /// ways, and an absent or false demand changes nothing.
     #[test]
     fn light_in_the_air_keeps_the_view_hdr_with_glow_and_upscaler_off() {
+        let _hdr = crate::hdr::test_lock();
         use crate::medium_air_demand::AirWanted;
         for selected in [ScreenAa::Off, ScreenAa::Taa] {
             let (mut app, camera) = aa_app(selected, true);
@@ -1892,6 +1893,7 @@ mod tests {
     /// switching it off takes the HDR view away again.
     #[test]
     fn the_volumetric_light_row_keeps_the_view_hdr() {
+        let _hdr = crate::hdr::test_lock();
         use crate::medium_air_demand::{follow_demand, AirAid, AirWanted};
         for selected in [ScreenAa::Off, ScreenAa::Taa] {
             let (mut app, camera) = aa_app(selected, true);

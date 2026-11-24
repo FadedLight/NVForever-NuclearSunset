@@ -842,7 +842,7 @@ fn difference_tolerance(levels: f64) -> f64 {
 /// Four bytes a pixel, row by row.
 fn picture_difference(a: &[u8], b: &[u8], width: usize, height: usize) -> (f64, f64) {
     let (mut sum, mut changed, mut seen) = (0u64, 0u64, 0u64);
-    for (p, q) in a.chunks_exact(4).zip(b.chunks_exact(4)).take(width * (height * 4 / 5)) {
+    for (p, q) in a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).take(width * (height * 4 / 5)) {
         let d = [0, 1, 2].map(|i| p[i].abs_diff(q[i]));
         sum += d.iter().map(|&d| u64::from(d)).sum::<u64>();
         changed += u64::from(d.iter().any(|&d| d >= 4));

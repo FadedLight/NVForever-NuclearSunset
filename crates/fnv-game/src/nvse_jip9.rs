@@ -402,7 +402,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // B:128)] and fractional channel inputs truncate toward zero before wrapping
         // [observed: same environment, isolated clean-room staging copy (read-only
         // `PrintToConsole` probe; zero writes to game install or Saves),
-        // `w4h_10_set_system_color_fractional` (`wave4h_reconcile.json`, PR #3803 / #3802):
+        // `w4h_10_set_system_color_fractional` (`wave4h_reconcile.json`, #3803):
         // `PROBE|w4h_10_set_system_color_fractional|c0=C7FFA5|f1(12.7,12.3,12.5)=C0C0C|f2(13.5,0.4,254.6)=D00FE|rest=C7FFA5`;
         // zero DLL, PDB, or third-party source consulted].
         "setsystemcolor" => {

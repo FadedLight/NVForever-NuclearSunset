@@ -7,6 +7,7 @@
 //! consulted:
 //! - Extra `WEAP` traits (`weaponClipRounds`, `weaponNumProjectiles`, `weaponAttackAnim`,
 //!   `weaponHandgrip`, `weaponSoundLevel`, `ammoMod` + `ammoForm`)
+//! - `ARMO` threshold (`armorDT`) and `formlist: 2` repair-list / nested-`FLST` membership
 //! - `ALCH` effect/classification traits (`aidRestoresAV`, `aidDamagesAV`, `aidIsWater`,
 //!   `aidIsPoisonous`)
 //! - Recipe membership (`miscComponent`, `miscProduct`)
@@ -22,6 +23,10 @@ use crate::ysi_filename::{any, bool_pred, number_set, parse_local_form, Match};
 use fnv_script::vm::XVal;
 use fnv_sim::FormId;
 use serde_json::{Map, Value as Json};
+use std::collections::{HashSet, VecDeque};
+
+/// Safety bound on nested `FLST` nodes visited during `formlist: 2` traversal [design].
+const MAX_NESTED_FLST_VISITS: usize = 256;
 
 /// Evaluates an extended ySI predicate key. Returns `Match::Unknown` for unrecognized keys
 /// or malformed predicate values.
@@ -49,6 +54,9 @@ pub(crate) fn eval(
         "weaponHandgrip" => weapon_int_field(g, item, "DNAM", "grip_animation", value),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 2); schemas/fnv/objects.json WEAP.VNAM]
         "weaponSoundLevel" => weapon_int_field(g, item, "VNAM", "", value),
+        // [documented: Sorting Icons 1.4b menus/ySI/ySI.json; schemas/fnv/objects.json ARMO.DNAM.damage_threshold;
+        //  GECK wiki SetArmorDT; hypothesis: non-negative >= N minimum DT threshold]
+        "armorDT" => armor_dt(g, item, value),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (values 54, 20, 16); schemas/fnv/objects.json ALCH/MGEF]
         "aidRestoresAV" => aid_effect_av(g, item, value, true),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 54); schemas/fnv/objects.json ALCH/MGEF]
@@ -64,6 +72,126 @@ pub(crate) fn eval(
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 1); schemas/fnv/gameplay.json RCPE.RCOD]
         "miscProduct" => recipe_membership(g, item, value, false),
         _ => Match::Unknown,
+    }
+}
+
+/// Evaluates `formlist: 2` against `mod` + `form` [documented: Sorting Icons 1.4b
+/// `menus/ySI/ySI.json` (`"formlist": 2`), `schemas/fnv/objects.json` `WEAP`/`ARMO.REPL`,
+/// GECK wiki `SetRepairList`; no ySI/yUI DLL or source code was consulted; hypothesis:
+/// repair-list back-reference, recursive nested `FLST` membership, and mixed live non-`FLST`
+/// direct equality]:
+/// - When a resolved target form is an `FLST`, matches if `item`'s effective repair list
+///   (`REPL`, including `SetRepairList` overrides) equals that `FLST` OR if `item` is
+///   reachable through `FLST` membership (including nested `FLST`s with a cycle guard).
+/// - When a resolved target is a live non-`FLST` form (e.g. a direct item in a mixed
+///   `formlist: 2` rule), matches direct equality `g.unclone(item) == target`.
+/// - [design] Missing plugin or non-existent local form in a loaded plugin yields `Match::No`;
+///   malformed hex or missing `mod` yields `Match::Unknown`.
+pub(crate) fn formlist_mode2(
+    g: &Game<'_>,
+    item: FormId,
+    fields: &Map<String, Json>,
+    value: &Json,
+) -> Match {
+    let Some(plugin) = fields.get("mod").and_then(Json::as_str) else {
+        return Match::Unknown;
+    };
+    let Some(index) = g
+        .data
+        .load_order
+        .iter()
+        .position(|p| p.eq_ignore_ascii_case(plugin))
+    else {
+        return Match::No;
+    };
+    if index > 255 {
+        return Match::Unknown;
+    }
+    let orig_item = g.unclone(item);
+    let item_repair_list = g.effective_repair_list_form(item);
+    let matches_one = |v: &Json| {
+        let Some(local) = parse_local_form(v) else {
+            return Match::Unknown;
+        };
+        let target = FormId(((index as u32) << 24) | local);
+        match g.data.sig(target) {
+            Some(sig) if &sig == b"FLST" => {
+                if item_repair_list == Some(target)
+                    || flst_contains_recursive(g, target, item)
+                    || (orig_item != item && flst_contains_recursive(g, target, orig_item))
+                {
+                    Match::Yes
+                } else {
+                    Match::No
+                }
+            }
+            Some(_) => {
+                if item == target || orig_item == target {
+                    Match::Yes
+                } else {
+                    Match::No
+                }
+            }
+            None => Match::No,
+        }
+    };
+    match value {
+        Json::Array(values) => any(values.iter().map(matches_one)),
+        _ => matches_one(value),
+    }
+}
+
+fn flst_contains_recursive(g: &Game<'_>, root_list: FormId, needle: FormId) -> bool {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(root_list);
+    queue.push_back(root_list);
+    let mut steps = 0usize;
+    while let Some(list_id) = queue.pop_front() {
+        steps += 1;
+        if steps > MAX_NESTED_FLST_VISITS {
+            break;
+        }
+        for member in crate::functions::refs::list_members(g, list_id) {
+            if member == needle || g.unclone(member) == needle {
+                return true;
+            }
+            if g.data.sig(member) == Some(*b"FLST") && visited.insert(member) {
+                queue.push_back(member);
+            }
+        }
+    }
+    false
+}
+
+/// Evaluates `armorDT` minimum threshold against an `ARMO`'s effective Damage Threshold
+/// (honoring live `SetArmorDT` overrides) [documented: Sorting Icons 1.4b
+/// `menus/ySI/ySI.json`, `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`, GECK wiki
+/// `SetArmorDT`; no ySI/yUI DLL or source code was consulted; hypothesis: `dt >= threshold`].
+/// [design] Non-`ARMO` forms disqualify as `Match::No`; negative, non-finite, or non-numeric
+/// thresholds remain `Match::Unknown`.
+fn armor_dt(g: &Game<'_>, item: FormId, value: &Json) -> Match {
+    if g.data.sig(item) != Some(*b"ARMO") {
+        return Match::No;
+    }
+    let Some(threshold) = value.as_f64().filter(|n| n.is_finite() && *n >= 0.0) else {
+        return Match::Unknown;
+    };
+    let base = g.unclone(item);
+    let dt = g
+        .world
+        .effective_armor_dt(item)
+        .or_else(|| g.world.effective_armor_dt(base))
+        .map(f64::from)
+        .or_else(|| match crate::nvse::record_value(g, item, "DNAM", "damage_threshold") {
+            Some(XVal::Num(n)) if n.is_finite() => Some(n),
+            _ => None,
+        })
+        .unwrap_or(0.0);
+    if dt >= threshold {
+        Match::Yes
+    } else {
+        Match::No
     }
 }
 

@@ -119,6 +119,16 @@ pub(crate) fn json_icon_spec(g: &mut Game<'_>, tag: &str) -> Option<(String, Opt
     book.icon_spec(tag).ok()
 }
 
+/// Resolves an unambiguous field (such as `template`, `systemcolor`, `category`, `name`,
+/// `tab`, `count`, or `string`) from the highest-priority JSON icon rule(s) matching `tag`.
+pub(crate) fn json_icon_trait(g: &mut Game<'_>, tag: &str, key: &str) -> Option<String> {
+    if g.ysi_filename.book.is_none() {
+        g.ysi_filename.book = Some(Book::load());
+    }
+    let book = g.ysi_filename.book.as_ref()?.as_ref().ok()?;
+    book.icon_trait(tag, key)
+}
+
 /// Whether a valid `menus/ySI/*.json` configuration book is loaded in this session.
 pub(crate) fn has_loaded_book(g: &mut Game<'_>) -> bool {
     if g.ysi_filename.book.is_none() {
@@ -293,6 +303,33 @@ impl Book {
         };
         Ok(((*filenames.first().expect("one filename")).to_string(), template))
     }
+
+    fn icon_trait(&self, tag: &str, key: &str) -> Option<String> {
+        let priority = self
+            .icons
+            .iter()
+            .filter(|r| r.tag == tag)
+            .map(|r| r.priority)
+            .max()?;
+        let mut values = BTreeSet::new();
+        for rule in self
+            .icons
+            .iter()
+            .filter(|r| r.tag == tag && r.priority == priority)
+        {
+            let Some(val) = rule.fields.get(key) else {
+                continue;
+            };
+            let formatted = match val {
+                Json::String(s) => s.clone(),
+                Json::Number(n) => n.to_string(),
+                Json::Bool(b) => if *b { "1" } else { "0" }.to_string(),
+                _ => continue,
+            };
+            values.insert(formatted);
+        }
+        (values.len() == 1).then(|| values.into_iter().next().expect("one value"))
+    }
 }
 
 impl Rule {
@@ -301,7 +338,7 @@ impl Rule {
         let formlist_mode = match self.fields.get("formlist") {
             None => Some(0i64),
             Some(v) => match v.as_i64() {
-                Some(n @ (0 | 1)) => Some(n),
+                Some(n @ 0..=2) => Some(n),
                 _ => None,
             },
         };
@@ -314,6 +351,7 @@ impl Rule {
                 "form" => match formlist_mode {
                     Some(0) => self.explicit_form(g, item, value),
                     Some(1) => self.formlist_member(g, item, value),
+                    Some(2) => crate::ysi_predicates::formlist_mode2(g, item, &self.fields, value),
                     _ => Match::Unknown,
                 },
                 "formType" => match g.data.sig(item).and_then(|s| form_type_code(&s)) {

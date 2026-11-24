@@ -95,11 +95,14 @@ pub struct SmallState {
     /// weapon, trait 1-19).
     pub oc_settings: HashMap<u8, f64>,
     pub oc_state: HashMap<(FormId, FormId, u8), f64>,
-    /// yUI's ySI traits: a form's sorting tag, and an icon by tag (or by form when it
-    /// has no tag).
+    /// yUI's ySI traits: a form's sorting tag, icon by tag (or by form when untagged),
+    /// and additional session trait overrides (`string`, `template`, `systemcolor`,
+    /// `category`, `name`, `tab`, `count`).
     pub ysi_tag: HashMap<FormId, String>,
     pub ysi_icon_by_tag: HashMap<String, String>,
     pub ysi_icon: HashMap<FormId, String>,
+    pub ysi_trait_by_tag: HashMap<(String, String), String>,
+    pub ysi_trait: HashMap<(FormId, String), String>,
     /// TTW_EnableRadioFix: radios are received in child worldspaces too (the engine's
     /// radio reads it). Not saved: TTW's handler script sets it again on every load, beside
     /// INI settings that last a session [observed: TaleOfTwoWastelands.esm
@@ -227,6 +230,8 @@ impl Game<'_> {
         !self.small.ysi_tag.is_empty()
             || !self.small.ysi_icon.is_empty()
             || !self.small.ysi_icon_by_tag.is_empty()
+            || !self.small.ysi_trait.is_empty()
+            || !self.small.ysi_trait_by_tag.is_empty()
             || self.ui_tree.find_tile("HUDMainMenu/ySI").is_some()
             || self.ui_tree.find_tile("InventoryMenu/ySI").is_some()
             || crate::ysi_filename::has_loaded_book(self)
@@ -250,12 +255,19 @@ impl Game<'_> {
         };
         let (icon, rule_template) = match tag.as_deref() {
             Some(t) => {
+                let override_tpl = self
+                    .small
+                    .ysi_trait_by_tag
+                    .get(&(t.to_string(), "template".into()))
+                    .filter(|s| !s.is_empty())
+                    .cloned();
                 if let Some(override_icon) = self.small.ysi_icon_by_tag.get(t) {
                     let icon = (!override_icon.is_empty()).then(|| override_icon.clone());
-                    let tpl = crate::ysi_filename::json_icon_spec(self, t).and_then(|(_, tpl)| tpl);
+                    let tpl = override_tpl
+                        .or_else(|| crate::ysi_filename::json_icon_spec(self, t).and_then(|(_, tpl)| tpl));
                     (icon, tpl)
                 } else if let Some((filename, tpl)) = crate::ysi_filename::json_icon_spec(self, t) {
-                    ((!filename.is_empty()).then_some(filename), tpl)
+                    ((!filename.is_empty()).then_some(filename), override_tpl.or(tpl))
                 } else {
                     let icon = self
                         .small
@@ -263,7 +275,7 @@ impl Game<'_> {
                         .get(&base)
                         .filter(|s| !s.is_empty())
                         .cloned();
-                    (icon, None)
+                    (icon, override_tpl)
                 }
             }
             None => {
@@ -273,7 +285,13 @@ impl Game<'_> {
                     .get(&base)
                     .filter(|s| !s.is_empty())
                     .cloned();
-                (icon, None)
+                let tpl = self
+                    .small
+                    .ysi_trait
+                    .get(&(base, "template".into()))
+                    .filter(|s| !s.is_empty())
+                    .cloned();
+                (icon, tpl)
             }
         };
         if tag.is_none() && icon.is_none() {
@@ -728,7 +746,9 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                     "tag" => {
                         g.small.ysi_tag.insert(f, v);
                     }
-                    "icon" => match effective_tag(g, f) {
+                    // [documented: GECK wiki YSISetTrait ("icon"); hypothesis: "filename" alias
+                    // writes the same session icon store; no ySI/yUI DLL or source consulted]
+                    "icon" | "filename" => match effective_tag(g, f) {
                         Some(t) => {
                             g.small.ysi_icon_by_tag.insert(t, v);
                         }
@@ -736,6 +756,23 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                             g.small.ysi_icon.insert(f, v);
                         }
                     },
+                    // [hypothesis] Per-form formatted sorting string override.
+                    "string" => {
+                        g.small.ysi_trait.insert((f, trait_name), v);
+                    }
+                    // [documented: Sorting Icons 1.4b menus/ySI/ySI.json icon-rule field names;
+                    // no ySI/yUI DLL or source consulted; hypothesis: tag-shared when tagged,
+                    // per-form when untagged; design: session-only override map]
+                    "template" | "systemcolor" | "category" | "name" | "tab" | "count" => {
+                        match effective_tag(g, f) {
+                            Some(t) => {
+                                g.small.ysi_trait_by_tag.insert((t, trait_name), v);
+                            }
+                            None => {
+                                g.small.ysi_trait.insert((f, trait_name), v);
+                            }
+                        }
+                    }
                     _ => {}
                 }
                 zero
@@ -753,6 +790,68 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                             .unwrap_or_default(),
                         None => g.small.ysi_icon.get(&f).cloned().unwrap_or_default(),
                     },
+                    // [hypothesis] Formatted sorting string: per-form `ySISetTrait "string"`
+                    // override, else `"{tag} {name}"` when tagged and named, `"{tag}"` when
+                    // tagged without a name, or `"{name}"` when untagged.
+                    "string" => {
+                        if let Some(ov) = g.small.ysi_trait.get(&(f, "string".into())) {
+                            ov.clone()
+                        } else {
+                            let tag = effective_tag(g, f);
+                            let display = g
+                                .world
+                                .forms
+                                .get(f)
+                                .and_then(|b| b.name.as_deref())
+                                .or_else(|| {
+                                    g.data
+                                        .record_field(f, "FULL", "")
+                                        .and_then(serde_json::Value::as_str)
+                                })
+                                .unwrap_or("")
+                                .to_string();
+                            match (tag, display.is_empty()) {
+                                (Some(t), false) => format!("{t} {display}"),
+                                (Some(t), true) => t,
+                                (None, false) => display,
+                                (None, true) => String::new(),
+                            }
+                        }
+                    }
+                    "template" => match effective_tag(g, f) {
+                        Some(t) => g
+                            .small
+                            .ysi_trait_by_tag
+                            .get(&(t.clone(), "template".into()))
+                            .cloned()
+                            .or_else(|| crate::ysi_filename::json_icon_trait(g, &t, "template"))
+                            .or_else(|| g.small.ysi_trait.get(&(f, "template".into())).cloned())
+                            .unwrap_or_else(|| crate::ui_ysi::YSI_DEFAULT_TEMPLATE.to_string()),
+                        None => g
+                            .small
+                            .ysi_trait
+                            .get(&(f, "template".into()))
+                            .cloned()
+                            .unwrap_or_default(),
+                    },
+                    "systemcolor" | "category" | "name" | "tab" | "count" => {
+                        match effective_tag(g, f) {
+                            Some(t) => g
+                                .small
+                                .ysi_trait_by_tag
+                                .get(&(t.clone(), trait_name.clone()))
+                                .cloned()
+                                .or_else(|| crate::ysi_filename::json_icon_trait(g, &t, &trait_name))
+                                .or_else(|| g.small.ysi_trait.get(&(f, trait_name)).cloned())
+                                .unwrap_or_default(),
+                            None => g
+                                .small
+                                .ysi_trait
+                                .get(&(f, trait_name))
+                                .cloned()
+                                .unwrap_or_default(),
+                        }
+                    }
                     _ => String::new(),
                 })
             }

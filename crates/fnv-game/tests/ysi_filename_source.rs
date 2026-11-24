@@ -1002,9 +1002,9 @@ fn formlist_predicate_supports_authored_and_live_flst_membership_and_refuses_unk
         XVal::Str("Owned/list-b.dds".into())
     );
 
-    // Unverified formlist mode (2) and non-FLST targets remain conservative Match::Unknown.
+    // Unverified formlist mode (3) and non-FLST targets on mode 1 remain conservative Match::Unknown.
     for extra in [
-        serde_json::json!({"priority": 30, "mod": "OwnedYsi.esm", "form": "00000840", "formlist": 2, "tag": "(mode2)"}),
+        serde_json::json!({"priority": 30, "mod": "OwnedYsi.esm", "form": "00000840", "formlist": 3, "tag": "(mode3)"}),
         serde_json::json!({"priority": 30, "mod": "OwnedYsi.esm", "form": "00000820", "formlist": 1, "tag": "(notFlst)"}),
     ] {
         files.write(
@@ -1477,4 +1477,273 @@ fn orthogonal_record_recipe_and_template_predicates_resolve_and_disqualify() {
             "{unknown_key} must stay Match::Unknown"
         );
     }
+}
+
+fn armor_and_mode2_fixture() -> Fixture {
+    // FLST 0x870: repair list (empty LNAM, referenced via REPL by WEAP 0x873).
+    let repair_flst = record(b"FLST", 0, 0x870, &[sub(b"EDID", z("OwnYsiRepairList"))]);
+    // FLST 0x871 (outer) -> FLST 0x872 (inner) -> WEAP 0x874 (nested member); also adds cyclic back-edge 0x871.
+    let outer_flst = record(
+        b"FLST",
+        0,
+        0x871,
+        &[
+            sub(b"EDID", z("OwnYsiOuterList")),
+            sub(b"LNAM", 0x872u32.to_le_bytes().to_vec()),
+        ],
+    );
+    let inner_flst = record(
+        b"FLST",
+        0,
+        0x872,
+        &[
+            sub(b"EDID", z("OwnYsiInnerList")),
+            sub(b"LNAM", 0x871u32.to_le_bytes().to_vec()),
+            sub(b"LNAM", 0x874u32.to_le_bytes().to_vec()),
+        ],
+    );
+
+    let weap_data = vec![0u8; 15];
+    let weap_dnam = vec![0u8; 207];
+    let weap_repl = record(
+        b"WEAP",
+        0,
+        0x873,
+        &[
+            sub(b"EDID", z("OwnYsiReplGun")),
+            sub(b"FULL", z("Scoped Carbine")),
+            sub(b"REPL", 0x870u32.to_le_bytes().to_vec()),
+            sub(b"DATA", weap_data.clone()),
+            sub(b"DNAM", weap_dnam.clone()),
+        ],
+    );
+    let weap_nested = record(
+        b"WEAP",
+        0,
+        0x874,
+        &[
+            sub(b"EDID", z("OwnYsiNestedGun")),
+            sub(b"FULL", z("Nested Rifle")),
+            sub(b"DATA", weap_data.clone()),
+            sub(b"DNAM", weap_dnam.clone()),
+        ],
+    );
+    let weap_direct = record(
+        b"WEAP",
+        0,
+        0x875,
+        &[
+            sub(b"EDID", z("OwnYsiDirectGun")),
+            sub(b"FULL", z("Direct Rifle")),
+            sub(b"DATA", weap_data),
+            sub(b"DNAM", weap_dnam),
+        ],
+    );
+
+    // ARMO 0x876: DT = 6.0 (passes armorDT: 5); ARMO 0x877: DT = 1.0 (fails armorDT: 5).
+    let mut armo_data = vec![0u8; 12];
+    armo_data[0..4].copy_from_slice(&50i32.to_le_bytes()); // value
+    armo_data[4..8].copy_from_slice(&100i32.to_le_bytes()); // health
+    armo_data[8..12].copy_from_slice(&10.0f32.to_le_bytes()); // weight
+    let mut dnam_hi = vec![0u8; 12];
+    dnam_hi[4..8].copy_from_slice(&6.0f32.to_le_bytes()); // DT = 6.0
+    let mut dnam_lo = vec![0u8; 12];
+    dnam_lo[4..8].copy_from_slice(&1.0f32.to_le_bytes()); // DT = 1.0
+    let armo_hi = record(
+        b"ARMO",
+        0,
+        0x876,
+        &[
+            sub(b"EDID", z("OwnYsiLightArmor")),
+            sub(b"FULL", z("Reinforced Jacket")),
+            sub(b"DATA", armo_data.clone()),
+            sub(b"DNAM", dnam_hi),
+        ],
+    );
+    let armo_lo = record(
+        b"ARMO",
+        0,
+        0x877,
+        &[
+            sub(b"EDID", z("OwnYsiCloth")),
+            sub(b"FULL", z("Plain Shirt")),
+            sub(b"DATA", armo_data),
+            sub(b"DNAM", dnam_lo),
+        ],
+    );
+
+    let bytes = [
+        tes4(),
+        top(b"FLST", &[repair_flst, outer_flst, inner_flst].concat()),
+        top(b"WEAP", &[weap_repl, weap_nested, weap_direct].concat()),
+        top(b"ARMO", &[armo_hi, armo_lo].concat()),
+        top(b"NPC_", &record(b"NPC_", 0, 7, &[sub(b"EDID", z("Player"))])),
+    ]
+    .concat();
+    let plugins = vec![Plugin::parse(&bytes, "OwnedYsi.esm".into()).unwrap()];
+    let order = LoadOrder::new(&plugins).unwrap();
+    let schema =
+        Schema::load_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/fnv")).unwrap();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../schemas/script/functions.json");
+    let catalogue = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let forms = FormStore::build(&order, &schema);
+    let refs = RefTable::build(&order, &schema);
+    let data = GameData::build(
+        &order,
+        &schema,
+        FunctionTable::load(&path).unwrap(),
+        &catalogue,
+        &refs,
+    );
+    Fixture { data, forms, refs }
+}
+
+#[test]
+fn formlist_mode2_and_armordt_predicates_evaluate_repair_lists_nested_flsts_and_live_overrides() {
+    let files = Files::new();
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([
+                {"priority": 10, "formType": 40, "tag": "(w00)"},
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": "00000870", "formlist": 2, "tag": "(wrepl)"},
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": ["00000871", "00000875"], "formlist": 2, "tag": "(wnest)"},
+                {"priority": 10, "formType": 24, "tag": "(cloth)"},
+                {"priority": 20, "formType": 24, "armorDT": 5, "tag": "(armor5)"}
+            ]),
+            serde_json::json!([
+                {"priority": 10, "tag": "(w00)", "filename": "Owned/w00.dds"},
+                {"priority": 10, "tag": "(wrepl)", "filename": "Owned/wrepl.dds"},
+                {"priority": 10, "tag": "(wnest)", "filename": "Owned/wnest.dds"},
+                {"priority": 10, "tag": "(cloth)", "filename": "Owned/cloth.dds"},
+                {"priority": 10, "tag": "(armor5)", "filename": "Owned/armor5.dds"}
+            ]),
+        ),
+    );
+    let f = armor_and_mode2_fixture();
+    let mut g = game(&f);
+
+    // formlist: 2 matches REPL back-reference, cyclic nested FLST membership, and mixed direct item.
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiReplGun)"), XVal::Str("Owned/wrepl.dds".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiNestedGun)"), XVal::Str("Owned/wnest.dds".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiDirectGun)"), XVal::Str("Owned/wnest.dds".into()));
+
+    // Live SetRepairList override (`SetRepairList list item`) promotes a weapon into the formlist: 2 match.
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([
+                {"priority": 10, "formType": 40, "tag": "(w00)"},
+                {"priority": 30, "mod": "OwnedYsi.esm", "form": "00000870", "formlist": 2, "tag": "(wrepl)"}
+            ]),
+            serde_json::json!([
+                {"priority": 10, "tag": "(w00)", "filename": "Owned/w00.dds"},
+                {"priority": 10, "tag": "(wrepl)", "filename": "Owned/wrepl.dds"}
+            ]),
+        ),
+    );
+    let mut g2 = game(&f);
+    assert_eq!(success(&mut g2, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiDirectGun)"), XVal::Str("Owned/w00.dds".into()));
+    success(&mut g2, "SetRepairList OwnYsiRepairList OwnYsiDirectGun");
+    assert_eq!(success(&mut g2, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiDirectGun)"), XVal::Str("Owned/wrepl.dds".into()));
+
+    // armorDT threshold classifies ARMO >= 5 vs < 5, disqualifies WEAP cleanly, and honors SetArmorDT.
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiLightArmor)"), XVal::Str("Owned/armor5.dds".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiCloth)"), XVal::Str("Owned/cloth.dds".into()));
+    success(&mut g, "SetArmorDT 7 OwnYsiCloth");
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiCloth)"), XVal::Str("Owned/armor5.dds".into()));
+
+    // Negative or non-numeric armorDT refuses conservatively as Match::Unknown on ARMO.
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([
+                {"priority": 10, "formType": 24, "tag": "(cloth)"},
+                {"priority": 30, "formType": 24, "armorDT": -2, "tag": "(neg)"}
+            ]),
+            serde_json::json!([{"priority": 10, "tag": "(cloth)", "filename": "Owned/cloth.dds"}]),
+        ),
+    );
+    let mut neg = game(&f);
+    assert_eq!(
+        query(&mut neg, "SetFunctionValue (ySIGetTrait \"filename\" OwnYsiLightArmor)"),
+        Err("an unsupported ySI predicate could change the highest-priority tag".into())
+    );
+}
+
+#[test]
+fn ysi_get_and_set_trait_support_string_template_systemcolor_and_category_metadata() {
+    let files = Files::new();
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": "00000873", "tag": "(w01)"},
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": "00000874", "tag": "(w01)"}
+            ]),
+            serde_json::json!([
+                {
+                    "priority": 10,
+                    "tag": "(w01)",
+                    "filename": "Owned/carbine.dds",
+                    "template": "ySICustom",
+                    "systemcolor": -1,
+                    "category": "(catW)",
+                    "name": "Weapons",
+                    "tab": 0,
+                    "count": 2
+                }
+            ]),
+        ),
+    );
+    let f = armor_and_mode2_fixture();
+    let mut g = game(&f);
+
+    // Formatted "string" combines effective tag + item name; untagged returns display name only.
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiReplGun)"),
+        XVal::Str("(w01) Scoped Carbine".into())
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiDirectGun)"),
+        XVal::Str("Direct Rifle".into())
+    );
+
+    // JSON icon metadata traits resolve unambiguously and honor tag-shared ySISetTrait overrides.
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"template\" OwnYsiReplGun)"), XVal::Str("ySICustom".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"systemcolor\" OwnYsiReplGun)"), XVal::Str("-1".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"category\" OwnYsiReplGun)"), XVal::Str("(catW)".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"name\" OwnYsiReplGun)"), XVal::Str("Weapons".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"tab\" OwnYsiReplGun)"), XVal::Str("0".into()));
+    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"count\" OwnYsiReplGun)"), XVal::Str("2".into()));
+
+    // Setting template/systemcolor on one tagged form shares with sibling forms of the same tag
+    // and flows into Game::ysi_item_display.
+    success(&mut g, "ySISetTrait \"template\" \"ySIOverrideTpl\" OwnYsiReplGun");
+    success(&mut g, "ySISetTrait \"systemcolor\" \"0\" OwnYsiReplGun");
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"template\" OwnYsiNestedGun)"),
+        XVal::Str("ySIOverrideTpl".into())
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"systemcolor\" OwnYsiNestedGun)"),
+        XVal::Str("0".into())
+    );
+    assert_eq!(g.ysi_item_display(FormId(0x874)).unwrap().template, "ySIOverrideTpl");
+
+    // Per-form "string" override does not leak to sibling forms sharing the tag.
+    success(&mut g, "ySISetTrait \"string\" \"(custom) Override Name\" OwnYsiReplGun");
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiReplGun)"),
+        XVal::Str("(custom) Override Name".into())
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiNestedGun)"),
+        XVal::Str("(w01) Nested Rifle".into())
+    );
+
+    // Honest yUI version gate remains unadvertised until full yUI 140 parity.
+    assert_eq!(success(&mut g, "SetFunctionValue (IsPluginInstalled \"yUI\")"), XVal::Num(0.0));
+    assert_eq!(success(&mut g, "SetFunctionValue (GetPluginVersion \"yUI\")"), XVal::Num(-1.0));
 }

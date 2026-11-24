@@ -28,13 +28,18 @@ multi-rule precedence/ties, and bad-item/no-rule outputs on `ySIGetTrait "filena
 remain [hypothesis] until an interactive-desktop multi-rule capture runs.
 
 - Explicit `mod` + hexadecimal local `form`, including a list of form strings,
-  `formlist` (`0` direct form match, `1` `FLST` membership), and `formType`
-  scalar/list predicates are evaluated [documented: field names, package author
-  documentation above]. [hypothesis] `form` is the hexadecimal local FormID in
-  the named plugin, `formlist: 1` tests membership in the referenced `FLST`
-  (reading live `FLST` contents including runtime `AddFormToFormList` changes;
-  other `formlist` modes such as `2` or non-`FLST` targets remain unknown), and
-  `formType` uses the full engine form-type code table
+  `formlist` (`0` direct form match, `1` `FLST` membership, `2` repair-list /
+  nested-`FLST` membership), and `formType` scalar/list predicates are evaluated
+  [documented: field names, package author documentation above]. [hypothesis]
+  `form` is the hexadecimal local FormID in the named plugin, `formlist: 1`
+  tests membership in the referenced `FLST` (reading live `FLST` contents
+  including runtime `AddFormToFormList` changes; non-`FLST` targets on mode `1`
+  and modes outside `0..=2` remain unknown), `formlist: 2` matches an item whose
+  effective repair list (`REPL`, honoring live `SetRepairList` overrides) equals
+  the referenced `FLST`, or that is recursively reachable through nested `FLST`
+  entries (bounded at 256 visited `FLST` nodes with cycle protection [design]),
+  or directly equals a resolved live non-`FLST` form in a mixed `formlist: 2`
+  selector, and `formType` uses the full engine form-type code table
   (`fnv_script::vm::form_type_code`). Placed references resolve to their base,
   and an existing temporary item base resolves through its original [engine
   design choice].
@@ -125,6 +130,11 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
       `Game::armor_class`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `2`
       matched `ArmorCombat` and rejected light/heavy; array support via `number_set`:
       hypothesis].
+    - `armorDT` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`;
+      `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`; GECK wiki `SetArmorDT`;
+      hypothesis: non-negative minimum DT threshold `effective_armor_dt >= threshold`
+      honoring live `SetArmorDT` overrides; design: negative, non-finite, or non-numeric
+      thresholds stay `Match::Unknown`].
     - `armorPower` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
       `schemas/fnv/objects.json` `ARMO.BMDT.general_flags` bit 5 `"Power Armor"` / GECK
       wiki `IsPowerArmor`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1`
@@ -150,10 +160,9 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
     `-1` on armor-slot rules], while `-1` on weapon/aid/power/recipe flags was `[observed]`
     not to match false in `yUI 1.4d` and stays `Match::Unknown`. Any other JSON value
     remains `Match::Unknown`.
-- [engine design choice] Other predicates, including `formlist: 2`, `armorDT`, and any
-  uncited or unmapped property conditions (including `bookSkill`, `isSkillBook`, `noteType`,
-  `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`, `edidPrefix`), remain **unknown**, rather
-  than false.
+- [engine design choice] Other uncited or unmapped property conditions (including
+  `bookSkill`, `isSkillBook`, `noteType`, `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`,
+  `edidPrefix`), remain **unknown**, rather than false.
   A certainly false supported predicate rejects a rule even if it also has unknown
   predicates. A possible unknown rule at or above the winning priority refuses the
   query; an unknown lower rule cannot win.
@@ -189,16 +198,29 @@ configuration snapshot also backs `crates/fnv-game/src/nvse_small.rs` for
 `ySIGetTrait` / `ySISetTrait` `"tag"` and `"icon"` [documented: GECK wiki
 `YSIGetTrait`/`YSISetTrait`, `"tag"` returns the sorting tag and `"icon"` returns
 the sorting icon texture path; changing a tagged form's icon applies to every form
-sharing that tag]. On `"tag"` and `"icon"`, session overrides set by `ySISetTrait`
-take precedence over JSON rules (including explicit `""` tag clearing), non-item
-forms are accepted [hypothesis: observed in community scripts querying world
-references and classes], and unavailable/unmatched/blocked configuration returns
-`""` rather than raising a script error [engine design choice]. Unhandled traits
-such as `"string"` continue to return `""`. No `yUI` provider presence/version is
-advertised (`ext-version.md`). This does **not** repair JAM sorting or establish
-full ySI/JAM compatibility. A configuration with unresolved potentially winning
-predicates cannot claim a filename merely because a lower supported rule exists.
-No original JSON, icons, scripts or private paths are included.
+sharing that tag]. On `"tag"` and `"icon"`, session overrides set by `ySISetTrait` take precedence
+over JSON rules (including explicit `""` tag clearing), non-item forms are
+accepted [hypothesis: observed in community scripts querying world references
+and classes], and unavailable/unmatched/blocked configuration returns `""`
+rather than raising a script error [engine design choice]. Additional traits on
+`ySIGetTrait` / `ySISetTrait` are handled `[hypothesis]` in `nvse_small.rs` (icon-rule
+field names `[documented: Sorting Icons 1.4b menus/ySI/ySI.json]`; no ySI/yUI DLL or
+source code was consulted):
+- `"string"`: per-form `ySISetTrait "string"` override if set, else `"{tag} {name}"`
+  when both effective tag and display name are non-empty, `"{tag}"` when tagged
+  without a name, or `"{name}"` when untagged.
+- `"template"`, `"systemcolor"`, `"category"`, `"name"`, `"tab"`, `"count"`:
+  session `ySISetTrait` override (shared across forms with the same effective
+  tag, or per-form when untagged) falling back to unambiguous highest-priority
+  JSON icon-rule metadata (`"template"` defaults to `"ySIDefault"` when tagged `[design]`).
+- `ySISetTrait "filename"` updates the same session icon store as `"icon"` `[hypothesis]` while
+  `ySIGetTrait "filename"` retains its strict JSON-backed refusal path.
+Unrecognized traits continue to return `""`. No `yUI` provider presence/version
+is advertised (`ext-version.md`). This does **not** repair JAM sorting or
+establish full ySI/JAM compatibility. A configuration with unresolved
+potentially winning predicates cannot claim a filename merely because a lower
+supported rule exists. No original JSON, icons, scripts or private paths are
+included.
 
 ## Source string arguments
 
@@ -212,7 +234,7 @@ authored paths and values. Compiler, VM and UI string-argument behavior are unch
 
 ## Authored controls
 
-Seventeen source controls live in the dedicated `ysi_filename_source` test target
+Nineteen source controls live in the dedicated `ysi_filename_source` test target
 (`crates/fnv-game/tests/ysi_filename_source.rs`), isolated because the existing
 file-reader roots are process-wide. They use independently authored configuration,
 items, and menu XML to cover:
@@ -243,7 +265,8 @@ items, and menu XML to cover:
 13. Full `formType` codes (`IMOD` 103, `ACTI` 21) and non-item `"tag"`/`"icon"`
     queries while keeping `"filename"` restricted to live inventory items.
 14. `"formlist": 0 | 1` authored and live `AddFormToFormList` membership alongside
-    conservative `Match::Unknown` refusal for `"formlist": 2` and non-`FLST` targets.
+    conservative `Match::Unknown` refusal for unknown `formlist` modes (`3`) and
+    non-`FLST` targets on mode `1`.
 15. Empty/comment-only auxiliary `.json` stub files ignored cleanly while empty
     `ySI.json` and unterminated auxiliary comments continue to refuse explicitly.
 16. Record-backed `WEAP`, `ALCH`, and `ARMO` predicates (`weaponSkill` scalar-only,
@@ -260,13 +283,22 @@ items, and menu XML to cover:
     conservative `Match::Unknown` refusal for unrecognized keys (`bookSkill`,
     `isSkillBook`, `noteType`, `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`,
     `edidPrefix`).
+18. `formlist: 2` (`REPL` repair-list back-reference, live `SetRepairList` override,
+    cyclic nested `FLST` membership, mixed direct item) and `armorDT` minimum
+    threshold (pass/fail, non-`ARMO` disqualification, live `SetArmorDT` override,
+    negative-threshold conservative refusal).
+19. `ySIGetTrait` / `ySISetTrait` `"string"`, `"template"`, `"systemcolor"`,
+    `"category"`, `"name"`, `"tab"`, and `"count"` resolution, tag-shared vs
+    per-form overrides, `Game::ysi_item_display` template override propagation,
+    and truthful unadvertised `yUI` version gate (`0` / `-1.0`).
 
 ## Engine list-row sorting and tile icons (`nvf-play`)
 
 - **Display resolution** `[design]`: `Game::ysi_active` and `Game::ysi_item_display`
   resolve each item's effective sorting tag, icon texture path, and XML template name
-  (`template` from the winning icon rule, defaulting to `ySIDefault` when tagged/icon-bearing
-  or `ySINoTag` otherwise) using the same `ySISetTrait` > JSON precedence as `ySIGetTrait`.
+  (`template` from `ySISetTrait "template"` override or the winning icon rule,
+  defaulting to `ySIDefault` when tagged/icon-bearing or `ySINoTag` otherwise) using
+  the same `ySISetTrait` > JSON precedence as `ySIGetTrait`.
   When no ySI configuration, session overrides, or injected `ySI` UI tiles are present,
   `ysi_active` returns `false` and vanilla menus pay zero cost and keep identical order.
 - **Sorting** `[hypothesis]`: When ySI is active, `MenuModel::apply_ysi` attaches resolved
@@ -275,13 +307,24 @@ items, and menu XML to cover:
   display name byte order, FormID, condition, mods)`, keeping Misc folder rows (`Keyring`,
   `Caravan Cards`, `Back`) pinned at the top, preserving `usable_ammo` and `SortBy`
   (`Value`/`Weight`) stable re-sorts, and tracking the selected row across re-sorts.
-- **Tile-row icons** `[design]`: `ui_ysi::apply_row_icon` is wired into the shared
-  `tiles::item_menu::write_lists` (covering `InventoryMenu`, `ContainerMenu`, and
-  `BarterMenu`) as well as `tiles::repair_menu` (`RepairMenu`) and `tiles::item_mod_menu`
-  (`ItemModMenu`). When `menus/ySI/ySI.xml` is present on the menu, each row instantiates
-  or updates a `ySIImage` child tile using the resolved template (`ySIDefault` fallback for
-  unknown custom templates, `ySINoTag` for untagged rows) and writes its `filename`. When
+- **Tile-row icons and spacing** `[design]`: `ui_ysi::apply_row_icon` is wired into the
+  shared `tiles::item_menu::write_lists` (covering `InventoryMenu`, `ContainerMenu`, and
+  `BarterMenu`), `tiles::repair_menu` (`RepairMenu`), `tiles::item_mod_menu`
+  (`ItemModMenu`), `tiles::recipe_menu` (`RecipeMenu`, both recipe and ingredient lists),
+  and `tiles::repair_services_menu` (`RepairServicesMenu`). When `menus/ySI/ySI.xml` is
+  present on the menu, each row instantiates or updates a `ySIImage` child tile using the
+  resolved template (`ySIDefault` fallback for unknown custom templates, `ySINoTag` for
+  untagged rows), writes its `filename`, and positions `ySIImage/x` plus literal
+  `ListItemText/x` using `_ySIWidth` / `_ySISpaceLeft` / `_ySISpaceRight` / `_ySIBlanks`
+  (preserving expression-driven `ListItemText/x` on UI overhauls untouched). When
   `menus/ySI/ySI.xml` is absent, `apply_row_icon` is a strict no-op.
+- **Hand-built fallback views** `[design]`: When `TileMenus` is off or falls back and
+  ySI is active (`Row::ysi` / `RowView::ysi` present), the hand-built Pip-Boy `ITEMS`
+  list (`pipboy::items`), Container/Barter lists (`menu::look`), Repair Services list
+  (`repair`), and Recipe/Ingredient lists (`crafting`, selecting the single ingredient
+  for breakdown recipes with 1 ingredient and >1 outputs, else the first output, else
+  the recipe form) draw 24×24 row icons and reserve text advance (`30` units where
+  needed). When ySI is inactive, all hand-built geometry and wrap widths are unchanged.
 
 ## `yUI` version gate evaluation (`GetPluginVersion "yUI"`)
 
@@ -289,15 +332,18 @@ Per `docs/design/extender-compat.md` §5.7 and `docs/spec-notes/ext-version.md` 
 `IsPluginInstalled "yUI"` remains `0` and `GetPluginVersion "yUI"` remains `-1.0`
 (unregistered in `fnv_script::vm::jip::PLUGINS`). Remaining `yUI 140` gaps before
 advertising `yUI`:
-- `ySIGetTrait "string"` formatted output and native default/fallback icon + equal-priority
-  file-order tie policies (unprobed in original FNV).
-- Remaining unmapped ySI JSON predicates (`formlist: 2`, threshold comparisons such as
-  `armorDT`, and any additional unprobed schema keys).
-- Row icon wiring for `RecipeMenu`, `RepairServicesMenu`, and hand-built (non-tiled)
-  fallback views.
-- Non-ySI `yUI` plugin modules (`yUI.ini` features outside ySI) and end-to-end installed
-  mod acceptance (`ln_ySIContextualPrompts.txt:25` `yUI < 140` gate and `JustAssortedMods`
-  `HUDMainMenu/ySI/_ySI` flow).
+- Native original-game probe verification for `ySIGetTrait "string"` formatting,
+  `ySIGetTrait "filename"` on non-item / `CLAS` forms (used by contextual-prompt
+  mods), native default/fallback icon and equal-priority file-order tie policies,
+  and `formlist: 1` mixed non-`FLST` targets (`ySI.json` armor entries).
+- Non-ySI `yUI` configuration features outside Sorting Icons (cursor matching,
+  hotkey icon replacement, interactive item categories, and remaining UI/sorting
+  fixes).
+- End-to-end installed mod acceptance (contextual-prompt mods gating on
+  `GetPluginVersion "yUI" >= 140` and calling `ySIGetTrait "filename"` on
+  non-item / `CLAS` forms, and HUD/loot-menu mods checking
+  `HUDMainMenu/ySI/_ySI` — noting that JAM also references unregistered
+  `ySIGetTagTrait`).
 
 These are source, model, and tile-tree consumer checks, not GPU rendering, multi-rule
 native parity, or complete installed ySI/JAM acceptance.

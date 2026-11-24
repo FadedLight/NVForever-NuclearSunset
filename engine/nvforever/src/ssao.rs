@@ -118,8 +118,26 @@ const GTAO_STEPS: u32 = 4;
 /// look stays close: the same contact shadows, a little more grain where the 4 x 4 texels
 /// lie on different surfaces [engineering choice, from the shader's reads: ssao.wesl].
 const PERFORMANCE_SLICES: u32 = 1;
-/// Largest radius on the screen, in pixels (near things, e.g. the player's arms).
-const MAX_SCREEN_RADIUS: f32 = 80.0;
+/// Largest radius on the screen, as a share of the picture's height (near things, e.g. the
+/// player's arms): 80 pixels of 1080. Until 2026-11-24 it was 80 pixels at any size, so at
+/// 4K half as far as at 1080p: the radius was held to about 5% of a point's distance there,
+/// 12 units (17 cm) at 3 m against the 64 meant, and a room's creases were barely shaded
+/// [observed 2026-11-24, an audit of the pass against the lamp shadows' rewrite]. Under an
+/// upscaler the share is of the render size's height, which the pass runs at.
+const MAX_SCREEN_RADIUS: f32 = 80.0 / 1080.0;
+
+/// [`MAX_SCREEN_RADIUS`], or `NVF_PLAY_DEBUG_AO_SCREEN=<share of the height>` (a test aid,
+/// for comparing: 0.037 is what 4K had).
+fn max_screen_radius() -> f32 {
+    static SHARE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SHARE.get_or_init(|| match std::env::var("NVF_PLAY_DEBUG_AO_SCREEN").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| *v > 0.0) {
+        Some(v) => {
+            info!("ambient occlusion: NVF_PLAY_DEBUG_AO_SCREEN={v}");
+            v
+        }
+        None => MAX_SCREEN_RADIUS,
+    })
+}
 /// The effect fades out between these distances (game units) [engineering choice: beyond
 /// them the radius is a pixel or two and the fog takes over].
 const FADE_START: f32 = 4000.0;
@@ -223,11 +241,10 @@ impl AmbientOcclusion {
     }
 
     /// Under FSR: the occlusion at the render size, on the HDR picture before FSR
-    /// ([`ao_before_fsr`]), with the largest radius on the screen scaled to the render size
-    /// so it covers what it did at the display size.
-    pub(crate) fn before_fsr(&mut self, render_size: UVec2, output_size: UVec2) {
+    /// ([`ao_before_fsr`]). The largest radius on the screen is a share of the height the
+    /// pass runs at ([`MAX_SCREEN_RADIUS`]), so it covers what it does at the display size.
+    pub(crate) fn before_fsr(&mut self, render_size: UVec2, _output_size: UVec2) {
         self.area = Vec4::new(render_size.x as f32, render_size.y as f32, 1.0, 0.0);
-        self.proj.z *= render_size.y as f32 / output_size.y.max(1) as f32;
     }
 
     fn runs_before_fsr(&self) -> bool {
@@ -679,7 +696,7 @@ pub(crate) fn follow_projection(mut cams: Query<(&Projection, &mut AmbientOcclus
         let y = 1.0 / (p.fov * 0.5).tan();
         let x = y / p.aspect_ratio.max(1e-3);
         let params = Vec4::new(RADIUS, AO_DEBUG.strength(lighting), p.near, FADE_END);
-        let projv = Vec4::new(x, y, MAX_SCREEN_RADIUS, FADE_START);
+        let projv = Vec4::new(x, y, max_screen_radius(), FADE_START);
         let variant = AO_DEBUG.variant_at(lighting, ao.level()).uniform();
         if ao.params != params || ao.proj != projv || ao.variant != variant {
             ao.params = params;

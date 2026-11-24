@@ -22,7 +22,7 @@ struct Ao {
     // distance (game units) beyond which the effect has faded out.
     params: vec4<f32>,
     // x, y: the projection's x and y scale (clip_from_view[0][0], [1][1]); z: the
-    // largest radius on the screen (pixels); w: the distance where the fade starts.
+    // largest radius on the screen (a share of the height); w: the distance where the fade starts.
     proj: vec4<f32>,
     // x, y: the size the depth prepass was drawn at; z, w: the picture's size. They differ
     // under FSR's upscaling (fsr.rs `prepare`), whose depth is expanded to the picture's
@@ -255,7 +255,9 @@ fn occlusion(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let n = normal_at(px, d);
     let radius = ao.params.x;
     let size = vec2<f32>(dims());
-    let on_screen = min(radius * ao.proj.y * 0.5 * size.y / dist, ao.proj.z);
+    // The largest radius on the screen is a share of the picture's height (ssao.rs
+    // `MAX_SCREEN_RADIUS`), so every size shades as far.
+    let on_screen = min(radius * ao.proj.y * 0.5 * size.y / dist, ao.proj.z * size.y);
     if on_screen < 1.0 {
         return texel(1.0, dist);
     }

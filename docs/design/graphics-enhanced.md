@@ -136,7 +136,7 @@ fade and the output.
 The old estimate: from the depth prepass alone (multisampled or not: sample 0 is read): the view-space position
 from the reverse-infinite depth (distance = near / depth), the normal from the neighbouring
 depths on the side with the smaller step, 12 samples on a 3-turn spiral within 64 game units
-(about 0.9 m; at most 80 pixels on the screen), turned per pixel by a 4 × 4 ordered pattern;
+(about 0.9 m; at most 80 pixels of 1080 on the screen, a share of the picture's height since 2026-11-24: it was 80 pixels at any size, half as far at 4K), turned per pixel by a 4 × 4 ordered pattern;
 each sample occludes by its cosine to the normal above 0.12, fading out between half and the
 whole radius. Strength 0.55. Since 2026-11-02 (#1370) this is worked out at half resolution,
 for the top-left pixel of each 2 × 2 block, into a two-channel texture that keeps the pixel's
@@ -179,7 +179,7 @@ direction) the normal N (from the depth, `normal_at` as before: on each axis the
 neighbouring texel with the smaller depth step, so an edge does not bend it) is projected:
 its angle γ from V, atan2(N·t, N·V) with t the slice's tangent, and its length |n_p|. The
 depth is marched `STEPS` = 4 times on each side, from one pixel out to the screen radius
-(64 units, at most 80 pixels as before), the steps closer together near the pixel (squared
+(64 units, at most 80 pixels of 1080 as before), the steps closer together near the pixel (squared
 spacing) where the contact shadows are. Each side keeps the highest horizon as its cosine
 from V, starting at the edge of the normal's hemisphere (γ ± π/2); the horizons are
 clamped to that hemisphere and the cosine-weighted visible arc between them is integrated
@@ -449,7 +449,7 @@ DLSS) [engineering count from `ssao.wesl`, not a measurement]:
 | | Quality | Performance |
 |---|---|---|
 | `occlusion`: the pixel's depth, the normal's 4 neighbours | 5 | 5 |
-| `occlusion`: the horizon march, slices x steps x 2 sides (scattered, up to 80 px away) | 16 | 8 |
+| `occlusion`: the horizon march, slices x steps x 2 sides (scattered, up to 80 px of 1080 away) | 16 | 8 |
 | `denoise`: the pixel's depth, the gradient's 4 neighbours | 5 | 5 |
 | `denoise`: the 4 x 4 occlusion texels (`Rg16Float`) | 16 | 16 |
 | all | 42 | 34 |

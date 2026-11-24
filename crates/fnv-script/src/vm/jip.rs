@@ -122,6 +122,13 @@ pub const JIP_NAMES: [&str; 1] = ["JIP NVSE Plugin"];
 ///   theirs (JIP 57.30 = 57.30, JohnnyGuitar 528 = 5.28, ShowOff 184 ≥ 1.83, kNVSE 37 ≥ 30).
 /// - SUP, JIP PP LN, AnhNVSE, NX and UIO at [`UNOBSERVED_VERSION`]: their pages name no
 ///   version and none was read in the original.
+/// - Improved Console (`"Improved Console"`) at `3.0` [documented: ext-version.md §2a
+///   registered name `"Improved Console"`; observed: Fallout: New Vegas 1.4.0.525 +
+///   xNVSE 6.4.9 + Improved Console v3 (10 official masters), `nvse.log` version `3`,
+///   `GetPluginVersion "Improved Console" == 3`]. It has no script functions of its own:
+///   NVForever provides persistent console locals (`int`/`float`/`ref`/`string_var`/
+///   `array_var`) and transparent expression/statement result printing directly in the
+///   interactive console (`docs/design/console.md`, `docs/spec-notes/ext-version.md` §5).
 ///
 /// UIO has no script functions: the engine reads its `uio\public` lists itself
 /// (`fnv_ui`), which is all the plugin does for a mod that asks whether it is there.
@@ -129,7 +136,7 @@ pub const JIP_NAMES: [&str; 1] = ["JIP NVSE Plugin"];
 /// functions are built, its menus are not, and a mod that finds it goes on to read its
 /// tiles), and the plugins whose registered name no page gives (ITR, One111, ppNVSE,
 /// vheyes-nvse and the smaller ones): ext-version.md §6.
-pub const PLUGINS: [(&str, f64); 15] = [
+pub const PLUGINS: [(&str, f64); 16] = [
     ("JIP NVSE Plugin", JIP_VERSION),
     ("JIP LN NVSE", JIP_VERSION),
     ("ShowOffNVSE Plugin", 184.0),
@@ -145,6 +152,7 @@ pub const PLUGINS: [(&str, f64); 15] = [
     ("AnhNVSE", UNOBSERVED_VERSION),
     ("Extensions for NVSE", UNOBSERVED_VERSION),
     ("UI Organizer Plugin", UNOBSERVED_VERSION),
+    ("Improved Console", 3.0),
 ];
 
 /// The version reported for a plugin the engine builds whose own number is neither

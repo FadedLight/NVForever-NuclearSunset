@@ -219,8 +219,12 @@ impl Game<'_> {
     }
 
     /// `ShowOff:OnPreScriptedActivate` before a scripted `Activate` runs its block or
-    /// default action. Calling reference is `target`; arguments are `(actor, allowed,
-    /// run_on_activate_block)`. Explicit `SetFunctionValue 0` prevents activation.
+    /// default action. Calling reference is `target`; arguments are `(actor,
+    /// run_on_activate_block, allowed)` [observed 2026-11-23: Fallout: New Vegas
+    /// 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, 10 official base masters,
+    /// `so_31_pre_scripted_activate_args_veto` / `so_31b_pre_scripted_activate_noveto`:
+    /// `Activate Player 0` passes `(0, 1)`, `Activate Player 1` passes `(1, 1)`, and
+    /// `SetFunctionValue 0` vetoes pickup; no DLL or source consulted].
     /// See `docs/spec-notes/preactivation-events.md`.
     pub(crate) fn pre_scripted_activation_allows(
         &mut self,
@@ -239,8 +243,8 @@ impl Game<'_> {
             |allowed| {
                 vec![
                     XVal::Ref(actor.0),
-                    XVal::Num(if allowed { 1.0 } else { 0.0 }),
                     XVal::Num(if run_block { 1.0 } else { 0.0 }),
+                    XVal::Num(if allowed { 1.0 } else { 0.0 }),
                 ]
             },
         )

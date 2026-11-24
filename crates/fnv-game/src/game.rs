@@ -1367,6 +1367,10 @@ pub struct Game<'a> {
     compiled_origins: crate::jip_provenance::CompiledOrigins,
     /// Repeated script Console expressions compile once, separately from debug lines.
     console_sources: std::collections::HashMap<String, ConsoleSource<'a>>,
+    /// Persistent local variables declared in interactive console lines
+    /// (`docs/design/console.md`). Lives for this game/loaded save only; cleared on
+    /// new game and not carried across `take_session`/`put_session`.
+    console_locals: ConsoleLocals,
     /// JIP's Script Runner: its files and their units (`crate::script_runner`).
     pub(crate) sr: crate::script_runner::SrState<'a>,
     /// A lambda already made, by its unit, its number in the unit and whose variables it
@@ -2365,11 +2369,34 @@ pub enum ActMode {
     Block,
 }
 
+/// Persistent interactive console locals (`docs/design/console.md`): declared `int`,
+/// `short`, `long`, `float`, `ref`, `string_var`, and `array_var` variables persist across
+/// console lines in the current game and reset on new game or save reload.
+#[derive(Debug, Clone, Default)]
+struct ConsoleLocals {
+    vars: Vec<fnv_script::VarDecl>,
+    ref_vars: std::collections::HashSet<String>,
+    values: BTreeMap<u16, Value>,
+}
+
+/// Result of running one interactive console script line (`Game::run_console_line`,
+/// `docs/design/console.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleLineResult {
+    /// Formatted result of the last value-producing statement or expression, if any
+    /// (`None` for bare declarations such as `int x`).
+    pub value: Option<String>,
+    /// Compiler warnings produced for the line.
+    pub warnings: Vec<String>,
+}
+
 /// Where a running script keeps its locals.
 enum Locals {
     Instance(InstKey),
     /// A result script (stage, dialogue, package): locals live for one run.
     Temp(BTreeMap<u16, Value>),
+    /// Interactive console lines: locals live in `Game::console_locals` across lines.
+    Console,
 }
 
 /// What makes a lambda the same one each time a script makes it (#1088): its unit (by
@@ -2581,6 +2608,7 @@ impl<'a> Game<'a> {
             compiled_paths: std::collections::HashMap::new(),
             compiled_origins: Default::default(),
             console_sources: Default::default(),
+            console_locals: Default::default(),
             combat_style_edits: Default::default(),
             sr: Default::default(),
             lambda_ids: Default::default(),
@@ -2899,6 +2927,7 @@ impl<'a> Game<'a> {
     /// "New Game" menu starts is a separate input, scripts.md §8]; the placed actors that
     /// start as corpses are dead ([`Game::lay_out_corpses`]).
     pub fn new_game(&mut self) {
+        self.clear_console_locals();
         // IsNewGame (`crate::nvse_unlisted2`): until a save is loaded.
         self.other.unlisted2.new_game = true;
         // Placed corpses (Base Health 0) lie dead from the start.
@@ -3429,13 +3458,193 @@ impl<'a> Game<'a> {
         self.run_query_with(src, ctx, false, |_, value| value)
     }
 
+    /// Clear all persistent interactive console locals, freeing any `string_var` and
+    /// `array_var` handles they own in `ExtStore` (`docs/design/console.md`).
+    pub fn clear_console_locals(&mut self) {
+        for var in std::mem::take(&mut self.console_locals.vars) {
+            if let Some(val) = self.console_locals.values.remove(&(var.index as u16)) {
+                match &var.ty {
+                    VarType::Other(t) if t == "string_var" => self.ext.destroy(val.num() as u32),
+                    VarType::Other(t) if t == "array_var" => self.ext.release(&fnv_script::vm::XVal::Array(val.num() as u32)),
+                    _ => {}
+                }
+            }
+        }
+        self.console_locals.ref_vars.clear();
+        self.console_locals.values.clear();
+    }
+
+    /// Whether `name` names a persistent interactive console local (case-insensitive).
+    pub fn has_console_local(&self, name: &str) -> bool {
+        self.console_locals.vars.iter().any(|v| v.name.eq_ignore_ascii_case(name))
+    }
+
+    /// If `name` is a persistent interactive console `ref` local currently holding a
+    /// non-zero FormID, return that FormID.
+    pub fn console_local_ref(&self, name: &str) -> Option<FormId> {
+        if !self.console_locals.ref_vars.contains(&name.to_ascii_lowercase()) {
+            return None;
+        }
+        let var = self.console_locals.vars.iter().find(|v| v.name.eq_ignore_ascii_case(name))?;
+        self.console_locals.values.get(&(var.index as u16)).copied()?.as_form().map(FormId)
+    }
+
+    fn compile_console_candidate(
+        &self,
+        src: &str,
+    ) -> Result<(fnv_script::compile::Compiled, std::collections::HashSet<String>, fnv_script::Decoded, Vec<String>), String> {
+        let (c, ref_vars) = fnv_script::compile::compile_runtime_with_locals(
+            src,
+            &self.data.table,
+            &GameEnv { g: self },
+            &self.console_locals.vars,
+            &self.console_locals.ref_vars,
+        );
+        if let Some(e) = c.errors().next() {
+            return Err(format!("{}: {}", e.kind.replace('_', " "), e.detail));
+        }
+        let warnings = c.diags.iter().map(|d| format!("{}: {}", d.kind.replace('_', " "), d.detail)).collect();
+        let d = fnv_script::decode(&c.bytes, &self.data.table);
+        Ok((c, ref_vars, d, warnings))
+    }
+
+    fn commit_console_locals(&mut self, new_vars: Vec<fnv_script::VarDecl>, new_ref_vars: std::collections::HashSet<String>) {
+        for old in &self.console_locals.vars {
+            let new_var = new_vars.iter().find(|v| v.index == old.index);
+            let old_ref = self.console_locals.ref_vars.contains(&old.name.to_ascii_lowercase());
+            let new_ref = new_var.is_some_and(|v| new_ref_vars.contains(&v.name.to_ascii_lowercase()));
+            if new_var.is_none_or(|v| v.ty != old.ty || new_ref != old_ref) {
+                if let Some(val) = self.console_locals.values.remove(&(old.index as u16)) {
+                    match &old.ty {
+                        VarType::Other(t) if t == "string_var" => self.ext.destroy(val.num() as u32),
+                        VarType::Other(t) if t == "array_var" => self.ext.release(&fnv_script::vm::XVal::Array(val.num() as u32)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.console_locals.vars = new_vars;
+        self.console_locals.ref_vars = new_ref_vars;
+    }
+
+    fn leak_console_unit(&self, src: &str, c: fnv_script::compile::Compiled, d: fnv_script::Decoded) -> &'a Compiled {
+        let unit = fnv_script::ScriptUnit {
+            plugin: "console".into(),
+            owner: fnv_script::UnitOwner::Other { sig: "CONS".into(), form: 0, ordinal: 0 },
+            kind: fnv_script::ScriptKind::Object,
+            header: Default::default(),
+            variables: c.variables,
+            refs: c.refs,
+            has_scda: true,
+            bytes: c.bytes,
+            source: Some(src.to_string()),
+        };
+        Box::leak(Box::new(Compiled::new(unit, d.program, d.report.raw_total())))
+    }
+
+    fn run_console_unit(&mut self, unit: &'a Compiled, ctx: RunCtx) -> Result<Option<String>, String> {
+        let data = self.data;
+        let mut opts = self.opts();
+        opts.strict = true;
+        self.depth += 1;
+        self.open_run();
+        let mut ex = Exec { game: self, unit, locals: Locals::Console, ctx, seconds: None };
+        let result = Vm::new(&data.table, &mut ex, opts).run_capturing_last(&unit.program.top).map_err(|e| e.to_string());
+        self.close_run();
+        self.depth -= 1;
+        if self.depth == 0 {
+            self.run_deferred_deaths();
+        }
+        let (_, value) = result?;
+        let shown = value.as_ref().map(|v| crate::functions::console::expression_result(self, v));
+        if let Some(v) = value {
+            self.ext.hand_over(&v);
+            self.ext.sweep();
+        }
+        Ok(shown)
+    }
+
+    /// Compile and run one interactive console line with persistent console locals and
+    /// transparent expression/statement result printing (`docs/design/console.md`).
+    ///
+    /// Compile-mode selection happens strictly before execution so a failing side effect
+    /// is never retried. Bare declarations (`int x`, `array_var a`, ...) persist their
+    /// slots with `value: None`; initializers, assignments, extender/vanilla calls, and
+    /// bare expressions (`5 + 5`, `x`, `GetModelPath TestBox`, `ar_List 1, 9`,
+    /// `player.GetAV Health + 10`) return their formatted result value before temporary
+    /// arrays are swept.
+    pub fn run_console_line(&mut self, line: &str, ctx: RunCtx) -> Result<ConsoleLineResult, String> {
+        use fnv_script::compile::{lex, parse};
+        use fnv_script::ir::XExpr;
+
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(ConsoleLineResult { value: None, warnings: Vec::new() });
+        }
+        let is_single_call_or_expr = if line.contains(['\r', '\n']) {
+            false
+        } else {
+            let mut long = Vec::new();
+            let ls = lex::lines(line, &mut long);
+            ls.len() == 1 && matches!(parse::statement(&ls[0]), Ok(s) if matches!(s.kw, parse::Kw::Call(_)))
+        };
+
+        let (chosen_src, c, ref_vars, d, warnings) = if !is_single_call_or_expr {
+            let (c, ref_vars, d, warnings) = self.compile_console_candidate(line)?;
+            (line.to_string(), c, ref_vars, d, warnings)
+        } else {
+            let expr_src = format!("eval ({line})");
+            let expr_cand = self.compile_console_candidate(&expr_src);
+            let expr_is_non_call = expr_cand.as_ref().is_ok_and(|(_, _, d, _)| {
+                matches!(
+                    d.program.top.as_slice(),
+                    [Stmt::Eval { expr } | Stmt::Let { expr }] if !matches!(expr, XExpr::Call { .. })
+                )
+            });
+            if expr_is_non_call {
+                let (c, ref_vars, d, warnings) = expr_cand.unwrap();
+                (expr_src, c, ref_vars, d, warnings)
+            } else {
+                let stmt_cand = self.compile_console_candidate(line);
+                let stmt_clean = stmt_cand.as_ref().is_ok_and(|(c, _, _, _)| {
+                    !c.diags.iter().any(|d| matches!(d.kind, "surplus_arguments" | "rest_of_line_dropped"))
+                });
+                match (stmt_cand, expr_cand) {
+                    (Ok((c, rv, d, w)), _) if stmt_clean => (line.to_string(), c, rv, d, w),
+                    (_, Ok((c, rv, d, w))) => (expr_src, c, rv, d, w),
+                    (Ok((c, rv, d, w)), Err(_)) => (line.to_string(), c, rv, d, w),
+                    (Err(se), Err(ee)) => {
+                        return Err(if se.starts_with("unknown function:") && crate::functions::console::has_expression_operator(line) {
+                            ee
+                        } else {
+                            se
+                        });
+                    }
+                }
+            }
+        };
+
+        let new_vars = c.variables.clone();
+        let unit = self.leak_console_unit(&chosen_src, c, d);
+        self.commit_console_locals(new_vars, ref_vars);
+        let value = self.run_console_unit(unit, ctx)?;
+        Ok(ConsoleLineResult { value, warnings })
+    }
+
     /// Print an interactive expression before the VM sweeps temporary arrays.
+    /// Reads and updates persistent interactive console locals (`docs/design/console.md`).
     pub fn eval_console_expression(&mut self, expr: &str, ctx: RunCtx) -> Result<String, String> {
-        if expr.trim().is_empty() || expr.contains(['\r', '\n']) {
+        let expr = expr.trim();
+        if expr.is_empty() || expr.contains(['\r', '\n']) {
             return Err("eval requires one script expression".into());
         }
-        let src = format!("Begin Function {{}}\nSetFunctionValue ({expr})\nEnd");
-        self.run_query_with(&src, ctx, true, |g, value| crate::functions::console::expression_result(g, &value))
+        let src = format!("eval ({expr})");
+        let (c, ref_vars, d, _warnings) = self.compile_console_candidate(&src)?;
+        let new_vars = c.variables.clone();
+        let unit = self.leak_console_unit(&src, c, d);
+        self.commit_console_locals(new_vars, ref_vars);
+        let value = self.run_console_unit(unit, ctx)?;
+        Ok(value.unwrap_or_else(|| "0".into()))
     }
 
     fn run_query_with<T>(
@@ -6706,6 +6915,11 @@ impl<'a> Game<'a> {
         // What "the used item's level" counts is not documented; 0 keeps the only
         // conditions on it (the ground pick-up idles, `== 0`) passing, as they did before
         // the index was named [hypothesis: a level of 0 is the ground, the idles' case].
+        // IsHorseStolen: New Vegas has no horses, so none is stolen [hypothesis: a check
+        // left from the engine's earlier game; the name is xEdit's, #3617].
+        if c.function == cond::IS_HORSE_STOLEN {
+            return 0.0;
+        }
         if c.function == cond::GET_USED_ITEM_LEVEL {
             return 0.0;
         }
@@ -7210,7 +7424,7 @@ impl Exec<'_, '_> {
     fn inst_key(&self) -> Option<InstKey> {
         match self.locals {
             Locals::Instance(k) => Some(k),
-            Locals::Temp(_) => None,
+            Locals::Temp(_) | Locals::Console => None,
         }
     }
 
@@ -7298,6 +7512,7 @@ impl Host for Exec<'_, '_> {
             }
             (None, VarSlot::Local { index, .. }) => Ok(match &self.locals {
                 Locals::Temp(m) => m.get(&index).copied().unwrap_or_default(),
+                Locals::Console => self.game.console_locals.values.get(&index).copied().unwrap_or_default(),
                 Locals::Instance(k) => self.game.var(*k, index),
             }),
             (Some(r), VarSlot::Local { index, .. }) => {
@@ -7325,6 +7540,10 @@ impl Host for Exec<'_, '_> {
                 Locals::Temp(m) => {
                     let int = matches!(self.unit.var_type(index), Some(VarType::Int)) || (self.unit.var_type(index).is_none() && short(letter));
                     m.insert(index, if int { Value::Num(to_int_storage(value.num()) as f64) } else { value });
+                }
+                Locals::Console => {
+                    let int = matches!(self.unit.var_type(index), Some(VarType::Int)) || (self.unit.var_type(index).is_none() && short(letter));
+                    self.game.console_locals.values.insert(index, if int { Value::Num(to_int_storage(value.num()) as f64) } else { value });
                 }
                 Locals::Instance(k) => {
                     let k = *k;
@@ -7524,9 +7743,12 @@ impl Host for Exec<'_, '_> {
         if let Some(&id) = self.game.lambda_ids.get(&key) {
             // Made again by a maker with no instance: it reads that run's variables
             // [hypothesis, script-compiler.md §9 Lambdas].
-            if let (Locals::Temp(m), Some(&index)) = (&self.locals, self.game.lambda_slots.get(&id)) {
-                let d = &mut self.game.lambdas[index];
-                d.captured = Some(m.clone());
+            if let Some(&index) = self.game.lambda_slots.get(&id) {
+                match &self.locals {
+                    Locals::Temp(m) => self.game.lambdas[index].captured = Some(m.clone()),
+                    Locals::Console => self.game.lambdas[index].captured = Some(self.game.console_locals.values.clone()),
+                    Locals::Instance(_) => {}
+                }
             }
             return Ok(fnv_script::vm::XVal::Ref(id));
         }
@@ -7534,6 +7756,7 @@ impl Host for Exec<'_, '_> {
         self.game.next_lambda = id + 1;
         let captured = match &self.locals {
             Locals::Temp(m) => Some(m.clone()),
+            Locals::Console => Some(self.game.console_locals.values.clone()),
             Locals::Instance(_) => None,
         };
         self.game.lambda_slots.insert(id, self.game.lambdas.len());
@@ -7577,12 +7800,28 @@ impl Host for Exec<'_, '_> {
                     _ => None,
                 }
             }
+            (fnv_script::vm::XVal::Ref(id), Locals::Console) if self.game.lambda_slots.contains_key(id) => {
+                let i = self.game.lambda_slots[id];
+                let unit = self.unit as *const Compiled;
+                let snap = self.game.console_locals.values.clone();
+                match self.game.lambdas.get_mut(i) {
+                    Some(d) if d.inst.is_none() && d.unit.is_some_and(|u| std::ptr::eq(u, unit)) => {
+                        d.captured = Some(snap);
+                        Some(i)
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         };
         let r = self.game.run_function_with_seconds(f, on, args, caller, (ctx, self.seconds));
-        if let (Some(i), Locals::Temp(m)) = (mine, &mut self.locals) {
+        if let Some(i) = mine {
             if let Some(c) = self.game.lambdas.get(i).and_then(|d| d.captured.clone()) {
-                *m = c;
+                match &mut self.locals {
+                    Locals::Temp(m) => *m = c,
+                    Locals::Console => self.game.console_locals.values = c,
+                    Locals::Instance(_) => {}
+                }
             }
         }
         r
@@ -7712,7 +7951,7 @@ impl Host for Exec<'_, '_> {
             (_, VarSlot::Global { global }) => VarPlace::Global(self.global_form(global).ok()?),
             (None, VarSlot::Local { index, .. }) => match &self.locals {
                 Locals::Instance(k) => VarPlace::Var(*k, index),
-                Locals::Temp(_) => return None,
+                Locals::Temp(_) | Locals::Console => return None,
             },
             (Some(r), VarSlot::Local { index, .. }) => VarPlace::Var(self.remote(r).ok()?.0, index),
         };

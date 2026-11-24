@@ -2024,6 +2024,32 @@ fn set_on_play_group_event_handler_anim_group_arg_forms() {
     assert!(fourth_args[9].contains('('), "zero-arg function call must compile as call, got {}", fourth_args[9]);
 }
 
+/// Interactive console sessions compile lines against persistent local variables:
+/// 1-based indices and `ref`-ness carry across lines, no spurious `variable_added`
+/// warning is emitted, and re-declaring a `ref` as another type clears its `ref`-ness.
+#[test]
+fn compile_runtime_with_locals_preserves_slots_and_ref_vars() {
+    use std::collections::HashSet;
+    let t = table();
+    let (c1, refs1) = fnv_script::compile::compile_runtime_with_locals("ref r = player\nint n = 5", &t, &World, &[], &HashSet::new());
+    assert_eq!(c1.errors().count(), 0, "{:?}", c1.diags);
+    assert!(c1.diags.iter().all(|d| d.kind != "variable_added"), "{:?}", c1.diags);
+    assert!(refs1.contains("r"));
+    let r_idx = c1.variables.iter().find(|v| v.name == "r").unwrap().index;
+    let n_idx = c1.variables.iter().find(|v| v.name == "n").unwrap().index;
+
+    let (c2, refs2) = fnv_script::compile::compile_runtime_with_locals("eval (r.GetActorValue Health + n)", &t, &World, &c1.variables, &refs1);
+    assert_eq!(c2.errors().count(), 0, "{:?}", c2.diags);
+    assert_eq!(c2.variables.iter().find(|v| v.name == "r").unwrap().index, r_idx);
+    assert_eq!(c2.variables.iter().find(|v| v.name == "n").unwrap().index, n_idx);
+    assert!(refs2.contains("r"));
+
+    let (c3, refs3) = fnv_script::compile::compile_runtime_with_locals("float r = 1.5", &t, &World, &c2.variables, &refs2);
+    assert_eq!(c3.errors().count(), 0, "{:?}", c3.diags);
+    assert_eq!(c3.variables.iter().find(|v| v.name == "r").unwrap().index, r_idx);
+    assert!(!refs3.contains("r"), "re-declaring ref as float clears ref-ness");
+}
+
 /// Compound bitwise, power, modulo, and shift assignments work in `let`, bare Let-macro,
 /// inline declaration, quest-variable, array-element, and NVSEScript forms, including
 /// nested calls shifted before bitwise-OR (`iINITemp |= (Floor (Clamp ...)) << 1`).

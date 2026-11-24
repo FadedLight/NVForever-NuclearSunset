@@ -185,6 +185,7 @@ mod em_clearance;
 mod followers_and_detecting_actors;
 mod form_override_queries;
 mod fos_convert;
+mod improved_console;
 mod is_in_air;
 mod is_in_kill_cam;
 mod no_unequip;

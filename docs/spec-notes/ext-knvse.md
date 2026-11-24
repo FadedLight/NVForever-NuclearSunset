@@ -82,6 +82,14 @@ game's frames were slow); the row keeps whole seconds.
 
 Follow-ups (engine side, slice 2 of knvse-anim.md):
 - **Wired [design]:** `AllowAttack` player attack-cycle cooldown, swing, and flinch
-  release (`nvf-play` `combat.rs::fire` consumes `Game::take_allow_attack`).
-- **Remaining:** weights, offsets, global time, additive poses, text keys, and sequence
-  headers (`Game::set_sequence_info`).
+  release (`nvf-play` `combat.rs::fire` consumes `Game::take_allow_attack`); for player
+  playback in `Animator`, script-sequence weights (`SetAnimWeight`), additive poses
+  (`SetAnimAdditive`, both bind-pose delta and reference-clip delta), blend transition
+  durations/views/priorities/`timeSync` clock phase alignment (`CrossFadeAnims`,
+  `BlendToAnim`, `BlendToAnimFromPose`, aligning to the named playing sequence's
+  normalized phase or clock time when active and still running the transition with
+  `destFrame` / default clock when inactive), global/per-sequence clocks
+  (`SetGlobalAnimTime`, `SetAnimCurrentTime`), and clip metadata publication
+  (`Game::set_sequence_info` from `script_sequences.rs` and `anim_state.rs`).
+- **Remaining:** NPC layered sequences and runtime text-key triggers (`AddAnimTextKey` /
+  `SetAnimTextKeys`).

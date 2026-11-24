@@ -184,6 +184,12 @@ pub const IS_GREETING_PLAYER: u16 = 123;
 /// (0x0006123C), `== 0` [observed: #3614].
 pub const GET_USED_ITEM_LEVEL: u16 = 258;
 
+/// IsHorseStolen's condition index, without parameters [documented: xEdit
+/// wbCTDAFunctions, "Index: 282; Name: 'IsHorseStolen'"]. No page in the script
+/// catalogue or the GECK wiki export; a mod's CTDA reached it on a player's install as
+/// `0x111A` (#3617).
+pub const IS_HORSE_STOLEN: u16 = 282;
+
 /// Whether condition index `function` is answered without a registered script function
 /// (`Game::condition_value`): IsLastIdlePlayed, the VATS area functions, the three
 /// extender aliases below, IsGreetingPlayer and GetUsedItemLevel. `fnvtool script stubs`
@@ -191,7 +197,7 @@ pub const GET_USED_ITEM_LEVEL: u16 = 258;
 pub fn answered_without_opcode(function: u16) -> bool {
     function == crate::idles::IS_LAST_IDLE_PLAYED
         || crate::vats::is_area_function(function)
-        || matches!(function, IS_GREETING_PLAYER | GET_USED_ITEM_LEVEL | IS_PLAYER_SWIMMING | GET_PERK_RANK | GET_PC_USING_IRON_SIGHTS)
+        || matches!(function, IS_GREETING_PLAYER | GET_USED_ITEM_LEVEL | IS_HORSE_STOLEN | IS_PLAYER_SWIMMING | GET_PERK_RANK | GET_PC_USING_IRON_SIGHTS)
 }
 
 /// Condition indices are the existing observed command opcodes minus 0x1000.
@@ -377,6 +383,8 @@ mod condition_only_tests {
         assert!(answered_without_opcode(crate::idles::IS_LAST_IDLE_PLAYED));
         assert_eq!(0x1000 + IS_GREETING_PLAYER, 0x107B);
         assert_eq!(0x1000 + GET_USED_ITEM_LEVEL, 0x1102);
+        assert!(answered_without_opcode(IS_HORSE_STOLEN));
+        assert_eq!(0x1000 + IS_HORSE_STOLEN, 0x111A);
         assert!(crate::functions::lookup(0x1000 + IS_GREETING_PLAYER).is_none());
         // GetDisposition (0x104C) is a registered function, not one of these.
         assert!(!answered_without_opcode(0x4C));

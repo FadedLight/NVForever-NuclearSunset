@@ -406,11 +406,41 @@ pub struct Vm<'t, 'h> {
     /// Skips so far, and how many of them a statement was told for ([`Host::skipped_in`]).
     skips: u64,
     skips_told: u64,
+    /// When set by [`Vm::run_capturing_last`], retain the last value-producing statement's
+    /// result across the per-statement `ExtStore::sweep` so interactive console lines can
+    /// format temporary arrays before cleanup.
+    capture_last: bool,
+    last_value: Option<XVal>,
 }
 
 impl<'t, 'h> Vm<'t, 'h> {
     pub fn new(table: &'t FunctionTable, host: &'h mut dyn Host, opts: RunOpts) -> Self {
-        Vm { table, host, opts, steps: 0, wait: None, no_wait: 0, skips: 0, skips_told: 0 }
+        Vm {
+            table,
+            host,
+            opts,
+            steps: 0,
+            wait: None,
+            no_wait: 0,
+            skips: 0,
+            skips_told: 0,
+            capture_last: false,
+            last_value: None,
+        }
+    }
+
+    fn record_last(&mut self, value: XVal) {
+        if !self.capture_last {
+            return;
+        }
+        if let Some(ext) = self.host.ext() {
+            ext.retain(&value);
+            if let Some(old) = self.last_value.replace(value) {
+                ext.release(&old);
+            }
+        } else {
+            self.last_value = Some(value);
+        }
     }
 
     fn skip(&mut self, e: &VmError) {
@@ -478,6 +508,27 @@ impl<'t, 'h> Vm<'t, 'h> {
     /// Run a statement list (a block body, or the top of a result script).
     pub fn run(&mut self, stmts: &[Stmt]) -> Result<Exit, VmError> {
         Ok(Self::exit(self.list(stmts, false)?))
+    }
+
+    /// Run a statement list and return the value produced by the last value-producing
+    /// statement (`Set`, `Call`, `Let`, `Eval`). If that value is an array, it stays
+    /// temporarily retained in `ExtStore` so the caller can format it before calling
+    /// `hand_over` and `sweep`.
+    pub fn run_capturing_last(&mut self, stmts: &[Stmt]) -> Result<(Exit, Option<XVal>), VmError> {
+        let prev_capture = std::mem::replace(&mut self.capture_last, true);
+        let prev_value = self.last_value.take();
+        let res = self.list(stmts, false);
+        self.capture_last = prev_capture;
+        let captured = std::mem::replace(&mut self.last_value, prev_value);
+        match res {
+            Ok(flow) => Ok((Self::exit(flow), captured)),
+            Err(e) => {
+                if let (Some(v), Some(ext)) = (captured, self.host.ext()) {
+                    ext.release(&v);
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Evaluate one expression (conditions, tests).
@@ -585,6 +636,10 @@ impl<'t, 'h> Vm<'t, 'h> {
                         return Ok(Flow::Return);
                     }
                     self.host.set_var(target, v).map_err(VmError::Host)?;
+                    if self.capture_last {
+                        let stored = self.host.get_var(target).unwrap_or(v);
+                        self.record_last(XVal::from_value(stored));
+                    }
                 }
                 Stmt::If { arms, otherwise } => {
                     let mut taken = None;
@@ -621,14 +676,21 @@ impl<'t, 'h> Vm<'t, 'h> {
                 }
                 Stmt::Return => return Ok(Flow::Return),
                 Stmt::Call { call } => {
-                    self.call(call)?;
+                    let v = self.call(call)?;
+                    if self.capture_last {
+                        self.record_last(XVal::from_value(v));
+                    }
                 }
                 // A failing extended statement reports its error and the script carries on
                 // with the next line [documented: Let; NVSE Error]; strict runs (tests)
                 // stop.
                 Stmt::Let { expr } | Stmt::Eval { expr } => {
                     match self.xeval(expr) {
-                        Ok(_) => {}
+                        Ok(v) => {
+                            if self.capture_last {
+                                self.record_last(v);
+                            }
+                        }
                         Err(e @ (VmError::Type(_) | VmError::MissingElement(_) | VmError::NotBuilt(_) | VmError::Expression(_) | VmError::Host(_))) if !self.opts.strict => {
                             self.skip(&e)
                         }

@@ -30,6 +30,7 @@ mod native_crash;
 mod exit_watch;
 #[cfg(target_os = "linux")]
 mod native_crash_unix;
+mod camera_overlay;
 mod nif_mirror;
 mod nif_attachments;
 mod extra_camera;
@@ -81,6 +82,8 @@ mod flashlight;
 mod eye_adapt;
 mod fog;
 mod haze;
+mod hdr;
+mod hdr_calibrate;
 mod aerial;
 mod fly;
 mod foot_ik;
@@ -220,6 +223,7 @@ mod effect_shaders;
 mod vats_highlight;
 mod tree;
 mod treelod;
+mod ui_project;
 mod river_flow;
 mod underwater;
 mod underwater_caustics;
@@ -1477,8 +1481,13 @@ fn main() -> AppExit {
             Some((p, String::from_utf8_lossy(&bytes).into_owned()))
         })
         .collect();
+    let hnvse_merge_region_lists = game
+        .vfs
+        .read("nvse\\plugins\\hnvse.ini")
+        .and_then(Result::ok)
+        .is_some_and(|bytes| fnv_world::audio::parse_hnvse_merge_region_lists(&String::from_utf8_lossy(&bytes)));
     let t0 = std::time::Instant::now();
-    let mut world = match WorldData::open(&args.esm_schema, opened, &args.world, bos_sources) {
+    let mut world = match WorldData::open(&args.esm_schema, opened, &args.world, bos_sources, hnvse_merge_region_lists) {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
@@ -1915,7 +1924,7 @@ fn main() -> AppExit {
                 ..default()
             }),
     )
-    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin))
+    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, hdr::HdrPlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)
@@ -2247,6 +2256,8 @@ fn main() -> AppExit {
             app.add_plugins(dialogue_look::DialogueLookPlugin);
             // AttachUIComponent's rects over their model nodes (ui_attach.rs, #1835).
             app.add_plugins(ui_attach::UiAttachPlugin);
+            // ProjectUITile's off-screen textures bound onto target model surfaces (ui_project.rs, #2418).
+            app.add_plugins(ui_project::UiProjectPlugin);
             // Who says a line to someone turns to them (speech_look.rs).
             app.add_plugins(speech_look::SpeechLookPlugin);
             // Who perceives whom (detection.rs): the drawn actors and the player.
@@ -2316,7 +2327,7 @@ fn main() -> AppExit {
         app.init_resource::<anim_objects::AnimObjects>()
             .add_systems(Startup, anim_objects::read)
             .add_systems(Update, anim_objects::hold.after(idles::drive).before(advance_animations))
-            .add_systems(Update, idles::play_npc_sequences.after(idles::drive))
+            .add_systems(Update, idles::play_npc_sequences.after(idles::drive).before(locomotion::drive))
             .add_systems(Last, anim_objects::report);
     }
     app.init_resource::<idles::PlayerIdles>();
@@ -2659,9 +2670,9 @@ fn setup(mut commands: Commands, start: Res<StartPose>) {
         // Water reads the depth of what lies behind it (water.rs).
         bevy::core_pipeline::prepass::DepthPrepass,
         // The world, the water (which the reflection camera leaves out), the player's
-        // first-person arms and seen body, and the impact decals (which need this
-        // camera's prepass).
-        bevy::camera::visibility::RenderLayers::from_layers(&[0, reflection::WATER_LAYER, sky::ARMS_LAYER, sky::BODY_LAYER, decals::DECAL_LAYER]),
+        // first-person arms and seen body, the impact decals (which need this
+        // camera's prepass), and JohnnyGuitar PreIS 3D camera overlays.
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, reflection::WATER_LAYER, sky::ARMS_LAYER, sky::BODY_LAYER, decals::DECAL_LAYER, camera_overlay::OVERLAY_PRE_IS_LAYER]),
     )).id();
     if start.play {
         commands.entity(cam).insert(nvf_play::PlayerCamera);

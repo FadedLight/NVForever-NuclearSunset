@@ -953,7 +953,8 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
 /// 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-24, `GSDocMitchellHouse`
 /// (`0x00103DF9`), 10 official base masters, `w4d_38_showoff_perk_stagger_fade`
 /// (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
-/// `json(std=42,42,42,jaxn=0/1,tao=0/1)`; no DLL or source consulted]; JAXN (1) and
+/// `json(42,42,42,0/1,0/1)` (standard JSON across modes 0/1/2, JAXN in modes 0/1,
+/// TaoConfig in modes 0/2); no DLL or source consulted]; JAXN (1) and
 /// TaoConfig (2) syntax extensions are [not built], so such files fail to parse.
 fn json_file(g: &Game, path: &str, use_cache: bool) -> Option<serde_json::Value> {
     if use_cache {

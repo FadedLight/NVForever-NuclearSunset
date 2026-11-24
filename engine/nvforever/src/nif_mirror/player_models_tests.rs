@@ -101,13 +101,16 @@ fn real_player_body_mirror_dispatch_and_held_edits_keep_rigs_separate() {
     assert_eq!(node(&mut app, 1.0).info.unwrap().alpha, Some([4845.0, 128.0]));
     call(&mut app, "setnifblockscale", &[XVal::Str("SharedBone".into()), XVal::Num(2.0), XVal::Num(2.0)]);
     app.world_mut().resource_mut::<nvf_play::control::PlayerControl>().pov = nvf_play::control::Pov::Third;
+    app.world_mut().resource_mut::<TestGame>().0.set_first_person(false);
     app.update();
     assert_eq!(app.world().get::<Transform>(first_bone).unwrap().scale, Vec3::splat(2.0));
     assert_eq!(app.world().get::<Transform>(third_bone).unwrap().scale, Vec3::ONE);
-    assert_eq!(scale(&mut app, None), XVal::Num(1.0), "old omitted default remains third person");
+    assert_eq!(scale(&mut app, None), XVal::Num(1.0), "omitted pcModel follows 3rd-person camera");
     app.world_mut().resource_mut::<nvf_play::control::PlayerControl>().pov = nvf_play::control::Pov::First;
+    app.world_mut().resource_mut::<TestGame>().0.set_first_person(true);
     app.update();
-    assert_eq!(scale(&mut app, None), XVal::Num(1.0));
+    assert_eq!(scale(&mut app, None), XVal::Num(2.0), "omitted pcModel follows 1st-person camera");
+    assert_eq!(scale(&mut app, Some(1.0)), XVal::Num(1.0));
     assert_eq!(scale(&mut app, Some(2.0)), XVal::Num(2.0));
     app.world_mut().resource_mut::<TestGame>().0.scene.push_edit(SceneEdit::ForModel {
         view: ModelView::FirstPerson, edit: Box::new(SceneEdit::Material {
@@ -426,7 +429,9 @@ fn cold_transform_writes_survive_frames_before_the_first_actor_is_drawn() {
     let transform = app.world().get::<Transform>(actor.nodes[1]).unwrap();
     assert_eq!(transform.translation, Vec3::new(4.0, 5.0, 6.0));
     assert_eq!(transform.scale, Vec3::splat(5.0));
-    for (axis, expected) in [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::NEG_X), (Vec3::Z, Vec3::Z)] {
+    // Z 90 in the scripts' angles is drawn with that rotation's transpose
+    // (`fnv_game::nif_blocks::SceneNode::rotation`): X goes to -Y.
+    for (axis, expected) in [(Vec3::X, Vec3::NEG_Y), (Vec3::Y, Vec3::X), (Vec3::Z, Vec3::Z)] {
         let actual = transform.rotation.mul_vec3(axis);
         assert!(actual.abs_diff_eq(expected, 1e-5),
             "quarter-turn of {axis:?}: {actual:?}, expected {expected:?}; rotation {:?}", transform.rotation);
@@ -822,7 +827,7 @@ fn authored_shape(app: &mut App, shape: Entity) -> Handle<NifMaterial> {
     use nvf_assets::authored::{LegacyLook, AUTHORED_MARK};
     let mut m = nvf_assets::nif_material::nif_material(StandardMaterial { reflectance: 0.5, ..default() });
     m.extension.emissive_rule.w = AUTHORED_MARK;
-    m.extension.legacy = Some(LegacyLook { normal: None, specular: None, roughness: 0.6, reflectance: 2.0, metallic: 0.0, tangents: true, specular_tint: Color::WHITE, scripted_tint: None });
+    m.extension.legacy = Some(LegacyLook { normal: None, specular: None, roughness: 0.6, reflectance: 2.0, metallic: 0.0, tangents: true, specular_tint: Color::WHITE, parallax: Default::default(), scripted_tint: None });
     let h = app.world_mut().resource_mut::<Assets<NifMaterial>>().add(m);
     app.world_mut().entity_mut(shape).insert(MeshMaterial3d(h.clone()));
     h

@@ -254,10 +254,29 @@ fn warm_up(params: WarmUp) {
     info!("pipboy: warm-up start (covered={covered}, device={device}, asked={}, frame={})", gate.asked(), gate.frames());
 }
 
-/// [design: #1803] A ready PSO is not a retained phase entry. Showing the rig again
-/// must refresh the main bins with its current mesh slabs and material bindings.
-fn requeue_raise(pip: Res<PipBoy>, mut meshes: Query<&mut Mesh3d, With<crate::pipboy_ready::PipBoyShape>>) {
-    if pip.warming.is_none() && pip.on_arm() && pip.phase == Phase::Raising {
+/// [design: #1803, #2862] A ready PSO is not a retained phase entry. Showing the rig
+/// again must refresh the main bins with its current mesh slabs and material bindings
+/// throughout the raise and once on the transition into `Phase::Up` (covering both
+/// shapes that only enter the frustum near the top of a holstered/empty-hands raise
+/// and warm `Frame::Screen` -> `Frame::Device` switches).
+fn requeue_raise(
+    pip: Res<PipBoy>,
+    mut meshes: Query<&mut Mesh3d, With<crate::pipboy_ready::PipBoyShape>>,
+    mut up_refreshed: Local<bool>,
+) {
+    let active = pip.warming.is_none() && pip.on_arm();
+    let refresh = if active && pip.phase == Phase::Raising {
+        *up_refreshed = false;
+        true
+    } else if active && pip.phase == Phase::Up {
+        let first_up = !*up_refreshed;
+        *up_refreshed = true;
+        first_up
+    } else {
+        *up_refreshed = false;
+        false
+    };
+    if refresh {
         for mut mesh in &mut meshes {
             mesh.set_changed();
         }
@@ -864,7 +883,7 @@ mod tests {
         own.base.occlusion_texture = Some(orm);
         own.base.depth_map = Some(images.add(Image::default()));
         own.extension.emissive_rule.w = nvf_assets::authored::AUTHORED_MARK;
-        own.extension.legacy = Some(nvf_assets::authored::LegacyLook { normal: None, specular: None, roughness: 1.0, reflectance: 0.3, metallic: 0.0, tangents: false, specular_tint: Color::WHITE, scripted_tint: None });
+        own.extension.legacy = Some(nvf_assets::authored::LegacyLook { normal: None, specular: None, roughness: 1.0, reflectance: 0.3, metallic: 0.0, tangents: false, specular_tint: Color::WHITE, parallax: Default::default(), scripted_tint: None });
         for m in [glare_material(&own), menus_material(&own, Handle::default())] {
             assert!(m.base.metallic_roughness_texture.is_none() && m.base.occlusion_texture.is_none() && m.base.depth_map.is_none());
             assert!(!nvf_assets::authored::is_authored(&m) && m.extension.legacy.is_none());
@@ -1179,5 +1198,55 @@ mod tests {
         app.world_mut().resource_mut::<PipBoy>().phase = nvf_play::pipboy::Phase::Down;
         frame(&mut app);
         assert_eq!(lit(&app, glows), [true, true, true], "down, all glow");
+    }
+
+    #[test]
+    fn requeue_raise_refreshes_while_raising_and_once_when_entering_up() {
+        #[derive(Resource, Default)]
+        struct Refreshed(bool);
+        let mut app = App::new();
+        app.init_resource::<PipBoy>()
+            .init_resource::<Refreshed>()
+            .add_systems(
+                Update,
+                (
+                    requeue_raise,
+                    |q: Query<Ref<Mesh3d>, With<crate::pipboy_ready::PipBoyShape>>, mut r: ResMut<Refreshed>| {
+                        r.0 = q.single().is_ok_and(|m| m.is_changed());
+                    },
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn((Mesh3d::default(), crate::pipboy_ready::PipBoyShape));
+        let refreshed = |app: &App| app.world().resource::<Refreshed>().0;
+        // First frame marks spawned component as added/changed; settle baseline.
+        app.update();
+
+        // Down: no refresh.
+        app.update();
+        assert!(!refreshed(&app));
+
+        // Raising: refreshes every frame.
+        app.world_mut().resource_mut::<PipBoy>().phase = Phase::Raising;
+        app.update();
+        assert!(refreshed(&app));
+
+        // First Up frame: refreshes once so meshes newly inside the frustum or switched
+        // from Frame::Screen -> Frame::Device enter the main bins.
+        app.world_mut().resource_mut::<PipBoy>().phase = Phase::Up;
+        app.update();
+        assert!(refreshed(&app));
+
+        // Subsequent Up frames: no per-frame churn.
+        app.update();
+        assert!(!refreshed(&app));
+
+        // Switching to Screen and back to warm Device (direct Phase::Up) re-arms the single refresh.
+        app.world_mut().resource_mut::<PipBoy>().frame = Frame::Screen;
+        app.update();
+        assert!(!refreshed(&app));
+        app.world_mut().resource_mut::<PipBoy>().frame = Frame::Device;
+        app.update();
+        assert!(refreshed(&app));
     }
 }

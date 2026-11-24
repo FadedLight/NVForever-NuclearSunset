@@ -7,7 +7,7 @@ use fnv_script::vm::{ArgValue, Value, XVal};
 use fnv_sim::FormId;
 
 pub(crate) fn handles(name: &str) -> bool {
-    ["AdvancePCLevel", "AdvLevel", "ModPCAttribute", "RemoveReputationExact", "ShowNameMenu", "KillAllActors", "KillAll"]
+    ["AdvancePCLevel", "AdvLevel", "ModPCAttribute", "RemoveReputationExact", "SetPCExpelled", "ShowNameMenu", "KillAllActors", "KillAll"]
         .iter()
         .any(|n| n.eq_ignore_ascii_case(name))
 }
@@ -16,17 +16,21 @@ pub(crate) fn call(g: &mut Game, ctx: &Ctx, receiver: Option<Value>, name: &str,
     let (min_args, max_args) = match name {
         "advancepclevel" | "advlevel" | "shownamemenu" => (0, 0),
         "killallactors" | "killall" => (0, 1),
-        "modpcattribute" => (2, 2),
+        "modpcattribute" | "setpcexpelled" => (2, 2),
         "removereputationexact" => (3, 3),
         _ => return None,
     };
     Some((|| {
-        // Keep an explicit empty receiver distinct from an omitted receiver before
-        // Host::ext_call converts it to Option<FormId>.
+        // Valid explicit receivers and explicit null (`0`) receivers are ignored and
+        // still target the player [observed: w4g_06_player_cmds_explicit_receiver];
+        // non-zero unknown references are still rejected [hypothesis].
         if let Some(value) = receiver {
-            let r = value.as_form().map(FormId).ok_or("invalid calling reference")?;
-            if r != FormId::PLAYER_REF && g.world.placed.get(r).is_none() && g.world.peek(r).is_none() {
-                return Err("invalid calling reference".into());
+            let explicit_null = matches!(value, Value::Ref(0)) || matches!(value, Value::Num(x) if x == 0.0);
+            if !explicit_null {
+                let r = value.as_form().map(FormId).ok_or("invalid calling reference")?;
+                if r != FormId::PLAYER_REF && g.world.placed.get(r).is_none() && g.world.peek(r).is_none() {
+                    return Err("invalid calling reference".into());
+                }
             }
         }
         if values.len() < min_args || values.len() > max_args {
@@ -73,6 +77,7 @@ pub(crate) fn call(g: &mut Game, ctx: &Ctx, receiver: Option<Value>, name: &str,
                 }
             }
             "removereputationexact" => { reputation::remove_reputation_exact(g, ctx, &a)?; }
+            "setpcexpelled" => { actor::set_pc_expelled(g, &a)?; }
             _ => unreachable!(),
         }
         Ok(XVal::Num(0.0))

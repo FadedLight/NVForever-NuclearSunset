@@ -347,7 +347,7 @@ pub(crate) mod tests {
     pub(crate) fn snapshot() -> Snapshot {
         let row = |id, equipped| item_menu::RowShown {
             key: RowKey { units: (FormId(id), None, 0), reference: None, nth: 0 },
-            name: format!("Item {id}"), text: format!("Item {id}"), equipped,
+            name: format!("Item {id}"), text: format!("Item {id}"), equipped, ysi: None,
         };
         Snapshot {
             common: item_menu::Snapshot {
@@ -356,7 +356,7 @@ pub(crate) mod tests {
                 titles: ["Merchant".into(), "Personal items".into()], weight: String::new(), focus: Side::Player,
                 pointer_pick: false, asking: false, navigated: 0,
                 card: Some(Info { weight: Some("2.50".into()), value: Some("8".into()), ..Default::default() }),
-                icon: None, take_all: false, take_all_hint: String::new(), note: None,
+                icon: None, take_all: false, take_all_hint: String::new(), note: None, ysi_icons: true,
             },
             rows: [vec![("0.9".into(), true)], vec![("--".into(), false), ("18".into(), false), ("2".into(), false), ("3".into(), false)]],
             purses: ["Coins   200".into(), "Coins   40".into()], caps: "Coins".into(), hints: ["[A]".into(), "[X]".into()],

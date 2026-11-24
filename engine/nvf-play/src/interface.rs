@@ -11,7 +11,7 @@ use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats, ImageSam
 use bevy::prelude::*;
 use fnv_font::{Font, Glyph, Line};
 use nvf_assets::GameData;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 mod tga;
@@ -566,18 +566,18 @@ fn decode_texture(bytes: &[u8], bc: bool, decode_dds: fn(&[u8], bool, bool) -> R
 /// A font's picture from its `.tex` file, read before the `.dds` (docs/spec-notes/fonts.md
 /// §2.2): a Russian install's fonts describe the letters of their `.tex`, while the `.dds`
 /// beside it is the English one [observed: #1439]; in an English install the two are the
-/// same picture. Only where the `.dds` is there too, so a font with a `.tex` alone (font 9)
-/// still draws nothing, as in the original (§3.1). None, with a warning for a broken file,
-/// when there is none.
+/// same picture; modded bitmap fonts often ship `.fnt` + `.tex`/`.Tex` without a sibling
+/// `.dds` [design]. None, with a warning for a broken file, when there is none.
 pub fn font_tex(font: &Font, data: &GameData) -> Option<fnv_font::Tex> {
-    if !data.vfs.exists(&font.texture_path()) {
-        return None;
-    }
     let path = font.tex_path();
     match fnv_font::Tex::parse(&data.read(&path)?) {
         Ok(t) => Some(t),
         Err(e) => {
-            warn!("interface: {path}: {e}; the .dds is drawn instead");
+            if data.vfs.exists(&font.texture_path()) {
+                warn!("interface: {path}: {e}; the .dds is drawn instead");
+            } else {
+                warn!("interface: {path}: {e}");
+            }
             None
         }
     }
@@ -628,6 +628,11 @@ pub fn set_font_files(files: [Option<String>; 9]) {
     let _ = INSTALL_FONTS.set(files);
 }
 
+/// Configure lazy fallback for a missing CJK character.
+pub fn set_cjk_font_path(path: Option<std::path::PathBuf>) {
+    crate::cjk_font::configure(path);
+}
+
 /// The file a font is read from: a default font file ([`FONT_FILES`]) is the install's
 /// own one for that number when its INI names one ([`set_font_files`]); any other path
 /// is itself.
@@ -635,7 +640,7 @@ pub fn font_file(path: &str) -> String {
     font_file_in(path, INSTALL_FONTS.get())
 }
 
-fn font_file_in(path: &str, install: Option<&[Option<String>; 9]>) -> String {
+pub(crate) fn font_file_in(path: &str, install: Option<&[Option<String>; 9]>) -> String {
     let own = install.and_then(|fonts| {
         let n = FONT_FILES.iter().position(|f| f.eq_ignore_ascii_case(path))?;
         fonts[n].clone()
@@ -643,9 +648,28 @@ fn font_file_in(path: &str, install: Option<&[Option<String>; 9]>) -> String {
     own.unwrap_or_else(|| path.to_string())
 }
 
+/// Font 9 (`FONT_FILES[8]`, `NVFont_Test`) is not loaded in the original game (fonts 1-8
+/// only [observed: hud_menus capture 2026-10-31, docs/spec-notes/fonts.md §3.1; sup6
+/// `LOADED_FONTS = 8`; `GetFontFile 9` returning `""`]). Keep it unloaded in the shared
+/// [`face`] loader so every caller (`tiles::draw::FontKit`, `credits::start`,
+/// `loading_look::fit_tip`, `wait`, etc.) keeps the vanilla stand-in consistently [design].
+pub(crate) fn is_unloaded_font(path: &str) -> bool {
+    path.len() == FONT_FILES[8].len()
+        && path.bytes().zip(FONT_FILES[8].bytes()).all(|(a, b)| {
+            let a = if a == b'/' { b'\\' } else { a.to_ascii_lowercase() };
+            a == b
+        })
+}
+
 /// The game's font at `path` (the install's own file for it: [`font_file`]), else `stand_in`.
 pub fn face(path: &str, stand_in: Font, data: Option<&GameData>, images: &mut Assets<Image>, bc: bool) -> Face {
+    if is_unloaded_font(path) {
+        return Face { font: stand_in, image: None, vector: None };
+    }
     let path = &font_file(path);
+    if is_unloaded_font(path) {
+        return Face { font: stand_in, image: None, vector: None };
+    }
     let read = data.and_then(|d| {
         let font = match Font::parse(&d.read(path)?) {
             Ok(f) => f,
@@ -676,6 +700,91 @@ pub const FONT_FILES: [&str; 9] = [
     "textures\\fonts\\glow_futura_caps_large.fnt",
     "textures\\fonts\\nvfont_test.fnt",
 ];
+
+/// VFS folder where mods ship extended font slot definitions (`*.txt`) for JIP LN NVSE
+/// [documented: JIP LN NVSE Plugin (`https://www.nexusmods.com/newvegas/mods/58277`,
+/// 50.80+, current 57.30) Nexus article "Installing extra UI fonts using JIP LN NVSE";
+/// observed: MAPMO v6.4 (`https://www.nexusmods.com/newvegas/mods/74365`) public
+/// `Data\NVSE\Plugins\xfonts\MAPMO.txt` asset; no third-party DLL or source code consulted].
+pub const XFONTS_DIR: &str = "nvse\\plugins\\xfonts\\";
+
+/// Parse `<slot>=<path>` entries from an `xfonts` text file into `out`.
+///
+/// Only extended slots `10..=255` are accepted so vanilla INI slots `1..=9` (and the
+/// unloaded vanilla font `9` rule) are never overwritten by mod `xfonts` files
+/// [documented: JIP LN NVSE 50.80+ `xfonts` format (`10..=31` in the 50.80 article,
+/// `10..=89` on GECK Wiki `SetFontFile`); observed: MAPMO v6.4 `MAPMO.txt` maps slots
+/// `21` and `22` to `textures\fonts\mapmo_hud_caps_font.fnt` and
+/// `textures\fonts\mapmo_hud_caps_font2.fnt`; design: comment/quote/slash/`data\`
+/// normalization and `10..=255` upper slot guard].
+pub fn parse_xfonts(text: &str, out: &mut BTreeMap<u8, String>) {
+    for raw in text.lines() {
+        let line = raw.trim_start_matches('\u{feff}').trim();
+        if line.is_empty()
+            || line.starts_with(';')
+            || line.starts_with('#')
+            || line.starts_with("//")
+        {
+            continue;
+        }
+        let Some((lhs, rhs)) = line.split_once('=') else {
+            continue;
+        };
+        let Ok(slot) = lhs.trim().parse::<u8>() else {
+            continue;
+        };
+        if slot < 10 {
+            continue;
+        }
+        let mut path = rhs
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .replace('/', "\\")
+            .to_ascii_lowercase();
+        while let Some(rest) = path.strip_prefix('\\') {
+            path = rest.to_string();
+        }
+        if let Some(rest) = path.strip_prefix("data\\") {
+            path = rest.to_string();
+        }
+        if !path.is_empty() {
+            out.insert(slot, path);
+        }
+    }
+}
+
+/// Discover and parse all `NVSE\Plugins\xfonts\*.txt` files visible through `vfs`.
+///
+/// Files are processed in case-insensitive sorted path order so overrides are
+/// deterministic [design]. Returns an empty map when no `xfonts` definitions exist,
+/// leaving unmodded vanilla font loading completely unchanged.
+pub fn load_xfonts(vfs: &fnv_vfs::Vfs) -> BTreeMap<u8, String> {
+    let mut paths = vfs.paths(|p| {
+        let lower = p.to_ascii_lowercase();
+        lower.starts_with(XFONTS_DIR) && lower.ends_with(".txt")
+    });
+    paths.sort_by_key(|a| a.to_ascii_lowercase());
+    let mut out = BTreeMap::new();
+    for path in paths {
+        if let Some(Ok(bytes)) = vfs.read(&path) {
+            parse_xfonts(&String::from_utf8_lossy(&bytes), &mut out);
+        }
+    }
+    out
+}
+
+/// Resolve a font slot number (`1..=9` vanilla or `10..=255` extended `xfonts`) to its
+/// normalized VFS `.fnt` path [design]. Slot `0` and unregistered extended slots return
+/// `None`.
+pub fn slot_font_path(slot: u8, extra: &BTreeMap<u8, String>) -> Option<String> {
+    if (1..=9).contains(&slot) {
+        Some(font_file(FONT_FILES[usize::from(slot) - 1]))
+    } else if slot >= 10 {
+        extra.get(&slot).cloned()
+    } else {
+        None
+    }
+}
 
 /// Where a font's letters stand from a line's top: the tallest glyph's rise [design].
 pub fn line_base(face: &Face) -> f32 {
@@ -716,11 +825,143 @@ pub fn set_line(p: &mut ChildSpawnerCommands, face: &Face, line: &Line, x: f32, 
 
 /// [`set_line`] with `mark` on every coloured node (each glyph, or the stand-in text).
 pub fn set_marked(p: &mut ChildSpawnerCommands, face: &Face, line: &Line, x: f32, base: f32, color: Color, mark: impl Bundle + Clone) {
+    set_scaled_bitmap_line(p, face, line, x, base, 1.0, color, mark);
+}
+
+type RedrawLine = Box<dyn Fn(&mut ChildSpawnerCommands) + Send + Sync>;
+
+#[derive(Component)]
+struct CjkLine(RedrawLine);
+
+/// A CJK line retains its advances and gaps so even a static screen can replace its
+/// question marks and move the following letters when the font is ready.
+pub(crate) fn redraw_cjk_lines(world: &mut World) {
+    use bevy::ecs::world::CommandQueue;
+    let mut lines = world.query::<(Entity, &CjkLine)>();
+    let mut queue = CommandQueue::default();
+    let mut commands = Commands::new(&mut queue, world);
+    for (entity, redraw) in lines.iter(world) {
+        commands.entity(entity).despawn_related::<Children>().with_children(|p| redraw.0(p));
+        if !crate::cjk_font::enabled() {
+            commands.entity(entity).remove::<CjkLine>();
+        }
+    }
+    queue.apply(world);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn set_scaled_bitmap_line(
+    p: &mut ChildSpawnerCommands,
+    face: &Face,
+    line: &Line,
+    x: f32,
+    base: f32,
+    scale: f32,
+    color: Color,
+    mark: impl Bundle + Clone,
+) {
+    if !needs_cjk_line(face, line) {
+        draw_marked(p, face, line, x, base, scale, color, mark);
+        return;
+    }
+    let advance: Vec<_> = line.glyphs.iter().map(|g| face.font.glyph_of(g.ch).advance()).collect();
+    let unit_scale = unit_scale();
+    let mut anchor = p.spawn(at(0.0, 0.0, 0.0, 0.0));
+    anchor.with_children(|p| draw_marked(p, face, line, x, base, scale, color, mark.clone()));
+    let face = face.clone();
+    let line = line.clone();
+    anchor.insert(CjkLine(Box::new(move |p| {
+        let _units = units_at(unit_scale);
+        let mut line = line.clone();
+        let mut delta = 0.0;
+        for (glyph, &old_advance) in line.glyphs.iter_mut().zip(&advance) {
+            glyph.x += delta;
+            delta += face.font.glyph_of(glyph.ch).advance() - old_advance;
+        }
+        line.width += delta;
+        draw_marked(p, &face, &line, x, base, scale, color, mark.clone());
+    })));
+}
+
+pub(crate) fn needs_cjk_line(face: &Face, line: &Line) -> bool {
+    crate::cjk_font::enabled() && line.glyphs.iter().any(|g| face.font.needs_cjk_fallback(g.ch))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_marked(
+    p: &mut ChildSpawnerCommands,
+    face: &Face,
+    line: &Line,
+    x: f32,
+    base: f32,
+    scale: f32,
+    color: Color,
+    mark: impl Bundle + Clone,
+) {
+    if face.image.is_some() && face.vector.is_none() {
+        // [observed: #1221] Snap the shared baseline once, keeping each glyph's
+        // fractional texture box.
+        p.spawn(line_anchor(base)).with_children(|p| {
+            for placed in &line.glyphs {
+                set_glyph(p, face, placed, x + placed.x * scale, 0.0, scale, color, mark.clone());
+            }
+        });
+        return;
+    }
+    if !needs_cjk_line(face, line) {
+        set_bevy_line(p, face, line.text_spaced(&face.font), x, base, color, mark);
+        return;
+    }
+    // Keep Bevy's original shaping for consecutive primary glyphs. The fallback
+    // images start at the same measured offsets and baseline as those text runs.
+    let mut run = Line::default();
+    let mut start = 0.0;
+    let flush = |p: &mut ChildSpawnerCommands, run: &mut Line, start: f32| {
+        if !run.glyphs.is_empty() {
+            set_bevy_line(
+                p,
+                face,
+                run.text_spaced(&face.font),
+                x + start,
+                base,
+                color,
+                mark.clone(),
+            );
+            run.glyphs.clear();
+        }
+    };
+    for &placed in &line.glyphs {
+        let mut native = placed;
+        if face.font.needs_cjk_fallback(placed.ch) {
+            if let Some((key, glyph)) = crate::cjk_font::lookup(placed.ch, face.font.size) {
+                flush(p, &mut run, start);
+                set_cjk_glyph(p, key, glyph, x + placed.x, base, 1.0, color, mark.clone());
+                continue;
+            }
+            native.ch = '?';
+        }
+        if run.glyphs.is_empty() {
+            start = placed.x;
+        }
+        native.x -= start;
+        run.glyphs.push(native);
+    }
+    flush(p, &mut run, start);
+}
+
+fn set_bevy_line(
+    p: &mut ChildSpawnerCommands,
+    face: &Face,
+    text: String,
+    x: f32,
+    base: f32,
+    color: Color,
+    mark: impl Bundle,
+) {
     if let Some(v) = &face.vector {
         // The line's text in the vector font, its baseline on `base`: Bevy lays it out at the
         // screen's resolution, without kerning or ligatures so it is as wide as `face.font`
         // measured it (`crate::vector_font`), in one line.
-        let text = line.text_spaced(&face.font);
         let font = TextFont { font_size: font_units(v.em), weight: bevy::text::FontWeight(v.weight), font_features: crate::vector_font::features(), ..TextFont::default().with_font(v.font.clone()) };
         let layout = (bevy::text::LineHeight::RelativeToFont(1.0), TextLayout::new(Justify::Left, LineBreak::NoWrap));
         let shadow = |part: Vec2, alpha: f32| (TextGlow(part), bevy::ui::widget::TextShadow { offset: Vec2::ZERO, color: Color::BLACK.with_alpha(alpha) });
@@ -746,33 +987,101 @@ pub fn set_marked(p: &mut ChildSpawnerCommands, face: &Face, line: &Line, x: f32
             }
             n.spawn((Text::new(text), font, layout, TextColor(color), shadow(DROP, DROP_ALPHA * ink), mark));
         });
-        return;
-    }
-    let Some((image, size)) = &face.image else {
-        // The codes are the run's code page's, not Latin-1 (`Ж` is 0xC6 in Windows-1251);
-        // the spaces between the words are put back (#2298).
-        let text = line.text_spaced(&face.font);
+    } else {
         let size = face.font.size * 0.75;
         p.spawn(Node { position_type: PositionType::Absolute, left: u(x), top: u(base - size), ..default() }).with_children(|n| {
             n.spawn((Text::new(text), TextFont { font_size: font_units(size), ..default() }, TextColor(color), mark));
         });
+    }
+}
+
+/// Draw one bitmap glyph starting at `x` and standing on `base`. Its offsets and ink
+/// are in the face's units multiplied by `scale`. A missing CJK glyph can use an outline
+/// atlas entry with precisely the metrics used in layout.
+#[allow(clippy::too_many_arguments)]
+pub fn set_glyph(
+    p: &mut ChildSpawnerCommands,
+    face: &Face,
+    placed: &fnv_font::Placed,
+    x: f32,
+    base: f32,
+    scale: f32,
+    color: Color,
+    mark: impl Bundle,
+) {
+    if face.font.needs_cjk_fallback(placed.ch) {
+        if let Some((key, glyph)) = crate::cjk_font::lookup(placed.ch, face.font.size) {
+            set_cjk_glyph(p, key, glyph, x, base, scale, color, mark);
+            return;
+        }
+    }
+    let Some((image, size)) = &face.image else {
         return;
     };
-    // [observed: #1221] Snap the shared baseline once, but keep each texture cut-out's
-    // fractional box. Aspect fitting and per-glyph layout rounding made identical glyphs differ.
-    p.spawn(line_anchor(base)).with_children(|p| {
-        for placed in &line.glyphs {
-            let g = face.font.glyph(placed.code);
-            if !g.drawn() {
-                continue;
+    let glyph = face.font.glyph(placed.code);
+    if !glyph.drawn() {
+        return;
+    }
+    let rect = Rect::new(
+        glyph.uv[0] * size.x,
+        glyph.uv[1] * size.y,
+        glyph.uv[2] * size.x,
+        glyph.uv[3] * size.y,
+    );
+    p.spawn((
+        at(
+            x + glyph.before * scale,
+            base - glyph.ascent * scale,
+            glyph.width * scale,
+            glyph.height * scale,
+        ),
+        ImageNode {
+            rect: Some(rect),
+            color,
+            image_mode: NodeImageMode::Stretch,
+            ..ImageNode::new(image.clone())
+        },
+        LayoutConfig {
+            use_rounding: false,
+        },
+        mark,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_cjk_glyph(
+    p: &mut ChildSpawnerCommands,
+    key: crate::cjk_font::GlyphKey,
+    raster: std::sync::Arc<crate::cjk_font::Raster>,
+    x: f32,
+    base: f32,
+    scale: f32,
+    color: Color,
+    mark: impl Bundle,
+) {
+    let g = raster.metrics;
+    if !g.drawn() {
+        return;
+    }
+    let entity = p
+        .spawn((
+            at(
+                x + g.before * scale,
+                base - g.ascent * scale,
+                g.width * scale,
+                g.height * scale,
+            ),
+            LayoutConfig {
+                use_rounding: false,
+            },
+            mark,
+        ))
+        .id();
+    p.commands().queue(move |world: &mut World| {
+        if let Some(image) = crate::cjk_font::image_node(world, key, &raster, color) {
+            if let Ok(mut entity) = world.get_entity_mut(entity) {
+                entity.insert(image);
             }
-            let rect = Rect::new(g.uv[0] * size.x, g.uv[1] * size.y, g.uv[2] * size.x, g.uv[3] * size.y);
-            p.spawn((
-                at(x + placed.x + g.before, -g.ascent, g.width, g.height),
-                ImageNode { rect: Some(rect), color, image_mode: NodeImageMode::Stretch, ..ImageNode::new(image.clone()) },
-                LayoutConfig { use_rounding: false },
-                mark.clone(),
-            ));
         }
     });
 }
@@ -942,6 +1251,14 @@ fn own_texture(path: &str) -> String {
 #[cfg(test)]
 #[path = "interface_layout_tests.rs"]
 mod layout_tests;
+
+#[cfg(test)]
+#[path = "interface/bitmap_text_tests.rs"]
+mod bitmap_text_tests;
+
+#[cfg(test)]
+#[path = "interface/font_tex_tests.rs"]
+pub(crate) mod font_tex_tests;
 
 #[cfg(test)]
 #[path = "interface/tga_consumer_tests.rs"]
@@ -1210,5 +1527,36 @@ pub(crate) mod tests {
     fn a_caps_only_font_centres_its_glyphs_on_the_cap_height() {
         let face = measured_font(true);
         assert_eq!(x_height(&face), line_base(&face));
+    }
+
+    #[test]
+    fn xfonts_parse_and_slot_paths_preserve_vanilla_slots_and_normalize_paths() {
+        let mut extra = BTreeMap::new();
+        parse_xfonts(
+            "\u{feff}   ; comment after BOM and leading spaces\n# hash\n// slash\n\
+             0=textures\\fonts\\bad0.fnt\n\
+             1=textures\\fonts\\override_vanilla.fnt\n\
+             9=textures\\fonts\\override_nine.fnt\n\
+             \u{feff}  21=textures\\fonts\\mapmo_hud_caps_font.fnt\n\
+             22 = \"Data/Textures/Fonts/MAPMO_HUD_Caps_Font2.fnt\"\n\
+             42=   \n\
+             256=textures\\fonts\\too_high.fnt\n\
+             not_a_line\n",
+            &mut extra,
+        );
+        assert_eq!(extra.len(), 2);
+        assert_eq!(extra.get(&21).map(String::as_str), Some("textures\\fonts\\mapmo_hud_caps_font.fnt"));
+        assert_eq!(extra.get(&22).map(String::as_str), Some("textures\\fonts\\mapmo_hud_caps_font2.fnt"));
+        assert!(!extra.contains_key(&0) && !extra.contains_key(&1) && !extra.contains_key(&9) && !extra.contains_key(&42));
+        // Later definitions for the same extended slot replace earlier ones cleanly.
+        parse_xfonts("22=\\textures/fonts/override_22.fnt\n", &mut extra);
+        assert_eq!(extra.get(&22).map(String::as_str), Some("textures\\fonts\\override_22.fnt"));
+        // Slot path resolution preserves vanilla 1..=9 and returns None for 0 / unregistered.
+        assert_eq!(slot_font_path(0, &extra), None);
+        assert_eq!(slot_font_path(1, &extra).as_deref(), Some(FONT_FILES[0]));
+        assert_eq!(slot_font_path(9, &extra).as_deref(), Some(FONT_FILES[8]));
+        assert_eq!(slot_font_path(21, &extra).as_deref(), Some("textures\\fonts\\mapmo_hud_caps_font.fnt"));
+        assert_eq!(slot_font_path(22, &extra).as_deref(), Some("textures\\fonts\\override_22.fnt"));
+        assert_eq!(slot_font_path(42, &extra), None);
     }
 }

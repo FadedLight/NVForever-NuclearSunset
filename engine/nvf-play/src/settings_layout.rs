@@ -300,13 +300,15 @@ mod tests {
     /// #2198's upscaler rows, #2169's FSR library row, #2242's upscaling counter row, #2317's
     /// Generated frames row, the field of view rows, the menu scale and Physics rate rows,
     /// #2662's grass fires, #2550's terrain height blending, #2551's terrain anti-tiling,
-    /// #2688's sound cover, #2670's cloud shadows, #2671's terrain shadows, #2149's smooth terrain and its Debug row terrain wireframe, the
+    /// #2688's sound cover, #2670's cloud shadows, #2671's terrain shadows, the ALC shadows (light_shadows.rs), #2149's smooth terrain and its Debug row terrain wireframe, the
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, #2843's Shadow
     /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, the
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
-    /// shadows row; #2981's authored materials row), by the group it registers with.
-    const KNOWN: [(&str, &str); 141] = [
+    /// shadows row; #2981's authored materials row and its reflections row; #2701's
+    /// full-detail scenery row; #3014's distant objects row; #2993's aerial perspective row;
+    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row; #3783's occlusion culling row), by the group it registers with.
+    const KNOWN: [(&str, &str); 154] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -340,6 +342,9 @@ mod tests {
         ("vats-style", "Gameplay"),
         ("vats-slowdown", "Gameplay"),
         ("difficulty", "Gameplay"),
+        ("difficulty-player-damage", "Gameplay"),
+        ("difficulty-npc-damage", "Gameplay"),
+        ("difficulty-kill-xp", "Gameplay"),
         ("hardcore", "Gameplay"),
         ("lip-sync", "Gameplay"),
         ("true-iron-sights", "Gameplay"),
@@ -368,6 +373,7 @@ mod tests {
         ("sky-clock", "World"),
         ("resolution", "Display"),
         ("borderless", "Display"),
+        ("hdr-output", "Display"),
         ("monitor", "Display"),
         ("first-person-body", "Display"),
         ("weapon-inertia", "Display"),
@@ -415,6 +421,7 @@ mod tests {
         ("fine-shadows", "Graphics"),
         ("cloud-shadows", "Graphics"),
         ("terrain-shadows", "Graphics"),
+        ("light-shadows", "Graphics"),
         ("bloom", "Graphics"),
         ("glow", "Graphics"),
         ("eye-adaptation", "Graphics"),
@@ -422,13 +429,21 @@ mod tests {
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
         ("authored-materials", "Graphics"),
+        ("authored-reflections", "Graphics"),
         ("terrain-height-blend", "Graphics"),
         ("terrain-anti-tiling", "Graphics"),
+        ("terrain-parallax", "Graphics"),
         ("mesh-terrain-blend", "Graphics"),
+        ("occlusion-culling", "Graphics"),
+        ("full-detail", "Graphics"),
+        ("distant-objects", "Graphics"),
         ("smooth-terrain", "Graphics"),
         ("light-shafts", "Graphics"),
         ("heat-haze", "Graphics"),
         ("desert-haze", "Graphics"),
+        ("aerial-perspective", "Graphics"),
+        ("night-sky-detail", "Graphics"),
+        ("distant-lights", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-effects", "Graphics"),
         ("water-mirror", "Graphics"),
@@ -464,6 +479,7 @@ mod tests {
         deselect-hotkeys map-remembers terminal-number-keys faster-hacking dialogue-music dialogue-radio \
         console-skips-player holster-real-time power-armor-no-screen-blood no-red-crosshair-cloaked \
         god-mode-quiet-landing console-compress-repeats console-timestamps living-anatomy-dr sync-categories \
+        sync-categories-keep-empty \
         perks-per-level special-points pick-without-skill hack-without-skill no-terminal-lockout no-casino-bans \
         loot-unconscious revive-companions revive-down-seconds pickpocket-worn no-sneak-criticals reload-when-empty \
         no-travel-time power-armor-fall weightless-armor weightless-aid weightless-ammo weightless-weapons \
@@ -472,7 +488,7 @@ mod tests {
         map-door-kinds hostiles-prefer-player prefer-player-start prefer-player-mid prefer-player-detection \
         equip-broken-items keep-broken-equipped hardcore-tweaks hardcore-ammo-weight hardcore-essential-companions \
         hardcore-sleep-heals weightless-worn-power-armor no-travel-crippled-leg wait-only-seated kill-reward-ap \
-        jump-ap-cost run-ap-cost no-selling custom-skill-points skill-point-base skill-points-per-int \
+        jump-ap-cost jump-ap-danger-only jump-without-enough-ap run-ap-cost no-selling custom-skill-points skill-point-base skill-points-per-int \
         no-unconscious-message no-voice-filter no-skip-dialogue lockpick-mouse no-max-casino-bet no-aiming-slowdown \
         repeat-jumping hold-to-sneak vats-entry-ap power-attack-ap quest-marker-reach scope-zoom-time drop-key \
         no-container-after-pick no-door-after-pick mark-unvisited-doors no-exit-hacking no-grab-owned agility-speed \
@@ -543,9 +559,10 @@ mod tests {
         mark-recurring-challenges hide-hotkeyed-containers hide-hotkeyed-barter hide-hotkeyed-repair \
         map-zoom-at-pointer console-homes shift-screenshot-hides print-plugin-names \
         weapon-requirements-matter console-model-details back-pace strafe-pace hack-no-single-chars \
-        hack-no-repeat-words hack-dud-when-full hack-spare-guessed run-overencumbered over-run-ap over-jump-ap \
+        hack-no-repeat-words hack-dud-when-full hack-spare-guessed hack-mark-guesses-as-duds \
+        hack-keep-matching-chars hack-compact-guesses hack-replenish-bonus run-overencumbered over-run-ap over-jump-ap \
         npc-melee-part-damage disarm-needs-skill disarm-mult disarm-explode-mult cap-skills-by-special skill-cap-base \
-        skill-cap-per-special skill-cap-per-luck skill-cap-most cap-skills-spare-tagged hold-breath breath-sway \
+        skill-cap-per-special skill-cap-per-luck skill-cap-most cap-skills-spare-tagged hold-breath breath-activate breath-sway \
         breath-ap scope-wheel-zoom wheel-cycles-hotkeys dpad-cycles-hotkeys keys-with-pad double-tap-ammo \
         improved-weather vats-stop-following-dead night-vision-toggle night-vision-off-first night-vision-by-day \
         kill-cam-outside-vats kill-cam-hit-location weather-trip-distance compass-pips-fade compass-places-fade \
@@ -555,8 +572,10 @@ mod tests {
         marker-name-hide-unfound marker-name-units hide-hud-compass hide-hud-ammo hide-hud-needs hide-hud-sneak \
         hide-hud-on-load grey-read-notes remember-item-places player-weapon-volume npc-weapon-volume \
         keep-fall-height-on-load no-marker-popup marker-shift-removes marker-removed-on-it clear-marker-within \
-        place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo \
-        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training";
+        place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
+        objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
+        sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -644,7 +663,7 @@ mod tests {
         assert_eq!(all.len(), list.len());
         all.sort_unstable();
         assert_eq!(all, (0..list.len()).collect::<Vec<_>>(), "each registered row once");
-        assert_eq!(keys(&list, &l, "Gameplay")[..11], ["[Game]", "difficulty", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "vats-style", "vats-slowdown", "kill-camera"]);
+        assert_eq!(keys(&list, &l, "Gameplay")[..14], ["[Game]", "difficulty", "difficulty-player-damage", "difficulty-npc-damage", "difficulty-kill-xp", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "vats-style", "vats-slowdown", "kill-camera"]);
         assert_eq!(keys(&list, &l, "Audio"), ["[Volume]", "volume-master", "volume-music", "volume-footstep", "volume-voice", "volume-effects", "volume-radio", "", "[Sound]", "music", "voice", "reverb", "voice-reverb"]);
         assert_eq!(keys(&list, &l, "Controls")[..6], ["[Input]", "@device", "button-style", "@automatic-input", "@rumble", ""]);
         assert_eq!(
@@ -663,9 +682,13 @@ mod tests {
         assert_eq!(at("button-style"), "Controls > Input");
         assert_eq!(at("terrain-anti-tiling"), "Graphics > Detail and Distance", "beside terrain height blending (#2551)");
         assert_eq!(at("authored-materials"), "Graphics > Detail and Distance", "beside anisotropic filtering, the other texture row (#2981)");
+        assert_eq!(at("authored-reflections"), "Graphics > Detail and Distance", "right after Authored materials (#2981 reflections)");
         assert_eq!(at("mesh-terrain-blend"), "Graphics > Detail and Distance", "beside the terrain rows (#2661)");
+        assert_eq!(at("terrain-parallax"), "Graphics > Detail and Distance", "after terrain anti-tiling (#3322)");
+        assert_eq!(nvf_settings_layout::needs("terrain-parallax").iter().map(|r| r.parent).collect::<Vec<_>>(), ["authored-materials"], "it draws the authored height maps");
         assert_eq!(at("cloud-shadows"), "Graphics > Shadows", "after Longer sun shadows (#2670)");
         assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
+        assert_eq!(at("light-shadows"), "Graphics > Shadows", "after Terrain shadows (light_shadows.rs)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
         assert_eq!(l.control_placement("bind:Jump").unwrap().path(), "Controls > Movement");
         assert_eq!(l.control_placement("bind:Sprint").unwrap().path(), "Controls > Movement", "beside the movement controls (#3000)");
@@ -683,7 +706,7 @@ mod tests {
         let l = resolve_layout(&list);
         let closed = |p: &Placement| p.heading != Some("V.A.T.S.") && p.heading != Some("Camera");
         let g = lines(&list, &l, "Gameplay", closed);
-        assert_eq!(g[..10], ["[Game]", "difficulty", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "[Camera]", "[Dialogue]"]);
+        assert_eq!(g[..13], ["[Game]", "difficulty", "difficulty-player-damage", "difficulty-npc-damage", "difficulty-kill-xp", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "[Camera]", "[Dialogue]"]);
         let p = l.placement_of(list.iter().position(|s| s.key == "vats-style").unwrap()).unwrap();
         assert_eq!(l.shown_count(&p, |_| true), 3);
         assert_eq!(l.shown_count(&p, |i| i != LayoutItem::Setting(list.iter().position(|s| s.key == "vats-slowdown").unwrap())), 2);
@@ -744,8 +767,11 @@ mod tests {
     #[test]
     fn every_tweak_of_1892_has_its_group_and_category() {
         let tweaks = tweak_rows();
-        // 560 less the console and screenshot keys, bindings since 2026-11-16 (Controls).
-        assert_eq!(tweaks.len(), 558);
+        // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
+        // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
+        // Running Costs AP sneak options (#3183), Stewie 9.65-9.70 sub-options (#3184),
+        // and No Encounter Zone Level Lock (#3878).
+        assert_eq!(tweaks.len(), 574);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);
@@ -762,10 +788,28 @@ mod tests {
         assert_eq!(at("tweak-no-xp-messages"), "Tweaks > HUD > Messages");
         assert_eq!(at("tweak-weightless-ammo"), "Tweaks > Cheats > Weight");
         assert_eq!(at("tweak-weightless-worn-armor"), "Tweaks > Gameplay > Weight");
+        assert_eq!(at("tweak-keep-chosen-ammo"), "Tweaks > Combat > Weapons and Armour");
+        assert_eq!(at("tweak-no-lock-encounter-zone-levels"), "Tweaks > Gameplay > Travel and World");
         // A row that only matters with another comes right after it.
         let next = |k: &str| list[l.ordered_settings().skip_while(|&i| list[i].key != k).nth(1).unwrap()].key;
         assert_eq!(next("tweak-take-all-confirm"), "tweak-take-all-confirm-min");
         assert_eq!(next("tweak-revive-companions"), "tweak-revive-down-seconds");
+        assert_eq!(next("tweak-revive-down-seconds"), "tweak-revive-on-cell-change");
+        assert_eq!(next("tweak-hack-mark-guesses-as-duds"), "tweak-hack-keep-matching-chars");
+        assert_eq!(next("tweak-hold-breath"), "tweak-breath-activate");
+        assert_eq!(next("tweak-sync-categories"), "tweak-sync-categories-keep-empty");
+        assert_eq!(next("tweak-jump-ap-cost"), "tweak-jump-ap-danger-only");
+        assert_eq!(next("tweak-jump-ap-danger-only"), "tweak-jump-without-enough-ap");
+        assert_eq!(next("tweak-sleep-heal-min-hours"), "tweak-sleep-misc-stat-requires-duration");
+        assert_eq!(next("tweak-grabbing-is-theft"), "tweak-grabbing-is-theft-min-value");
+        assert_eq!(next("tweak-no-self-explosion-damage"), "tweak-no-self-explosion-non-hostiles");
+        assert_eq!(needs("tweak-breath-activate").len(), 1);
+        assert_eq!(needs("tweak-breath-activate")[0].parent, "tweak-hold-breath");
+        assert_eq!(needs("tweak-sync-categories-keep-empty").len(), 1);
+        assert_eq!(needs("tweak-sync-categories-keep-empty")[0].parent, "tweak-sync-categories");
+        assert_eq!(needs("tweak-revive-on-cell-change")[0].parent, "tweak-revive-companions");
+        assert_eq!(needs("tweak-no-self-explosion-non-hostiles")[0].parent, "tweak-no-self-explosion-damage");
+        assert_eq!(needs("tweak-grabbing-is-theft-min-value")[0].parent, "tweak-grabbing-is-theft");
         // The engine's own tabs are as they were.
         assert_eq!(keys(&list, &l, "Audio"), keys(&registry(&KNOWN), &resolve_layout(&registry(&KNOWN)), "Audio"));
     }

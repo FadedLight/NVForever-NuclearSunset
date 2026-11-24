@@ -102,6 +102,7 @@ original lacks it); **Save?**: *yes* (must be saved), *have* (already in the sna
 | Request queues, animations, detection values, detection events, Wait/Sleep in progress | marked "Not saved" in `Game` | none | drop |
 | Detection states: each actor's state (Normal/Alert/Combat/Lost), alert and target lists, the target fought; StartCombat's forced pairs | `awareness` (`awareness.actors`, `awareness.forced`) | not found | **saved since 2026-11-01** (#971): a fight goes on after a load, and IsInCombat on the player reads the same before the first detection round; the next round measures again as before. Combat groups' tactics, barks and the engine's engage/aim/crouch hints are rebuilt |
 | Who has had OnStartCombat and not yet OnCombatEnd | `fighting` | not found | **saved** (#1578): a load runs no OnStartCombat for a fight the save holds [documented: spec-notes/ext-save.md §4], a start still due at the save runs once, and the fight's OnCombatEnd runs when it ends. A created reference dropped on a load (§4.1) leaves it with its detection state. Saves from before this field did not record it, and that history cannot be recovered: their actors in Combat or Lost count as started, Alert does not, so a start still due in such a save does not run [design: `Game::restore`] |
+| StartCombat targets not measured since (#3390) | `scripted_combat` | not found | **saved** whenever there are forced pairs, empty too. A save with forced pairs and without it is older: there a target still holding the value StartCombat gave it counts as not measured [design: `Game::restore_scripted_combat`] |
 | Config | `cfg: GameConfig` | none | rebuild from settings (seed: see §5) |
 
 ### 3.3 AI (fnv-ai, used by `engine/nvforever`)
@@ -158,6 +159,13 @@ body    u32 length + zstd(JSON or postcard) of SaveBody
   both snapshots); a change that cannot default bumps N and adds a migration function
   from N−1, so old saves stay loadable. `RefExtra::killing_hit` is one: the dead of an
   older save have no killing hit, as nothing in the save tells it [design].
+  `RefState::made_at` (where a created reference was made, its editor location, #2278;
+  saved since 0.8.0) is another, with a fill-in on the load: a created actor of an older
+  save, which has none, takes the place it was saved at (`World::made_at_from_saved_place`,
+  #3042) [decision: the nearest fact the save holds, an approximation of where it was
+  made, since combat, following or a scripted MoveTo may have moved it before the save].
+  N stays: every actor `World::place` makes has one, so a missing one marks the
+  older save; dropped items have none by design and get none.
 - Encoding: JSON keeps saves inspectable and is what the tests already use; size is the
   question. Measure a long session's snapshot first: if compressed JSON stays in the low
   megabytes (the original's 61-hour save is 8 MB uncompressed), keep JSON; otherwise
@@ -275,7 +283,16 @@ and Lonesome Road dropped, 36 more by the game layer; the base game's changes ba
 5. **Physics**: objects load at rest where they were.
 6. **Another load order**: forms are remapped by name, those of missing plugins dropped
    with a notice; built 2026-10-21 (§4.1).
-7. **Importing a `.fos`**: not planned.
+7. **Importing a `.fos`**: the game runtime never reads or writes `.fos` files (the
+   runtime stays `.nvfsave`-only). An accepted offline
+   `fnvtool save convert <input.fos> --out <output.nvfsave>` (and
+   `fnvtool save inspect-fos <input.fos>`) utility converts the decoded `.fos` subset
+   (`crates/fnv-save/src/fos.rs`, `crates/fnv-game/src/fos_convert.rs`) into a standard
+   `NVFSAVE\0` v1 save and emits a structured JSON report separating `converted`,
+   `hypothesis_fields` (every `[hypothesis]` `.fos` field written, per
+   `docs/spec-notes/save-files.md` §6.6), and `skipped` (`.nvse` co-saves, unsupported
+   created `0xFF` kinds such as `ACRE`/`ACHR`, unpersisted item hotkeys `0x4A`,
+   perks/active effects, and unmapped changed-form/global layouts).
 8. **Thumbnail**: 512×288 from the main camera; built (§6), shown on the pause menu's load
    page.
 

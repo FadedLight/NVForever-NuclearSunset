@@ -15,6 +15,7 @@
 //!   UPnP IGD stays with the `igd-next` crate in the caller.
 //! - [`hosted`]: a relay a player hosts (`nvf-relay`, section 9): its wire format, the relay's
 //!   state machine and the game's side of a session.
+//! - [`report`]: the `co-op connect:` log line, one per join (section 12, "Field").
 //! - [`candidate`]: the addresses a game may be reached at, and how they rank.
 //! - [`ice`]: [`ice::Agent`], the connectivity checks (hole punching) between two games, which
 //!   picks the path both use.
@@ -25,6 +26,7 @@ pub mod candidate;
 pub mod hosted;
 pub mod ice;
 pub mod portmap;
+pub mod report;
 pub mod stun;
 
 #[cfg(any(test, feature = "natsim"))]

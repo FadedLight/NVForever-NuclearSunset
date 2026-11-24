@@ -493,7 +493,9 @@ pub(crate) fn sync_game(
                     main_fog.clone(),
                     // Render world and water only; exclude `ARMS_LAYER` and `DECAL_LAYER`
                     // (avoiding a per-PiP-camera `DepthPrepass` requirement for ForwardDecal) [design].
-                    RenderLayers::from_layers(&[0, crate::reflection::WATER_LAYER]),
+                    // The weather's flat clouds too while the volumetric clouds take their place in
+                    // the main view, as the mirror and the scope's lens (the layer is empty otherwise).
+                    RenderLayers::from_layers(&[0, crate::reflection::WATER_LAYER, crate::volumetric_clouds::FLAT_CLOUD_LAYER]),
                     cam_tf,
                     cam_global,
                 ))
@@ -810,6 +812,10 @@ mod tests {
         let cam_e = cam_q.single(app.world()).expect("spawned camera");
         assert!(app.world().get::<Camera>(cam_e).unwrap().is_active);
         assert_ne!(app.world().get::<MeshMaterial3d<NifMaterial>>(lens).unwrap().0.id(), orig_mat.id());
+        // The weather's flat clouds while the volume draws in the main view; the volume itself never.
+        let layers = app.world().get::<RenderLayers>(cam_e).unwrap();
+        assert!(layers.intersects(&RenderLayers::layer(crate::volumetric_clouds::FLAT_CLOUD_LAYER)));
+        assert!(!layers.intersects(&RenderLayers::layer(crate::volumetric_clouds::VOLUME_LAYER)));
 
         // Zero-scale anchor must deactivate camera and restore original material without panicking.
         *app.world_mut().get_mut::<GlobalTransform>(anchor).unwrap() = GlobalTransform::from(Transform::from_scale(Vec3::ZERO));

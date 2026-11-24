@@ -57,6 +57,9 @@
 //! - **Desert haze** (`desert-haze`, off in every preset): a thin dust haze added to the
 //!   weather's own distance fog, thicker with distance and toward the ground, warmer toward
 //!   the sun, as far as the weather's fog leaves room for it (haze.rs, #2675).
+//! - **Volumetric clouds** (`volumetric-clouds`, a prototype, off in every preset): the
+//!   weather's cloud layers drawn as a lit slab of cloud above the world, its cover the one
+//!   Cloud shadows composes (volumetric_clouds.rs, #2991).
 //! - **Aerial perspective** (`aerial-perspective`, off in every preset): far scenery takes on
 //!   the weather's sky colours with distance, per colour channel and toward the sun, inside the
 //!   weather's own fog (aerial.rs, #2993).
@@ -227,6 +230,12 @@ pub struct Graphics {
     pub heat_haze: bool,
     /// A dust haze in the weather's fog (haze.rs; off in every preset) [design, #2675].
     pub desert_haze: bool,
+    /// The weather's clouds as a lit volume (volumetric_clouds.rs; a prototype, off in every
+    /// preset) [design, #2991].
+    pub volumetric_clouds: bool,
+    /// Its level while it is on (the Volumetric clouds row's Performance, Normal or High;
+    /// `volumetric_clouds.rs` `CloudLevel`): Normal in every preset [design, 2026-11-23].
+    pub volumetric_clouds_level: crate::volumetric_clouds::CloudLevel,
     /// Surfaces whose diffuse has an authored PBR set under `textures\pbr\` are shaded from
     /// it (#2981, docs/spec-notes/pbr-materials.md; on in both looks: a texture pack's maps
     /// are assets, as a diffuse replacer is). Read once at the start (nvf_assets
@@ -265,9 +274,9 @@ pub const AUTHORED_MATERIALS_KEY: &str = "authored-materials";
 pub const AUTHORED_REFLECTIONS_KEY: &str = "authored-reflections";
 
 /// The keys of `--graphics-only`: the settings page's switches and the anti-aliasing,
-/// shadow-filter, full-detail and distant-object choices that are not vanilla's, in the
+/// shadow-filter, full-detail, distant-object and cloud-level choices that are not vanilla's, in the
 /// order of [`Graphics::describe`].
-pub const KEYS: [&str; 28] = [
+pub const KEYS: [&str; 31] = [
     "ambient-occlusion",
     "fine-shadows",
     "bloom",
@@ -293,6 +302,9 @@ pub const KEYS: [&str; 28] = [
     "full-detail-9x9",
     "distant-objects-8",
     "distant-objects-12",
+    "volumetric-clouds",
+    "volumetric-clouds-performance",
+    "volumetric-clouds-high",
     "aerial-perspective",
     "night-sky-detail",
     "distant-lights",
@@ -356,6 +368,9 @@ impl Graphics {
             heat_haze: false,
             // Off in every preset: an addition of our own [design, #2675].
             desert_haze: false,
+            // Off in every preset: a prototype of our own [design, #2991].
+            volumetric_clouds: false,
+            volumetric_clouds_level: crate::volumetric_clouds::CloudLevel::Normal,
             // On in both looks [design, #2981]: without a pack nothing changes.
             authored_materials: true,
             // On in both looks [design, #2981]: without a pack nothing reflects.
@@ -399,6 +414,7 @@ impl Graphics {
             "terrain-shadows" => &mut self.terrain_shadows,
             "heat-haze" => &mut self.heat_haze,
             "desert-haze" => &mut self.desert_haze,
+            "volumetric-clouds" => &mut self.volumetric_clouds,
             "aerial-perspective" => &mut self.aerial_perspective,
             "night-sky-detail" => &mut self.night_sky_detail,
             AUTHORED_MATERIALS_KEY => &mut self.authored_materials,
@@ -409,8 +425,8 @@ impl Graphics {
     }
 
     /// Exactly the improvements named ([`KEYS`]) on (`--graphics-only`); of the
-    /// anti-aliasings, of the shadow filters, of the full-detail sizes and of the
-    /// distant-object reaches the last named wins.
+    /// anti-aliasings, of the shadow filters, of the full-detail sizes, of the
+    /// distant-object reaches and of the clouds' levels the last named wins.
     pub fn only(keys: &[String]) -> Result<Self, String> {
         let mut g = Graphics::preset(Preset::Vanilla);
         for k in keys.iter().map(|k| k.trim()).filter(|k| !k.is_empty()) {
@@ -424,6 +440,16 @@ impl Graphics {
                 "full-detail-9x9" => g.full_detail = crate::full_detail::FullDetail::Nine,
                 "distant-objects-8" => g.distant_objects = crate::distant_objects::DistantObjects::Eight,
                 "distant-objects-12" => g.distant_objects = crate::distant_objects::DistantObjects::Twelve,
+                // The switch alone is Normal, as an INI written while the row was a switch.
+                "volumetric-clouds" | "volumetric-clouds-performance" | "volumetric-clouds-high" => {
+                    use crate::volumetric_clouds::CloudLevel;
+                    g.volumetric_clouds = true;
+                    g.volumetric_clouds_level = match k {
+                        "volumetric-clouds-performance" => CloudLevel::Performance,
+                        "volumetric-clouds-high" => CloudLevel::High,
+                        _ => CloudLevel::Normal,
+                    };
+                }
                 "no-glow" => g.glow = false,
                 "no-eye-adaptation" => g.eye_adaptation = false,
                 "no-neon-glow" => g.neon_glow = false,
@@ -471,6 +497,7 @@ impl Graphics {
             (!self.authored_reflections, "no authored reflections"),
             (self.full_detail != crate::full_detail::FullDetail::Off, self.full_detail.describe()),
             (self.distant_objects != crate::distant_objects::DistantObjects::Off, self.distant_objects.describe()),
+            (self.volumetric_clouds, "volumetric clouds"),
             (self.aerial_perspective, "aerial perspective"),
             (self.night_sky_detail, "night sky detail"),
             (self.distant_lights, "distant lights"),
@@ -1046,7 +1073,10 @@ fn apply(
         } else {
             e.remove::<(bevy::post_process::bloom::Bloom, bevy::camera::Hdr, crate::post::ImageSpaceGlow)>();
         }
-        if temporal {
+        // The volumetric medium's far buffer is composed in the linear HDR picture before
+        // tonemapping (medium.rs, volumetric_clouds.rs), so its row keeps the view HDR whatever
+        // the glow and the upscaler say [design, #3032 decision 10].
+        if temporal || g.volumetric_clouds {
             e.insert(bevy::camera::Hdr);
         }
         // Eye adaptation (eye_adapt.rs) and the bright pass need the HDR view; each has
@@ -1564,9 +1594,10 @@ mod tests {
     #[test]
     fn every_key_is_a_switch_and_enhanced_leaves_taa_off() {
         let all = Graphics::only(&KEYS.map(String::from)).expect("keys");
-        // Of the three anti-aliasings, the two shadow filters, the two full-detail sizes and
-        // the two distant-object reaches the last named is on.
-        assert_eq!(all.describe().split(", ").count(), KEYS.len() + 1 - 5);
+        // Of the three anti-aliasings, the two shadow filters, the two full-detail sizes, the
+        // two distant-object reaches and the clouds' three levels the last named is on.
+        assert_eq!(all.describe().split(", ").count(), KEYS.len() + 1 - 7);
+        assert_eq!(all.volumetric_clouds_level, crate::volumetric_clouds::CloudLevel::High);
         assert_eq!(all.full_detail, crate::full_detail::FullDetail::Nine);
         assert_eq!(all.distant_objects, crate::distant_objects::DistantObjects::Twelve);
         assert_eq!((all.screen_aa, all.shadow_filter), (ScreenAa::Taa, ShadowFilteringMethod::Temporal));
@@ -1729,6 +1760,49 @@ mod tests {
         *g.switch("desert-haze").expect("settings key") = true;
         assert_eq!(g, on);
         assert!(!Graphics::preset(Preset::Enhanced).describe().contains("haze"));
+    }
+
+    #[test]
+    fn volumetric_clouds_are_off_in_both_looks_and_have_their_own_key() {
+        assert!(!Graphics::preset(Preset::Vanilla).volumetric_clouds && !Graphics::preset(Preset::Enhanced).volumetric_clouds);
+        let on = Graphics::only(&["volumetric-clouds".into()]).expect("volumetric-clouds");
+        assert!(on.volumetric_clouds && !on.cloud_shadows, "the volume does not switch Cloud shadows on");
+        assert_eq!(on.describe(), "light glow, volumetric clouds");
+        let mut g = Graphics::preset(Preset::Vanilla);
+        *g.switch("volumetric-clouds").expect("settings key") = true;
+        assert_eq!(g, on);
+        // The levels (2026-11-23): the switch alone is Normal; the last named wins.
+        use crate::volumetric_clouds::CloudLevel;
+        let level = |keys: &[&str]| {
+            let g = Graphics::only(&keys.iter().map(|k| (*k).to_string()).collect::<Vec<_>>()).expect("keys");
+            (g.volumetric_clouds, g.volumetric_clouds_level, g.describe())
+        };
+        let words = || "light glow, volumetric clouds".to_string();
+        assert_eq!(level(&["volumetric-clouds"]), (true, CloudLevel::Normal, words()));
+        assert_eq!(level(&["volumetric-clouds-performance"]), (true, CloudLevel::Performance, words()));
+        assert_eq!(level(&["volumetric-clouds-performance", "volumetric-clouds-high"]), (true, CloudLevel::High, words()));
+        assert_eq!(level(&["volumetric-clouds-high", "volumetric-clouds"]), (true, CloudLevel::Normal, words()));
+        assert!(!Graphics::preset(Preset::Enhanced).describe().contains("volumetric"));
+    }
+
+    /// The volumetric medium is composed in the HDR picture: with Light glow off and no
+    /// upscaler the row alone makes the main view HDR, and switching it off takes it away
+    /// again while the game runs (#3032 decision 10).
+    #[test]
+    fn volumetric_clouds_keep_the_view_hdr_with_glow_and_upscaler_off() {
+        for selected in [ScreenAa::Off, ScreenAa::Taa] {
+            let (mut app, camera) = aa_app(selected, true);
+            app.world_mut().resource_mut::<Graphics>().glow = false;
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: glow off, no upscaler: not HDR");
+            app.world_mut().resource_mut::<Graphics>().volumetric_clouds = true;
+            app.update();
+            assert!(app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: the row makes the view HDR");
+            assert!(!app.world().entity(camera).contains::<bevy::post_process::bloom::Bloom>(), "{selected:?}: and nothing else of the glow");
+            app.world_mut().resource_mut::<Graphics>().volumetric_clouds = false;
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: off again: not HDR");
+        }
     }
 
     #[test]

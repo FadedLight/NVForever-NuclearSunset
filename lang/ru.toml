@@ -559,6 +559,9 @@ name = "Русский"
 # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
 "Heat haze (experimental)" = "Марево (экспериментально)"
 "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "Вкл.: дальняя земля у горизонта слегка дрожит в жаркие ясные дни, в зависимости от солнца и погоды. Прототип. Нет в оригинале."
+# [design; engine/nvforever/src/volumetric_clouds.rs] The Volumetric clouds row (a prototype, #2991).
+"Volumetric clouds (experimental)" = "Объёмные облака (экспериментально)"
+"The weather's clouds drawn with depth, lit by the sun: Off, or Performance, Normal or High, each finer and dearer than the last. A prototype. Not in the original." = "Облака погоды, нарисованные объёмными и освещённые солнцем: Выкл. либо Производительность, Нормально или Высокое, каждое детальнее и затратнее предыдущего. Прототип. Нет в оригинале."
 # [design, #3146; engine/nvf-play/src/pause.rs] Why a settings row is greyed.
 "Greyed out: {why}" = "Недоступно: {why}"
 # [design, #3146; engine/nvf-play/src/lockpick.rs] Lockpicking: the refusals, the status line, the Force Lock button.

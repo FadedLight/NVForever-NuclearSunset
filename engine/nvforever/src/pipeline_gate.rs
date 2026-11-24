@@ -154,7 +154,7 @@ fn waited_for(state: &CachedPipelineState) -> bool {
 }
 
 /// The errors Bevy tries again [design: bevy_render 0.20.1 `process_pipeline`].
-fn retried(e: &ShaderCacheError) -> bool {
+pub(crate) fn retried(e: &ShaderCacheError) -> bool {
     matches!(e, ShaderCacheError::ShaderNotLoaded(_) | ShaderCacheError::ShaderImportNotYetAvailable)
 }
 

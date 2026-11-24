@@ -474,6 +474,7 @@ pub const SECTIONS: &[Section] = &[
             "tweak-hold-containers",
             "tweak-hold-furniture",
             "tweak-hold-water",
+            "tweak-no-lock-encounter-zone-levels",
             "tweak-disable-fast-travel",
             "tweak-no-travel-crippled-leg",
             "tweak-quick-use",

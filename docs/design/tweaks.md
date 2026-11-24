@@ -696,9 +696,9 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 <!-- generated: the table below lists every tweak of AllTweaks.json (v9.87) by its INI key -->
 | Status | Count |
 |---|---|
-| done | 594 |
+| done | 595 |
 | to do | 0 |
-| unsure, skipped | 24 |
+| unsure, skipped | 23 |
 | n/a | 17 |
 | skipped: fix | 10 |
 
@@ -781,6 +781,7 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 | `bNoFastTravelIfLegsCrippled` | done |  | 1 | No Travel on a Crippled Leg (NVForever's own refusal text) |
 | `bNoFreeBarterItems` | done |  | 1 | Price for Worthless Things (slider, 0-10 caps) |
 | `bNoGrabOwnedItems` | done |  |  | No Grabbing Owned Items |
+| `bNoLockEncounterZoneLevels` | done |  |  | No Encounter Zone Level Lock: encounter zones recompute their level from the player's current level instead of freezing on first visit (`fnv_sim::zones`, `fnv_game::zones`, `GetZoneLevel`; [documented: lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini` `[Tweaks]`: `; don't freeze the level of encounter zones when they are first visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted]; [design: respects zone `min_level` and `Match PC Below Minimum Level` including session overrides, while already-fixed references keep their fixed levels until cell reset]) |
 | `bNoLockFailedTerminals` | done |  |  | No Terminal Lockout |
 | `bNoPlayerStaggerAnims` | done |  |  | No Player Stagger |
 | `bNoSkillTags` | done |  | 6 | No Skill Tags (the outline, percent and XP options not built) |
@@ -850,7 +851,6 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 | `iPerksPerLevel` | done |  | 1 | Perks per Level (1 to 5) |
 | `bMoreFrequentNPCLightUpdates` | unsure, skipped | yes | 1 | NVForever lights actors its own way; unclear what to change |
 | `bHipFireAnimsWhileScoped` | unsure, skipped |  |  | depends on alternate animations |
-| `bNoLockEncounterZoneLevels` | unsure, skipped |  |  | encounter-zone level locking not yet checked in NVForever |
 | `bSneakingDoesntForcePowerAttacks` | unsure, skipped |  |  | depends on separate animations |
 | `bStrengthAffectsAllThrowables` | unsure, skipped |  |  | how fThrowingStrengthPenalty shortens a throw is not documented (the GECK wiki export names the setting but has no page for it), and NVForever applies it to no throw yet |
 | `bUseArmorRepairKitsInRepairMenu` | unsure, skipped |  |  | the masters have no armour repair kit, and nothing in the data marks a mod's item as one or says how much it repairs |

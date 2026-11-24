@@ -441,6 +441,7 @@ pub fn apply_modular_tweaks_to_game(overrides: &StewieIniMap, tweaks: &mut Tweak
     bool_tweak!("Tweaks", "bReloadingWithNoAmmoSwapsAmmoTypes", empty_reload_swaps_ammo);
     bool_tweak!("Tweaks", "bMenuSearch", menu_search);
     bool_tweak!("Tweaks", "bArmorConditionLabel", armor_condition);
+    bool_tweak!("Tweaks", "bNoLockEncounterZoneLevels", no_lock_encounter_zone_levels);
 
     // Numeric [Tweaks] settings with documented domains.
     if let Some(n) = overrides.get_i32("Tweaks", "iPerksPerLevel").filter(|&n| n >= 1) {
@@ -705,6 +706,7 @@ mod tests {
             "[Tweaks]\n\
              bCritChanceIgnoresFireRate=1\n\
              bMenuSearch=1\n\
+             bNoLockEncounterZoneLevels=1\n\
              bHardcoreTweaks=1\n\
              iPerksPerLevel=3\n\
              iMaxCharacterLevel=50\n\
@@ -720,9 +722,10 @@ mod tests {
 
         let mut tweaks = Tweaks::default();
         let count = apply_modular_tweaks_to_game(&map, &mut tweaks);
-        assert_eq!(count, 9);
+        assert_eq!(count, 10);
         assert!(tweaks.crit_ignores_fire_rate);
         assert!(tweaks.menu_search);
+        assert!(tweaks.no_lock_encounter_zone_levels);
         assert!(tweaks.hardcore_tweaks);
         assert!(!tweaks.hardcore_ammo_weight);
         assert!(tweaks.hardcore_essential_companions);

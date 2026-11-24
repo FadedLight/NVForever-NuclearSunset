@@ -45,6 +45,8 @@ impl Game<'_> {
             true
         } else if section.eq_ignore_ascii_case("Tweaks") && key.eq_ignore_ascii_case("bArmorConditionLabel") {
             self.tweaks.armor_condition
+        } else if section.eq_ignore_ascii_case("Tweaks") && key.eq_ignore_ascii_case("bNoLockEncounterZoneLevels") {
+            self.tweaks.no_lock_encounter_zone_levels
         } else {
             return None;
         };

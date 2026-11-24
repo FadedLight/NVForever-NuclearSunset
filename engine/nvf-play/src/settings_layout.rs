@@ -574,7 +574,7 @@ mod tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -768,8 +768,9 @@ mod tests {
         let tweaks = tweak_rows();
         // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
         // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
-        // Running Costs AP sneak options (#3183), and Stewie 9.65-9.70 sub-options (#3184).
-        assert_eq!(tweaks.len(), 573);
+        // Running Costs AP sneak options (#3183), Stewie 9.65-9.70 sub-options (#3184),
+        // and No Encounter Zone Level Lock (#3878).
+        assert_eq!(tweaks.len(), 574);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);
@@ -787,6 +788,7 @@ mod tests {
         assert_eq!(at("tweak-weightless-ammo"), "Tweaks > Cheats > Weight");
         assert_eq!(at("tweak-weightless-worn-armor"), "Tweaks > Gameplay > Weight");
         assert_eq!(at("tweak-keep-chosen-ammo"), "Tweaks > Combat > Weapons and Armour");
+        assert_eq!(at("tweak-no-lock-encounter-zone-levels"), "Tweaks > Gameplay > Travel and World");
         // A row that only matters with another comes right after it.
         let next = |k: &str| list[l.ordered_settings().skip_while(|&i| list[i].key != k).nth(1).unwrap()].key;
         assert_eq!(next("tweak-take-all-confirm"), "tweak-take-all-confirm-min");

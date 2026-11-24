@@ -37,10 +37,20 @@ the native player spotlight described in `world.md` §8.)
 Every stored field has a live consumer in `engine/nvforever/src/flashlight.rs`:
 
 - `[Main] RenderEffects` and `[Flashlight] Enabled`: master activation gate
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`].
+  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`;
+  observed lifecycle: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official
+  base masters, isolated clean-room staging, BetterFlashlightNVSE 1.1.5 +
+  `Data\Config\BetterFlashlightNVSE.ini`, GSDocMitchellHouse (`0x00103DF9`), Wave 4E
+  black-box probe `w4e_c06_betterflashlight_toggle_lifecycle`: loads
+  `Data\Config\BetterFlashlightNVSE.ini` cleanly and activates its material-light pass
+  strictly while the Pip-Boy light is toggled on (`TogglePipBoyLight 1 -> matpass
+  visited=1755 queued=490`; `TogglePipBoyLight 0 -> pass inactive`); zero DLL/PDB/source
+  consulted].
 - `[Flashlight] Angle`, `SpotSize`, `Distance`: mapped onto native Bevy `SpotLight`
   `outer_angle` (`Angle * SpotSize`, treating `Angle` as base cone half-angle in degrees
-  [hypothesis]), `inner_angle` preserving NVForever's vanilla `14 / 30` softness ratio
+  [hypothesis: GPU shader / visual-only boundary confirmed non-script-observable in Wave
+  4E `w4e_v02_betterflashlight_visual_cone` — requires interactive A/B screenshot
+  inspection]), `inner_angle` preserving NVForever's vanilla `14 / 30` softness ratio
   [design], and `range` (`Distance`, game units) [documented: Better Flashlight NVSE
   v1.1.6 `Data\Config\BetterFlashlightNVSE.ini` (`;light cone`,
   `;spot size scale - shrinks the pool (cone + cookie together). 1.0 = full Angle, lower = tighter`)].
@@ -77,7 +87,9 @@ Every stored field has a live consumer in `engine/nvforever/src/flashlight.rs`:
   weapon-node alignment], then applies `(OffsetX, OffsetY, OffsetZ)` in the attach
   point's local game-space `(right, forward, up)` frame [hypothesis: FNV local axis
   convention for `OffsetX/Y/Z`, since the INI comment does not specify individual axis
-  orientations].
+  orientations; GPU shader / visual-only boundary confirmed non-script-observable in Wave
+  4E `w4e_v02_betterflashlight_visual_cone` — requires interactive A/B screenshot
+  inspection].
 - `[Battery] Enabled`, `DrainRate`, `RechargeRate`, `RechargeThreshold`: while actively
   playing (`PlayState::Playing` and not `Paused`), drains charge (`100 -> 0`) at
   `DrainRate` units/s when on, automatically shuts off at `0` and locks out re-toggling

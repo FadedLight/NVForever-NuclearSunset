@@ -236,8 +236,11 @@ fn desktop_admission_keeps_main_behavior_without_dropping_shapes() {
     replace(&mut data, "vertices", Value::FloatList { dim: 3, data: positions });
     let admitted = rejected.admit(1, &empty_decoded(), &Struct::default(), &data);
     assert!(admitted.is_some(), "desktop admission does not reject nonfinite shapes");
-    assert!(rejected.accept_mesh(1, &admitted.unwrap().mesh));
+    let admitted = admitted.unwrap();
+    assert!(rejected.accept_mesh(1, &admitted.mesh));
     assert_eq!(rejected.total, 0);
+    assert!(!rejected.accept_mesh_android(1, &admitted.mesh), "Android path rejects the same nonfinite mesh");
+    assert_eq!(rejected.total, 1);
 }
 
 #[test]

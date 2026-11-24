@@ -94,9 +94,11 @@ fn scale(v: f32) -> f32 {
         1.0
     }
 }
+#[cfg(any(target_os = "android", test))]
 fn part(v: f32) -> f32 {
     (scale(v) - 0.75) / 1.25
 }
+#[cfg(any(target_os = "android", test))]
 fn from_part(v: f32) -> f32 {
     scale(
         0.75 + if v.is_finite() {
@@ -106,9 +108,11 @@ fn from_part(v: f32) -> f32 {
         } * 1.25,
     )
 }
+#[cfg(any(target_os = "android", test))]
 fn shown(v: f32) -> String {
     format!("{:.0}%", from_part(v) * 100.0)
 }
+#[cfg(any(target_os = "android", test))]
 fn mode(w: &World) -> String {
     if w.resource::<TouchDialogue>().confirm {
         "Select then confirm"
@@ -117,6 +121,7 @@ fn mode(w: &World) -> String {
     }
     .into()
 }
+#[cfg(any(target_os = "android", test))]
 fn set_mode(w: &mut World, name: &str) -> bool {
     let confirm = match name {
         "Select then confirm" => true,
@@ -127,6 +132,7 @@ fn set_mode(w: &mut World, name: &str) -> bool {
     true
 }
 
+#[cfg(any(target_os = "android", test))]
 fn set_enabled(world: &mut World, enabled: bool) {
     if world.resource::<TouchDialogue>().enabled == enabled { return; }
     world.resource_mut::<TouchDialogue>().enabled = enabled;

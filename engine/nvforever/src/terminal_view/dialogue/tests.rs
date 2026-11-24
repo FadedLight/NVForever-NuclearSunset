@@ -132,7 +132,7 @@ fn actual_model_and_camera_publish_bidirectional_glass_without_housing_hits_or_s
         assert!(view.canvas_at(request,request.stamp.display.min-Vec2::ONE).is_none());
         // Use the actual CPU glass and camera to locate the raised authored switch;
         // no input rectangle or precomputed camera fields are written by the fixture.
-        let instance = app.world().resource::<DialogueMonitor>().0.as_ref().unwrap();
+        let instance = app.world().resource::<DialogueMonitor>().active.as_ref().unwrap();
         let camera = app.world().get::<Camera>(instance.camera).unwrap();
         let at = app.world().get::<GlobalTransform>(instance.camera).unwrap();
         let point = Vec2::new(910.,680.);
@@ -198,7 +198,7 @@ fn folded_glass_cannot_reverse_project_a_response_hidden_by_a_nearer_uv_region()
     let (mut app,_files)=fixture(640,1.0);
     app.update();app.update();
     let request=app.world().resource::<Request>();
-    let instance=app.world().resource::<DialogueMonitor>().0.as_ref().unwrap();
+    let instance=app.world().resource::<DialogueMonitor>().active.as_ref().unwrap();
     let camera=app.world().get::<Camera>(instance.camera).unwrap();
     let transform=app.world().get::<GlobalTransform>(instance.camera).unwrap();
     let texture=nvf_play::terminal::screen::TEXTURE_UNITS;

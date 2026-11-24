@@ -7,6 +7,7 @@ pub const KEY: &str = "dialogue-speaker-side";
 pub const DEVICE_SIDE_KEY: &str = "dialogue-device-side-v1";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Side { #[default] Standard, Left, Right }
+#[cfg(any(target_os = "android", test))]
 impl Side {
     fn name(self) -> &'static str { match self { Self::Standard => "Standard", Self::Left => "Speaker left", Self::Right => "Speaker right" } }
     fn named(name: &str) -> Option<Self> { [Self::Standard, Self::Left, Self::Right].into_iter().find(|s| s.name() == name) }
@@ -16,7 +17,9 @@ impl Side {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeviceSide { #[default] Right, Left }
 impl DeviceSide {
+    #[cfg(any(target_os = "android", test))]
     fn name(self) -> &'static str { match self { Self::Right => "Right", Self::Left => "Left" } }
+    #[cfg(any(target_os = "android", test))]
     fn named(name: &str) -> Option<Self> { [Self::Right, Self::Left].into_iter().find(|s| s.name() == name) }
     fn speaker_side(self) -> Side { match self { Self::Right => Side::Left, Self::Left => Side::Right } }
 }
@@ -112,7 +115,9 @@ struct Owned {
     written_rotation: Quat,
 }
 
+#[cfg(any(target_os = "android", test))]
 fn chosen(w: &World) -> String { w.resource::<Options>().side.name().into() }
+#[cfg(any(target_os = "android", test))]
 fn choose(w: &mut World, name: &str) -> bool {
     let Some(side) = Side::named(name) else { return false };
     let mut opts = w.resource_mut::<Options>();
@@ -124,7 +129,9 @@ fn choose(w: &mut World, name: &str) -> bool {
     }
     true
 }
+#[cfg(any(target_os = "android", test))]
 fn chosen_device_side(w: &World) -> String { w.resource::<Options>().device_side.name().into() }
+#[cfg(any(target_os = "android", test))]
 fn choose_device_side(w: &mut World, name: &str) -> bool {
     let Some(device_side) = DeviceSide::named(name) else { return false };
     let mut opts = w.resource_mut::<Options>();

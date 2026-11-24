@@ -658,8 +658,8 @@ pub fn read_controls(
         control.sneak = held.base(control.sneak);
     }
     if *state.get() != PlayState::Playing {
-        if cfg!(target_os = "android") || held_sneak.is_some() {
-            if std::mem::take(&mut *native_sneak_hold) { control.sneak = false; }
+        if (cfg!(target_os = "android") || held_sneak.is_some()) && std::mem::take(&mut *native_sneak_hold) {
+            control.sneak = false;
         }
         if let Some(held) = held_sneak.as_deref_mut() {
             held.controller_active = false;
@@ -683,13 +683,13 @@ pub fn read_controls(
     let sneak_start = if controller_hold { crate::bindings::keys_with_pad() && input.physical_just_pressed(Control::CrouchSneak) } else { input.just_pressed(Control::CrouchSneak) };
     let sneak_end = if controller_hold { crate::bindings::keys_with_pad() && input.physical_just_released(Control::CrouchSneak) } else { input.just_released(Control::CrouchSneak) };
     let native_hold_mode = tweaks.as_ref().is_some_and(|t| t.hold_to_sneak);
-    if android_sneak_hold && *native_sneak_hold && (!native_hold_mode || !sneak_pressed) {
+    if *native_sneak_hold && (!native_hold_mode || !sneak_pressed) {
         c.sneak = false;
         *native_sneak_hold = false;
     }
     // Native hold affects only the restored base; virtual/controller holds apply below.
     if native_hold_mode {
-        if android_sneak_hold && sneak_start { *native_sneak_hold = true; }
+        if sneak_start { *native_sneak_hold = true; }
         if sneak_pressed != c.sneak && (sneak_start || sneak_end) {
             c.sneak = sneak_pressed;
             info!("Crouch/Sneak held: sneaking {} asked", if c.sneak { "on" } else { "off" });

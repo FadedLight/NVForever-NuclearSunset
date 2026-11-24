@@ -1,4 +1,6 @@
 //! Original split-thumb lockpicking input. Puzzle rules remain in fnv-game/lockpick.
+// Desktop skips `lockpick::touch::install` so touch lockpick runtime stays Android/test-only.
+#![cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
 use super::{LockpickInput, LockpickScreen, KEY_DEGREES};
 use crate::{
     bindings::ControlInput,
@@ -311,6 +313,7 @@ pub(super) fn install(app: &mut App) {
         register(app)
     }
 }
+#[cfg(target_os = "android")]
 pub(super) fn clear(mut gestures: ResMut<Gestures>, mut held: ResMut<HeldTorque>) {
     gestures.cancel();
     *held = HeldTorque::default();

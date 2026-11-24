@@ -702,6 +702,7 @@ mod tests {
     fn desktop_pad_plugin_omits_android_controller_rows_and_keeps_immediate_aim_after_menu_and_unfocused() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputPlugin, bevy::state::app::StatesPlugin))
+            .init_resource::<Assets<Image>>()
             .insert_state(PlayState::Menu)
             .init_resource::<Bindings>()
             .init_resource::<PlayerControl>()

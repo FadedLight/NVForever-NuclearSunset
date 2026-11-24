@@ -476,12 +476,8 @@ mod tests {
     fn spawn_monitor_missing_bounds_or_glass_leaks_zero_entities_and_images() {
         use nvf_assets::model::{ModelCtx, PreparedModel, PreparedShape};
         use nvf_assets::NifMaterial;
-        let mut app = App::new();
-        app.init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<NifMaterial>>()
-            .init_resource::<Assets<StandardMaterial>>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<nvf_assets::model::ModelCache>();
+        let (mut app, _files) = crate::outfits::tests::asset_fixture();
+        app.init_resource::<Assets<StandardMaterial>>();
         let mesh_handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::new(
             bevy::mesh::PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
@@ -498,12 +494,14 @@ mod tests {
                 mesh: mesh_handle,
                 material: mat_handle,
                 transform: Affine3A::IDENTITY,
+                ancestors: Vec::new(),
+                node: None,
+                own: Affine3A::IDENTITY,
                 cpu: None,
-                skin: None,
-                morph: None,
-                hidden: false,
-                alpha_blend: false,
-                refraction: false,
+                segments: Vec::new(),
+                external_emittance: false,
+                look: nvf_assets::material_anim::Look::stored([0.0; 3], 1.0, 1.0),
+                missing_diffuse: None,
             }],
             bounds: None,
             ..Default::default()
@@ -514,7 +512,7 @@ mod tests {
             ModelCtx,
             ResMut<Assets<StandardMaterial>>,
         )>::new(app.world_mut());
-        let (mut commands, mut models, mut plain) = system_state.get_mut(app.world_mut());
+        let (mut commands, mut models, mut plain) = system_state.get_mut(app.world_mut()).unwrap();
         // fit_model=true with bounds=None must bail out BEFORE spawning any shape or allocating any image.
         let res = spawn_monitor(
             &mut commands,

@@ -1631,7 +1631,7 @@ fn build_mesh_desktop(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
     if md.colors.len() == n {
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, md.colors);
     }
-    let idx: Vec<u32> = md.triangles.into_iter().filter(|&[a, b, c]| (a as usize) < n && (b as usize) < n && (c as usize) < n).flat_map(|[a, b, c]| [a as u32, b as u32, c as u32]).collect();
+    let idx: Vec<u32> = md.triangles.into_iter().filter(|&[a, b, c]| (a as usize) < n && (b as usize) < n && (c as usize) < n).flatten().collect();
     mesh.insert_indices(Indices::U32(idx));
     if !has_normals {
         mesh.compute_normals();

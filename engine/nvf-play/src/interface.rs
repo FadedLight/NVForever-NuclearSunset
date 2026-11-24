@@ -211,6 +211,7 @@ pub fn ui_scale_part(s: f32) -> f32 {
 
 /// Expanded HUD slider has its own key so earlier 50..150% saved parts keep their size.
 pub const HUD_SCALE_KEY: &str = "hud-scale-v2";
+#[cfg(any(target_os = "android", test))]
 const HUD_SCALE_CHOICES: usize = 46;
 
 fn fit_hud_scale(scale: f32) -> f32 {
@@ -220,6 +221,7 @@ fn fit_hud_scale(scale: f32) -> f32 {
 fn hud_scale_part(scale: f32) -> f32 {
     (((fit_hud_scale(scale) - 0.25) / 2.25) * 1000.0).round() / 1000.0
 }
+#[cfg(any(target_os = "android", test))]
 fn hud_scale_of_part(part: f32) -> f32 {
     if !part.is_finite() { return 1.0; }
     fit_hud_scale(0.25 + part.clamp(0.0, 1.0) * 2.25)

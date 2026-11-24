@@ -697,13 +697,14 @@ mod shared_table_tests {
     #[test]
     fn desktop_layout_excludes_android_sections_and_stamp() {
         let list = registry(&[("difficulty", "Gameplay"), ("hud-scale-v2", "Display"), ("touch-dialogue", "Gameplay"), ("controller-ads-v1", "Controller")]);
+        let at = |k: &str| list.iter().position(|s| s.key == k).unwrap();
         let l = super::resolve_desktop_layout(&list);
         assert_eq!(l.tab_names()[..8], DESKTOP_TAB_ORDER);
         // None of the Android-only keys are named by desktop SECTIONS; they remain unnamed.
         assert_eq!(l.unnamed(), 3);
-        assert_eq!(l.placement_of(1), Some(Placement::tab("Display")));
-        assert_eq!(l.placement_of(2), Some(Placement::tab("Gameplay")));
-        assert_eq!(l.placement_of(3), Some(Placement::tab("Controller")));
+        assert_eq!(l.placement_of(at("hud-scale-v2")), Some(Placement::tab("Display")));
+        assert_eq!(l.placement_of(at("touch-dialogue")), Some(Placement::tab("Gameplay")));
+        assert_eq!(l.placement_of(at("controller-ads-v1")), Some(Placement::tab("Controller")));
         assert_ne!(layout_stamp(), mobile_layout_stamp());
     }
 

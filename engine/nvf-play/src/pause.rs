@@ -1256,7 +1256,7 @@ const MENU_FONTS: [&str; 2] = ["Original", "Sharp"];
 
 /// Settings menu UI scale key in `[Settings]` (7-choice list: 80%..=200%, default 100%).
 pub const SETTINGS_MENU_SCALE_KEY: &str = "settings-menu-scale-v1";
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 const SETTINGS_MENU_SCALES: [f32; 7] = [0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0];
 
 /// Independent UI scale for the pause Settings page, taking effect immediately.
@@ -1276,7 +1276,7 @@ impl SettingsMenuScale {
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn settings_menu_scale_names() -> Vec<String> {
     SETTINGS_MENU_SCALES.iter().map(|s| format!("{:.0}%", s * 100.0)).collect()
 }
@@ -1287,7 +1287,7 @@ fn settings_menu_scale_chosen(w: &World) -> String {
     settings_menu_scale_names()[crate::settings::nearest(&SETTINGS_MENU_SCALES, scale)].clone()
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", test))]
 fn take_settings_menu_scale(w: &mut World, text: &str) -> bool {
     let names = settings_menu_scale_names();
     let Some(i) = crate::settings::choice_of(text, &names, |v| {

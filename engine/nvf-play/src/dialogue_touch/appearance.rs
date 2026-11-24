@@ -1,5 +1,6 @@
 //! Borderless dialogue treatments over the live world, with independent accents and tint.
 use bevy::prelude::*;
+#[cfg(any(target_os = "android", test))]
 use crate::settings::{add_choice_list, add_setting, ChoiceList, Setting, Slider};
 
 pub(crate) const THEME_KEY: &str = "dialogue-theme-v1";
@@ -14,6 +15,7 @@ pub(crate) const HINTS_KEY: &str = "dialogue-hints-v1";
 pub(crate) enum Theme {
     #[default] Minimal, ClassicGlass, SplitPanel, RetroConsole, WristTerminal,
 }
+#[cfg(any(target_os = "android", test))]
 impl Theme {
     const ALL: [Self; 5] = [Self::Minimal, Self::ClassicGlass, Self::SplitPanel, Self::RetroConsole, Self::WristTerminal];
     fn name(self) -> &'static str {
@@ -31,29 +33,39 @@ pub(crate) struct Appearance {
 impl Default for Appearance {
     fn default() -> Self { Self { theme: Theme::Minimal, background: 0.18, frame: 0.60, hints: false, tint: Tint::Hud } }
 }
+#[cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Tint { #[default] Hud, Neutral, Amber }
+#[cfg(any(target_os = "android", test))]
 fn tint_name(w:&World)->String {match w.resource::<Appearance>().tint {Tint::Hud=>"HUD colour",Tint::Neutral=>"Neutral",Tint::Amber=>"Warm amber"}.into()}
+#[cfg(any(target_os = "android", test))]
 fn pick_tint(w:&mut World,name:&str)->bool {
     let tint=match name {"HUD colour"=>Tint::Hud,"Neutral"=>Tint::Neutral,"Warm amber"=>Tint::Amber,_=>return false};
     w.resource_mut::<Appearance>().tint=tint;true
 }
 fn opacity(value: f32) -> f32 { if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 } }
 fn backing(value: f32) -> f32 { opacity(value).min(0.80) }
+#[cfg(any(target_os = "android", test))]
 fn shown(value: f32) -> String { format!("{:.0}%", opacity(value) * 100.0) }
+#[cfg(any(target_os = "android", test))]
 fn shown_backing(value: f32) -> String { shown(opacity(value)*0.80) }
+#[cfg(any(target_os = "android", test))]
 fn chosen(world: &World) -> String { world.resource::<Appearance>().theme.name().into() }
+#[cfg(any(target_os = "android", test))]
 fn pick(world: &mut World, name: &str) -> bool {
     let name=match name {"Split Panel"=>"Field Notes","Minimal"=>"Normal","Classic Glass"=>"Classic",_=>name};
     let Some(theme) = Theme::ALL.into_iter().find(|t| t.name() == name) else { return false; };
     world.resource_mut::<Appearance>().theme = theme;
     true
 }
+#[cfg(any(target_os = "android", test))]
 const THEME_NOTE: &str = "Choose standard dialogue, Field Notes, the Classic casing, or an installed Terminal or Pip-Boy model.";
+#[cfg(any(target_os = "android", test))]
 fn theme_setting(note: &'static str) -> Setting {
     Setting { key: THEME_KEY, group: crate::pause::GROUP_MENUS, label: "Dialogue theme",
         note, switches: "", get: |_|false, set: |_,_|{}, slider: None }
 }
+#[cfg(any(target_os = "android", test))]
 fn theme_choices() -> ChoiceList {
     ChoiceList { names: |_|Theme::ALL.iter().map(|t|t.name().into()).collect(), chosen, pick, save: chosen, load: pick, ask_keep: false }
 }

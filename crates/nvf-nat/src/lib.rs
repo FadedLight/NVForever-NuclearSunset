@@ -13,6 +13,7 @@
 //! - [`portmap`]: NAT-PMP (RFC 6886) and PCP (RFC 6887) MAP requests, and [`portmap::Mapper`],
 //!   which asks the router for a port (PCP first, NAT-PMP when the router only speaks that).
 //!   UPnP IGD stays with the `igd-next` crate in the caller.
+//! - [`relay`]: when a guest cannot reach the host, which other guest relays for it (section 8).
 //! - [`candidate`]: the addresses a game may be reached at, and how they rank.
 //! - [`ice`]: [`ice::Agent`], the connectivity checks (hole punching) between two games, which
 //!   picks the path both use.
@@ -22,6 +23,7 @@
 pub mod candidate;
 pub mod ice;
 pub mod portmap;
+pub mod relay;
 pub mod stun;
 
 #[cfg(any(test, feature = "natsim"))]

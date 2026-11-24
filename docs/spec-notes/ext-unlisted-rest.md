@@ -88,8 +88,12 @@ number, a form or a string. [observed: set rest1]:
   value is of another type or the key is missing.
 - **GetValueType** `name key`: 1 number, 2 form, 4 string, 0 none (also for no such map).
 - **GetSize** `name`: the number of keys.
-- **GetKeys**: a list of the keys. In what order is [hypothesis]: NVForever lists them by
-  lower-case key, which matched the order they were set in the probe.
+- **GetKeys**: a list of the keys. The original returns keys in unordered hash-table order
+  (neither insertion order nor alphabetical) [observed: Fallout: New Vegas 1.4.0.525 +
+  xNVSE 6.4.9 + ShowOffNVSE 184 with the 10 official base masters, clean-room script probe
+  `so_08_auxstrmap_keys_order`: inserting `Bravo`, `charlie`, `alpha` returned
+  `alpha,charlie,Bravo`; no DLL or source consulted]. NVForever keeps deterministic
+  lower-case key order [design].
 - **GetAsArray**: a string map of the keys and values.
 - **GetFirst / GetNext**: a `[key, value]` list each; after the last, no array.
 - **GetAll** `0|1`: no array when the store has no map; with `1` a string map of the

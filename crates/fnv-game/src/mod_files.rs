@@ -992,10 +992,13 @@ fn xval_to_json(g: &Game, v: &XVal, depth: usize) -> serde_json::Value {
     }
 }
 
-/// Put `value` at a JSON Pointer (RFC 6901) in `root`, making the objects on the way
-/// that are missing [hypothesis: the page does not say what a pointer into a missing
-/// part does]; an array index at or past the end (or `-`) appends. False when the path
-/// runs through a value that is neither an object nor an array.
+/// Put `value` at a JSON Pointer (RFC 6901) in `root`. Promotes a `null` root (including
+/// a missing file) into `{}` so single-level pointers such as `"/k"` succeed, while
+/// failing when any intermediate segment is missing rather than auto-creating intermediate
+/// objects [hypothesis: the page does not specify missing-path creation; root-object
+/// creation is retained for missing files / null roots while missing intermediate segments
+/// return false]. An array index at the final segment equal to `len` (or `-`) appends.
+/// False when any intermediate segment is missing or traverses a non-container value.
 fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Value) -> bool {
     use serde_json::Value as J;
     if pointer.is_empty() {
@@ -1004,32 +1007,35 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
     }
     let Some(rest) = pointer.strip_prefix('/') else { return false };
     let parts: Vec<String> = rest.split('/').map(|p| p.replace("~1", "/").replace("~0", "~")).collect();
+    if root.is_null() {
+        *root = J::Object(serde_json::Map::new());
+    }
     let mut cur = root;
     let mut value = Some(value);
     for (i, part) in parts.iter().enumerate() {
         let last = i + 1 == parts.len();
-        if cur.is_null() {
-            *cur = J::Object(serde_json::Map::new());
-        }
         cur = match cur {
             J::Object(m) => {
                 if last {
                     m.insert(part.clone(), value.take().unwrap_or(J::Null));
                     return true;
                 }
-                m.entry(part.clone()).or_insert(J::Null)
+                let Some(next) = m.get_mut(part) else { return false };
+                next
             }
             J::Array(items) => {
                 let at = match part.parse::<usize>() {
-                    Ok(n) => n.min(items.len()),
-                    Err(_) if part == "-" => items.len(),
-                    Err(_) => return false,
+                    Ok(n) if last => n.min(items.len()),
+                    Ok(n) if n < items.len() => n,
+                    Err(_) if last && part == "-" => items.len(),
+                    _ => return false,
                 };
-                if at == items.len() {
-                    items.push(J::Null);
-                }
                 if last {
-                    items[at] = value.take().unwrap_or(J::Null);
+                    if at == items.len() {
+                        items.push(value.take().unwrap_or(J::Null));
+                    } else {
+                        items[at] = value.take().unwrap_or(J::Null);
+                    }
                     return true;
                 }
                 &mut items[at]
@@ -1041,9 +1047,14 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
 }
 
 /// A JSON file under the game's folder: with `use_cache`, the cache's copy when present;
-/// otherwise the UTF-8 file parsed fresh (UTF-8 BOM stripped). Every parser mode reads
-/// standard JSON [hypothesis: JAXN (1) and TaoConfig (2) extend it; their extensions are
-/// not read, so such a file fails to parse].
+/// otherwise the UTF-8 file parsed fresh (UTF-8 BOM stripped). All three parser modes
+/// (`0` JSON, `1` JAXN, `2` TaoConfig) read standard JSON [observed: Fallout: New Vegas
+/// 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-24, `GSDocMitchellHouse`
+/// (`0x00103DF9`), 10 official base masters, `w4d_38_showoff_perk_stagger_fade`
+/// (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+/// `json(42,42,42,0/1,0/1)` (standard JSON across modes 0/1/2, JAXN in modes 0/1,
+/// TaoConfig in modes 0/2); no DLL or source consulted]; JAXN (1) and
+/// TaoConfig (2) syntax extensions are [not built], so such files fail to parse.
 fn json_file(g: &Game, path: &str, use_cache: bool) -> Option<serde_json::Value> {
     if use_cache {
         if let Some(v) = g.mod_files.showoff_json.get(&norm(path)) {
@@ -1434,7 +1445,10 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
         }
         // `toWrite filepath [jsonPointer] [parserMode] [useCache] [saveFile]
         // [compactFormatting]`: the value converted and put at the pointer of the file's
-        // JSON (a file that is missing or not JSON starts from nothing); cached when
+        // JSON (a missing file, malformed non-JSON file, or `null` root starts from `null`
+        // and promotes the root to `{}` for a single-level pointer, while missing
+        // intermediate segments return `0` without creating intermediate objects
+        // [hypothesis]); cached when
         // asked, saved unless saveFile is 0, minified or indented [documented:
         // WriteToJSON]. Saved into NVForever's layer, never the game's folder
         // (`write_root`). 1 when done [documented: "success"].

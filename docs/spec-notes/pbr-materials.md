@@ -1101,7 +1101,7 @@ and is off by default and in both presets [design].
   engineering policy set from those numbers with margins (the grazing change would pass at
   three times its correlation, the head-on one at about twice its change):
   `terrain_parallax_ab.rs`. The cover under the centre is an estimate (the meshes'
-  interpolation of the painted opacities on the stored triangles, layer alpha taken as 1,
+  interpolation of the painted opacities on the stored triangles,
   layers the renderer leaves out skipped), so its limit (half) leaves a margin; the spot
   itself is chosen at vertices, where no interpolation enters.
 - **Not done in stage 1** (owed): a passing run of the two ground-pack scenarios; the

@@ -169,8 +169,9 @@ apart and the last row/column coincides with the neighbour's first.
 - **Landscape layers: the diffuse's alpha** (#3789). A layer covers by its painted opacity
   alone; its diffuse texture's alpha has no part in it. [observed: FalloutNV.exe 1.4.0.525,
   native 1920 x 1080 pictures of its window, Goodsprings (-71552, 2892) heading 0 at noon,
-  pitch 25 and 50 down, the lower half, mean absolute difference of 255] The 61 DXT1 landscape
-  diffuses of the base game as DXT5 with the same colour blocks and a 40/255 checkerboard of
+  pitch 25 and 50 down, the lower half, mean absolute difference of 255] The 61 DXT1 files of
+  `textures\landscape` in `Fallout - Textures.bsa` and `Fallout - Textures2.bsa` that are no
+  normal map or LOD, as DXT5 with the same colour blocks and a 40/255 checkerboard of
   16 texels in the alpha draw as without it: 0.002 and 0.013, where two runs with the game's
   own differ by 0.002 and 0.002; solid magenta in their place (the control) differs by 66.6
   and 91.1. The test was jojokengly's first [observed: jojokengly, #3486,
@@ -185,7 +186,8 @@ apart and the last row/column coincides with the neighbour's first.
   opacity by it. Now none of its landscape draws read it: the folded layers with or without
   height blending, anti-tiling and parallax, the layers drawn on their own, the mesh terrain
   blend's copies of both, and the generated LOD (which never did). Road strips and other NIF
-  shapes keep their alpha. Smoke: `terrain-layer-alpha` and its variants.
+  shapes keep their alpha. Smoke: `terrain-layer-alpha`, `terrain-layer-alpha-parallax` and
+  `terrain-layer-alpha-separate`.
 - **Alpha grid orientation** [observed]: VTXT position = row × 17 + column, rows south →
   north, columns west → east. Neighbouring quadrants share an edge of the grid; for a
   texture layered on both sides, the edge opacities agree (within 1/255) for 38,039 of

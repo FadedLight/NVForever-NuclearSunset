@@ -35662,3 +35662,50 @@ forbid = [
   { text = "failed and will not be tried again", label = "a pipeline that failed for good (terrain-layer-alpha-parallax)" },
 ]
 manual = "Open terrain-layer-alpha-parallax-shots/terrain_parallax_ab_9s_a.png: no checkerboard on the ground (the height blend's edges are sharp)."
+
+[[scenario]]
+name = "terrain-layer-alpha-separate"
+source = "[observed by jojokengly, #3486; #3789] docs/spec-notes/world.md \"Landscape layers: the diffuse's alpha\", engine/nvf-assets/src/nif_material.wesl TERRAIN_LAYER: as terrain-layer-alpha with every layer drawn on its own (NVF_PLAY_TEST_TERRAIN_LAYERS=blended, as on a GPU without bindless textures), at that scenario's spot and pose. Measured: 12.6, and 32.6 with the shaders before #3789 on the same pack"
+areas = ["renderer", "graphics", "terrain", "textures"]
+paths = [
+  "engine/nvforever/src/terrain.rs", "engine/nvf-assets/src/nif_material.rs", "engine/nvf-assets/src/nif_material.wesl",
+  "engine/nvf-assets/src/pbr_field/ground.rs", "engine/nvf-assets/src/pbr_field/ground/",
+]
+env = { NVF_PLAY_TEST_PBR_GROUND_PACK = "alpha", NVF_PLAY_TEST_TERRAIN_LAYERS = "blended", NVFOREVER_HOME = "terrain-layer-alpha-separate-home", NVF_PLAY_TEST_SHOT_DIR = "terrain-layer-alpha-separate-shots", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_LOOK = "6:0:-20.7", NVF_PLAY_TEST_TERRAIN_PARALLAX_AB = "12:hold:view" }
+args = ["--pos=-71552,2892,8454", "--heading", "0", "--play", "--no-voice", "--no-messages", "--no-grass", "--hour", "12", "--size", "1280x720", "--graphics-only", "authored-materials,no-eye-adaptation"]
+run_seconds = 30
+timeout = 180
+expect = [
+  { re = 'pbr ground pack: and a diffuse for each, one flat colour with a checkerboard alpha', count = 1, label = "the generated diffuses are in (terrain-layer-alpha-separate)" },
+  { re = 'terrain parallax ab at 12 s: under the centre: the landscape .*no folded material', label = "every layer is drawn on its own" },
+  { re = 'terrain parallax ab at 12 s \(hold\): .*contrast 1?\d\.\d/', count = 1, label = "contrast under 20: 12.6 measured, 32.6 with the alpha in the layers' blending" },
+]
+forbid = [
+  { re = 'terrain parallax ab.*FAIL', label = "a shot that could not be measured (terrain-layer-alpha-separate)" },
+  { text = "pbr ground pack: FAIL", label = "the ground pack was not written (terrain-layer-alpha-separate)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good (terrain-layer-alpha-separate)" },
+]
+manual = "Open terrain-layer-alpha-separate-shots/terrain_parallax_ab_12s_a.png: no checkerboard on the ground."
+
+[[scenario]]
+name = "terrain-layer-alpha-separate-anti-tiling"
+source = "[observed by jojokengly, #3486; #3789] docs/spec-notes/world.md \"Landscape layers: the diffuse's alpha\", engine/nvf-assets/src/terrain_pbr.wesl terrain_pbr_standard: as terrain-layer-alpha-separate with Terrain anti-tiling on. Measured: 12.6, and 29.8 with the shaders before #3789 on the same pack"
+areas = ["renderer", "graphics", "terrain", "textures"]
+paths = [
+  "engine/nvforever/src/terrain.rs", "engine/nvf-assets/src/nif_material.rs", "engine/nvf-assets/src/terrain_pbr.wesl",
+  "engine/nvf-assets/src/terrain_sampling.wesl", "engine/nvf-assets/src/pbr_field/ground.rs", "engine/nvf-assets/src/pbr_field/ground/",
+]
+env = { NVF_PLAY_TEST_PBR_GROUND_PACK = "alpha", NVF_PLAY_TEST_TERRAIN_LAYERS = "blended", NVFOREVER_HOME = "terrain-layer-alpha-separate-anti-tiling-home", NVF_PLAY_TEST_SHOT_DIR = "terrain-layer-alpha-separate-anti-tiling-shots", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_LOOK = "6:0:-20.7", NVF_PLAY_TEST_TERRAIN_PARALLAX_AB = "12:hold:view" }
+args = ["--pos=-71552,2892,8454", "--heading", "0", "--play", "--no-voice", "--no-messages", "--no-grass", "--hour", "12", "--size", "1280x720", "--graphics-only", "authored-materials,no-eye-adaptation,terrain-anti-tiling"]
+run_seconds = 30
+timeout = 180
+expect = [
+  { re = 'pbr ground pack: and a diffuse for each, one flat colour with a checkerboard alpha', count = 1, label = "the generated diffuses are in (terrain-layer-alpha-separate-anti-tiling)" },
+  { re = 'terrain parallax ab at 12 s \(hold\): .*contrast 1?\d\.\d/', count = 1, label = "contrast under 20: 12.6 measured, 29.8 with the alpha in the anti-tiled layers' blending" },
+]
+forbid = [
+  { re = 'terrain parallax ab.*FAIL', label = "a shot that could not be measured (terrain-layer-alpha-separate-anti-tiling)" },
+  { text = "pbr ground pack: FAIL", label = "the ground pack was not written (terrain-layer-alpha-separate-anti-tiling)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good (terrain-layer-alpha-separate-anti-tiling)" },
+]
+manual = "Open terrain-layer-alpha-separate-anti-tiling-shots/terrain_parallax_ab_12s_a.png: no checkerboard on the ground."

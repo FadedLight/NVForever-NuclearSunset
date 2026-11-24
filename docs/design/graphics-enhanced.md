@@ -4020,12 +4020,14 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     exponential. The layers' path alone, the baseline, is one read.
   - *The fragment texture budget* [design; counted in the code]: wgpu counts every sampled texture a pipeline layout shows the fragment stage,
     outside binding arrays, against `max_sampled_textures_per_shader_stage`. The fullest mesh view
-    layout holds 11 with the two arrays (shadow maps 2, depth and motion prepasses 2, the tonemapping
-    table of a view that is not HDR 1, the transmission texture every 3D camera has 1, the sun
-    visibility 2 + 2, the ambient occlusion 1); the fullest material holds 27 when not bindless (the
-    terrain's: StandardMaterial's 8 with `pbr_specular_textures`, its layers' 19) and 10 when the
+    layout of a view with the two arrays holds 10 (shadow maps 2, depth and motion prepasses 2,
+    the transmission texture every 3D camera has 1, the sun
+    visibility 2 + 2, the ambient occlusion 1; no tonemapping table, for such views are HDR), and two more
+    for a reflection cube on a device without binding arrays; the fullest material drawn holds 12 when not
+    bindless (the NIF material's: StandardMaterial's 8 with `pbr_specular_textures`, its own 4; the folded
+    terrain's 27 are drawn with bindless textures alone) and 10 when the
     world's materials are bindless (the sky's, which stays non-bindless). So the fullest pipeline
-    needs 38 not bindless, 21 bindless. The
+    needs 24 not bindless, 20 bindless. The
     arrays are bound only while the Volumetric clouds row is on with Cloud shadows (`volume_layout`),
     and when the fullest count (measured once, when they are first wanted, from bevy_pbr's own layout
     and the materials' derived layouts on the device) plus 4 fits the limit; otherwise the views
@@ -4033,8 +4035,8 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     without the reader and K is the layers'), logged in one line `cloud shadows: ...`
     (sun_visibility.rs `CloudVolumeRoom`, tests `cloud_volume_room_decides_the_layout`,
     `the_weather_only_layout_leaves_out_bindings_45_and_46`, `shader_variants_are_valid_wgsl`).
-    A 16-texture adapter cannot draw the non-bindless terrain even without the arrays (36); the
-    budget matters between 36 and 41. Either row's switch asks for the other layout's pipelines, kept
+    So the arrays need 28 not bindless, 24 bindless, the margin included; an adapter with 16 keeps the
+    weather-only layout. Either row's switch asks for the other layout's pipelines, kept
     from then on, as the Cloud shadows row's switch does without the volume.
   - *K*: `1 - strength (1 - exp(-depth))` with the layers' strength (`STRENGTH`, the calibration aid
     included) and their low-sun band (sine 0.02 to 0.1), mixed over the layers' K by the covered
@@ -4052,12 +4054,15 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     overcast does not dim the whole scene; the volume's is absolute, so under a full overcast the
     ground takes the whole strength [engineering choice].
   - *Where each level serves* [arithmetic, not looked at]: a receiver at the ground reference reads
-    the floor 20,000 / tan(elevation) units toward the sun. The near window covers about 31,500 units
-    each way (2,000 of them guard), so it serves the ground around the camera only with the sun above
-    about 34 degrees; below, the far level (cells of 4,000 units, its light filtered to 8,000) gives
+    the bent floor toward the sun, about 20,000 / tan(elevation) units away while that is short (29,500
+    at 34 degrees), less and less than that for a lower sun. The near window covers about 31,500 units
+    each way (2,000 of them guard), so it serves the ground around the camera whole only with the sun above
+    about 34 degrees, in part to about 32; below, the far level (cells of 4,000 units, its light filtered to 8,000) gives
     the shadow next to the player too, a broad soft dimming rather than a cloud's outline. The far
-    window (about 252,000 each way, 16,000 guard) reaches the camera's ground down to about 4.9
-    degrees, where the low-sun band still leaves about 90 % of the shadow: around that elevation the
+    window (about 252,000 each way, 16,000 guard) reaches the camera's ground much lower than a flat floor
+    would have it, since the floor bends down to meet the ray (`lvr_rise`, R = 4,000,000: at 4.9 degrees
+    it is met 184,000 units away, inside the guard): whole down to about 3.2 degrees, where the low-sun band
+    leaves about 41 % of the shadow, and gone at about 2.7, where it leaves 28 %. Between the two the
     hand-over to the layers sweeps across the scene (smooth, no seam, but the pattern changes).
     A start above the ground moves all of this up (the ground reference is the first output's camera
     height rounded to 1,024, cloud_shadows.rs `GROUND_SNAP`): the floor is then 20,000 units over that
@@ -4108,9 +4113,11 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the lens's and the extra cameras'.
   - The sky material's uniform is a vector longer (the fair sun's disc, zero) and sky.wesl tests it.
   - The shaders' sources are registered at the start; none is compiled.
-  - With Cloud shadows or Terrain shadows on, their uniform is six vectors longer (zero; the shader reads
-    none of them) and the views' component holds two texture views more, not bound; layouts and pipelines
-    are as without the row. The shared reader's system finds no light volume (a flag read a frame).
+  - With Cloud shadows or Terrain shadows on, the buffer of their uniform is six vectors (96 bytes) longer,
+    zero and outside the shader's struct, and the views' component holds two texture views more, not bound;
+    layouts, pipelines and the shader's text are as without the row. (The buffer keeps one size, for it is
+    bound in the views' groups, and one type, for the light's other readers take it whole.) The shared
+    reader's run condition finds no light volume.
   - With Cloud shadows on, the cloud textures are read as without the row (the volume's look through a
     texture's alpha waits until it wants the cover, and then reads the file once more); a colour texture's
     shape is checked before it is decoded, not after.

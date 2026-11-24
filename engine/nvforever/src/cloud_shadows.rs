@@ -229,9 +229,18 @@ pub fn parse_source(value: Option<&str>) -> crate::sun_visibility::CloudSource {
     }
 }
 
+/// Whether [`hand_over_source`] is due: not done yet, and the light volume asked for (the Volumetric
+/// clouds row and Cloud shadows on).
+fn source_due(shadows: Res<CloudShadows>, graphics: Option<Res<crate::graphics::Graphics>>, mut done: Local<bool>) -> bool {
+    let due = !*done && shadows.enabled && graphics.is_some_and(|g| g.volumetric_clouds);
+    *done |= due;
+    due
+}
+
 /// Hands the sun-visibility plumbing the source the aid asks for and the strength in force (the
 /// shadow from the light volume takes the same strength as the weather's layers, and needs it
-/// whether or not a layer image is published). Once, at the start (neither changes in a run).
+/// whether or not a layer image is published). Once, when the light volume is first asked for
+/// (neither changes in a run).
 fn hand_over_source(sink: Option<ResMut<crate::sun_visibility::SunVisibility>>) {
     let Some(mut sink) = sink else { return };
     let value = std::env::var("NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE").ok();
@@ -593,12 +602,12 @@ impl Plugin for CloudShadowsPlugin {
             .init_resource::<CloudCoverPublished>()
             .init_resource::<CloudCoverRefused>()
             .init_resource::<CloudCoverEmpty>()
-            .add_systems(Startup, hand_over_source)
             .add_systems(
                 Update,
                 (
                     follow_graphics.run_if(resource_exists_and_changed::<crate::graphics::Graphics>),
                     follow_switch.run_if(resource_changed::<CloudShadows>),
+                    hand_over_source.run_if(source_due),
                     produce_cloud_shadows.run_if(producer_wanted),
                     release_cloud_shadows.run_if(switches_changed),
                     publish_cloud_cover.run_if(cover_in_use),

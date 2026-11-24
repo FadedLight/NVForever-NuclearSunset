@@ -692,10 +692,15 @@ pub const CLOUD_VOLUME_ROOM_MARGIN: u32 = 4;
 /// The mesh view layout's sampled textures at its fullest when [`MeshPipelineViewLayouts`] is not
 /// there to count them (bevy_pbr mesh_view_bindings.rs `layout_entries` for
 /// [`fullest_view_key`]): the point and directional shadow maps (2, 5), the depth and motion
-/// prepasses (20, 22), the tonemapping table of a view that is not HDR (18), the view transmission
+/// prepasses (20, 22), the view transmission
 /// texture every 3D camera has (24, nvf-assets nif_material.rs), the sun visibility's cloud and
-/// terrain maps (40, 41), the light volume's arrays (45, 46) and the ambient occlusion (44).
-pub const FULLEST_VIEW_TEXTURES: u32 = 11;
+/// terrain maps (40, 41), the light volume's arrays (45, 46), the ambient occlusion (44) and,
+/// on a device without binding arrays, [`REFLECTION_CUBE_TEXTURES`].
+pub const FULLEST_VIEW_TEXTURES: u32 = 10 + REFLECTION_CUBE_TEXTURES;
+/// A view's reflection cube (nvf-assets reflection_cube.rs: Bevy's `ENVIRONMENT_MAP`) without
+/// binding arrays: the diffuse and the specular cube (bevy_pbr environment_map.rs
+/// `get_bind_group_layout_entries`; with them they are arrays, counted against another limit).
+pub const REFLECTION_CUBE_TEXTURES: u32 = 2;
 
 /// Whether the light volume's two arrays (bindings 45-46) fit the adapter's fragment stage
 /// (#3032 stage 2i M2). wgpu counts every sampled texture of a
@@ -703,7 +708,8 @@ pub const FULLEST_VIEW_TEXTURES: u32 = 11;
 /// `max_sampled_textures_per_shader_stage` (wgpu-core binding_model.rs
 /// `BindingTypeMaxCountValidator`): the mesh view layout's plus the material's (bindless materials
 /// hold theirs in binding arrays, which count against another limit). The fullest pipeline is the
-/// fullest view layout with the material holding the most such textures; the arrays are bound only
+/// fullest view layout a view that takes the arrays can have ([`fullest_view_key`]) with the material
+/// drawn on this device holding the most such textures ([`most_textures`]); the arrays are bound only
 /// when that count and [`CLOUD_VOLUME_ROOM_MARGIN`] fit the limit, else the views have the
 /// weather-only layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -750,15 +756,18 @@ impl CloudVolumeRoom {
     }
 }
 
-/// The mesh view layout key at its fullest in this game, the light volume's arrays included: every
-/// key bit a world view can have (graphics.rs: the depth prepass always, motion vectors with a
-/// temporal method, tonemapping in the shader on a view that is not HDR; the transmission texture
-/// on every 3D camera; fog; the sun visibility and the ambient occlusion in the lighting).
+/// The mesh view layout key at its fullest in this game of a view with the light volume's arrays:
+/// every key bit such a view can have (graphics.rs: the depth prepass always, motion vectors with a
+/// temporal method; the transmission texture
+/// on every 3D camera; fog; the reflection cube of authored materials; the sun visibility and the
+/// ambient occlusion in the lighting). Not the tonemapping in the shader (a table more): the arrays
+/// come with the Volumetric clouds row, which keeps the main view HDR, and the mirror's and the
+/// lens's cameras always are.
 pub fn fullest_view_key() -> MeshPipelineViewLayoutKey {
     MeshPipelineViewLayoutKey::from(
         MeshPipelineKey::DEPTH_PREPASS
             | MeshPipelineKey::MOTION_VECTOR_PREPASS
-            | MeshPipelineKey::TONEMAP_IN_SHADER
+            | MeshPipelineKey::ENVIRONMENT_MAP
             | MeshPipelineKey::VIEW_TRANSMISSION_TEXTURE
             | MeshPipelineKey::DISTANCE_FOG
             | MeshPipelineKey::NVF_SUN_VISIBILITY
@@ -783,6 +792,14 @@ fn material_textures<M: AsBindGroup>(device: &RenderDevice) -> (u32, bool) {
     (n as u32, bindless)
 }
 
+/// The most textures of the materials drawn on a device: `others` always, the folded terrain
+/// (`terrain`: its textures outside binding arrays, whether it is bindless) only where it is
+/// bindless (terrain.rs `TerrainMaterials::folds`; elsewhere the land's quadrants and layers are
+/// NIF materials).
+pub fn most_textures(terrain: (u32, bool), others: &[u32]) -> u32 {
+    others.iter().copied().chain(terrain.1.then_some(terrain.0)).max().unwrap_or(0)
+}
+
 /// [`CloudVolumeRoom`] on this device: the fullest view layout counted from bevy_pbr's own
 /// layouts ([`FULLEST_VIEW_TEXTURES`] without them), the world's materials counted from their
 /// derived layouts as this device makes them.
@@ -791,10 +808,9 @@ fn measure_room(device: &RenderDevice, layouts: Option<&MeshPipelineViewLayouts>
         let layout = l.get_view_layout(fullest_view_key());
         layout.main_layout.entries.iter().chain(layout.binding_array_layout.entries.iter()).filter(|e| counts_as_sampled(e)).count() as u32
     });
-    let (terrain, terrain_bindless) = material_textures::<crate::terrain::TerrainMaterial>(device);
+    let terrain = material_textures::<crate::terrain::TerrainMaterial>(device);
     let (nif, nif_bindless) = material_textures::<nvf_assets::nif_material::NifMaterial>(device);
-    let material = [
-        terrain,
+    let others = [
         nif,
         material_textures::<nvf_assets::nif_surface_blend::NifBlendMaterial>(device).0,
         material_textures::<StandardMaterial>(device).0,
@@ -805,12 +821,9 @@ fn measure_room(device: &RenderDevice, layouts: Option<&MeshPipelineViewLayouts>
         material_textures::<crate::tree::BillboardMaterial>(device).0,
         material_textures::<crate::water::WaterMaterial>(device).0,
         material_textures::<crate::volumetric_clouds::CloudVolumeMaterial>(device).0,
-        material_textures::<crate::vats_highlight::PartMaskMaterial>(device).0,
-    ]
-    .into_iter()
-    .max()
-    .unwrap_or(0);
-    CloudVolumeRoom::new(device.limits().max_sampled_textures_per_shader_stage, view, material, terrain_bindless && nif_bindless)
+        material_textures::<crate::distant_lights::GlowMaterial>(device).0,
+    ];
+    CloudVolumeRoom::new(device.limits().max_sampled_textures_per_shader_stage, view, most_textures(terrain, &others), terrain.1 && nif_bindless)
 }
 
 /// Render world: the shared uniform buffer and sampler (made the first time the plumbing
@@ -830,26 +843,71 @@ struct SunVisibilityGpu {
     /// Whether the light volume's arrays fit this adapter (measured once, when the layout with them
     /// is first wanted): the views' `cloud_volume` is the cloud variant, the row and this.
     room: Option<CloudVolumeRoom>,
-    /// The source last named in the log (with the Volumetric clouds row on; none with it off).
-    in_use: Option<CloudSourceInUse>,
+    /// What is held for the layout with the light volume's arrays.
+    volume: VolumeLayout,
+}
+
+/// What the plumbing holds for the views' layout with the light volume's arrays, all of it gone with
+/// the layout or the last view (`V` the stand-in's view, another type in the tests).
+struct VolumeLayout<V = TextureView> {
+    /// The views have that layout.
+    on: bool,
+    /// The bindings' stand-in ([`light_fallback`]), while they have.
+    stand_in: Option<V>,
+    /// They had it in the last frame and have it no more: their views are still to be let go.
+    release: bool,
+    /// The source last named in the log, while the light volume is asked for ([`volume_wanted`]).
+    told: Option<CloudSourceInUse>,
+}
+
+impl<V> Default for VolumeLayout<V> {
+    fn default() -> Self {
+        VolumeLayout { on: false, stand_in: None, release: false, told: None }
+    }
+}
+
+impl<V> VolumeLayout<V> {
+    /// The layout of this frame, the stand-in made or dropped with it.
+    fn set(&mut self, on: bool, make: impl FnOnce() -> V) {
+        if !on {
+            self.release |= self.on;
+            self.stand_in = None;
+        } else if self.stand_in.is_none() {
+            self.stand_in = Some(make());
+        }
+        self.on = on;
+    }
+
+    /// No view takes the sun visibility: nothing is held, and the next one starts anew.
+    fn leave(&mut self) {
+        if self.on || self.release || self.stand_in.is_some() || self.told.is_some() {
+            *self = VolumeLayout::default();
+        }
+    }
+}
+
+/// Whether the cloud shadows may come from the light volume at all: Cloud shadows and the Volumetric
+/// clouds row on. With either off nothing of it is asked, measured, bound or named in the log.
+pub fn volume_wanted(cloud_on: bool, row: bool) -> bool {
+    cloud_on && row
 }
 
 /// Whether the views' layout has the light volume's arrays (bindings 45-46, the pipelines the
-/// reader): Cloud shadows on, the Volumetric clouds row on, and room on the adapter (`fits`, asked
+/// reader): [`volume_wanted`], and room on the adapter (`fits`, asked
 /// only then). With the row off the layout, the pipelines and the shader are the weather's alone.
 pub fn volume_layout(cloud_on: bool, row: bool, fits: impl FnOnce() -> bool) -> bool {
-    cloud_on && row && fits()
+    volume_wanted(cloud_on, row) && fits()
 }
 
-/// The source to name in the log this frame, if any: a change while the Volumetric clouds row is on
-/// (not Off as the first), and once the one left when it goes off; with the row off nothing else.
-/// `told` is the one named last, none while the row is off.
-fn source_told(told: &mut Option<CloudSourceInUse>, now: CloudSourceInUse, row: bool) -> Option<CloudSourceInUse> {
+/// The source to name in the log this frame, if any: a change while the light volume is asked for
+/// (`wanted`, [`volume_wanted`]), and once the one left when it is not any more; nothing else.
+/// `told` is the one named last, none while it is not asked for.
+fn source_told(told: &mut Option<CloudSourceInUse>, now: CloudSourceInUse, wanted: bool) -> Option<CloudSourceInUse> {
     if *told == Some(now) {
         return None;
     }
-    let last = std::mem::replace(told, row.then_some(now));
-    (last.is_some() || (row && now != CloudSourceInUse::Off)).then_some(now)
+    let last = std::mem::replace(told, wanted.then_some(now));
+    (last.is_some() || wanted).then_some(now)
 }
 
 struct GpuParts {
@@ -857,8 +915,6 @@ struct GpuParts {
     sampler: Sampler,
     /// The terrain binding's stand-in ([`terrain_fallback`]).
     terrain_fallback: TextureView,
-    /// The light volume bindings' stand-in ([`light_fallback`]), while they are in the layout.
-    light_fallback: Option<TextureView>,
     written: Option<SunVisibilityUniform>,
 }
 
@@ -931,6 +987,9 @@ fn extract_sun_visibility(
     (medium_output, medium_request): (Extract<Option<Res<crate::medium::MediumOutput>>>, Extract<Option<Res<crate::medium::MediumRequest>>>),
     (layouts, graphics): (Option<Res<MeshPipelineViewLayouts>>, Extract<Option<Res<crate::graphics::Graphics>>>),
 ) {
+    if views.is_empty() {
+        gpu.volume.leave();
+    }
     let active = vis.active();
     if !active && suns.is_empty() && views.is_empty() && marked_suns.is_empty() && bound.is_empty() {
         return;
@@ -953,23 +1012,24 @@ fn extract_sun_visibility(
     if views.is_empty() {
         return;
     }
-    // The automatic source's gate (#3032 stage 2i M2): read every frame, as the
-    // sky's state changes without the switches changing.
-    gpu.gate = AutoGate {
-        row: graphics.as_deref().is_some_and(|g| g.volumetric_clouds),
-        sky_shown: medium_output.as_deref().is_some_and(|o| o.ready),
-        traced: medium_request.as_deref().is_some_and(|r| r.trace.is_some()),
-    };
     gpu.uniform = SunVisibilityUniform::pack(&vis);
     gpu.cloud = vis.cloud.as_ref().map(|c| c.image.id());
     gpu.terrain = vis.terrain.as_ref().map(|t| t.image.id());
     // The key bits follow the switches, not the publication (module notes).
     let (cloud, terrain) = (vis.cloud_on(), vis.terrain_on());
     (gpu.cloud_on, gpu.source, gpu.strength) = (cloud, vis.cloud_source, vis.cloud_strength);
+    // The automatic source's gate (#3032 stage 2i M2): read every frame the light volume is asked
+    // for, as the sky's state changes without the switches changing.
+    let row = graphics.as_deref().is_some_and(|g| g.volumetric_clouds);
+    let wanted = volume_wanted(cloud, row);
+    gpu.gate = AutoGate {
+        row,
+        sky_shown: wanted && medium_output.as_deref().is_some_and(|o| o.ready),
+        traced: wanted && medium_request.as_deref().is_some_and(|r| r.trace.is_some()),
+    };
     // The light volume's arrays only while the Volumetric clouds row is on and where the adapter
     // has room for them: measured once, constant for the run, so the key bit
     // changes only with the cloud variant and the row.
-    let row = gpu.gate.row;
     let cloud_volume = volume_layout(cloud, row, || {
         gpu.room
             .get_or_insert_with(|| {
@@ -980,6 +1040,9 @@ fn extract_sun_visibility(
             .fits
     });
     let uniform = gpu.uniform;
+    gpu.volume.set(cloud_volume, || light_fallback(&device, &queue));
+    // Out of the layout the light volume's views are not bound: any will do.
+    let light = gpu.volume.stand_in.clone().unwrap_or_else(|| fallback.d2_array.texture_view.clone());
     let parts = gpu.parts.get_or_insert_with(|| {
         let mut buffer = UniformBuffer::from(uniform);
         buffer.set_label(Some("nvf_sun_visibility"));
@@ -993,15 +1056,8 @@ fn extract_sun_visibility(
             min_filter: FilterMode::Linear,
             ..default()
         });
-        GpuParts { buffer, sampler, terrain_fallback: terrain_fallback(&device, &queue), light_fallback: None, written: Some(uniform) }
+        GpuParts { buffer, sampler, terrain_fallback: terrain_fallback(&device, &queue), written: Some(uniform) }
     });
-    if !cloud_volume {
-        parts.light_fallback = None;
-    } else if parts.light_fallback.is_none() {
-        parts.light_fallback = Some(light_fallback(&device, &queue));
-    }
-    // Out of the layout the light volume's views are not bound: any will do.
-    let light = parts.light_fallback.as_ref().unwrap_or(&fallback.d2_array.texture_view);
     let Some(buffer) = parts.buffer.buffer() else { return };
     for e in &views {
         if let Ok((_, mut b)) = bound.get_mut(e) {
@@ -1055,7 +1111,8 @@ pub fn usable_uniform(packed: SunVisibilityUniform, terrain_uploaded: bool) -> S
 /// `RenderSystems::PrepareResourcesFlush`) decide the source ([`CloudSourceInUse::decide`]),
 /// named in the log when it changes; with the volume the uniform gets its window and each
 /// level's presence (faded in over `LVR_ARRIVAL_SECS`), and bindings 45 and 46 its front sets
-/// (the stand-in for a level without one).
+/// (the stand-in for a level without one). While it is not asked for ([`volume_wanted`]) none of
+/// that runs: the uniform is the packed one, and in the frame the layout goes the views are let go.
 fn prepare_sun_visibility(
     mut gpu: ResMut<SunVisibilityGpu>,
     mut bound: Query<&mut NvfSunVisibilityBindings>,
@@ -1071,23 +1128,30 @@ fn prepare_sun_visibility(
     let Some(parts) = gpu.parts.as_mut() else { return };
     let uploaded = |id: Option<AssetId<Image>>| id.and_then(|id| images.get(id)).map(|g| &g.texture_view);
     let terrain_map = uploaded(gpu.terrain);
-    let ready = reader.as_deref().map_or([false; 2], |r| r.ready());
-    let use_ = CloudSourceInUse::decide(gpu.cloud_on, gpu.source, ready, gpu.gate);
-    let room = volume_layout(gpu.cloud_on, gpu.gate.row, || gpu.room.is_some_and(|r| r.fits));
-    let use_ = if room { use_ } else { use_.without_room() };
-    if let Some(told) = source_told(&mut gpu.in_use, use_, gpu.gate.row) {
-        info!("cloud shadows: source {}", told.line());
+    let mut uniform = usable_uniform(gpu.uniform, terrain_map.is_some());
+    let wanted = volume_wanted(gpu.cloud_on, gpu.gate.row);
+    // The light volume's views to bind, where they may have changed.
+    let mut light: Option<[TextureView; 2]> = None;
+    if wanted || gpu.volume.told.is_some() {
+        let reader = reader.as_deref().filter(|_| gpu.volume.on);
+        let ready = reader.map_or([false; 2], |r| r.ready());
+        let use_ = CloudSourceInUse::decide(gpu.cloud_on, gpu.source, ready, gpu.gate);
+        let use_ = if gpu.volume.on { use_ } else { use_.without_room() };
+        if let Some(told) = source_told(&mut gpu.volume.told, use_, wanted) {
+            info!("cloud shadows: source {}", told.line());
+        }
+        if let (Some(r), Some(stand_in)) = (reader, gpu.volume.stand_in.as_ref()) {
+            // Only the levels the source reads are present (a level left out has presence 0 and its stand-in bound).
+            let used = use_.levels();
+            let p = r.presence(crate::volumetric_clouds_lightvol::LVR_ARRIVAL_SECS);
+            let window = r.window([0, 1].map(|i| if used[i] { p[i] } else { 0.0 }));
+            uniform = with_cloud_volume(uniform, use_, gpu.strength, window);
+            light = Some([0, 1].map(|i| r.levels[i].as_ref().filter(|_| used[i]).map_or(stand_in, |l| &l.view).clone()));
+        }
     }
-    // Only the levels the source reads are present (a level left out has presence 0 and its stand-in bound).
-    let used = use_.levels();
-    let window = reader.as_deref().map_or_else(Default::default, |r| {
-        let p = r.presence(crate::volumetric_clouds_lightvol::LVR_ARRIVAL_SECS);
-        r.window([0, 1].map(|i| if used[i] { p[i] } else { 0.0 }))
-    });
-    let uniform = with_cloud_volume(usable_uniform(gpu.uniform, terrain_map.is_some()), use_, gpu.strength, window);
-    let light = parts.light_fallback.as_ref().unwrap_or(&fallback.d2_array.texture_view);
-    let level_view = |i: usize| if used[i] { reader.as_deref().and_then(|r| r.levels[i].as_ref()).map_or(light, |l| &l.view) } else { light };
-    let (light_near, light_far) = (level_view(0).clone(), level_view(1).clone());
+    if std::mem::take(&mut gpu.volume.release) && light.is_none() {
+        light = Some([0, 1].map(|_| fallback.d2_array.texture_view.clone()));
+    }
     if parts.written != Some(uniform) {
         parts.buffer.set(uniform);
         parts.buffer.write_buffer(&device, &queue);
@@ -1102,11 +1166,13 @@ fn prepare_sun_visibility(
         if b.terrain_texture.id() != terrain.id() {
             b.terrain_texture = terrain.clone();
         }
-        if b.light_near.id() != light_near.id() {
-            b.light_near = light_near.clone();
-        }
-        if b.light_far.id() != light_far.id() {
-            b.light_far = light_far.clone();
+        if let Some([near, far]) = &light {
+            if b.light_near.id() != near.id() {
+                b.light_near = near.clone();
+            }
+            if b.light_far.id() != far.id() {
+                b.light_far = far.clone();
+            }
         }
     }
 }
@@ -1539,28 +1605,52 @@ pub(crate) mod tests {
     /// fullest pipeline's fragment textures with them, plus the margin, fit the adapter's
     /// `max_sampled_textures_per_shader_stage`; else the weather-only layout, where every source but
     /// the aid `weather` takes the weather's layers. The counts here are this build's: the fullest
-    /// view layout 11 with the arrays (shadow maps 2, depth and motion prepasses 2, tonemapping
-    /// table 1, transmission 1, sun visibility 2 + 2, ambient occlusion 1), the terrain material 27
-    /// when not bindless (StandardMaterial's 8 with `pbr_specular_textures`, the layers' 19 with
-    /// #3322's height maps), 10
+    /// view layout 10 with the arrays (shadow maps 2, depth and motion prepasses 2,
+    /// transmission 1, sun visibility 2 + 2, ambient occlusion 1), two more with a reflection cube
+    /// on a device without binding arrays; StandardMaterial's 8 with `pbr_specular_textures`, the
+    /// NIF material's 12, the folded terrain's 27 with #3322's height maps, drawn where it is bindless
+    /// only (its textures are in binding arrays then), and 10
     /// for the largest material that stays non-bindless when the rest are (the sky's 8 + 2).
     #[test]
     fn cloud_volume_room_decides_the_layout() {
         assert_eq!(CLOUD_VOLUME_ROOM_MARGIN, 4);
-        // Not bindless: 38 with the arrays, 42 with the margin.
-        assert!(!CloudVolumeRoom::new(16, FULLEST_VIEW_TEXTURES, 27, false).fits, "WebGPU's default 16");
-        assert!(!CloudVolumeRoom::new(37, FULLEST_VIEW_TEXTURES, 27, false).fits);
-        assert!(!CloudVolumeRoom::new(41, FULLEST_VIEW_TEXTURES, 27, false).fits, "one short of the margin");
-        assert!(CloudVolumeRoom::new(42, FULLEST_VIEW_TEXTURES, 27, false).fits);
-        // Bindless: 21 with the arrays, 25 with the margin.
-        assert!(!CloudVolumeRoom::new(16, FULLEST_VIEW_TEXTURES, 10, true).fits);
-        assert!(CloudVolumeRoom::new(25, FULLEST_VIEW_TEXTURES, 10, true).fits);
+        let textures = |source: &str, from: &str, to: &str| {
+            let s = &source[source.find(from).unwrap_or_else(|| panic!("{from}"))..];
+            s[..s.find(to).expect("its end")].matches("#[texture(").count() as u32
+        };
+        let standard = unix_lines(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../vendor/bevy_pbr/src/pbr_material.rs")).expect("pbr_material.rs"));
+        let standard = textures(&standard, "pub struct StandardMaterial {", "\n}\n") + standard.matches("cfg_attr(feature = \"pbr_specular_textures\", texture(").count() as u32;
+        let nif = standard + textures(&unix_lines(include_str!("../../nvf-assets/src/nif_material.rs")), "pub struct NifSurface {", "\n}\n");
+        let folded = standard + textures(&unix_lines(include_str!("terrain.rs")), "pub struct TerrainLayers {", "\n}\n");
+        let sky = standard + textures(&unix_lines(include_str!("sky.rs")), "pub struct SkyDisplay {", "\n}\n");
+        assert_eq!((standard, nif, folded, sky), (8, 12, 27, 10));
+        // Not bindless: the folded terrain is not drawn; with a reflection cube (no binding arrays)
+        // 24 with the arrays, 28 with the margin.
+        let others = [nif, standard + 2, standard, sky];
+        let material = most_textures((folded, false), &others);
+        assert_eq!((FULLEST_VIEW_TEXTURES, material), (12, 12));
+        assert!(!CloudVolumeRoom::new(16, FULLEST_VIEW_TEXTURES, material, false).fits, "WebGPU's default 16");
+        assert!(!CloudVolumeRoom::new(27, FULLEST_VIEW_TEXTURES, material, false).fits, "one short of the margin");
+        assert!(CloudVolumeRoom::new(28, FULLEST_VIEW_TEXTURES, material, false).fits);
+        assert!(CloudVolumeRoom::new(26, FULLEST_VIEW_TEXTURES - REFLECTION_CUBE_TEXTURES, material, false).fits, "the cube takes two of them");
+        // Bindless, the cubes in binding arrays: 20 with the arrays, 24 with the margin. A bindless
+        // terrain counts with what it keeps outside them.
+        assert_eq!((most_textures((0, true), &[0, 0, 0, sky]), most_textures((folded, true), &others)), (10, 27));
+        let view = FULLEST_VIEW_TEXTURES - REFLECTION_CUBE_TEXTURES;
+        assert!(!CloudVolumeRoom::new(23, view, sky, true).fits && CloudVolumeRoom::new(24, view, sky, true).fits);
         assert!(CloudVolumeRoom::new(1 << 20, FULLEST_VIEW_TEXTURES, 27, false).fits, "a desktop adapter's limit");
+        // The views that take the arrays are HDR, so none tonemaps in the shader; the cube is
+        // counted with the others.
+        assert!(fullest_view_key().contains(MeshPipelineViewLayoutKey::ENVIRONMENT_MAP) && !fullest_view_key().contains(MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER));
+        assert!(include_str!("graphics.rs").contains("if temporal || g.volumetric_clouds"), "the row keeps the main view HDR");
+        for (camera, source) in [("the mirror's", include_str!("reflection.rs")), ("the lens's", include_str!("scope_view.rs"))] {
+            assert!(source.contains("Hdr,"), "{camera} camera is HDR");
+        }
         assert!(!CloudVolumeRoom::new(u32::MAX - 1, u32::MAX, 1, true).fits, "saturating, no overflow");
-        let room = CloudVolumeRoom::new(37, 11, 27, false);
-        assert_eq!(room.needed(), 38);
-        assert!(room.line().starts_with("the weather-only layout") && room.line().contains("allows 37"), "{}", room.line());
-        assert!(CloudVolumeRoom::new(1 << 20, 11, 10, true).line().starts_with("the light volume's arrays (bindings 45-46) are bound"));
+        let room = CloudVolumeRoom::new(23, 12, 12, false);
+        assert_eq!(room.needed(), 24);
+        assert!(room.line().starts_with("the weather-only layout") && room.line().contains("allows 23"), "{}", room.line());
+        assert!(CloudVolumeRoom::new(1 << 20, 10, 10, true).line().starts_with("the light volume's arrays (bindings 45-46) are bound"));
         // The source in the weather-only layout.
         let both = [true, true];
         for asked in [CloudSource::Auto, CloudSource::Volume, CloudSource::Share, CloudSource::Depth] {
@@ -1662,11 +1752,47 @@ pub(crate) mod tests {
         assert!(!volume_layout(true, true, || false) && volume_layout(true, true, || true));
         let volume = CloudSourceInUse::Volume { near: true, far: true, only: false };
         let mut told = None;
-        let mut say = |now, row| source_told(&mut told, now, row);
-        assert_eq!([say(row_off, false), say(CloudSourceInUse::Off, false), say(row_off, false)], [None; 3], "the row off: no line");
+        let mut say = |now, wanted| source_told(&mut told, now, wanted);
+        assert_eq!([say(row_off, false), say(CloudSourceInUse::Off, false), say(row_off, false)], [None; 3], "not asked for: no line");
         assert_eq!([say(volume, true), say(volume, true)], [Some(volume), None], "named once");
-        assert_eq!([say(row_off, false), say(row_off, false), say(CloudSourceInUse::Off, false)], [Some(row_off), None, None], "switched off: once");
-        assert_eq!([say(CloudSourceInUse::Off, true), say(volume, true), say(CloudSourceInUse::Off, true)], [None, Some(volume), Some(CloudSourceInUse::Off)]);
+        assert_eq!([say(row_off, false), say(row_off, false), say(CloudSourceInUse::Off, false)], [Some(row_off), None, None], "the row off: once");
+        assert_eq!([say(volume, true), say(CloudSourceInUse::Off, false), say(CloudSourceInUse::Off, false)], [Some(volume), Some(CloudSourceInUse::Off), None], "Cloud shadows off: once");
+        assert!(volume_wanted(true, true) && !volume_wanted(true, false) && !volume_wanted(false, true));
+    }
+
+    /// The layout's own state: the stand-in is made once while the layout is on and goes with it,
+    /// the views let go once in the frame it goes; when the last view goes, whatever was on (both
+    /// rows off at once), nothing stays, so a later activation names its source again.
+    #[test]
+    fn the_volumes_layout_leaves_nothing_behind() {
+        let volume = CloudSourceInUse::Volume { near: true, far: true, only: false };
+        let mut made = 0;
+        let mut layout = VolumeLayout::<u32>::default();
+        let mut set = |layout: &mut VolumeLayout<u32>, on: bool| layout.set(on, || {
+            made += 1;
+            made
+        });
+        set(&mut layout, false);
+        assert_eq!((layout.on, layout.stand_in, layout.release), (false, None, false), "off from the start: nothing to let go");
+        for _ in 0..3 {
+            set(&mut layout, true);
+            assert_eq!((layout.on, layout.stand_in, layout.release), (true, Some(1), false));
+        }
+        set(&mut layout, false);
+        assert_eq!((layout.on, layout.stand_in, std::mem::take(&mut layout.release)), (false, None, true), "let go once");
+        set(&mut layout, false);
+        assert!(!layout.release);
+        // On again, its source named, and the last view gone with no frame of it off before.
+        set(&mut layout, true);
+        assert_eq!(source_told(&mut layout.told, volume, true), Some(volume));
+        layout.leave();
+        assert_eq!((layout.on, layout.stand_in, layout.release, layout.told), (false, None, false, None));
+        set(&mut layout, true);
+        assert_eq!((layout.stand_in, source_told(&mut layout.told, volume, true)), (Some(3), Some(volume)), "named again");
+        // The extraction leaves it before anything returns early.
+        let here = unix_lines(include_str!("sun_visibility.rs"));
+        let extract = &here[here.find("\nfn extract_sun_visibility(").expect("the extraction")..];
+        assert!(extract.find("gpu.volume.leave();").expect("left there") < extract.find("return;").expect("a return"));
     }
 
     #[test]
@@ -2103,7 +2229,7 @@ pub(crate) mod tests {
                     // The light volume: declared with the volume def only, read by the cloud
                     // variant through the shared reader.
                     let declared = |s: &str| code(&out).contains(s);
-                    for s in ["@binding(45)", "@binding(46)", "light_volume: LightVolumeWindow", "fn lvr_optical_depth("] {
+                    for s in ["@binding(45)", "@binding(46)", "    volume: vec4<f32>,", "light_volume: LightVolumeWindow", "fn lvr_optical_depth("] {
                         assert_eq!(declared(s), volume, "{case}: {s}");
                     }
                     assert_eq!(out.matches("lvr_optical_depth(nvf_light_near, nvf_light_far, nvf_sun_visibility_sampler, nvf_sun.light_volume, P, L)").count(), usize::from(cloud && volume), "{case}");

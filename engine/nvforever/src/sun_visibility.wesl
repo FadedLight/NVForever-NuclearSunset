@@ -39,9 +39,9 @@ struct NvfSunVisibility {
     // The cloud from the light volume (mask bit 4): x its strength (the weather's, the same
     // setting), y, z the sine of the light's elevation from which its shadow starts and at which
     // it is whole; w unused.
-    volume: vec4<f32>,
+    @if(NVF_CLOUD_VOLUME) volume: vec4<f32>,
     // The light volume's fronts as this frame reads them (light_volume_reader.wesl); the CPU
-    // writes them in either variant, the weather-only one leaves them out of its view.
+    // writes both in either variant, the weather-only one leaves them out of its view.
     @if(NVF_CLOUD_VOLUME) light_volume: LightVolumeWindow,
 }
 

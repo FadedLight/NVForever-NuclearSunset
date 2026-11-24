@@ -2804,7 +2804,7 @@ forbid = [
 name = "volumetric-clouds-shadows"
 source = "[design, #3032 stage 2i] docs/design/graphics-enhanced.md §3.23 (Ground shadows from the light volume), engine/nvforever/src/sun_visibility.rs (CloudSourceInUse, volume_layout, CloudVolumeRoom), light_volume_reader.wesl and volumetric_clouds_lightvol.rs (LightVolumeReader): Cloud shadows with the Volumetric clouds row on, at Goodsprings at noon under NVBlackMountainWeather: the adapter's textures are counted once, the views take the light volume's arrays, and once the volumetric sky is shown and a level is complete the surfaces take their cloud shadows from the light volume, without a shader, pipeline or rendering error. The look is checked in pictures by hand"
 areas = ["renderer", "graphics", "weather"]
-paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/vendor/bevy_pbr/src/render/mesh.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
 env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
 run_seconds = 40
@@ -2821,6 +2821,46 @@ forbid = [
   { text = "failed to process shader", label = "a receiver's shader that does not build with the reader" },
   { text = "failed and will not be tried again", label = "a receiver's pipeline that failed for good" },
   { text = "panicked", label = "a panic with the shadows from the volume" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-shadows-switch"
+source = "[design, #3032 stage 2i] engine/nvforever/src/sun_visibility.rs (volume_layout, VolumeLayout, source_told): Cloud shadows on throughout, the Volumetric clouds row Off at the start, switched to Normal and Off again in play at Goodsprings at noon (two pauses of the settings page, NVF_PLAY_TEST_SETTINGS): before the first switch no pipeline has the light volume and no line names a source or counts the adapter's textures; each resume waits until the receivers' pipelines are ready, none pending; with the row on the receivers' pipelines with the light volume are asked for and the surfaces read it, with the row off again the source left is named once; no shader, pipeline or rendering error. The log cannot show what a receiver's draw gave: the pipelines asked for and ready stand for it, the pictures are checked by hand"
+areas = ["renderer", "graphics", "weather", "settings"]
+paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/nvforever/src/settings.rs", "engine/vendor/bevy_pbr/src/render/mesh.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PIPELINE_DEFS = "1", NVF_PLAY_TEST_PAUSE = "12:14,36:38", NVF_PLAY_TEST_SETTINGS = "13:volumetric-clouds=Normal,37:volumetric-clouds=Off" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "cloud-shadows"]
+run_seconds = 50
+expect = [
+  { text = "sun visibility: cloud on terrain off debug off", count = 1, label = "Cloud shadows on once, from the start to the end" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", count = 1, label = "the adapter's textures counted once, not before the row is on" },
+  { text = "cloud shadows: source the weather's layers (the Volumetric clouds row is off)", count = 1, label = "the source left when the row goes off, once; none named before it was on" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', count = 2, label = "each switch's resume waits for its pipelines" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: .*opaque_mesh_pipeline', label = "receivers are drawn with the weather's layout" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Normal", label = "the row switched on in play" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", label = "no light volume in a layout before" },
+  { re = 'pipeline \d+ shader-defs: .*NVF_CLOUD_VOLUME.*: .*opaque_mesh_pipeline', label = "the receivers' variant with the light volume asked for" },
+  { re = 'cloud shadows: source the light volume \(', label = "the surfaces read the light volume" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "the row switched off in play" },
+  { text = "cloud shadows: source the weather's layers (the Volumetric clouds row is off)", label = "back to the weather's layers" },
+], [
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Normal", label = "the row switched on" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', label = "its pipelines ready before play goes on" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "and switched off" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', label = "the weather's pipelines ready again" },
+], [
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "switched off" },
+  { text = "volumetric clouds: light volume off (textures released)", label = "the light volume's textures go" },
+]]
+forbid = [
+  { re = 'pipeline \d+ failed after \d+ ms: ', label = "a pipeline failed over the switches" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error over the switches" },
+  { text = "Caught rendering error", label = "a rendering (validation) error over the switches" },
+  { text = "failed to process shader", label = "a shader of either layout that does not build" },
+  { text = "failed and will not be tried again", label = "a pipeline of either layout that failed for good" },
+  { text = "panicked", label = "a panic over the switches" },
 ]
 
 [[scenario]]

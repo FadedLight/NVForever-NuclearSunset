@@ -1240,6 +1240,12 @@ pub(crate) mod gpu {
     /// rerun (light_volume_reader.wesl's header states the exception).
     pub const LVR_KEEP_FRAMES: u32 = 4;
 
+    /// Whether [`publish_light_volume_reader`] has anything to do: the light volume is held, or the
+    /// reader still holds something of it.
+    fn reader_in_use(gpu: Option<Res<LvGpu>>, reader: Res<LightVolumeReader>) -> bool {
+        gpu.is_some_and(|g| g.0.is_some()) || reader.levels.iter().any(Option::is_some) || reader.ready_since.iter().any(Option::is_some)
+    }
+
     /// Makes the shared reader for this frame from the light volume's state: its levels when the
     /// medium's prepare step planned the light volume this frame, the last ones for up to
     /// [`LVR_KEEP_FRAMES`] frames without a plan while the state is held, else none.
@@ -1286,7 +1292,7 @@ pub(crate) mod gpu {
             let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) else { return };
             render_app
                 .init_resource::<LightVolumeReader>()
-                .add_systems(bevy::render::Render, publish_light_volume_reader.in_set(bevy::render::RenderSystems::PrepareResourcesFlush));
+                .add_systems(bevy::render::Render, publish_light_volume_reader.in_set(bevy::render::RenderSystems::PrepareResourcesFlush).run_if(reader_in_use));
         }
     }
 

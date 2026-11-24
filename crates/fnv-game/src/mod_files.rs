@@ -950,9 +950,13 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
 }
 
 /// A JSON file under the game's folder: with `use_cache`, the cache's copy when present;
-/// otherwise the UTF-8 file parsed fresh (UTF-8 BOM stripped). Every parser mode reads
-/// standard JSON [hypothesis: JAXN (1) and TaoConfig (2) extend it; their extensions are
-/// not read, so such a file fails to parse].
+/// otherwise the UTF-8 file parsed fresh (UTF-8 BOM stripped). All three parser modes
+/// (`0` JSON, `1` JAXN, `2` TaoConfig) read standard JSON [observed: Fallout: New Vegas
+/// 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-24, `GSDocMitchellHouse`
+/// (`0x00103DF9`), 10 official base masters, `w4d_38_showoff_perk_stagger_fade`
+/// (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+/// `json(std=42,42,42,jaxn=0/1,tao=0/1)`; no DLL or source consulted]; JAXN (1) and
+/// TaoConfig (2) syntax extensions are [not built], so such files fail to parse.
 fn json_file(g: &Game, path: &str, use_cache: bool) -> Option<serde_json::Value> {
     if use_cache {
         if let Some(v) = g.mod_files.showoff_json.get(&norm(path)) {

@@ -464,9 +464,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // works for melee/unarmed weapons"]. Returns 1 for a living actor unarmed/melee
         // (`animation_type <= 2` or no equipped weapon) and 0 with a ranged gun equipped
         // [observed 2026-11-08: showoff5.recoil.player 1 unarmed; observed: Fallout: New
-        // Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, clean-room script probe
-        // so_33_force_recoil_unarmed_vs_gun: unarmed 1, holstered 10mm Pistol 0,
-        // ForceHitReaction 0].
+        // Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-23/24,
+        // `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+        // `so_33_force_recoil_unarmed_vs_gun` (unarmed 1, holstered 10mm Pistol 0,
+        // ForceHitReaction 0) and `w4d_38_showoff_perk_stagger_fade`
+        // (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+        // `stag(p=0,d=0)|recoil(un=1,bat=1,gun=0)`; no DLL or source consulted].
         "forcerecoilanim" => {
             let Some(a) = subject else { return Some(Ok(zero)) };
             let actor = a == FormId::PLAYER_REF || matches!(g.world.placed.get(a).map(|p| &p.sig), Some(b"ACHR" | b"ACRE"));

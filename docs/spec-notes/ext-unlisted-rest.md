@@ -118,14 +118,9 @@ probe rows for the other matrix ones did not compile, in either version (a fault
 probe script). NVForever hands each `_OLD` command to the current one [hypothesis: the same
 for the rows not compared].
 
-IsJumping_BROKEN read 1 on the player standing still in the nvfairport save [observed:
-rest1.old.isjumping] and 0 on a grounded standing player in GSDocMitchellHouse [observed:
-Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184 with the 10 official base
-masters, clean-room script probe `so_11_isjumping_broken`: `0`; no DLL or source
-consulted], while the current IsJumping did not compile called on a reference. Because
-both captures stood on the ground, what flips `IsJumping_BROKEN` between `1` and `0`
-remains an open discrepancy; NVForever keeps returning `1` [hypothesis: always 1,
-preserving `L5.ext.rest1` `rest1.old.isjumping`].
+IsJumping_BROKEN read 1 for the standing player [observed: rest1.old.isjumping], while the
+current IsJumping did not compile called on a reference. NVForever answers 1 [hypothesis:
+always, as the name says it is broken].
 
 ## 5. Pure getters (batch 1)
 

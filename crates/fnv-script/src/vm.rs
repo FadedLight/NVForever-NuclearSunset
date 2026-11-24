@@ -3266,6 +3266,28 @@ impl Vm<'_, '_> {
                     other => other,
                 })
             }
+            // [observed: w4g_05_isactordetected_and_setclass_invalid] Calling
+            // IsActorDetected on an explicit null/non-form receiver logs a null-reference
+            // diagnostic, returns 0 without falling back to implicit self, and continues
+            // the script instead of aborting.
+            "isactordetected" => {
+                let on = match &c.on {
+                    Some(e) => Some(self.xeval(e)?.value()?),
+                    None => None,
+                };
+                if on.is_some_and(|v| v.as_form().is_none()) {
+                    self.host.no_reference_call(&lname, on, c);
+                    return Ok(XVal::Num(0.0));
+                }
+                let mut args = Vec::with_capacity(c.args.len());
+                for a in &c.args {
+                    args.push(self.xeval(a)?);
+                }
+                match self.host.ext_call(&lname, on, &args) {
+                    Some(r) => r.map_err(VmError::Host),
+                    None => Err(VmError::NotBuilt(format!("the extender function {name} (tasks C, D)"))),
+                }
+            }
             // [documented: ToString; ToNumber] (the hex and reportError arguments of
             // ToNumber: D1). List arrays and stringmaps format as "NULL" [observed:
             // Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-23, `GSDocMitchellHouse`,

@@ -687,4 +687,21 @@ fn gate_970_barter_container_open_click_wildcards_and_key_button_events() {
     }
     assert_eq!(glob(&g, G_BTN_COUNT), 2.0);
     assert_eq!(glob(&g, G_BTN_SUM), 12.0);
+
+    // Live StewVal/StewieGetValue for Barter Categories Icons' synchronized-category keys
+    // and 9.65-9.70 settings while keeping reported version at main's 945.
+    let bound = Tweaks {
+        sync_categories: true,
+        prevent_switch_when_emptying_category: true,
+        vendor_lists_both: true,
+        ..Default::default()
+    };
+    g.bind_stewie_stat_settings(&bound);
+    assert_eq!(num(&mut g, r#"GetPluginVersion "lStewieAl's Tweaks""#), 945.0);
+    for fn_name in ["StewVal", "StewieGetValue"] {
+        assert_eq!(num(&mut g, &format!(r#"{fn_name} "bSynchronizeContainerCategories:Tweaks""#)), 1.0);
+        assert_eq!(num(&mut g, &format!(r#"{fn_name} "bPreventSwitchWhenEmptyingCategory:Synchronized Container Categories""#)), 1.0);
+        assert_eq!(num(&mut g, &format!(r#"{fn_name} "bBarterCheckActorBuySellFlags:Tweaks""#)), 1.0);
+        assert_eq!(num(&mut g, &format!(r#"{fn_name} "bRestoreLockedDoorSound:Tweaks""#)), 1.0);
+    }
 }

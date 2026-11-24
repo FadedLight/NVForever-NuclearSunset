@@ -71,12 +71,19 @@ Individual item figures show one item's weight and value for a stack.
 
 [design] After the engine hands its authoritative settings to the game,
 `StewieGetValue` and `StewVal` return the existing choices below as numeric 0 or 1.
-Both functions use the same read-only path; names ignore ASCII case and surrounding
-whitespace. The base `nvse_stewie_tweaks.ini` never supplies NVForever defaults;
-mod-shipped `Data\NVSE\Plugins\Tweaks\INIs\*.ini` files may override NVForever
-tweak settings at startup beneath `NVForever.ini` (maintainer decision 2026-11-24,
-[stewie-modular-inis.md](stewie-modular-inis.md)). No new settings are
-added. [hypothesis] The original plugin matches names the same way; not observed.
+Both functions use the same read-only path; names take `Key:Section` and do NOT trim
+leading, trailing, or around-colon whitespace (`Section:Key` and bare keys also return 0)
+[observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + lStewieAl's Tweaks 1005 + JIP LN
+57.30, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, isolated
+clean-room staging copy (read-only `PrintToConsole` probe; zero writes to game install or
+Saves), `w4h_08_stewie_get_value_whitespace`
+(`tools/capture/nvse/catalogs/wave4h_reconcile.json`, #3803):
+`PROBE|w4h_08_stewie_get_value_whitespace|sk(0=0,L=0,R=0,M=0)|ks(0=1,L=0,R=0,M=0)|bare(0=0,L=0,R=0)`;
+zero DLL, PDB, or third-party source consulted]. Names ignore ASCII case [hypothesis: not
+probed in `w4h_08_stewie_get_value_whitespace`]. The base `nvse_stewie_tweaks.ini` never
+supplies NVForever defaults; mod-shipped `Data\NVSE\Plugins\Tweaks\INIs\*.ini` files may
+override NVForever tweak settings at startup beneath `NVForever.ini` (maintainer decision
+2026-11-24, [stewie-modular-inis.md](stewie-modular-inis.md)). No new settings are added.
 
 | Query | Existing choice and consumer |
 |---|---|

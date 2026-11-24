@@ -436,14 +436,24 @@ pub(crate) fn tick_play_clock(virt: Res<Time<Virtual>>, real: Res<Time<Real>>, l
 /// Pause the virtual clock while the picture is held ([`picture_held`]), or while the
 /// console's free camera holds the world (`crate::free_cam`, mode 1), and let it run
 /// again after. Nothing else pauses it.
-fn freeze_picture(mode: Res<MenuPause>, paused: Res<Paused>, state: Res<State<PlayState>>, free_cam: Option<Res<crate::free_cam::FreeCam>>, mut clock: ResMut<Time<Virtual>>) {
-    let held_by_cam = free_cam.is_some_and(|f| f.holds_world());
+fn freeze_picture(
+    mode: Res<MenuPause>,
+    paused: Res<Paused>,
+    state: Res<State<PlayState>>,
+    free_cam: Option<Res<crate::free_cam::FreeCam>>,
+    photo: Option<Res<crate::photo_mode::PhotoMode>>,
+    mut clock: ResMut<Time<Virtual>>,
+) {
+    let held_by_photo = photo.is_some_and(|p| p.holds_world());
+    let held_by_cam = free_cam.is_some_and(|f| f.holds_world()) || held_by_photo;
     let stop = picture_held(*mode, paused.0, *state.get()) || held_by_cam;
     if clock.is_paused() != stop {
         let why = if paused.0 {
             "the pause menu"
         } else if *state.get() == PlayState::Loading {
             "a loading screen"
+        } else if held_by_photo {
+            "photo mode"
         } else if held_by_cam {
             "the free camera"
         } else {
@@ -821,6 +831,9 @@ enum Entry {
     Continue,
     Save,
     Load,
+    /// Back to the world in photo mode (`crate::photo_mode`), the way a controller opens it
+    /// [design].
+    Photo,
     Settings,
     /// Where the original has Help, under the player's Replace Help With Console tweak: the
     /// game goes on and the console opens [design: docs/design/tweaks.md].
@@ -833,7 +846,7 @@ enum Entry {
 /// The column's entries, with the Console entry when `console` (the tweak) and the Mods
 /// entry when `mods` ([`ModsEntry`]).
 fn entries(mods: bool, console: bool) -> Vec<Entry> {
-    let mut v = vec![Entry::Continue, Entry::Save, Entry::Load, Entry::Settings];
+    let mut v = vec![Entry::Continue, Entry::Save, Entry::Load, Entry::Photo, Entry::Settings];
     if console {
         v.push(Entry::Console);
     }
@@ -850,6 +863,7 @@ impl Entry {
             Entry::Continue => "Continue",
             Entry::Save => "Save",
             Entry::Load => "Load",
+            Entry::Photo => "Photo Mode",
             Entry::Settings => "Settings",
             Entry::Console => CONSOLE_LABEL,
             Entry::Mods => MODS_LABEL,
@@ -3030,6 +3044,7 @@ fn open(
     mut next: ResMut<NextState<PlayState>>,
     wheel: Option<Res<crate::weapon_wheel::WeaponWheel>>,
     (script, mut seen, mut request): (Option<Res<crate::script::ScriptState>>, Local<u64>, ResMut<PageRequest>),
+    photo: Option<Res<crate::photo_mode::PhotoMode>>,
 ) {
     let keys = keys.snapshot();
     let by_aid = fire(&mut aid.open, time.elapsed_secs());
@@ -3054,8 +3069,9 @@ fn open(
             _ => None,
         };
     }
-    // Esc closes the weapon wheel (`crate::weapon_wheel`), not the game.
-    if wheel.is_some_and(|w| w.holds_input()) && !by_aid && by_script.is_none() {
+    // Esc closes the weapon wheel (`crate::weapon_wheel`), not the game, and photo mode
+    // (`crate::photo_mode`).
+    if (wheel.is_some_and(|w| w.holds_input()) || photo.is_some_and(|p| p.on)) && !by_aid && by_script.is_none() {
         return;
     }
     if by_aid {
@@ -3784,7 +3800,15 @@ fn choose(
         Option<Res<crate::ui_colour::CustomColours>>,
         Option<Res<crate::settings_view::HiddenRows>>,
     ),
-    (meters, pointed, mut tab_store, tweaks, mut report, mut touch): (Query<(&PauseButton, &RelativeCursorPosition)>, Query<(&PointerState, &PauseButton)>, Option<ResMut<SettingsTabStore>>, Option<Res<crate::tweaks::TweakSettings>>, Option<ResMut<ReportEntry>>, touch::Input),
+    (meters, pointed, mut tab_store, tweaks, mut report, mut touch, mut photo_ask): (
+        Query<(&PauseButton, &RelativeCursorPosition)>,
+        Query<(&PointerState, &PauseButton)>,
+        Option<ResMut<SettingsTabStore>>,
+        Option<Res<crate::tweaks::TweakSettings>>,
+        Option<ResMut<ReportEntry>>,
+        touch::Input,
+        Option<ResMut<crate::photo_mode::PhotoRequest>>,
+    ),
 ) {
     let keys = keys.snapshot();
     use crate::bindings::{Bindings, Input, InputDevice};
@@ -4526,6 +4550,8 @@ fn choose(
                 take = Some(Entry::Load);
             } else if keys.just_pressed(KeyCode::KeyS) || act("settings") {
                 take = Some(Entry::Settings);
+            } else if act("photo") {
+                take = Some(Entry::Photo);
             } else if act("mods") && mods {
                 take = Some(Entry::Mods);
             } else if keys.just_pressed(KeyCode::Escape) {
@@ -4538,8 +4564,9 @@ fn choose(
                 }
             }
             // Any other choice while a resume waits ends the wait; the graphics change stays
-            // latched, so the next Continue waits again [design: graphics_resume.rs].
-            if take.is_some_and(|e| e != Entry::Continue) && resume.pending() {
+            // latched, so the next Continue waits again [design: graphics_resume.rs]. Photo
+            // Mode resumes as Continue does, so it rides a wait already under way.
+            if take.is_some_and(|e| !matches!(e, Entry::Continue | Entry::Photo)) && resume.pending() {
                 commands.queue(cancel_resume);
             }
             match take {
@@ -4590,6 +4617,18 @@ fn choose(
                 Some(Entry::Continue) if !resume.pending() => {
                     commands.queue(request_resume);
                 }
+                // Back to the world the way Continue goes (`crate::graphics_resume`); photo
+                // mode opens once play has resumed.
+                Some(Entry::Photo) => match photo_ask.as_mut() {
+                    Some(p) => {
+                        info!("pause menu: photo mode");
+                        p.0 = true;
+                        if !resume.pending() {
+                            commands.queue(request_resume);
+                        }
+                    }
+                    None => warn!("pause menu: photo mode is not in this build"),
+                },
                 // Continue while a resume is already pending does nothing, as no choice does.
                 Some(Entry::Continue) | None => {}
             }
@@ -5720,7 +5759,7 @@ mod tests {
     #[test]
     fn the_console_entry_stands_where_help_was() {
         let labels: Vec<&str> = super::entries(true, true).iter().map(|e| e.label()).collect();
-        assert_eq!(labels, ["Continue", "Save", "Load", "Settings", CONSOLE_LABEL, MODS_LABEL, "Quit"]);
+        assert_eq!(labels, ["Continue", "Save", "Load", "Photo Mode", "Settings", CONSOLE_LABEL, MODS_LABEL, "Quit"]);
         assert!(!super::entries(false, false).contains(&Entry::Console));
     }
 
@@ -6653,8 +6692,8 @@ mod tests {
     #[test]
     fn the_mods_entry_stands_before_quit_only_when_a_mod_added_one() {
         let labels = |mods| entries(mods, false).iter().map(|e| e.label()).collect::<Vec<_>>();
-        assert_eq!(labels(false), ["Continue", "Save", "Load", "Settings", "Quit"]);
-        assert_eq!(labels(true), ["Continue", "Save", "Load", "Settings", "Mods", "Quit"]);
+        assert_eq!(labels(false), ["Continue", "Save", "Load", "Photo Mode", "Settings", "Quit"]);
+        assert_eq!(labels(true), ["Continue", "Save", "Load", "Photo Mode", "Settings", "Mods", "Quit"]);
         assert!(Page::Mods.opened_by("Mods"));
         assert!(!Page::Mods.opened_by("Settings"));
         assert_eq!(Page::Mods.settings_row(), None);

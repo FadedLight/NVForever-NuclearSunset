@@ -3412,7 +3412,10 @@ impl Seen {
 }
 
 /// Show the camera `seen` of the third-person rig, and the first-person rig or not.
-fn show_rigs(body: &mut Body, commands: &mut Commands, visibility: &mut Query<&mut Visibility>, seen: Seen, first: bool) {
+///
+/// `hidden` (photo mode's Hide Player): neither is seen, whatever the view.
+fn show_rigs(body: &mut Body, commands: &mut Commands, visibility: &mut Query<&mut Visibility>, seen: Seen, first: bool, hidden: bool) {
+    let (seen, first) = if hidden { (Seen { body: false, head: false, arms: false, weapon: false }, false) } else { (seen, first) };
     let third = &mut body.third;
     if third.seen != Some(seen) {
         for d in &third.drawn {
@@ -3527,7 +3530,7 @@ fn drive_body(
     mut transforms: Query<&mut Transform>,
     mut visibility: Query<&mut Visibility>,
     mut anim: ResMut<WeaponAnim>,
-    (furniture, mut idles, mut seat, pip, cams, first_fov, limbs, (death, knock), (zoom, combat, mut true_sights, scope, mut lens3d, lens_sway), (ahead, mut lunge, s1st, vats, inertia, mut blows)): (
+    (furniture, mut idles, mut seat, pip, cams, first_fov, limbs, (death, knock), (zoom, combat, mut true_sights, scope, mut lens3d, lens_sway), (ahead, mut lunge, s1st, vats, inertia, mut blows, photo)): (
         Res<crate::furniture::BodyOverride>,
         ResMut<PlayerIdles>,
         ResMut<nvf_play::furniture::PlayerSeat>,
@@ -3537,11 +3540,13 @@ fn drive_body(
         Option<Res<nvf_play::combat::PlayerLimbs>>,
         (Res<crate::death_cam::DeathCam>, Res<crate::player_knockdown::PlayerKnockdown>),
         (Option<Res<nvf_play::aim_zoom::AimZoom>>, Option<Res<nvf_play::combat::Combat>>, Option<ResMut<nvf_play::aim_zoom::TrueSights>>, Option<Res<nvf_play::aim_zoom::Scope>>, Option<ResMut<nvf_play::aim_zoom::Scope3d>>, Option<Res<nvf_play::aim_zoom::LensSway>>),
-        (Res<crate::weapon_lower::Ahead>, ResMut<nvf_play::player::Lunge>, Option<Res<nvf_play::console::ShowFirstPerson>>, Option<Res<nvf_play::vats_mode::VatsMode>>, Option<Res<nvf_play::inertia::MovementInertia>>, Option<ResMut<PlayerBlows>>),
+        (Res<crate::weapon_lower::Ahead>, ResMut<nvf_play::player::Lunge>, Option<Res<nvf_play::console::ShowFirstPerson>>, Option<Res<nvf_play::vats_mode::VatsMode>>, Option<Res<nvf_play::inertia::MovementInertia>>, Option<ResMut<PlayerBlows>>, Option<Res<nvf_play::photo_mode::PhotoMode>>),
     ),
     (mut driven, parents, mut toddler): (ResMut<nvf_play::player::ViewDriven>, Query<&ChildOf>, Option<ResMut<nvf_play::player::PlayerToddler>>),
 ) {
     let state = &mut *state;
+    // Photo mode's Hide Player: no rig is drawn (the shadow stays).
+    let hidden = photo.as_deref().is_some_and(|p| p.hides_player());
     player.body_view = None;
     // Set again below while the body's attack clip carries the player.
     let was_carrying = std::mem::replace(&mut lunge.carrying, false);
@@ -3576,7 +3581,7 @@ fn drive_body(
         state.muzzle_entity = None;
         state.casing_entity = None;
         state.weapon_aim = None;
-        show_rigs(body, &mut commands, &mut visibility, Seen { body: true, head: death.third_person() || knock.ragdolled(), arms: true, weapon: true }, false);
+        show_rigs(body, &mut commands, &mut visibility, Seen { body: true, head: death.third_person() || knock.ragdolled(), arms: true, weapon: true }, false, hidden);
         return;
     }
     // Turbo slows the world's clock, not the player's clips (magic-archetypes.md §2).
@@ -3724,7 +3729,7 @@ fn drive_body(
         state.muzzle_entity = None;
         state.casing_entity = None;
         state.weapon_aim = None;
-        show_rigs(body, &mut commands, &mut visibility, Seen { body: third_view || own_body, head: third_view, arms: true, weapon: true }, false);
+        show_rigs(body, &mut commands, &mut visibility, Seen { body: third_view || own_body, head: third_view, arms: true, weapon: true }, false, hidden);
         return;
     }
     if body.third.furniture.take().is_some() {
@@ -4356,7 +4361,7 @@ fn drive_body(
     // [observed: the owner's screenshots of the original's VATS, 2026-11-10, no arms or
     // weapon in the picture].
     let targeting = vats.is_some_and(|v| v.selected().is_some());
-    show_rigs(body, &mut commands, &mut visibility, seen, (!third_view || s1st) && !scoped && !targeting);
+    show_rigs(body, &mut commands, &mut visibility, seen, (!third_view || s1st) && !scoped && !targeting, hidden);
 
     m.log_elapsed += dt;
     if m.log_elapsed >= 1.0 {
@@ -4683,13 +4688,13 @@ mod tests {
         world.insert_resource(pb);
         let seen = Seen { body: false, head: true, arms: true, weapon: true };
         world.run_system_once(move |mut pb: ResMut<PlayerBody>, mut commands: Commands, mut vis: Query<&mut Visibility>| {
-            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, true);
+            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, true, false);
         }).unwrap();
         assert_eq!(*world.get::<Visibility>(first_root).unwrap(), Visibility::Inherited);
         assert!(world.resource::<PlayerBody>().first_person_drawn());
         // Hiding hides cleanly; re-showing shows again.
         world.run_system_once(move |mut pb: ResMut<PlayerBody>, mut commands: Commands, mut vis: Query<&mut Visibility>| {
-            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, false);
+            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, false, false);
         }).unwrap();
         assert_eq!(*world.get::<Visibility>(first_root).unwrap(), Visibility::Hidden);
         assert!(!world.resource::<PlayerBody>().first_person_drawn());

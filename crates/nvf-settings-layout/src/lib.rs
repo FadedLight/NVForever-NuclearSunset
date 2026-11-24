@@ -215,7 +215,7 @@ pub const SECTIONS: &[Section] = &[
     section(
         "Controls",
         Some("Actions"),
-        &["controls:bind:Activate", "controls:bind:Grab", "controls:bind:Menu Mode", "controls:bind:Rest", "controls:bind:Toggle POV", "controls:bind:QuickSave", "controls:bind:QuickLoad"],
+        &["controls:bind:Activate", "controls:bind:Grab", "controls:bind:Menu Mode", "controls:bind:Rest", "controls:bind:Toggle POV", "controls:bind:QuickSave", "controls:bind:QuickLoad", "controls:bind:Photo Mode"],
     ),
     section(
         "Controls",

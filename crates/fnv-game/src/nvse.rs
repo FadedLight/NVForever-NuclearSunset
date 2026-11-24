@@ -15,12 +15,18 @@ fn field(g: &Game, form: FormId, sub: &str, path: &str) -> Option<XVal> {
     if let Some(v) = g.field_overrides.get(&(form, format!("{sub}/{path}"))) {
         return Some(v.clone());
     }
-    // A clone reads its original's fields (TempCloneForm).
-    let form = g.unclone(form);
-    if let Some(v) = g.field_overrides.get(&(form, format!("{sub}/{path}"))) {
-        return Some(v.clone());
+    // A clone reads its original's fields (TempCloneForm). `MODL/` is snapshotted at
+    // clone creation (`Game::snapshot_model_path`), so a clone falls back directly to
+    // the authored record and never live-inherits post-clone `MODL/` edits from its
+    // source [observed: w4g_02_tempcloneform_world_proj_csty,
+    // w4g_13_isidleplaying_and_idle_replace].
+    let orig = g.unclone(form);
+    if sub != "MODL" {
+        if let Some(v) = g.field_overrides.get(&(orig, format!("{sub}/{path}"))) {
+            return Some(v.clone());
+        }
     }
-    Some(match g.data.record_field(form, sub, path)? {
+    Some(match g.data.record_field(orig, sub, path)? {
         Json::Number(n) => XVal::Num(record_float(n.as_f64()?)),
         Json::String(s) if s.starts_with("0x") => XVal::Ref(u32::from_str_radix(&s[2..], 16).ok()?),
         Json::String(s) => XVal::Str(s.clone()),

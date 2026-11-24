@@ -739,6 +739,19 @@ those three both from the top-level root and from the menu's root, and checks th
 page's own example (`RadiationMeter/radiation_text/depth`: -50, then 0) when the tree has
 that tile. `--no-inherited` leaves them out.
 
+## NVSE / extender black-box probe harness (`nvse/`)
+
+`tools/capture/nvse/` contains a strictly read-only clean-room black-box
+NVSE/extender console-only (`PrintToConsole`) probe script emitter, declarative
+JSON catalogs (Wave 1/2 parity probes and Waves 4A–4D — excluding all
+file-writing and `con_Save` probes), read-only log verifier (with offline 3-tier
+persistence log classifier), clean-room `[observed: ...]` citation formatter
+with an automated privacy gate, and offline stdlib `unittest` suite. Like §10,
+neither the tool nor its emitted probe scripts write into `--game-dir`, `Data\`,
+`NVSE\`, `Fallout.ini`, or Saves, and the tool never launches the game; see
+[`tools/capture/nvse/README.md`](nvse/README.md) for manual staging steps and
+usage.
+
 ## Tests
 
 ```

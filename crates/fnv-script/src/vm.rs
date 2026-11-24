@@ -3018,7 +3018,11 @@ impl Vm<'_, '_> {
             // [documented: https://obse.silverlock.org/obse_command_doc.html (`(atan2:float)
             // datan2 arg1:float arg2:float`, "ATan2 and DATan2 use degrees"); cross-referenced
             // on https://geckwiki.com/index.php?title=Fatan2 ("significantly faster than dATan2");
-            // hypothesis: exact degree atan2(y, x) in [-180, 180], with (0, 0) -> 0.0].
+            // observed: 2026-11-23, GSDocMitchellHouse (0x00103DF9), Fallout: New Vegas
+            // 1.4.0.525 + xNVSE 6.4.9 (10 official base masters), #3678 / PR #3679 probe
+            // `w1_3495_compound_assign_and_datan2` (10 quadrant/axis calls: `(0,0)=0`,
+            // `(1,0)=90`, `(0,1)=0`, `(-1,0)=-90`, `(0,-1)=180`, `(1,1)=45`, `(-1,1)=-45`,
+            // `(-1,-1)=-135`, `(1,-1)=135`, `(1,1.7320508)=30.000002`)].
             "atan2" | "datan2" => {
                 let (y, x) = (val(self, 0)?.num()?, val(self, 1)?.num()?);
                 XVal::Num(if y == 0.0 && x == 0.0 { 0.0 } else { y.atan2(x).to_degrees() })
@@ -3572,8 +3576,6 @@ fn assign_op(op: XAssign) -> XOp {
         XAssign::Pow => XOp::Pow,
         XAssign::BitOr => XOp::BitOr,
         XAssign::BitAnd => XOp::BitAnd,
-        XAssign::Shl => XOp::Shl,
-        XAssign::Shr => XOp::Shr,
         XAssign::Mod | XAssign::Set => XOp::Mod,
     }
 }

@@ -951,6 +951,16 @@ impl Rig {
         Some(self.weapon_node_at(root, self.muzzle.as_ref()?)?.translation.into())
     }
 
+    /// Where the weapon's muzzle is and the barrel's forward unit vector (game space) in
+    /// the last pose with the rig at `root`: `ProjectileNode` position and weapon model
+    /// `+X` axis (the barrel axis used by `line_up_sights`).
+    fn weapon_aim_at(&self, root: Transform) -> Option<([f32; 3], [f32; 3])> {
+        let muzzle = self.muzzle_at(root)?;
+        let model = self.weapon_node_at(root, &[])?;
+        let dir = model.transform_vector3(Vec3::X).normalize_or_zero();
+        (dir.length_squared() > 0.5).then_some((muzzle.to_array(), dir.to_array()))
+    }
+
     /// Where a node of the weapon model is in the last pose with the rig at `root`
     /// (game space), given the way down to it from the `Weapon` node.
     fn weapon_node_at(&self, root: Transform, path: &[(Option<usize>, Transform)]) -> Option<Affine3A> {
@@ -1285,6 +1295,9 @@ pub struct PlayerBody {
     /// The third-person head's eye this frame, game space, while the view is from
     /// outside; `None` in first person or without a body.
     head_eye: Option<[f32; 3]>,
+    /// The weapon muzzle position and barrel forward unit vector (game space) in the rig
+    /// in view while a weapon is drawn in hand; `None` when holstered or unarmed.
+    weapon_aim: Option<([f32; 3], [f32; 3])>,
     motion: Motion,
     /// Why the body could not be built (reported once).
     failed: Option<String>,
@@ -1359,6 +1372,17 @@ impl PlayerBody {
     /// without a body.
     pub fn head_eye(&self) -> Option<[f32; 3]> {
         self.head_eye
+    }
+
+    /// Muzzle position and barrel forward unit vector (game space) of the weapon in hand
+    /// in the rig in view, for weapon-attached flashlight alignment (`flashlight.rs`).
+    pub fn weapon_aim(&self) -> Option<([f32; 3], [f32; 3])> {
+        self.weapon_aim
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_weapon_aim_for_test(&mut self, aim: Option<([f32; 3], [f32; 3])>) {
+        self.weapon_aim = aim;
     }
 
     /// The entity of the muzzle node (`ProjectileNode`) of the weapon in hand, in the
@@ -3503,6 +3527,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         return;
     };
     if death.down() || knock.ragdolled() {
@@ -3514,6 +3539,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         show_rigs(body, &mut commands, &mut visibility, Seen { body: true, head: death.third_person() || knock.ragdolled(), arms: true, weapon: true }, false);
         return;
     }
@@ -3661,6 +3687,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         show_rigs(body, &mut commands, &mut visibility, Seen { body: third_view || own_body, head: third_view, arms: true, weapon: true }, false);
         return;
     }
@@ -4270,6 +4297,7 @@ fn drive_body(
         _ => &body.third,
     };
     anim.muzzle = if m.hands.in_hand { seen.muzzle_at(root).map(|p| p.to_array()) } else { None };
+    state.weapon_aim = if m.hands.in_hand { seen.weapon_aim_at(root) } else { None };
     state.muzzle_entity = seen.muzzle_entity.filter(|_| m.hands.in_hand);
     state.casing_entity = seen.casing_entity.filter(|_| m.hands.in_hand);
     anim.casing = if m.hands.in_hand { seen.casing_at(root).map(|(p, d)| (p.to_array(), d.to_array())) } else { None };

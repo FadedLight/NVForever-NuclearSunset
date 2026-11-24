@@ -55,6 +55,17 @@ class SvgTests(unittest.TestCase):
         self.assertIn("fill: false, stroke: true", text)
         self.assertNotIn("64 * 64", text)
 
+    def test_committed_icons_generated_rs_matches_svg_sources(self):
+        families, digest = svg.compile_manifest(MANIFEST)
+        expected = svg.rust_geometry(families, digest)
+        actual = svg.DEFAULT_OUT.read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertEqual(
+            actual,
+            expected,
+            "engine/nvforever/src/touch/icons_generated.rs is out of sync with assets/touch; "
+            "run: python tools/android/svg_icons.py --out engine/nvforever/src/touch/icons_generated.rs",
+        )
+
     def test_sources_match_exact_family_style_and_original_licence(self):
         for family in MANIFEST_DATA["families"]:
             for icon in MANIFEST_DATA["icons"]:

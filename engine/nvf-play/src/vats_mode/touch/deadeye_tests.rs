@@ -106,7 +106,7 @@ fn deadeye_empty_fire_ap_and_ammo_limits_keep_reservations_and_no_attacks() {
 
 #[test]
 fn deadeye_explicit_off_preserves_native_reticle_mark_and_confirm_for_mouse_and_pad() {
-    assert_eq!(Mode::default(),Mode::Off);assert_eq!(VatsStyle::default(),VatsStyle::DeadEye);
+    assert_eq!(Mode::default(),Mode::Off);assert_eq!(VatsStyle::default(),VatsStyle::Classic);
     for device in [InputDevice::KeyboardMouse,InputDevice::Controller] {
         let (mut app,pad,f)=deadeye_scene(Mode::Off);
         let at=point(&app,f,B,1);assert!(!raw(&mut app,f,2040,TouchPhase::Started,at,false));

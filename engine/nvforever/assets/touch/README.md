@@ -18,8 +18,10 @@ The manifest declares its stroke/fill profile. The strict nvf-touch-svg/2 compil
 unsupported semantics rather than approximating them. Even-odd compound paths provide
 real transparent holes; all output remains a tintable white coverage mask.
 
-SVG source is authoritative. Generated Rust geometry belongs only in Cargo OUT_DIR;
-preview sheets belong in a private review directory. The runtime rasterizes at actual
+SVG source is authoritative. Regenerate the committed Rust geometry by hand when SVGs
+change with `python tools/android/svg_icons.py --out engine/nvforever/src/touch/icons_generated.rs`
+(`tools/android/tests/test_svg_icons.py` checks parity; `engine/nvforever/build.rs` does
+not run Python); preview sheets belong in a private review directory. The runtime rasterizes at actual
 physical content-box dimensions after layout, with the selected family in its bounded
 cache key. Family selection changes artwork only, independently of skins, placements,
 control bindings, hit targets and opacity/tint. No artwork or final layout is locked by

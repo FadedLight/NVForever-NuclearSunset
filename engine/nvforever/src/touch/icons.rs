@@ -1,6 +1,7 @@
 //! Owned SVG geometry rasterized after layout at physical image-box dimensions.
-//! Artwork is authoritative in assets/touch; the strict build compiler rejects SVG
-//! semantics this renderer does not implement. No position, binding or theme state lives here.
+//! Artwork is authoritative in assets/touch; tools/android/svg_icons.py validates the
+//! SVG profile and regenerates icons_generated.rs by hand so Cargo builds need no Python.
+//! No position, binding or theme state lives here.
 use bevy::{
     asset::{AssetEventSystems, RenderAssetUsages},
     camera::visibility::VisibilitySystems,
@@ -50,7 +51,7 @@ struct IconSource {
     label: &'static str,
     primitives: &'static [Primitive],
 }
-include!(concat!(env!("OUT_DIR"), "/touch_icons.rs"));
+include!("icons_generated.rs");
 
 /// Manifest index, deliberately independent of positions, bindings and appearance.
 #[derive(Component)]

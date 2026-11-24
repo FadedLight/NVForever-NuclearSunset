@@ -196,7 +196,7 @@ cmd = ["cargo", "deny", "--manifest-path", "engine/Cargo.toml", "check", "licens
 [[check]]
 name = "engine cargo test"
 paths = ["engine/", "crates/", "Cargo.toml", "schemas/"]
-cmd = ["cargo", "test", "--release", "--locked", "--no-fail-fast"]
+cmd = ["cargo", "test", "--release", "--locked"]
 cwd = "engine"
 
 [[check]]

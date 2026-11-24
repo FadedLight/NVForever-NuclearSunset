@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = ROOT / "engine/nvforever/assets/touch/manifest.json"
+DEFAULT_OUT = ROOT / "engine/nvforever/src/touch/icons_generated.rs"
 NS = "{http://www.w3.org/2000/svg}"
 MAX_SOURCE_BYTES = 16 * 1024
 MAX_ICONS = 64
@@ -298,7 +299,7 @@ def main() -> None:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         if not args.out.is_file() or args.out.read_text(encoding="utf-8") != output:
-            args.out.write_text(output, encoding="utf-8")
+            args.out.write_text(output, encoding="utf-8", newline="\n")
     if args.preview:
         args.preview.parent.mkdir(parents=True, exist_ok=True)
         args.preview.write_text(preview_svg(args.manifest, args.family, args.backdrop), encoding="utf-8")

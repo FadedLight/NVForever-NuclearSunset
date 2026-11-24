@@ -416,6 +416,13 @@ no hand-typed console sessions. Interface, protocol and file formats:
 `docs/spec-notes/xnvse-capture.md`. The plugin reads no game memory (only xNVSE's plugin
 interface and the game's script language) and writes only to the capture directory.
 
+**Writing files from a probe** (owner, 2026-11-24, #3793). A probe or capture that writes
+files (a save, an INI, JSON, Excel) may run only in a separate **staging copy** of the game
+folder, one the tools never treat as the real install. The probe itself is committed (in a
+catalog or in the pull request that cites it), and the claim it backs says how the copy was
+made and what was written. The `.fos` harness of #3667 and the save/reload probes of #3775
+have an exception for saves into `Saves\fosprobe\`.
+
 **One-time setup (owner, by hand — tools never write into the game folder):**
 1. Install xNVSE 6.4.9 or later following its own instructions (github.com/xNVSE/NVSE,
    Steam version). The plugin declines to load on older xNVSE or other game versions.

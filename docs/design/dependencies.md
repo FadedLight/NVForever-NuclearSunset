@@ -156,11 +156,10 @@ All four vendored crates touched or added by `#2436` are wired through `[patch.c
 
 [design] `nvforever` requests tiny-skia =0.11.4 directly (BSD-3-Clause), already present
 in engine/Cargo.lock via Bevy. Default features are disabled; `std`/`simd` provide the
-bounded antialiased path stroker, without enabling a PNG encoder. Owned SVG is validated
-at build time by a strict Python standard-library compiler, not a runtime XML crate.
-No resvg/usvg or external artwork dependency is added. Cargo must normally regenerate
-the direct dependency's lock entry and licence/advisory checks remain required before
-integration; this source packet deliberately does not hand-edit the lock. The build step
-uses `NVF_PYTHON` (already set by tools/android/build.py), or host `python`/`python3`;
-therefore a direct Cargo build also needs Python 3.11+ on PATH or that explicit variable.
+bounded antialiased path stroker, without enabling a PNG encoder. Owned SVGs under
+`engine/nvforever/assets/touch/` are validated and compiled into the committed
+`engine/nvforever/src/touch/icons_generated.rs` by running `tools/android/svg_icons.py`
+by hand when SVGs change (`tools/android/tests/test_svg_icons.py` verifies parity).
+`engine/nvforever/build.rs` does not invoke Python, so desktop Cargo builds need no
+Python runtime, and no runtime XML/SVG crate (`resvg`/`usvg`) is added.
 See [android-svg-icons.md](android-svg-icons.md) for bounds and pending GPU validation.

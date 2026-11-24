@@ -24,10 +24,13 @@ SVG path commands define moves, lines, quadratic/cubic curves and closed contour
 [design] The owned `nvf-touch-svg/1` profile supports explicit absolute M/L/Q/C/Z path
 commands, circles, lines, polylines and polygons. Styling is one shared stroke; no fills,
 transforms, CSS, text rendering, filters, images, references, entities or scripting are
-accepted. Unsupported input fails the build instead of being drawn incorrectly. A bounded
-Python standard-library compiler validates the XML/manifest and emits typed geometry into
-Cargo OUT_DIR. SVG files remain the sole authoritative geometry; generated Rust is not
-checked in. Limits cover source size, count, command count, coordinates and painted bounds.
+accepted. Unsupported input fails validation instead of being drawn incorrectly. A bounded
+Python standard-library tool (`tools/android/svg_icons.py`) validates the XML/manifest and
+emits typed geometry into the committed `engine/nvforever/src/touch/icons_generated.rs`
+file when run by hand after editing SVGs. `engine/nvforever/build.rs` does not invoke
+Python during Cargo builds; `tools/android/tests/test_svg_icons.py` verifies the committed
+Rust file stays byte-for-byte in sync with the SVG sources. Limits cover source size,
+count, command count, coordinates and painted bounds.
 
 [design] This avoids a general-purpose runtime SVG parser and resvg/usvg dependency graph.
 Rasterization reuses tiny-skia 0.11.4 (BSD-3-Clause), already present in engine/Cargo.lock.
@@ -77,12 +80,14 @@ Selectable original generic appearances/layouts remain a separate follow-up.
 
 ## Source packet limits and build impact
 
-[design] The direct dependency and unconditional build-script compiler are proposed for
-review, not admitted native validation. Direct desktop Cargo builds now also need the
-already documented Python 3.11+ tooling (or `NVF_PYTHON`), because desktop unit tests
-compile the touch module. Runtime touch activation remains Android-only; normal desktop
-input/UI behaviour is unchanged. Generated geometry is embedded, so no runtime SVG files
-need Android asset staging. No Cargo.lock bytes are edited in this increment.
+[design] The generated icon geometry is committed at
+`engine/nvforever/src/touch/icons_generated.rs` and included directly by
+`engine/nvforever/src/touch/icons.rs`, so desktop and Android Cargo builds require no
+Python (`engine/nvforever/build.rs` is unchanged vs `main`). Run
+`python tools/android/svg_icons.py --out engine/nvforever/src/touch/icons_generated.rs`
+by hand whenever SVGs under `engine/nvforever/assets/touch/` change. Runtime touch
+activation remains Android-only; normal desktop input/UI behaviour is unchanged. Generated
+geometry is embedded, so no runtime SVG files need Android asset staging.
 
 [design] The cache bounds are 64 live icon nodes, 512 physical pixels per dimension and
 8 MiB of current CPU image pixels, plus at most one 1 MiB raster allocation during a

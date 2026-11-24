@@ -136,9 +136,9 @@ not decode yet.
   in older records), bits the schema names the same way. EMTMedicalBeep01: loop (4) 1,
   2D (6) 0. `SetSoundFlag` stores per-`SOUN` session bitmask overrides
   (`Game::sound_flags`, `Game::sound_flag`, `Game::set_sound_flag`,
-  `Game::sound_flags_override`) with `TempCloneForm` snapshotting and post-clone isolation
-  (`Game::snapshot_sound_flags`) [design; hypothesis: session-only lifetime and rejection
-  of fractional/out-of-range flag IDs and non-`SOUN` forms].
+  `Game::sound_flags_override`, `Game::snapshot_sound_flags`) [design] with
+  `TempCloneForm` snapshotting and post-clone isolation [hypothesis: also session-only
+  lifetime and rejection of fractional/out-of-range flag IDs and non-`SOUN` forms].
 
 ### 9.1 `TempCloneForm` SOUN aliases and engine sound overrides
 
@@ -147,14 +147,16 @@ not decode yet.
   original sound's `FNAM` path and `SNDD` traits. Session overrides via
   `SetSoundSourceFile` and `SetSoundTraitNumeric` apply to the target FormID without
   mutating the original.
+- [hypothesis] Pre-clone `SetSoundSourceFile` and `SetSoundTraitNumeric` (`0..=11`) edits
+  on an original or parent clone carry onto newly created `TempCloneForm` `SOUN` clones,
+  while post-clone edits on the original or parent clone stay isolated from
+  already-created clones (e.g., silencing an original `SOUN` with trait `3 = -99` after
+  cloning a playable copy).
 - [design] `TempCloneForm` snapshots the source form's active `SetSoundSourceFile` and
-  `SetSoundTraitNumeric` (`0..=12`) overrides onto the new clone at creation time
+  `SetSoundTraitNumeric` (`0..=11`) overrides onto the new clone at creation time
   (`Game::snapshot_sound_traits`), and `Game::sound_source_override` /
   `Game::sound_trait_override` read only the queried FormID's own entry before falling
-  back to the authored ESM `FNAM` / `SNDD` record. Pre-clone edits on an original or
-  parent clone carry onto newly created clones, while post-clone edits on the original
-  or parent clone stay isolated from already-created clones (e.g., silencing an original
-  `SOUN` with trait `3 = -99` after cloning a playable copy).
+  back to the authored ESM `FNAM` / `SNDD` record.
   `engine/nvf-play/src/world_sounds.rs` (`sync_script_sounds`) runs in `PlaySet::Sync`
   (before `SfxSet` resolves `PlaySound` requests): it materializes cloned `SOUN` entries
   in `sfx.forms.sounds` from their original's authored `Sound` with `edid = None`

@@ -2420,6 +2420,17 @@ order = [[
 forbid = [{ text = "Caught rendering error", label = "a rendering (validation) error while the HDR view's parts come and go" }]
 
 [[scenario]]
+name = "hdr-sdr-fallback"
+source = "docs/design/hdr-output.md: HDR asked for (NVF_HDR=1) on a surface with no Rgba16Float (forced by the test aid NVF_PLAY_TEST_SDR_SURFACE=1, so on any machine) stays SDR: the window says so, the corner text and log line say the screen offers no HDR, and no HDR surface is made"
+areas = ["renderer", "graphics", "settings"]
+paths = ["engine/nvforever/src/hdr.rs", "engine/nvforever/src/hdr_calibrate.rs", "engine/nvforever/src/hdr_expand.wesl", "engine/vendor/bevy_render/src/view/window/**", "engine/vendor/bevy_core_pipeline/src/blit/**", "engine/vendor/bevy_core_pipeline/src/upscaling/**"]
+env = { NVF_HDR = "1", NVF_PLAY_TEST_SDR_SURFACE = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 12
+expect = ["hdr: this surface offers no Rgba16Float; staying SDR", "hdr: HDR asked for, but this screen offers no HDR (Windows HDR off?)"]
+forbid = ["hdr: window surface Rgba16Float (scRGB)", "hdr: output on (scRGB)", "Caught rendering error"]
+
+[[scenario]]
 name = "distant-lights"
 source = "[design, #3013] docs/design/graphics-enhanced.md §3.22 Distant lights at night (engine/nvforever/src/distant_lights.rs, distant_lights.wesl): started with --graphics-only distant-lights at Goodsprings 22:00, the distant lights come on once, list the cells in reach with their light references and glow statics, draw glows, and the glows' pipeline compiles and is ready (pipeline_gate.rs `distant lights pipeline <n> ready`, with NVF_PLAY_TEST_PIPELINE_LOG); the exit summary counts cells, lights, glow statics and glows drawn, without a rendering, validation or pipeline error. Whether towns glow where they should is checked in pictures by hand"
 areas = ["renderer", "graphics"]
@@ -6243,6 +6254,23 @@ forbid = [
 manual = "Compare flashlight_aimed_off.png and flashlight_aimed_on.png (1280x720): with the flashlight on, the aimed Ranger Sequoia cylinder, frame, sights and gloved hand must remain cleanly readable (not blown out to white) while the interior wallpaper and window ahead are brightly illuminated by the flashlight cone."
 
 # ------------------------------------------------------------------ sounds
+
+[[scenario]]
+name = "missile-launch-sounds"
+source = "#3444 (player report R-DWTU2458), docs/spec-notes/audio.md §15.6: Lonesome Road's second silo, the missile silent in flight: the sound key of Backward names a 2D SOUN with no radii (NVDLC04QSTMissileLaunchPt2), which the distance to the silo silenced"
+note = "The player stands at NVDLC04MissileLaunchViewMarkerREF, where the script moves them, 2,900 units from the silo; the launch quest is started at 8 s, as the launch control's script does. Forward follows about 1 s later, Backward 13 s after that. Needs LonesomeRoad.esm (the ten masters), as the other add-on scenarios need theirs: without it the run fails, it is not skipped."
+areas = ["audio", "object-anims", "lonesome-road"]
+paths = ["engine/nvf-play/src/sfx.rs", "engine/nvforever/src/object_anims.rs", "engine/nvforever/src/anim_sounds.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_UNSEEN = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_SCRIPT = "8:start:NVDLC04MissileLaunchQuest" }
+args = ["--play", "--world", "NVDLC04Road02World", "--pos=27963,6159,19024", "--heading", "14", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 36
+order = [[
+  { re = 'playgroup: NVDLC04MissileLaunchREF passes the sound key NVDLC04QSTMissileLaunchPt1 of Forward', label = "Forward's sound key" },
+  { re = 'sfx: sound key NVDLC04QSTMissileLaunchPt1 starts: .*qst_missilelaunch_explode_pt1\.wav, .* gain (?P<n>[0-9.]+), 2D, .* (2[89]|30)\d\d units away', range = [0.3, 0.4], label = "it starts, 9.25 dB off" },
+  { re = 'playgroup: NVDLC04MissileLaunchREF passes the sound key NVDLC04QSTMissileLaunchPt2 of Backward', label = "Backward's sound key" },
+  { re = 'sfx: sound key NVDLC04QSTMissileLaunchPt2 starts: .*qst_missilelaunch_explode_pt2\.wav, .* gain (?P<n>[0-9.]+), 2D, .* (2[89]|30)\d\d units away', range = [0.95, 1.05], label = "the flight's sound starts whole, from 2,900 units" },
+]]
+forbid = [{ re = 'sfx: sound key NVDLC04QSTMissileLaunchPt\d (not heard|dropped)', label = "a launch sound is not heard" }]
 
 [[scenario]]
 name = "own-sounds-goodsprings"
@@ -17182,6 +17210,28 @@ expect = [
   { re = 'GetCannibal.*>> 1\.00', label = "the player is in the cannibalism act" },
   { re = 'HasBeenEaten.*>> 0\.00', label = "not eaten while the act lasts (capture ac4)" },
   { re = 'HasBeenEaten.*>> 1\.00', label = "eaten once the 7.7 s act is over" },
+]
+
+[[scenario]]
+name = "perk-robot-deactivate"
+source = "#3479 (docs/spec-notes/perk-activation.md §2): with Robotics Expert, E on a hostile robot opens the perk's Deactivate while the player sneaks undetected (before, E did nothing to a hostile actor, so the choice never opened); without it, standing, or once it is shut down, E still does nothing (#2536)"
+note = "VCrTier0CrProtectron (00167ED5: Very Aggressive, no Allow PC Dialogue) placed 300 units from the player at 3 s (the first created reference, 0xFF000000), the coyotes there disabled; the unseen test aid keeps it from detecting the player (GetDetected 0). E is pressed standing at 10 s, crouched at 15 s (the list's first button answered by the menu aid after 1 s) and again at 23 s"
+areas = ["scripts", "perks", "activation"]
+paths = ["crates/fnv-game/src/activate_choices.rs", "engine/nvf-play/src/script.rs", "engine/nvf-play/src/script_hud.rs", "engine/nvf-play/src/activate.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_UNSEEN = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_SCRIPT = "2:call:VERGSCoyote1REF:Disable,2.1:call:VERGSCoyote2REF:Disable,2.2:call:VERGSCoyote3REF:Disable,2.3:call:VERGSCoyote4REF:Disable,2.4:call:VERGSCoyote5REF:Disable,2.5:call:VERGSCoyote6REF:Disable,3:call:player:PlaceAtMe:VCrTier0CrProtectron:1:300:0", NVF_PLAY_TEST_CONSOLE = "5:player.addperk 00031DC2;5.3:close;19:FF000000.getunconscious;19.3:close", NVF_PLAY_TEST_FACE = "9.5:FF000000,14.5:FF000000,22.5:FF000000", NVF_PLAY_TEST_CONTROL = "9.8:aimref=FF000000,11:sneak,14.8:aimref=FF000000,22.8:aimref=FF000000", NVF_PLAY_TEST_ACTIVATE = "10,15,23" }
+args = ["--cell", "Goodsprings", "--pos=-61000,4500,8500", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 26
+order = [[
+  { re = 'activate 0xFF000000 Protectron: nothing to do \(hostile\)', label = "standing: E does nothing to the hostile robot" },
+  { re = 'activate: .* offers the perks. choices \["Deactivate"\] and no default action', label = "crouched and undetected: the perk's choice" },
+  { re = 'activate: the player chose Deactivate \(Robot', label = "Deactivate is chosen" },
+  { re = 'GetUnconscious.*>> 1\.00', label = "the robot is shut down" },
+  { re = 'activate 0xFF000000 Protectron: nothing to do', label = "and not offered again" },
+]]
+expect = [{ re = 'activate: .* offers the perks. choices', count = 1, label = "the list opens once" }]
+forbid = [
+  { re = 'Protectron \(Talk\)', label = "Talk on the robot" },
+  { re = 'reticle: prompt "[^"]+" on "Protectron"', label = "an action prompt on the robot" },
 ]
 
 [[scenario]]
@@ -30219,6 +30269,7 @@ expect = [
   { text = "frame generation: DLSS Frame Generation (NVIDIA, through Streamline;", label = "the row's choice running" },
   { re = 'latency reduction: NVIDIA Reflex through Streamline \(sl\.reflex, eLowLatency\) on the window', label = "latency calls through Streamline's Reflex" },
   { re = 'DLSS-G: options: mode On, 1 generated frame\(s\) per real frame \(at most \d+\), 1280x720, depth and motion 853x480, back buffers left to DLSS-G, user interface recomposition on: eOk', label = "frame generation on in play at 2x" },
+  { re = 'DLSS-G: queue parallelism eBlockNoClientQueues: each frame.s first submit waits on DLSS-G.s inputs fence \(first value [1-9]\d*\)', label = "DLSS-G leaves the game's queue free, the next frame waiting on its inputs fence (docs/design/dlss-frame-generation.md \"Queue parallelism\")" },
   { re = 'DLSS-G: 1\d\.\d s: \d+ real frames, \d+ presented \((1\.[89]|2\.[0-2])\d* per real frame\), status eOk', label = "about two presented per real frame over ten seconds" },
   { re = 'fps counter: FPS \d+ +\(\d+ rendered\) +[\d.]+ ms ', label = "the overlay's FPS row reads the frames shown and the rendered ones apart" },
   { re = 'DLSS: evaluates: ([1-9]\d*) ok, 0 failed', label = "DLSS's evaluates with the shared frame numbers, none failed" },
@@ -35844,3 +35895,66 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error" },
 ]
 note = "The same start, spot search and poses as terrain-parallax-ground-pack (round 2, 2026-11-22), not yet checked by a run. The shots are saved as terrain-parallax-ground-pack-off-shots/terrain_parallax_ab_<seconds>s_<a|b|c>.png."
+
+[[scenario]]
+name = "gpu-occlusion-culling"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; nvforever gpu_occlusion.rs, engine/vendor/README.md bevy#26239): with the experiment NVF_OCCLUSION_CULLING=1 the main camera gets Bevy's two-phase GPU occlusion culling at Novac noon, the depth pyramid is built from the main pass's region and the culling passes compile, without a rendering error. Whether anything visible is culled is checked in screenshots against a run without it (§13)"
+areas = ["renderer", "graphics"]
+paths = [
+  "engine/nvforever/src/gpu_occlusion.rs", "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/depth.rs",
+  "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/downsample_depth.wesl", "engine/vendor/bevy_pbr/src/render/mesh_preprocess.wesl",
+  "engine/vendor/bevy_render/src/view/mod.rs",
+]
+env = { NVF_OCCLUSION_CULLING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Novac", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 20
+expect = [
+  { text = "occlusion culling: on for the main camera", count = 1, label = "the test aid turns it on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the culling or depth pyramid passes" },
+]
+
+[[scenario]]
+name = "occlusion-culling-row-pick"
+source = "#3783, docs/settings-reference.md occlusion-culling: the Graphics row Occlusion culling is off by default and is read once at the start; turning it on in the page keeps this run as it was (off) and writes the next start's choice. occlusion-culling-row starts in the same home"
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+note = "The home's INI may hold the row from an earlier run: the test aid keeps this run off, Defaults puts the row back to Off, then a click turns it on (as settings-switch-write does)."
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_OCCLUSION_CULLING = "0", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:16", NVF_PLAY_TEST_SETTINGS = "11:page,13:occlusion-culling", NVF_PLAY_TEST_PAUSE_MENU = "12:defaults" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 18
+expect = [
+  { text = "occlusion culling: off", count = 1, label = "the test aid keeps this run off" },
+  { text = "pause menu: settings back to their defaults", label = "Defaults puts the row back to Off" },
+  { text = "settings: occlusion-culling on", label = "the row turned on in the page" },
+]
+order = [["pause menu: settings back to their defaults", "settings: occlusion-culling on"]]
+forbid = [{ text = "occlusion culling: on for the main camera", label = "the run's state changed before the next start" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "occlusion-culling-row"
+source = "#3783, docs/settings-reference.md occlusion-culling: a start in occlusion-culling-row-pick's home reads the saved row and turns the culling on for the main camera"
+note = "runs after occlusion-culling-row-pick in the same home."
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 14
+expect = [{ text = "occlusion culling: on for the main camera", count = 1, label = "the saved row turns it on at the next start" }]
+forbid = [{ text = "occlusion culling: off", label = "the saved row not read" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "gpu-light-clustering"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; main.rs, engine/vendor/README.md bevy#25869, bevy#26588): NVF_GPU_CLUSTERING=1 keeps Bevy's GPU light clustering, with its per-view buffers kept from frame to frame, at Goodsprings at night with the town's lamps, without a rendering error (the default stays CPU clustering)"
+areas = ["renderer", "graphics"]
+paths = ["engine/vendor/bevy_pbr/src/cluster/gpu.rs", "engine/vendor/bevy_pbr/src/cluster/mod.rs"]
+env = { NVF_GPU_CLUSTERING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "23"]
+run_seconds = 20
+expect = [
+  { text = "lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)", count = 1, label = "GPU clustering is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the clustering passes" },
+]

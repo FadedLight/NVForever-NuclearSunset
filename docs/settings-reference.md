@@ -333,6 +333,16 @@ off by default, saved in `NVForever.ini` `[Settings]` [design: #3305]).
 - Command-line switches: `--size`
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `hdr-output`: HDR output
+
+- On the page: On: the game is drawn for an HDR screen (Windows HDR on). Takes effect at once.
+  Calibrate... sets the screen's peak and the brightness.
+- In full: A choice list: Off, On, Calibrate.... On draws the game in HDR on a screen with Windows
+  HDR on; with no HDR screen or no fp16 surface it stays SDR. It switches live, with no restart.
+  Calibrate... opens the calibration pictures for the screen's peak and the brightness.
+- More: docs/design/hdr-output.md
+- Registered in `engine/nvforever/src/hdr.rs`
+
 ### `borderless`: Full screen
 
 - On the page: On: the game fills its monitor without a frame, at the full screen resolution
@@ -1399,6 +1409,21 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
 - Command-line switches: `--graphics-only` (`--graphics-only mesh-terrain-blend`)
 - More: docs/design/graphics-enhanced.md §3.14
 - Registered in `engine/nvforever/src/settings.rs`
+
+### `occlusion-culling`: Occlusion culling
+
+- On the page: On: hidden objects are skipped before drawing. Helps when the GPU limits
+  the frame rate (high resolutions, dense towns); costs some CPU. Takes effect at the next
+  start.
+- In full: [design] Bevy's two-phase GPU occlusion culling on the main camera: meshes
+  hidden behind nearer ones (by last frame's depth, then this frame's) are not drawn.
+  First-person shapes are never culled. [observed 2026-11-24, 4K DLSS Quality, maxed
+  settings, 9950X3D + RTX 5090] Novac's GPU time 4.96 → 4.31 ms, but its frame 6.96 → 7.18
+  ms, as the second culling phase costs render-thread time: it helps where the GPU holds
+  the frame rate and costs a little where the CPU does (docs/design/frame-rate-audit.md
+  §13). Off by default. Read once at the start, so a change applies at the next start. The
+  test aid `NVF_OCCLUSION_CULLING` (`1` on, `0` off) overrides the saved row for a run.
+- Registered in `engine/nvforever/src/gpu_occlusion.rs`
 
 ### `smooth-terrain`: Smooth terrain
 

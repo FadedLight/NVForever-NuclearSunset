@@ -613,6 +613,10 @@ pub struct FormChanges {
     /// SetActorFullName: base → the message whose title is the new name.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub names: BTreeMap<FormId, FormId>,
+    /// Savebaked base-form string name overrides (`.fos` `NPC_` bit 5 / `TACT` bit 2),
+    /// separate from session-only `SetName`/`SetFullNameAlt`/`LNSetName` (`Game::name_overrides`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub saved_names: BTreeMap<FormId, String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub quest_items: BTreeMap<FormId, bool>,
     /// SetCellOwnership (None: the owner was cleared).
@@ -629,6 +633,10 @@ pub struct FormChanges {
     /// FACT XNAM's (`functions::fo3`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub faction_modifiers: BTreeMap<FormId, BTreeMap<FormId, i64>>,
+    /// Runtime FACT flag overrides (16-bit DATA flags: Hidden, Evil, Special Combat, Track
+    /// Crime, Allow Sell), overriding `GameData::faction_flags` (`Game::faction_flags`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub faction_flags: BTreeMap<FormId, u16>,
     /// ResetInterior: interior cells reset at their next load (`crate::respawn`).
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty", default)]
     pub expired_cells: std::collections::BTreeSet<FormId>,
@@ -1095,6 +1103,8 @@ pub mod menus {
     /// The Pip-Boy's ITEMS page, the inventory [documented: GECK wiki GetSelectedItemRef,
     /// "Inventory Menu (1002)"; GetMenuItemListRefs, "1002 Pip-Boy Inventory Menu"].
     pub const INVENTORY: u16 = 1002;
+    /// The container menu [documented: GECK wiki GetMenuTargetRef, "1008 Container Menu"].
+    pub const CONTAINER: u16 = 1008;
     /// The Pip-Boy's STATS page [documented: GECK wiki GetSelectedItemRef, "Pipboy STATS
     /// Menu (1003) - Perk"].
     pub const STATS: u16 = 1003;
@@ -1453,6 +1463,9 @@ pub struct Game<'a> {
     pub showoff: crate::nvse_showoff::ShowOffState,
     /// Mods' INI and other files (`crate::mod_files`).
     pub mod_files: crate::mod_files::ModFiles,
+    /// Runtime settings loaded from `Data\NVSE\Plugins\kNVSE.ini` (`crate::knvse_ini`,
+    /// not saved in snapshots).
+    pub knvse_ini: crate::knvse_ini::KnvseIni,
     pub(crate) ysi_filename: crate::ysi_filename::State,
     /// SUP batch 6's state: the mouse, the cursor, the debug texts, the lockpick menu …
     /// (`crate::nvse_sup6`; the engine fills and takes it).
@@ -2518,6 +2531,8 @@ pub struct Session {
     zone_changes: std::collections::HashMap<FormId, crate::nvse_anh::ZoneChange>,
     /// Session `SetObjectEffect` (`EITM/`) overrides on loaded base forms (0 = cleared).
     object_effect_overrides: std::collections::HashMap<FormId, FormId>,
+    /// Session `SetWeaponCritDamage` (`CRDT/critical_damage`) overrides on loaded base forms.
+    weapon_crit_damage_overrides: std::collections::HashMap<FormId, fnv_script::vm::XVal>,
 }
 
 /// An event handler: the event (lower case), the function or lambda, the filters by
@@ -2616,6 +2631,12 @@ impl<'a> Game<'a> {
         world.set_inventory_sources(sources);
         // JIP LN's write for JIP Companions Command & Control's MCM page (`crate::jip_ccc`).
         crate::jip_ccc::write_globals(&data.load_order, &mut world);
+        // Stewie Tweaks modular override folders (`Data\NVSE\Plugins\Tweaks\INIs\*.ini`
+        // and `Data\NVSE\Plugins\Tweaks\GameSettings\*.ini`): no-op when absent or empty.
+        let mut tweaks = crate::tweaks::Tweaks::default();
+        let (_, modular_tweaks) = crate::stewie_inis::load_modular_inis_from_data();
+        crate::stewie_inis::apply_modular_tweaks_to_game(&modular_tweaks, &mut tweaks);
+        crate::stewie_inis::apply_modular_game_settings_to_world(&mut world);
         Game {
             data,
             ext: Default::default(),
@@ -2678,6 +2699,7 @@ impl<'a> Game<'a> {
             hud: Default::default(),
             showoff: Default::default(),
             mod_files: Default::default(),
+            knvse_ini: crate::knvse_ini::KnvseIni::load(),
             ysi_filename: Default::default(),
             sup: Default::default(),
             lu3: Default::default(),
@@ -2714,7 +2736,7 @@ impl<'a> Game<'a> {
             difficulty: Default::default(),
             difficulty_custom: Default::default(),
             difficulty_request: None,
-            tweaks: Default::default(),
+            tweaks,
             combat_requests: Vec::new(),
             destruction_changes: Vec::new(),
             due_children: Vec::new(),
@@ -2761,7 +2783,7 @@ impl<'a> Game<'a> {
             locks: Default::default(),
             senses: Default::default(),
             vats: Default::default(),
-            weather: Default::default(),
+            weather: crate::weather::WeatherState::cold_start(data),
             ui: Default::default(),
             console_requests: Vec::new(),
             mfg: Default::default(),
@@ -2947,6 +2969,23 @@ impl<'a> Game<'a> {
         format!("Note: {}", self.expand_codes(&name.unwrap_or_else(|| self.data.name(note))))
     }
 
+    /// Re-read and apply Stewie Tweaks modular override folders
+    /// (`Data\NVSE\Plugins\Tweaks\INIs\*.ini` and
+    /// `Data\NVSE\Plugins\Tweaks\GameSettings\*.ini`) from both disk read roots and this
+    /// session's `mod_files` writes. Returns `(tweak_fields_applied, gmsts_applied)`.
+    /// Bound application settings (`bind_stewie_stat_settings`) are left intact.
+    pub fn apply_stewie_modular_inis(&mut self) -> (usize, usize) {
+        let tweaks_applied = if self.small.stewie_stat_settings_loaded {
+            0
+        } else {
+            let (_, overrides) = crate::stewie_inis::load_modular_inis(&self.mod_files);
+            crate::stewie_inis::apply_modular_tweaks_to_game(&overrides, &mut self.tweaks)
+        };
+        let (_, gmsts) = crate::stewie_inis::load_modular_game_settings(&self.mod_files);
+        let gmsts_applied = crate::stewie_inis::apply_game_settings_to_world(&mut self.world, &gmsts);
+        (tweaks_applied, gmsts_applied)
+    }
+
     /// The new-game state: every quest flagged "Start game enabled" is running, with no
     /// stage set [hypothesis: the flag's documented meaning (xEdit); which quest the
     /// "New Game" menu starts is a separate input, scripts.md §8]; the placed actors that
@@ -3070,7 +3109,15 @@ impl<'a> Game<'a> {
         if !self.quest(q).completed {
             self.start_quest(q);
         }
-        self.quest(q).stages_done.insert(stage);
+        let qst = self.quest(q);
+        qst.stages_done.insert(stage);
+        if let Some(cur) = qst.current_stage {
+            if stage >= qst.stages_done.iter().next_back().copied().unwrap_or(stage) {
+                qst.current_stage = None;
+            } else if stage > cur {
+                qst.current_stage = Some(stage);
+            }
+        }
         let player = Some(FormId::PLAYER_REF);
         let label = format!("QUST {q} stage {stage}");
         let mut ran = Vec::new();
@@ -3729,7 +3776,8 @@ impl<'a> Game<'a> {
         let opts = self.opts();
         self.udf.push(UdfFrame { value: None, caller: None });
         self.open_run();
-        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds: None };
+        let seconds = Some(self.stateless_udf_seconds());
+        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds };
         let result = Vm::new(&data.table, &mut ex, opts).run(&block.body).map_err(|e| e.to_string());
         if let Locals::Temp(m) = &ex.locals {
             for (&index, v) in m {
@@ -3903,9 +3951,23 @@ impl<'a> Game<'a> {
         self.run_function_with_seconds(f, on, args, caller, (ctx, None))
     }
 
+    /// Single-frame delta exposed to stateless UDFs (`GetSecondsPassed` when `ctx.inst` is
+    /// `None`): zero while paused in menus, loading, or `FreezeTime`, otherwise the current
+    /// frame step `cfg.frame_seconds` [observed: w4g_03_jip_callback_getsecondspassed].
+    pub(crate) fn stateless_udf_seconds(&self) -> f64 {
+        if self.in_menu() || self.loading || self.gaps.jip3.time_frozen {
+            0.0
+        } else {
+            self.cfg.frame_seconds
+        }
+    }
+
     /// An elapsed value belongs to this UDF invocation and its nested calls only.
-    /// JIP callbacks supply it; ordinary calls and result scripts do not.
+    /// Callers may supply an explicit delta; stateless UDFs without one receive the
+    /// single-frame delta (`stateless_udf_seconds`), while persistent instances keep their
+    /// own clocks and result scripts continue to read zero.
     pub(crate) fn run_function_with_seconds(&mut self, f: &fnv_script::vm::XVal, on: Option<Value>, args: Vec<fnv_script::vm::XVal>, caller: Option<FormId>, (ctx, seconds): (RunCtx, Option<f64>)) -> Result<fnv_script::vm::XVal, String> {
+        let seconds = seconds.or_else(|| Some(self.stateless_udf_seconds()));
         self.nested(move |g| g.run_function_here(f, on, args, caller, (ctx, seconds)))
     }
 
@@ -4204,7 +4266,17 @@ impl<'a> Game<'a> {
                 None
             })
             .collect();
-        Session { handlers, main_loop, main_loop_registrars, jip_seq, restarted_seen: std::mem::take(&mut self.restarted_seen), handler_seq: self.handler_seq, pp, itr_kept: std::mem::take(&mut self.other.itr.kept), sr_registered, jip_kept: std::mem::take(&mut self.jip.kept), dialogue_edits: self.dialogue_edits.for_session(), save_files: std::mem::take(&mut self.save_files), kept_calls: self.take_kept_calls(), list_edits: std::mem::take(&mut self.list_edits), owner_ranks: std::mem::take(&mut self.other.owner_ranks), destruction: std::mem::take(&mut self.other.jip6.destruction), perk_edits: std::mem::take(&mut self.lu3.perk_edits), ref_radius: std::mem::take(&mut self.other.lutana.ref_radius), radiation: std::mem::take(&mut self.showoff.radiation), terminal_password_notes: std::mem::take(&mut self.terminals.password_notes), package_overrides, zone_changes: std::mem::take(&mut self.other.zone_changes), object_effect_overrides }
+        let weapon_crit_damage_overrides = self
+            .field_overrides
+            .iter()
+            .filter_map(|((form, key), val)| {
+                if key == "CRDT/critical_damage" && self.data.sigs.contains_key(form) {
+                    return Some((*form, val.clone()));
+                }
+                None
+            })
+            .collect();
+        Session { handlers, main_loop, main_loop_registrars, jip_seq, restarted_seen: std::mem::take(&mut self.restarted_seen), handler_seq: self.handler_seq, pp, itr_kept: std::mem::take(&mut self.other.itr.kept), sr_registered, jip_kept: std::mem::take(&mut self.jip.kept), dialogue_edits: self.dialogue_edits.for_session(), save_files: std::mem::take(&mut self.save_files), kept_calls: self.take_kept_calls(), list_edits: std::mem::take(&mut self.list_edits), owner_ranks: std::mem::take(&mut self.other.owner_ranks), destruction: std::mem::take(&mut self.other.jip6.destruction), perk_edits: std::mem::take(&mut self.lu3.perk_edits), ref_radius: std::mem::take(&mut self.other.lutana.ref_radius), radiation: std::mem::take(&mut self.showoff.radiation), terminal_password_notes: std::mem::take(&mut self.terminals.password_notes), package_overrides, zone_changes: std::mem::take(&mut self.other.zone_changes), object_effect_overrides, weapon_crit_damage_overrides }
     }
 
     /// Take over what lasts for the session ([`Game::take_session`]).
@@ -4212,9 +4284,6 @@ impl<'a> Game<'a> {
         self.handlers = s.handlers;
         self.jip.main_loop = s.main_loop;
         self.jip.restore_main_loop_registrars(s.main_loop_registrars, s.jip_seq);
-        for callback in &mut self.jip.main_loop {
-            callback.last_clock = functions::clock_now(self.time);
-        }
         self.restarted_seen = s.restarted_seen;
         self.handler_seq = s.handler_seq;
         self.pp_put_session(s.pp);
@@ -4237,6 +4306,9 @@ impl<'a> Game<'a> {
         self.other.zone_changes = s.zone_changes;
         for (form, ench) in s.object_effect_overrides {
             self.field_overrides.insert((form, "EITM/".into()), fnv_script::vm::XVal::Ref(ench.0));
+        }
+        for (form, val) in s.weapon_crit_damage_overrides {
+            self.field_overrides.insert((form, "CRDT/critical_damage".into()), val);
         }
     }
 
@@ -4603,6 +4675,7 @@ impl<'a> Game<'a> {
     /// ran, each after the previous one was closed, layer5-captures.md §10.1–10.2].
     pub fn tick(&mut self) {
         self.frame += 1;
+        self.sync_knvse_ini();
         self.temp_refs.clear();
         self.sync_player_level();
         // JIP's SetGameMainLoopCallback functions due this frame (task J6), then xNVSE's
@@ -6052,6 +6125,13 @@ impl<'a> Game<'a> {
             if was_interior && placed.world_of(c).is_some() && !self.player.fast_travel.keep {
                 self.player.fast_travel.travel_disabled = false;
             }
+            if let Some(w) = placed.world_of(c) {
+                self.other.jg6.last_exterior_world = Some(w);
+            } else if self.other.jg6.last_exterior_world.is_none() {
+                if let Some(w) = self.loaded_cells.iter().find_map(|&l| placed.world_of(l)) {
+                    self.other.jg6.last_exterior_world = Some(w);
+                }
+            }
             let cells = self.cells_around(c);
             self.set_loaded(cells);
         }
@@ -7367,6 +7447,7 @@ impl<'a> Game<'a> {
         g.radio.npc_radios = s.npc_radios.clone();
         g.weather.shown = s.weather_shown;
         g.weather.raining = s.raining;
+        g.weather.clear_measurement();
         g.provocations.grudges = s.grudges.iter().copied().collect();
         g.provocations.forgiven = s.forgiven.clone();
         g.nav_switches = s.nav_switches.clone();
@@ -7612,7 +7693,7 @@ impl Host for Exec<'_, '_> {
             }
         }
         let g = &*self.game;
-        let named = |x: FormId| g.name_overrides.get(&x).or_else(|| g.data.full_names.get(&g.unclone(x))).cloned();
+        let named = |x: FormId| g.name_overrides.get(&x).or_else(|| g.forms.saved_names.get(&x)).or_else(|| g.data.full_names.get(&g.unclone(x))).cloned();
         named(f).or_else(|| crate::functions::base_of(g, f).and_then(named))
     }
 
@@ -8070,10 +8151,11 @@ impl Host for Exec<'_, '_> {
         Some(self.game.add_var_place(p))
     }
 
+    fn allows_null_receiver(&self, name: &str) -> bool {
+        functions::player_source::handles(name)
+    }
+
     fn ext_call(&mut self, name: &str, on: Option<Value>, args: &[fnv_script::vm::XVal]) -> Option<Result<fnv_script::vm::XVal, String>> {
-        if crate::ysi_filename::handles(name, args) {
-            return Some(crate::ysi_filename::call(self.game, on, args));
-        }
         if functions::player_source::handles(name) {
             let source_ctx = Ctx { unit: self.unit.shared_key().clone(), opcode: 0, on: None, self_ref: self.ctx.self_ref,
                 action_ref: self.ctx.action_ref, quest: self.ctx.quest, inst: None, in_condition: false };

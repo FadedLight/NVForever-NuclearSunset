@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use crate::candidate::{canonical, pair_class, Candidate, Kind};
+use crate::candidate::{canonical, pair_class, Candidate, Kind, RELAYED_CLASS};
 
 /// Which side of the join this agent is on. The guest nominates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +35,9 @@ pub struct Config {
     /// After the first valid pair, how long the guest waits for a better class to answer
     /// before it picks (200 ms). It picks at once when no better class is left to try.
     pub settle: Duration,
+    /// The same wait when the best pair that answered goes through a hosted relay (2 s): a
+    /// relay answers in one round trip, while punching a direct hole can take a few.
+    pub relay_settle: Duration,
     /// A keepalive on the chosen pair this often while nothing else is sent (1 s): many NATs
     /// forget a UDP mapping after about 30 s.
     pub keepalive: Duration,
@@ -49,6 +52,7 @@ impl Default for Config {
             pace: Duration::from_millis(20),
             give_up: Duration::from_secs(10),
             settle: Duration::from_millis(200),
+            relay_settle: Duration::from_secs(2),
             keepalive: Duration::from_secs(1),
             lost_after: Duration::from_secs(4),
         }
@@ -314,7 +318,8 @@ impl Agent {
             if let Some((id, class)) = best {
                 let better_left =
                     self.pairs.iter().any(|p| p.class < class && !matches!(p.state, State::Succeeded { .. }));
-                let settled = self.first_valid.is_some_and(|t| now.saturating_duration_since(t) >= self.cfg.settle);
+                let wait = if class >= RELAYED_CLASS { self.cfg.relay_settle } else { self.cfg.settle };
+                let settled = self.first_valid.is_some_and(|t| now.saturating_duration_since(t) >= wait);
                 if !better_left || settled || timed_out {
                     self.select(id, now);
                     return std::mem::take(&mut self.out);

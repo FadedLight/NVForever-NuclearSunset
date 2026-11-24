@@ -68,8 +68,8 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
 | `relay_answer` | guest | `for`, `accept`, `reason`, `candidates` | My answer to `for`'s request. Accepting, I send my candidates. Refusing, `reason` is `off`, `busy` or `no_direct_path`. |
 | `bye` | either | none | Leaving. From the host, this ends the lobby. |
 
-A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx","addr":"203.0.113.5:47960"}`, or
-`"[2001:db8::5]:47960"` for IPv6. A receiver skips kinds it does not know.
+A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx"|"relay","addr":"203.0.113.5:47960"}`, or
+`"[2001:db8::5]:47960"` for IPv6. `relay` is a relay a player hosts (`nvf-relay`, issue #3880). A receiver skips kinds it does not know.
 
 ## Socket messages, service to game
 

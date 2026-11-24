@@ -93,3 +93,45 @@ pair to connect except these [design: the textbook result]:
 - symmetric against port-restricted.
 
 Two machines on one LAN connect over the LAN behind any kind.
+
+## Hosted relay (`nvf-relay`)
+
+[design: #3795 section 9, option 2; issue #3880. Our own format, not any standard's]
+
+A relay a player runs for friends whose networks cannot reach each other directly. It runs on a
+VPS or a home server with one UDP port open (47961 by default), and never on the project's
+servers. The game is pointed at it with `[Coop] Relay=host:port`.
+
+- Every datagram starts with a 23-byte header:
+  - `NVRL`;
+  - version 1;
+  - an op;
+  - a 16-byte session id;
+  - a side (0 host, 1 guest).
+- The body follows.
+- Ops:
+  - 1 Bind (client to relay): claim or keep this side for the sending address.
+  - 2 Bound (relay to client): the body is the refresh interval in seconds (u16, big-endian, 10).
+  - 3 Refused: one reason byte. 1 means the relay is full. 2 means another address holds the side.
+  - 4 Data: a payload of at most 1400 bytes. The relay forwards it to the other side's address,
+    with the side byte naming where it came from.
+- Data also claims and refreshes a side, so a client that only sends still holds it.
+- The session id is the first 16 bytes of SHA-256 over `"nvf-relay session v1\0"`, the host's
+  Noise public key and the guest's. Both sides already have both keys, so no new message is
+  needed.
+- A side not heard from for 30 s is let go. Only then may another address claim it, for
+  example a guest that changed networks.
+- Each side may send 256 KiB/s (a token bucket), and the relay holds 256 sessions. Both limits
+  can be changed on the command line.
+- A refusal is one byte longer than the request it answers, so the relay does not amplify
+  spoofed traffic.
+- The relay sees only Noise ciphertext. Someone who knows both keys could claim a side first,
+  which blocks the relay for that pair but cannot read or forge its packets.
+
+In the game:
+- The relay's address is a candidate of kind `relay` (`Kind::Relayed`), ranked below all
+  others.
+- Both sides pair with it like any remote address. Datagrams to it are wrapped, and datagrams
+  from it are unwrapped by session before Noise sees them.
+- When a relay pair is the best that has answered, the guest waits 2 s (not 200 ms) for a
+  direct pair before choosing it.

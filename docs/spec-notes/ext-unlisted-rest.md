@@ -284,7 +284,20 @@ commands that touch the menus, the sky or the minimap ran one per launch].
   holds one key. **RefMapArrayGetValue** `name key` gave a one-element list. Its element
   read back as a float with a denormal value (2.1e-310) when 5 was set, so how the value is
   stored is open. NVForever keeps the value as given and lists it.
-- **HasActionRef**: 1 for Doc [hypothesis: 1 for an actor, 0 otherwise].
+- **HasActionRef**: takes 0 arguments (1-argument calls fail to compile) and returns `1`
+  for references with active action/interaction state rather than unconditionally for every
+  actor (`rest5.hasactionref.doc` observed `1` on sitting Doc Mitchell) [observed: Fallout:
+  New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse`
+  (`0x00103DF9`), 10 official base masters, clean-room read-only console probes in
+  `tools/capture/nvse/catalogs/wave4c_extenders.json` (#3679), no DLL or source consulted:
+  `w4c_a03_has_action_ref` (`P=0(00000000)|Doc=0(00000000)|Door=1(00000000)|Cont=0|Acti=0|Furn=0|Stat=0|Misc=0|Dyn0=0(00000000)|Dyn1=0(00000000)`),
+  `w4c_a03c_has_action_ref_doc_real` (`pl=0|doc(h=1,g=00000000,lnk=00000000,par=00000000)|door(h=1,g=00000000,lnk=00000000,par=00000000)` — placed Doc Mitchell `0x00104C0F` sitting in furniture `0x001059B0` and scripted front door `0x00103E61` both return `1` while `Player` returns `0`),
+  `w4c_a03d_has_action_ref_doors_actors` (`spawnNpc=0|doors(tot=2,hasAct=1,hasScr=1)` — freshly spawned `PlaceAtMe` NPC returns `0`, and only the 1 scripted door of 2 doors returns `1`),
+  and `w4c_a03b_has_action_ref_1arg` (`COMPILE_FAIL`)]. NVForever returns `1` when the
+  calling reference has an active `ctx.action_ref` / `Game::action_refs` entry, active
+  `Game::furniture_use`, or a `DOOR` base with an attached script, and `0` otherwise
+  [hypothesis: exact engine condition for when a scripted door or non-door ref acquires or
+  clears action state outside the probed references].
 
 **Constant answers** (each [observed] for the inputs probed; what each changes is not seen):
 

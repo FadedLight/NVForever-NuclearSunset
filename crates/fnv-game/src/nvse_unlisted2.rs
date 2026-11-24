@@ -359,8 +359,25 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let _ = crate::nvse::call(g, ctx, "setcontainersound", None, &[XVal::Ref(container), XVal::Num(which), XVal::Ref(sound)]);
             XVal::Num(0.0)
         }
-        // 1 for an actor [observed: rest5.hasactionref.doc; hypothesis: others 0].
-        "hasactionref" => XVal::Num(f64::from(u8::from(subject.is_some_and(|r| crate::ai::is_actor_base(g.world.forms, crate::functions::base_of(g, r).unwrap_or(FormId(0))))))),
+        // Active action/interaction state on the calling reference (0-arg only): 0 for
+        // Player, freshly spawned standing NPCs, and unscripted non-actor refs; 1 for
+        // refs with an active action/furniture/scripted-door state [observed: Fallout:
+        // New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
+        // `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+        // `w4c_a03_has_action_ref`, `w4c_a03c_has_action_ref_doc_real`,
+        // `w4c_a03d_has_action_ref_doors_actors`, `w4c_a03b_has_action_ref_1arg`;
+        // hypothesis: approximated via active `action_refs` / `ctx.action_ref`,
+        // active `furniture_use`, or a `DOOR` base with an attached script].
+        "hasactionref" => {
+            let has = subject.is_some_and(|r| {
+                (ctx.action_ref.is_some() && ctx.self_ref == Some(r))
+                    || g.action_refs.contains_key(&r)
+                    || g.furniture_use(r).is_some()
+                    || crate::functions::base_of(g, r)
+                        .is_some_and(|b| g.data.sig(b) == Some(*b"DOOR") && g.data.script_of_base(b).is_some())
+            });
+            XVal::Num(f64::from(u8::from(has)))
+        }
         // [observed: rest5.questtargetschanged 1, toggle.hiteffects 1]
         "getquesttargetschanged" | "togglehiteffects" => XVal::Num(1.0),
         "getobjectiveteleportlinks" => XVal::Array(0),

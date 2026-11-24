@@ -1073,10 +1073,12 @@ fn apply(
         } else {
             e.remove::<(bevy::post_process::bloom::Bloom, bevy::camera::Hdr, crate::post::ImageSpaceGlow)>();
         }
+        // HDR output (hdr.rs) keeps the main view in fp16 so its highlights band no more
+        // than the screen's.
         // The volumetric medium's far buffer is composed in the linear HDR picture before
         // tonemapping (medium.rs, volumetric_clouds.rs), so its row keeps the view HDR whatever
         // the glow and the upscaler say [design, #3032 decision 10].
-        if temporal || g.volumetric_clouds {
+        if temporal || g.volumetric_clouds || crate::hdr::on() {
             e.insert(bevy::camera::Hdr);
         }
         // Eye adaptation (eye_adapt.rs) and the bright pass need the HDR view; each has

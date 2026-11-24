@@ -3627,7 +3627,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   dome's depth); FSR draws the sky's band into its reactive mask's opaque reference, so the
   volume is not reactive (that draw reads the same far buffer; the march itself runs once, in
   the medium's trace pass); DLSS gets no mask for it. Only the main world
-  camera draws it (render layer 19, which only that camera has). A sky-only volume: the
+  camera draws it (render layer 21, which only that camera has). A sky-only volume: the
   clouds never pass in front of terrain or anything of the world.
 - **Space.** The main view is HDR (`glow`, on by default, inserts it; the temporal modes force
   it), and the sky's parts are the weather's linear colours times the sky level, blended in

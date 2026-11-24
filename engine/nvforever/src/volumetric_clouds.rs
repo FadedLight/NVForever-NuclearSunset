@@ -100,7 +100,7 @@ mod air;
 
 /// Render layer of the volume: only the main world camera has it (main.rs), so the
 /// reflection and lens cameras never run the march [design].
-pub const VOLUME_LAYER: usize = 19;
+pub const VOLUME_LAYER: usize = 21;
 
 // --- The constants that trade cost for look, in one place [engineering choice: starting
 // values to judge from pictures; none is a fact about the original game]. ---

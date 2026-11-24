@@ -206,7 +206,7 @@ pub const SECTIONS: &[Section] = &[
     // Shadow resolution sizes the flashlight's maps too, so it needs no Sun shadows (no NEEDS
     // line) (#2843).
     section("Graphics", Some("Shadows"), &["sun-shadows", "shadow-filter", "shadow-resolution", "shadow-distance", "fine-shadows", "cloud-shadows", "terrain-shadows", "light-shadows"]),
-    section("Graphics", Some("Lighting and Effects"), &["ambient-occlusion", "volumetric-clouds", "light-shafts", "heat-haze", "desert-haze", "aerial-perspective", "night-sky-detail", "bloom", "grade", "glow", "eye-adaptation", "neon-glow"]),
+    section("Graphics", Some("Lighting and Effects"), &["ambient-occlusion", "volumetric-clouds", "light-shafts", "heat-haze", "desert-haze", "volumetric-light", "volumetric-light-strength", "aerial-perspective", "night-sky-detail", "bloom", "grade", "glow", "eye-adaptation", "neon-glow"]),
     section("Graphics", Some("Water"), &["water-reflections", "water-mirror", "water-effects"]),
     section("Graphics", Some("Detail and Distance"), &["distant-lod", "full-detail", "distant-objects", "grass", "anisotropic", "authored-materials", "authored-reflections", "terrain-height-blend", "terrain-anti-tiling", "terrain-parallax", "mesh-terrain-blend", "smooth-terrain", "object-distance", "actor-distance", "item-distance", "grass-distance", "tree-distance", "distant-lights"]),
     section("Graphics", Some("World and Animation"), &["head-tracking", "foot-ik", "sky-clock"]),
@@ -971,6 +971,7 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("fine-shadows", "sun-shadows", "Needs Sun Shadows."),
     ("eye-adaptation", "glow", "Needs Light Glow (HDR)."),
     ("neon-glow", "glow", "Needs Light Glow (HDR)."),
+    ("volumetric-light-strength", "volumetric-light", "Needs Volumetric Light."),
     ("grass-distance", "grass", "Needs Grass."),
     // #3322: the terrain parallax draws the authored height maps.
     ("terrain-parallax", "authored-materials", "Needs Authored Materials."),
@@ -1030,16 +1031,28 @@ pub const SHOWN_WITH: &[(&str, &str, &[&str])] = &[
 
 /// Rows greyed unless a list row has one of the named choices: (the row, the list row, the
 /// choices by name, why) [design: the menu overhaul], as [`NEEDS`] for a row that needs a
-/// choice rather than a row switched on. The game's page
-/// (`nvf_play::settings::Settings::disabled_status`) and the launcher both go by it.
+/// choice rather than a row switched on. A switch's two choices are named `On` and `Off`
+/// ([`SWITCH_ON`], [`SWITCH_OFF`]), so a row greyed while a switch is **on** is a rule on its
+/// `Off` (Sun shafts while Volumetric light is on: they give way to it, #3032 stage 3). The
+/// game's page (`nvf_play::settings::Settings::disabled_status`) and the launcher both go by it.
 pub const NEEDS_CHOICE: &[(&str, &str, &[&str], &str)] = &[
     ("vats-slowdown", "vats-style", &["Classic"], "Classic V.A.T.S. only."),
+    ("light-shafts", "volumetric-light", &[SWITCH_OFF], "Replaced by Volumetric Light."),
     // The Custom difficulty's own three, greyed under the five levels [design: #3570
     // review, maintainer decision 2026-11-24: greyed, not hidden].
     ("difficulty-player-damage", "difficulty", &["Custom"], "Custom difficulty only."),
     ("difficulty-npc-damage", "difficulty", &["Custom"], "Custom difficulty only."),
     ("difficulty-kill-xp", "difficulty", &["Custom"], "Custom difficulty only."),
 ];
+
+/// A switch's choice names in [`NEEDS_CHOICE`]'s rules.
+pub const SWITCH_ON: &str = "On";
+pub const SWITCH_OFF: &str = "Off";
+
+/// The name of a switch's state for a rule ([`NEEDS_CHOICE`]): [`SWITCH_ON`] or [`SWITCH_OFF`].
+pub fn switch_choice(on: bool) -> &'static str {
+    if on { SWITCH_ON } else { SWITCH_OFF }
+}
 
 /// What a row needs of another row to apply: `parent` on (a switch on, a list past its first
 /// choice) when `choices` is empty, else `parent` on one of `choices` (by name). `why` is

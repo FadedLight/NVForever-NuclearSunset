@@ -60,6 +60,11 @@
 //! - **Volumetric clouds** (`volumetric-clouds`, a prototype, off in every preset): the
 //!   weather's cloud layers drawn as a lit slab of cloud above the world, its cover the one
 //!   Cloud shadows composes (volumetric_clouds.rs, #2991).
+//! - **Volumetric light** (`volumetric-light`, a prototype, off in every preset): the sun's
+//!   light in the air, rays and a glow toward a low sun from a froxel grid
+//!   (medium_air*.rs, #3032 stage 3); its strength is a slider of its own
+//!   (medium_air_demand.rs `AirStrengthSetting`, not part of this resource). Sun shafts
+//!   yield to it while it draws (shafts.rs).
 //! - **Aerial perspective** (`aerial-perspective`, off in every preset): far scenery takes on
 //!   the weather's sky colours with distance, per colour channel and toward the sun, inside the
 //!   weather's own fog (aerial.rs, #2993).
@@ -265,6 +270,9 @@ pub struct Graphics {
     /// Twinkling stars, a moon glow and moonlit clouds (night_sky.rs; off in every preset)
     /// [design, #2995].
     pub night_sky_detail: bool,
+    /// The sun's light in the air (medium_air_demand.rs; a prototype, off in every preset)
+    /// [design, #3032 stage 3].
+    pub volumetric_light: bool,
 }
 
 /// The settings key of the Authored materials row (#2981).
@@ -276,7 +284,7 @@ pub const AUTHORED_REFLECTIONS_KEY: &str = "authored-reflections";
 /// The keys of `--graphics-only`: the settings page's switches and the anti-aliasing,
 /// shadow-filter, full-detail, distant-object and cloud-level choices that are not vanilla's, in the
 /// order of [`Graphics::describe`].
-pub const KEYS: [&str; 31] = [
+pub const KEYS: [&str; 32] = [
     "ambient-occlusion",
     "fine-shadows",
     "bloom",
@@ -305,6 +313,7 @@ pub const KEYS: [&str; 31] = [
     "volumetric-clouds",
     "volumetric-clouds-performance",
     "volumetric-clouds-high",
+    "volumetric-light",
     "aerial-perspective",
     "night-sky-detail",
     "distant-lights",
@@ -388,6 +397,8 @@ impl Graphics {
             aerial_perspective: false,
             // Off in every preset: an addition of our own [design, #2995].
             night_sky_detail: false,
+            // Off in every preset: a prototype of our own [design, #3032 stage 3].
+            volumetric_light: false,
         }
     }
 
@@ -420,6 +431,7 @@ impl Graphics {
             AUTHORED_MATERIALS_KEY => &mut self.authored_materials,
             AUTHORED_REFLECTIONS_KEY => &mut self.authored_reflections,
             "distant-lights" => &mut self.distant_lights,
+            "volumetric-light" => &mut self.volumetric_light,
             _ => return None,
         })
     }
@@ -498,6 +510,7 @@ impl Graphics {
             (self.full_detail != crate::full_detail::FullDetail::Off, self.full_detail.describe()),
             (self.distant_objects != crate::distant_objects::DistantObjects::Off, self.distant_objects.describe()),
             (self.volumetric_clouds, "volumetric clouds"),
+            (self.volumetric_light, "volumetric light"),
             (self.aerial_perspective, "aerial perspective"),
             (self.night_sky_detail, "night sky detail"),
             (self.distant_lights, "distant lights"),
@@ -1012,8 +1025,9 @@ fn apply(
     eye: Res<crate::eye_adapt::EyeCurve>,
     cutouts: Option<ResMut<nvf_assets::nif_material::BlendedCutouts>>,
     map: Option<Res<DirectionalLightShadowMap>>,
-    mut done: Local<Option<(Graphics, Msaa, bool, UpscalerChoice, Vec<Entity>)>>,
+    mut done: Local<Option<(Graphics, Msaa, bool, UpscalerChoice, Vec<Entity>, bool)>>,
     work: Option<ResMut<crate::quality_probe::Work>>,
+    air: Option<Res<crate::medium_air_demand::AirWanted>>,
 ) {
     let cam_count = cams.iter().count();
     if cam_count == 0 {
@@ -1036,17 +1050,20 @@ fn apply(
     });
     let mut entities: Vec<Entity> = cams.iter().map(|c| c.0).chain(suns.iter().map(|s| s.0)).collect();
     entities.sort_unstable();
-    if aa_matches && done.as_ref().is_some_and(|(d, m, supported, effective, previous)| *d == *g && *m == msaa.0 && *supported == fsr_support.0 && *effective == upscaler && *previous == entities) {
+    // The light in the air (medium_air_demand.rs) is composed in the HDR picture too; absent
+    // (tests, or before its plugin) it counts as off.
+    let air = air.is_some_and(|a| a.0);
+    if aa_matches && done.as_ref().is_some_and(|(d, m, supported, effective, previous, was_air)| *d == *g && *m == msaa.0 && *supported == fsr_support.0 && *effective == upscaler && *previous == entities && *was_air == air) {
         return;
     }
     let first = done.is_none();
-    let msaa_changed = done.as_ref().is_some_and(|(previous, saved, _, effective, _)| {
+    let msaa_changed = done.as_ref().is_some_and(|(previous, saved, _, effective, ..)| {
         let previous_effective = if previous.screen_aa == ScreenAa::Off && *effective == UpscalerChoice::Off { *saved } else { Msaa::Off };
         previous_effective != want_msaa || *saved != msaa.0
     });
-    let fsr_changed = done.as_ref().is_none_or(|(_, _, _, effective, _)| effective.fsr() != fsr);
-    let dlss_changed = done.as_ref().is_none_or(|(_, _, _, effective, _)| effective.dlss() != dlss);
-    *done = Some((*g, msaa.0, fsr_support.0, upscaler, entities));
+    let fsr_changed = done.as_ref().is_none_or(|(_, _, _, effective, ..)| effective.fsr() != fsr);
+    let dlss_changed = done.as_ref().is_none_or(|(_, _, _, effective, ..)| effective.dlss() != dlss);
+    *done = Some((*g, msaa.0, fsr_support.0, upscaler, entities, air));
     if let Some(mut work) = work {
         work.graphics += 1;
     }
@@ -1077,8 +1094,9 @@ fn apply(
         // than the screen's.
         // The volumetric medium's far buffer is composed in the linear HDR picture before
         // tonemapping (medium.rs, volumetric_clouds.rs), so its row keeps the view HDR whatever
-        // the glow and the upscaler say [design, #3032 decision 10].
-        if temporal || g.volumetric_clouds || crate::hdr::on() {
+        // the glow and the upscaler say [design, #3032 decision 10]; the light in the air of
+        // stage 3 likewise (rulings-stage3 R2).
+        if temporal || g.volumetric_clouds || crate::hdr::on() || air {
             e.insert(bevy::camera::Hdr);
         }
         // Eye adaptation (eye_adapt.rs) and the bright pass need the HDR view; each has
@@ -1829,6 +1847,65 @@ mod tests {
         *g.switch("night-sky-detail").expect("settings key") = true;
         assert_eq!(g, on);
         assert!(!Graphics::preset(Preset::Enhanced).describe().contains("night sky"));
+    }
+
+    /// The light in the air (#3032 stage 3) is composed in the HDR picture too: its demand
+    /// alone keeps the main view HDR, the cached change detection follows the demand both
+    /// ways, and an absent or false demand changes nothing.
+    #[test]
+    fn light_in_the_air_keeps_the_view_hdr_with_glow_and_upscaler_off() {
+        use crate::medium_air_demand::AirWanted;
+        for selected in [ScreenAa::Off, ScreenAa::Taa] {
+            let (mut app, camera) = aa_app(selected, true);
+            app.world_mut().resource_mut::<Graphics>().glow = false;
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: no demand resource: not HDR");
+            app.insert_resource(AirWanted(false));
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: demand off: not HDR");
+            app.insert_resource(AirWanted(true));
+            app.update();
+            assert!(app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: the demand makes the view HDR");
+            assert!(!app.world().entity(camera).contains::<bevy::post_process::bloom::Bloom>(), "{selected:?}: and nothing else of the glow");
+            app.insert_resource(AirWanted(false));
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: off again: not HDR");
+        }
+    }
+
+    #[test]
+    fn volumetric_light_is_off_in_both_looks_and_has_its_own_key() {
+        assert!(!Graphics::preset(Preset::Vanilla).volumetric_light && !Graphics::preset(Preset::Enhanced).volumetric_light);
+        let on = Graphics::only(&["volumetric-light".into()]).expect("volumetric-light");
+        assert!(on.volumetric_light && !on.volumetric_clouds && !on.cloud_shadows && !on.terrain_shadows, "the light switches no other row on");
+        assert_eq!(on.describe(), "light glow, volumetric light");
+        let mut g = Graphics::preset(Preset::Vanilla);
+        *g.switch("volumetric-light").expect("settings key") = true;
+        assert_eq!(g, on);
+        assert!(!Graphics::preset(Preset::Enhanced).describe().contains("volumetric"));
+        assert!(KEYS.contains(&"volumetric-light"));
+    }
+
+    /// The Volumetric light row keeps the view HDR through the demand (medium_air_demand.rs
+    /// `follow_demand`, the one writer of `AirWanted`) with Light glow off and no upscaler, and
+    /// switching it off takes the HDR view away again.
+    #[test]
+    fn the_volumetric_light_row_keeps_the_view_hdr() {
+        use crate::medium_air_demand::{follow_demand, AirAid, AirWanted};
+        for selected in [ScreenAa::Off, ScreenAa::Taa] {
+            let (mut app, camera) = aa_app(selected, true);
+            app.init_resource::<AirAid>().init_resource::<AirWanted>().add_systems(PreUpdate, follow_demand);
+            app.world_mut().resource_mut::<Graphics>().glow = false;
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: row off: not HDR");
+            app.world_mut().resource_mut::<Graphics>().volumetric_light = true;
+            app.update();
+            assert!(app.world().resource::<AirWanted>().0, "{selected:?}: the row asks for the light");
+            assert!(app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: the row makes the view HDR");
+            app.world_mut().resource_mut::<Graphics>().volumetric_light = false;
+            app.update();
+            assert!(!app.world().entity(camera).contains::<bevy::camera::Hdr>(), "{selected:?}: off again: not HDR");
+        }
     }
 
     // The guard alone: repeated requests and an earlier registration. Both callers

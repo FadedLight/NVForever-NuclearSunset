@@ -1,0 +1,319 @@
+//! The volumetric medium's light in the air (LootJunkieAzza/NVForever#3032, stage 3,
+//! checkpoint 1d): the main world's side of the light. An engineering choice of NVForever's
+//! own for the enhanced look, never a fact about the original game and never used to explain
+//! a difference from it [design].
+//!
+//! Each frame while the light is wanted, in `Last` (after medium_air_grid.rs `follow_air`
+//! in `PostUpdate` and its commands, before the render world extracts), [`follow_light`]
+//! finishes the main camera's `AirCamera`:
+//! - **the tune file** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`, the task's decision 14): looked
+//!   at every 0.5 s of real time (medium_air.rs `poll_due`), each text parsed over the start
+//!   tune (`TuneFollower`), its changes logged; the grid follows its `DEPTH` and `GRID`
+//!   (medium_air_grid.rs `prepare_air` makes the volume again when the grid changes);
+//! - **the sunlit share s** (R11): medium_air.rs `scaled_share` from the `Sun` light's
+//!   displayed colour and `illuminance / (PI U)` and the `GlobalAmbientLight`'s colour and
+//!   `brightness / U`, as sky.rs `update_sky` set them this frame (medium_air.rs module doc,
+//!   "What scaled_share's caller passes");
+//! - **the gate** (R7, medium_air.rs `gate`): outdoors, above water, a sun light, a usable fog
+//!   blended in display values, day, a strength above 0, an effective share above 0. Day is
+//!   the elevation that aimed the light above 0 (medium_air.rs `day_by_aim`): sky.rs
+//!   `update_sky` aims the `Sun` entity from `sun_direction(climate, sun_light_hour())`, and
+//!   `SkyState::sun_elevation_at(sun_light_hour())` is that direction's elevation (both public
+//!   already: nothing added to sky.rs). No comparison with the stepped hour's sun (the second
+//!   review's should-fix: a modded climate with a day of a thousandth of an hour fooled it);
+//!   without a sky state the gate is closed as indoors before the night test. One line per
+//!   change: `volumetric medium: light in the air on: ...` at once (again when a tune change
+//!   alters its figures, medium_air.rs `tune_changed`, and when its bounds moved by more than
+//!   0.05, looked at every 5 s of real time, medium_air.rs `bounds_moved`), `... off: <reason>`
+//!   once the reason held 0.5 s of real time (medium_air.rs `GateLog`: at start the fog shader
+//!   is patched a moment after the first frames).
+//!
+//! - **the start strength** (the user's overall strength slider, 2026-11-20): the aid's value
+//!   when the aid asks for the light, else the settings row's Volumetric light strength
+//!   (medium_air_demand.rs `AirStrengthSetting`, 0 to 200 %); a move of the slider makes new
+//!   start values at once (medium_air.rs `TuneFollower::restart`; a tune file's keys still win).
+//! - Sun shafts yield in the render world, per view, in a frame the light's composite drew
+//!   there (medium_air_compose.rs `AirComposedViews`, shafts.rs `shafts_skip`), not from
+//!   this main-world gate (the third review's new fault 1).
+//!
+//! With the light not wanted nothing runs but the check of the demand, and nothing is logged.
+
+use crate::fly::FlyCam;
+use crate::medium_air::{self, AirGateInput, AirGrid, AirPhase, AirTune, GateLog, NormedPhase, TuneFollower, ViewBounds};
+use crate::medium_air_demand::{AirStrengthSetting, AirWanted};
+use crate::medium_air_grid::AirCamera;
+use bevy::prelude::*;
+use std::f32::consts::PI;
+use std::sync::LazyLock;
+
+/// The start tune (the start aids, as medium_air_grid.rs reads them, and the grid aid), the
+/// strength aid's value when it asks for the light, and the tune file's path, read once.
+struct LightAids {
+    start: AirTune,
+    /// `NVF_PLAY_DEBUG_MEDIUM_LIGHT`'s strength when the aid asks for the light
+    /// (medium_air_demand.rs `wanted_from_aid`): it wins over the settings row's slider.
+    aid_strength: Option<f32>,
+    path: Option<String>,
+}
+
+static AIDS: LazyLock<LightAids> = LazyLock::new(|| {
+    let var = |name: &str| std::env::var(name).ok();
+    let start = AirTune {
+        grid: medium_air::debug_grid(var(medium_air::ENV_GRID).as_deref()),
+        ..AirTune::start(
+            medium_air::debug_strength(var(medium_air::ENV_STRENGTH).as_deref()),
+            medium_air::debug_view(var(medium_air::ENV_VIEW).as_deref()),
+            medium_air::debug_occluders(var(medium_air::ENV_OCCLUDERS).as_deref()),
+            medium_air::debug_depth(var(medium_air::ENV_DEPTH).as_deref()),
+        )
+    };
+    let path = var(medium_air::ENV_TUNE).filter(|p| !p.trim().is_empty());
+    let aid = var(medium_air::ENV_STRENGTH);
+    let aid_strength = crate::medium_air_demand::wanted_from_aid(aid.as_deref()).then(|| medium_air::debug_strength(aid.as_deref()));
+    LightAids { start, aid_strength, path }
+});
+
+/// The start strength: the aid's value when the aid asks for the light, else the settings
+/// row's slider [design].
+pub fn start_strength(aid: Option<f32>, row: f32) -> f32 {
+    aid.unwrap_or(row)
+}
+
+pub struct AirLightPlugin;
+
+impl Plugin for AirLightPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Last, follow_light);
+    }
+}
+
+/// One activation's state (dropped when the light is no longer wanted, so the next one
+/// logs again).
+#[derive(Default)]
+struct LightState {
+    active: bool,
+    follower: Option<TuneFollower>,
+    /// When the tune file was last looked at (real seconds).
+    looked: Option<f64>,
+    /// The gate's log (an off reason only once it held 0.5 s).
+    log: GateLog,
+    /// What the last "on" line was written for (the line again when a tune change alters its
+    /// figures or its bounds moved); none while the light is off.
+    told: Option<Told>,
+    /// The phase last solved for the log ([`solved`]).
+    phase: Option<NormedPhase>,
+}
+
+/// The solved phase for `phase`: the cached one while its four inputs are the same, else
+/// solved again (medium_air.rs `AirPhase::normed`, 8,192 steps and a bisection) and kept
+/// [design: the third review's should-fix].
+fn solved(cache: &mut Option<NormedPhase>, phase: AirPhase) -> NormedPhase {
+    match *cache {
+        Some(n) if n.phase == phase => n,
+        _ => *cache.insert(phase.normed()),
+    }
+}
+
+/// The last "on" line's tune and bounds, and when its bounds were last looked at (real
+/// seconds).
+#[derive(Clone, Copy)]
+struct Told {
+    tune: AirTune,
+    bounds: ViewBounds,
+    looked: f64,
+}
+
+/// Whether the bounds are due a look: [`medium_air::BOUND_RELOG_SECONDS`] of real time since
+/// the last (a clock that went back counts as due) [design].
+pub fn bounds_due(looked: f64, now: f64) -> bool {
+    now < looked || now - looked >= medium_air::BOUND_RELOG_SECONDS
+}
+
+/// The scaled share s from the lights as sky.rs set them this frame (R11; medium_air.rs module
+/// doc for the names): 0 without a sun light.
+fn light_share(sun: Option<&DirectionalLight>, ambient: Option<&GlobalAmbientLight>) -> f32 {
+    let Some(sun) = sun else { return 0.0 };
+    let unit = crate::sky::light_unit();
+    let rgb = |c: Color| {
+        let l = c.to_linear();
+        Vec3::new(l.red, l.green, l.blue)
+    };
+    let (ambient_luma, ambient_scale) = ambient.map_or((0.0, 0.0), |a| (medium_air::display_luma(rgb(a.color)), a.brightness / unit));
+    medium_air::scaled_share(medium_air::display_luma(rgb(sun.color)), sun.illuminance / (PI * unit), ambient_luma, ambient_scale)
+}
+
+/// Each frame: nothing while the light is not wanted (the state forgotten once); else the
+/// tune file, the share, the gate and the grid onto the main camera's `AirCamera`.
+#[allow(clippy::type_complexity)]
+fn follow_light(
+    (wanted, strength_row): (Option<Res<AirWanted>>, Option<Res<AirStrengthSetting>>),
+    time: Res<Time<Real>>,
+    (sky, submerged, ambient): (Option<Res<crate::sky::SkyState>>, Option<Res<crate::underwater::CameraSubmerged>>, Option<Res<GlobalAmbientLight>>),
+    suns: Query<&DirectionalLight, With<crate::sky::Sun>>,
+    mut cams: Query<(&mut AirCamera, &Projection), With<FlyCam>>,
+    mut state: Local<LightState>,
+) {
+    if !wanted.is_some_and(|w| w.0) {
+        if state.active {
+            *state = LightState::default();
+        }
+        return;
+    }
+    let Some((mut cam, projection)) = cams.iter_mut().next() else { return };
+    let state = &mut *state;
+    state.active = true;
+    let aids = &*AIDS;
+    // The start values with the strength of the aid or of the row's slider, made again when
+    // the slider moves (the tune file, when given, still parses over them).
+    let row = strength_row.map_or(crate::medium_air_demand::STRENGTH_DEFAULT, |s| s.0);
+    let start = aids.start.with_strength(start_strength(aids.aid_strength, row));
+    let follower = state.follower.get_or_insert_with(|| TuneFollower::new(start));
+    for line in follower.restart(start) {
+        info!("{line}");
+    }
+    // The tune file, at most every TUNE_POLL_SECONDS of real time.
+    let now = time.elapsed_secs_f64();
+    if let Some(path) = aids.path.as_deref().filter(|_| medium_air::poll_due(state.looked, now)) {
+        let read = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"));
+        for line in follower.feed(read.as_deref().map_err(String::as_str)) {
+            info!("{line}");
+        }
+        state.looked = Some(now);
+    }
+    let tune = follower.tune();
+    let aspect = match projection {
+        Projection::Perspective(p) => p.aspect_ratio,
+        _ => 16.0 / 9.0,
+    };
+    let grid = AirGrid::for_view(aspect, tune.grid, tune.depth);
+    // The view's longest ray for the logged bound (the projection's scales, as the grid pass
+    // takes them from the extracted view).
+    let clip = projection.get_clip_from_view();
+    let corner = medium_air::corner_ray_len(clip.x_axis.x, clip.y_axis.y);
+    let sun = suns.iter().next();
+    let s = light_share(sun, ambient.as_deref());
+    // Day by the elevation that aimed the light (the module doc).
+    let day = sky.as_ref().is_some_and(|sky| medium_air::day_by_aim(sky.sun_elevation_at(sky.sun_light_hour())));
+    let input = AirGateInput {
+        interior: sky.as_ref().is_none_or(|s| s.interior.is_some()),
+        submerged: submerged.is_some_and(|s| s.0),
+        sun: sun.is_some(),
+        fog: cam.fog,
+        display_blend: cam.display_blend,
+        day,
+        strength: tune.strength,
+        share: medium_air::effective_share(s, tune.share),
+    };
+    let answer = medium_air::gate(&input);
+    // The line and the bounds it states, from the phase solved once per change of its inputs
+    // (`solved`: the third review's should-fix on the 8,192-step solve).
+    let fog = cam.fog;
+    let bounds_of = |phase: &NormedPhase| medium_air::on_bounds(&grid, phase, s, &tune, fog, corner);
+    let tell = |phase: &NormedPhase, bounds: ViewBounds| {
+        info!("{}", medium_air::on_line_with(&grid, phase, s, &tune, &bounds));
+        Some(Told { tune, bounds, looked: now })
+    };
+    match state.log.step(answer, now) {
+        Some(Ok(())) => {
+            let phase = solved(&mut state.phase, tune.phase());
+            state.told = tell(&phase, bounds_of(&phase));
+        }
+        Some(Err(off)) => {
+            info!("volumetric medium: light in the air off: {}", off.reason());
+            state.told = None;
+        }
+        // The light still on: the line again when the tune changed what it states, or when its
+        // bounds moved (a weather fade, the hour, the view), looked at every 5 s at most.
+        None if answer.is_ok() => {
+            if let Some(told) = state.told {
+                if medium_air::tune_changed(&told.tune, &tune) {
+                    let phase = solved(&mut state.phase, tune.phase());
+                    state.told = tell(&phase, bounds_of(&phase));
+                } else if bounds_due(told.looked, now) {
+                    let phase = solved(&mut state.phase, tune.phase());
+                    let bounds = bounds_of(&phase);
+                    state.told = if medium_air::bounds_moved(&told.bounds, &bounds) { tell(&phase, bounds) } else { Some(Told { looked: now, ..told }) };
+                }
+            }
+        }
+        None => {}
+    }
+    let next = AirCamera { grid, tune, share: s, draws: answer.is_ok(), ..*cam };
+    if *cam != next {
+        *cam = next;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The phase is solved once per change of its four inputs and reused while they stay.
+    #[test]
+    fn the_phase_is_solved_once_per_change() {
+        let mut cache = None;
+        let p = AirTune::default().phase();
+        let first = solved(&mut cache, p);
+        assert_eq!(first, p.normed());
+        // A planted value proves the second call reads the cache instead of solving.
+        let planted = NormedPhase { norm: 123.0, ..first };
+        cache = Some(planted);
+        assert_eq!(solved(&mut cache, p), planted, "same inputs: the cached solve");
+        let other = AirPhase { cap: 3.0, ..p };
+        assert_eq!(solved(&mut cache, other), other.normed(), "a changed input: solved again");
+        assert_eq!(cache.map(|n| n.phase), Some(other));
+    }
+
+    /// The bounds are looked at every 5 s of real time (a clock that went back: at once).
+    #[test]
+    fn the_bounds_are_looked_at_every_five_seconds() {
+        assert!(!bounds_due(10.0, 14.9));
+        assert!(bounds_due(10.0, 15.0));
+        assert!(bounds_due(10.0, 3.0));
+    }
+
+    /// The night gate's clock (the second review's should-fix): the reviewer's degenerate
+    /// climate, sunrise begin equal to sunset end (a day of a thousandth of an hour, as
+    /// fnv-world's `sun_direction` allows), the sky stepped at 6:00 and the light aimed at
+    /// 6:0009, 90 % through that day: the aiming elevation is above 0 (sin 0.9 pi > 0), so it
+    /// is day, while the old comparison with the stepped sun (theta 0, due east, against theta
+    /// 0.9 pi: a negative dot) read night. A normal climate: day at 13:00, night at 23:00.
+    #[test]
+    fn day_follows_the_lights_own_clock_in_a_degenerate_climate() {
+        use crate::sky::SkyState;
+        let aimed_day = |sky: &SkyState| medium_air::day_by_aim(sky.sun_elevation_at(sky.sun_light_hour()));
+        let mut sky = SkyState::default();
+        sky.climate.sunrise = (6.0, 6.5);
+        sky.climate.sunset = (5.5, 6.0);
+        sky.hour = 6.0;
+        sky.follow_game_clock(6.0009, 0.0);
+        assert_eq!((sky.hour, sky.sun_light_hour()), (6.0, 6.0009), "stepped at 6:00, aimed at 6:0009");
+        assert!(aimed_day(&sky), "the light is aimed at a sun above the horizon");
+        // The old comparison: the aimed direction against the stepped hour's.
+        let stepped = sky.sun_dir_game();
+        let mut aimed_sky = SkyState::default();
+        aimed_sky.climate = sky.climate.clone();
+        aimed_sky.hour = 6.0009;
+        let aimed = aimed_sky.sun_dir_game();
+        assert!(aimed[2] > 0.0);
+        let dot: f32 = (0..3).map(|i| aimed[i] * stepped[i]).sum();
+        assert!(dot < 0.0, "the old comparison would have read night: {dot}");
+        let mut normal = SkyState::default();
+        normal.climate.sunrise = (6.0, 7.0);
+        normal.climate.sunset = (18.0, 19.0);
+        normal.hour = 13.0;
+        assert!(aimed_day(&normal));
+        normal.hour = 23.0;
+        assert!(!aimed_day(&normal));
+    }
+
+    /// The start strength is the aid's value when the aid asks for the light, else the row's.
+    #[test]
+    fn the_aid_wins_over_the_slider_for_the_start_strength() {
+        assert_eq!(start_strength(None, 1.5), 1.5);
+        assert_eq!(start_strength(Some(0.5), 1.5), 0.5);
+        assert_eq!(start_strength(Some(2.0), 0.0), 2.0);
+        // Through the tune: held to 0..=2.
+        assert_eq!(AirTune::default().with_strength(start_strength(None, 1.5)).strength, 1.5);
+    }
+}

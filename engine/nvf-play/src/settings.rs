@@ -516,10 +516,18 @@ impl Settings {
             return f(world);
         }
         // A row whose parent is off or not on a choice it needs (the shared tables
-        // `settings_layout::NEEDS` and `NEEDS_CHOICE`, which the launcher follows too).
+        // `settings_layout::NEEDS` and `NEEDS_CHOICE`, which the launcher follows too); a
+        // switch parent's choices are On and Off (`settings_layout::switch_choice`).
         crate::settings_layout::needs(key).into_iter().find_map(|r| {
             let p = self.index(r.parent)?;
-            let holds = if r.choices.is_empty() { self.value(world, p) >= 0.5 } else { self.choices(p).is_some_and(|c| r.choices.contains(&(c.chosen)(world).as_str())) };
+            let holds = if r.choices.is_empty() {
+                self.value(world, p) >= 0.5
+            } else {
+                match self.choices(p) {
+                    Some(c) => r.choices.contains(&(c.chosen)(world).as_str()),
+                    None => r.choices.contains(&crate::settings_layout::switch_choice(self.value(world, p) >= 0.5)),
+                }
+            };
             (!holds).then_some(r.why)
         })
     }

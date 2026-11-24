@@ -36158,3 +36158,267 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error" },
 ]
 note = "The same start, spot search and poses as terrain-parallax-ground-pack (round 2, 2026-11-22), not yet checked by a run. The shots are saved as terrain-parallax-ground-pack-off-shots/terrain_parallax_ab_<seconds>s_<a|b|c>.png."
+
+[[scenario]]
+name = "volumetric-light"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs, medium_air_grid.wesl, medium_air_filter.wesl and medium_air_compose.wesl, and the narrow edits in graphics.rs (the view kept HDR), terrain_shadows.rs (the map's producer demand) and sun_visibility.rs (the outdoor sun's marker): with the debug aid NVF_PLAY_DEBUG_MEDIUM_LIGHT=1 at Goodsprings at 17:30 under NVWastelandClear, 4x MSAA, sun shadows and the Terrain shadows and Cloud shadows rows on, the light is wanted, its gate opens, the volume is made with the filter's second volume, the grid, filter and composite pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite (multisampled depth) draw, without a 'not drawn' reason or a shader, pipeline or rendering error. The look and the cost are checked in pictures and GPU spans by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+run_seconds = 30
+expect = [
+  { re = 'graphics: light glow, cloud shadows, terrain shadows$', label = "the two rows the light reads are on and nothing else of the enhanced look" },
+  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light (medium_air_demand.rs)" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors (medium_air_light.rs) and the on line states the grid and the bounds" },
+  { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made, with the filter's second volume (FILTER on by default)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles (medium_air_grid.wesl)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_filter_pipeline', label = "the filter pass compiles (medium_air_filter.wesl)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_compose_pipeline', label = "the composite compiles (medium_air_compose.wesl, multisampled depth)" },
+  { text = "volumetric medium: light in the air: terrain map in use (", label = "the terrain map is produced for the light and valid for the current sun" },
+  { text = "volumetric medium: light in the air: cloud shadow in use (", label = "the Cloud shadows image is published and read as K" },
+  { text = "volumetric medium: light in the air: cloud shadow source the weather's layers (", label = "with the Volumetric clouds row off K stays the image's (the surfaces' source, sun_visibility.rs)" },
+  { text = "volumetric medium: light in the air: grid pass drawn", label = "the grid pass drew" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth yes)", label = "the light was composed, on the 4x multisampled depth" },
+]
+order = [[
+  { text = "volumetric medium: light in the air wanted", label = "the demand at the start" },
+  { re = 'volumetric medium: light in the air on: ', label = "the gate opens" },
+  { text = "volumetric medium: light in the air: composite drawn (", label = "before the composite draws (it runs only through the open gate)" },
+]]
+forbid = [
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn (projection, fog, adapter limit, failed pipeline, missing bindings)" },
+  { text = "pipeline failed", label = "the grid, filter or composite pipeline failed" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light" },
+  { text = "failed to process shader", label = "a shader of the light that does not build" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the light on" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-solid-cores"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (Solid cores of blended shapes), engine/nvforever/src/solid_cores.rs, engine/nvf-assets/src/nif_spawn.rs (solid_core_rules, solid_core) and texture.rs (alpha_solidity): the light in the air by its row, by the Goodsprings water tank (reference 00106B5E at -68245,591,8183 [documented: FalloutNV.esm REFR DATA], about 1,540 units off at heading 176; nv_watertank.nif, NiAlphaProperty flags 4333: blend on, no test) at 07:00 under NVWastelandHazy: the loaded cells' blended shapes with solid texels get their core draws, so they are in the depth the composite reads, and the light is composed, without a shader, pipeline or rendering error. With the light off there is none: volumetric-light-off. Smoke cannot read the depth at a pixel: that the tank is solid in it is checked by the main session in pictures of the light alone (NVF_PLAY_DEBUG_SOLID_CORES=off for the pair)"
+areas = ["renderer", "graphics", "models"]
+paths = ["engine/nvforever/src/solid_cores.rs", "engine/nvforever/src/medium_air_compose*", "engine/nvforever/src/medium_air_demand.rs", "engine/nvf-assets/src/nif_spawn.rs", "engine/nvf-assets/src/nif_material*", "engine/nvf-assets/src/nif_prepass.wesl"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_SOLID_CORES = "ref:00106B5E" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light"]
+run_seconds = 45
+expect = [
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors" },
+  { re = 'solid cores: [1-9]\d* \(draws of [1-9]\d* materials', label = "blended shapes with solid texels have their core draws (how many is not fixed)" },
+  { re = 'solid cores: reference 00106B5E: [1-9]\d* cores \([1-9]\d* of them in view\)', label = "the tank itself has cores, and the view holds them" },
+  { text = "volumetric medium: light in the air: composite drawn (", label = "the light was composed over them" },
+]
+forbid = [
+  { text = "solid cores: off", label = "the debug aid switched the cores off" },
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn" },
+  { re = 'pipeline \d+ failed after \d+ ms', label = "a pipeline failed with the cores" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the cores" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the cores" },
+  { text = "failed to process shader", label = "a shader that does not build with the cores" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the cores" },
+  { text = "panicked", label = "a panic with the cores" },
+]
+
+[[scenario]]
+name = "volumetric-light-solid-cores-blend"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (Solid cores of blended shapes), engine/nvforever/src/solid_cores.rs (drawn_source): volumetric-light-solid-cores with the Mesh terrain blend row on, which draws the tank (a blended STAT) with a clone of its material: the tank has its cores all the same [observed: player test of 2026-11-24, where the row took them away]. Smoke cannot read the depth at a pixel"
+areas = ["renderer", "graphics", "models"]
+paths = ["engine/nvforever/src/solid_cores.rs", "engine/nvforever/src/mesh_terrain_blend.rs", "engine/nvf-assets/src/nif_surface_blend.rs", "engine/nvforever/src/medium_air_compose*", "engine/nvforever/src/medium_air_demand.rs", "engine/nvf-assets/src/nif_spawn.rs", "engine/nvf-assets/src/nif_material*", "engine/nvf-assets/src/nif_prepass.wesl"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_SOLID_CORES = "ref:00106B5E" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light,mesh-terrain-blend"]
+run_seconds = 45
+expect = [
+  { text = "mesh terrain blend: start band=", label = "the Mesh terrain blend row is on" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light (terrain blend on)" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors (terrain blend on)" },
+  { re = 'solid cores: [1-9]\d* \(draws of [1-9]\d* materials', label = "blended shapes with solid texels have their core draws (how many is not fixed) (terrain blend on)" },
+  { re = 'solid cores: reference 00106B5E: [1-9]\d* cores in view under a terrain blend clone', label = "the tank itself has cores, and the view holds them (terrain blend on)" },
+  { text = "volumetric medium: light in the air: composite drawn (", label = "the light was composed over them (terrain blend on)" },
+]
+forbid = [
+  { text = "solid cores: off", label = "the debug aid switched the cores off (terrain blend on)" },
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn (terrain blend on)" },
+  { re = 'pipeline \d+ failed after \d+ ms', label = "a pipeline failed with the cores (terrain blend on)" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the cores (terrain blend on)" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the cores (terrain blend on)" },
+  { text = "failed to process shader", label = "a shader that does not build with the cores (terrain blend on)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the cores (terrain blend on)" },
+  { text = "panicked", label = "a panic with the cores (terrain blend on)" },
+]
+
+[[scenario]]
+name = "volumetric-light-taa"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs and its shaders: the volumetric-light run under native TAA at a fixed 1280x720, so the depth is single-sampled and the composite's single-sampled variant is the one asked for: the light is wanted, its gate opens, the pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/taa.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,taa"]
+run_seconds = 30
+expect = [
+  { re = 'graphics: light glow, temporal anti-aliasing, cloud shadows, terrain shadows$', label = "TAA is the anti-aliasing in force (not the multisampling)" },
+  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light under TAA" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors under TAA" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles under TAA" },
+  { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made with the filter's second volume under TAA" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_filter_pipeline', label = "the filter pass compiles under TAA" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_compose_pipeline', label = "the composite's single-sampled variant compiles" },
+  { text = "volumetric medium: light in the air: terrain map in use (", label = "the terrain map is in use under TAA" },
+  { text = "volumetric medium: light in the air: cloud shadow in use (", label = "the cloud shadow is in use under TAA" },
+  { text = "volumetric medium: light in the air: grid pass drawn", label = "the grid pass drew under TAA" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth no)", label = "the light was composed on single-sampled depth under TAA" },
+]
+forbid = [
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn under TAA" },
+  { text = "pipeline failed", label = "the grid, filter or composite pipeline failed under TAA" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed under TAA" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light under TAA" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light under TAA" },
+  { text = "failed to process shader", label = "a shader of the light that does not build under TAA" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under TAA" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-fsr"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs and its shaders: the volumetric-light run under FSR Quality at a fixed 1280x720 output (render size 853x480), so the composite works on the reduced main pass (its viewport from MainPassResolutionOverride) with single-sampled depth before the upscaler: the light is wanted, its gate opens, the pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error. DLSS needs files a player supplies: no scenario"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/fsr.rs", "engine/nvforever/src/upscaler/**"]
+env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--fsr", "quality", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+run_seconds = 30
+expect = [
+  "FSR dispatch active: 3.1.4, 853x480 -> 1280x720",
+  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light under FSR" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors under FSR" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles under FSR" },
+  { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made with the filter's second volume under FSR" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_filter_pipeline', label = "the filter pass compiles under FSR" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_compose_pipeline', label = "the composite compiles" },
+  { text = "volumetric medium: light in the air: terrain map in use (", label = "the terrain map is in use under FSR" },
+  { text = "volumetric medium: light in the air: cloud shadow in use (", label = "the cloud shadow is in use under FSR" },
+  { text = "volumetric medium: light in the air: grid pass drawn", label = "the grid pass drew under FSR" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth no)", label = "the light was composed at FSR's render size before the upscaler" },
+]
+forbid = [
+  "FSR dispatch failed",
+  "FSR 3.1 unavailable",
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn under FSR" },
+  { text = "pipeline failed", label = "the grid, filter or composite pipeline failed under FSR" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed under FSR" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light under FSR" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light under FSR" },
+  { text = "failed to process shader", label = "a shader of the light that does not build under FSR" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under FSR" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-night"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air.rs (gate, day_by_aim) and medium_air_light.rs (day from SkyState::sun_elevation_at(sun_light_hour())): the volumetric-light run at 01:00, where the Sun entity's light is the weather's night light from the opposite direction: the light is wanted, the gate closes with the night reason by the clock that aims the light, and the composite never draws, without a 'not drawn' reason or a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "1", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+run_seconds = 20
+expect = [
+  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light" },
+  { text = "volumetric medium: light in the air off: night (the direct light is the night light)", label = "the gate closes at night with its reason (held 0.5 s before it is logged)" },
+]
+forbid = [
+  { text = "volumetric medium: light in the air: composite drawn", label = "the light composed at night (the gate must keep the composite off)" },
+  { text = "volumetric medium: light in the air: grid pass drawn", label = "the grid (and so the filter, which runs only after it) dispatched at night: medium_air_grid.rs grid_dispatched keeps both off while the gate is closed (the filter pass logs no line of its own)" },
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the grid could not be drawn at night" },
+  { text = "pipeline failed", label = "the grid or filter pipeline failed at night" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed at night" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light at night" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light at night" },
+  { text = "failed to process shader", label = "a shader of the light that does not build" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-off"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air: off means off), engine/nvforever/src/medium_air_demand.rs, medium_air_grid.rs and medium_air_light.rs: the volumetric-light run without the debug aid (the light off, as by default): no line of the light is logged and none of its pipelines is asked for, while the Terrain shadows and Cloud shadows rows it shares the frame with stay on, without a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/solid_cores.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+run_seconds = 20
+expect = [
+  { re = 'graphics: light glow, cloud shadows, terrain shadows$', label = "the rows are on; the light is not a row of the graphics line" },
+  { text = "test aid NVF_PLAY_TEST_PIPELINE_LOG: each pipeline logged", label = "the pipeline log is on, so an asked pipeline of the light would show" },
+]
+forbid = [
+  { text = "solid cores:", label = "off means off: no solid core is made, and no line of them (solid_cores.rs)" },
+  { text = "light in the air", label = "off means off: no line of the light at all" },
+  { re = 'pipeline \d+ asked: medium_air_', label = "off means off: no pipeline of the light is asked for" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error" },
+  { text = "Caught rendering error", label = "a rendering (validation) error" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-clouds"
+source = "[design, #3032] docs/design/volumetric-medium.md (The near grid and the light in the air, The visibility), engine/nvforever/src/medium_air_grid.rs (prepare_air_volume, air_cloud_source), medium_air_grid.wesl (AIR_LIGHT_VOLUME) and sun_visibility.rs (CloudVolumeFrame): the light in the air with the Volumetric clouds and Cloud shadows rows on, at Goodsprings at noon under NVBlackMountainWeather: the surfaces take their cloud shadows from the clouds' light volume and the air takes the same source, its light-volume grid and mean pipelines compile, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error. The look is checked in pictures by hand; run it with --slots 1 (three games compiling the march at once outrun the run)"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
+run_seconds = 40
+expect = [
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the light's gate opens" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_volume_pipeline', label = "the grid's light-volume variant compiles (AIR_LIGHT_VOLUME, the shared reader linked)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_cloud_mean_pipeline', label = "the mean pass compiles" },
+  { re = 'cloud shadows: source the light volume \(', label = "the surfaces read the light volume (sun_visibility.rs)" },
+  { text = "volumetric medium: light in the air: cloud shadow source the light volume (", label = "the air reads the same light volume" },
+  { text = "volumetric medium: light in the air: grid drawn from the clouds' light volume (its mean transmittance copied into the reference)", label = "the light-volume variant itself was dispatched, after the mean pass and its copy (not the flat grid)" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, ", label = "the light was composed" },
+]
+forbid = [
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn" },
+  { text = "a pipeline of the light volume failed", label = "the light volume's variant failed and the air fell back" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light volume in the air" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light volume in the air" },
+  { text = "failed to process shader", label = "a shader of the light that does not build" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good" },
+  { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "volumetric-light-row"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air_demand.rs (follow_demand: AirWanted = row or aid), graphics.rs (the volumetric-light key), terrain_shadows.rs (the producer for the air alone), shafts.rs (the yield): the public switch, --graphics-only volumetric-light with light-shafts, the Terrain shadows and Cloud shadows rows off and no debug aid, at Goodsprings at 17:30 under NVWastelandClear: the row asks for the light, its gate opens, the terrain map is produced by the air's own demand and is in use while the surfaces' terrain variant stays off, no cloud shadow is published, the grid pass and the composite draw, and the Sun shafts yield, without a 'not drawn' reason or a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather", "settings"]
+paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light,light-shafts"]
+run_seconds = 30
+expect = [
+  { re = 'graphics: .*sun shafts.*volumetric light', label = "the row and the Sun shafts are on (the order of the graphics line as graphics.rs describe writes it)" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light (follow_demand)" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors with the row" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_air_filter_pipeline', label = "the filter pass compiles with the row" },
+  { text = "volumetric medium: light in the air: terrain map in use (", label = "the terrain map is produced for the air alone (the Terrain shadows row off) and is in use" },
+  { text = "volumetric medium: light in the air: cloud shadow not in use (nothing published", label = "the Cloud shadows row off: no cloud image, K is 1" },
+  { text = "volumetric medium: light in the air: grid pass drawn", label = "the grid pass drew with the row" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth yes)", label = "the light was composed with the row" },
+  # The yield's line as shafts.rs yield_step prints it at f532a86de, from the render side: the
+  # shafts' pass skips a view whose air composite drew in that frame (shafts_skip).
+  { text = "sun shafts: yielding to the light in the air", label = "the Sun shafts' pass yields on the view where the light's composite drew" },
+]
+forbid = [
+  { text = "light in the air wanted (debug aid", label = "the debug aid was set: this scenario is the row's alone" },
+  { re = 'sun visibility: cloud \w+ terrain on', label = "the air switched the surfaces' terrain variant on (the producer for the air must not shade surfaces)" },
+  { text = "sun visibility: cloud on", label = "the surfaces' cloud variant on with the Cloud shadows row off" },
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn with the row" },
+  { text = "pipeline failed", label = "the grid, filter or composite pipeline failed with the row" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_air_', label = "a pipeline of the light failed with the row" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the row" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the row" },
+  { text = "failed to process shader", label = "a shader of the light that does not build with the row" },
+  { text = "panicked", label = "a panic" },
+]

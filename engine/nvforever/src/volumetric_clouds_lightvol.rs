@@ -798,7 +798,7 @@ fn lv_start(i: usize, set: usize, u: &CloudVolumeUniform, (cam, field): (Vec3, D
 // ---- Stage 2i M2: the shared reader of the light volume (light_volume_reader.wesl) ----
 //
 // [design] One reader of the completed fronts for every user outside
-// the trace (the ground cloud shadows now, reflections later): the render
+// the trace (the ground cloud shadows and the light in the air now, reflections later): the render
 // world's `gpu::LightVolumeReader` (the fronts' views and windows, made by
 // `gpu::publish_light_volume_reader` each frame the light volume ran), the shader struct
 // [`LightVolumeWindow`] a user packs from it, and the WESL module `nvforever::light_volume_reader`

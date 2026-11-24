@@ -3997,7 +3997,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   its layer zero at the slab floor, the shadows' plane bent with the horizon.
   - *The shared reader* (`volumetric_clouds_lightvol.rs` `gpu::LightVolumeReader`, the WESL module
     `nvforever::light_volume_reader`, whose header is the contract; CPU mirror `lvr_optical_depth`):
-    one reader for every user outside the trace (the shadows now;
+    one reader for every user outside the trace (the shadows and the light in the air now;
     reflections later). Per level it holds the front a reader may sample this frame, its window
     measured as the trace measures its front's (the camera's position in nodes from the front's
     corner under this frame's drift), the floor, the bend and the guard. The front is one whose
@@ -4078,6 +4078,41 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the projection, the hand-over, the fallback, the module's text and validity) and
     `sun_visibility.rs` (`cloud_volume_off_is_todays_cloud`, `cloud_volume_hands_over_to_the_weather`,
     `with_the_volumetric_clouds_off_the_cloud_shadows_are_the_weathers_alone`, the variants linked with the reader).
+- **#3032 stage 3: the light in the air** (sunlight seen in the air: shafts where it is lit, shade
+  behind ridges, buildings and clouds; the whole account is docs/design/volumetric-medium.md, "The
+  near grid and the light in the air"). An engineering choice for the enhanced look, not a fact
+  about the original game, never a parity item; off by default and in every preset, with or
+  without this section's row. Switched by the row "Volumetric light (experimental)"
+  (`volumetric-light`) with its strength slider (`volumetric-light-strength`, 0 to 200 %, one
+  overall scale of the applied correction), or the debug aid `NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`;
+  the screen-space Sun shafts skip their pass on a view in any frame in which the light's
+  composite drew there (decided in the render world), and are greyed on the page. Code: `medium_air.rs`,
+  `medium_air_demand.rs`, `medium_air_light.rs`, `medium_air_grid.rs` and `.wesl`,
+  `medium_air_filter.wesl`, `medium_air_compose.rs` and `.wesl`.
+  - *Technique*: the talk's near representation [documented: Bauer 2019, slides 42 and 47; Wronski
+    2014]: a froxel grid of 160 x 88 x 64 at 16:9 to 48,000 units of view depth (exponential slices
+    from a first of 50 units), marched front to back per column (on discrete NVIDIA cards in four
+    chunks of slices at once, their sums joined) by a compute pass with its own bind group after the main pass, four dithered
+    visibility samples a froxel (`V = K x min(C, T)`: the sun's cascades as Bevy picks them, the terrain map read as surfaces read it, the clouds' shadow
+    from the surfaces' own source: the volumetric clouds' light volume, else the Cloud shadows
+    image), filtered 3 x 3 within each slice, then composed by a fullscreen pass before the early
+    post-processing (so before FSR, DLSS, bloom, eye adaptation, tonemapping and TAA). The medium
+    is the weather's own fog: each froxel stores the fog share's steps and their visibility-weighted
+    sum, and the light is a re-shading of the fog's own light in the fog's display-value blend, with
+    the fog colour as the budget near and the pixel's own colour on the sky (slide 62), shadow never
+    taking more than the share the fog gave, every result held inside the HDR target's range.
+  - *What follows the weather*: the fog's share curve and colour from the camera's fog each frame,
+    the sunlit share from the sun and ambient lights as sky.rs sets them, the clouds' mean shadow
+    as the reference the rays are measured against; a fog the light cannot read, a fog not blended
+    in display values, night, interiors and under water are shown the plain way. The look's
+    constants (ray contrast, lift, shade limit, phase floor, sky weights) are artistic choices made
+    from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`).
+  - *Cost so far*: the passes' own spans (absolute, not compared with a frame without the light): grid 0.21
+    to 0.31 ms and composite 0.14 to 0.15 ms of GPU time at 2560x1440 with four samples a froxel, before the
+    filter pass [observed: the main session's run, 2026-11-20]; 6.9 MiB a volume, two with the filter. Not
+    done: a temporal filter, the cost of the light volume's reads, the moon, local lights, FSR's reactive
+    mask and the jitter offset, a quiet-window frame-time run. Smoke: `volumetric-light`, `-taa`, `-fsr`,
+    `-night`, `-off`, `-row`, `-clouds`.
 - **What follows the weather** (from `SkyState` and the cover every frame, through weather
   fades: no weather names, no per-weather result kept): the amount (so the threshold, the types and the
   share of sky move smoothly through a fade), the drift (the layers' ONAM speeds along the wind, as the

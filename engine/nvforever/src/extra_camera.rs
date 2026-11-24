@@ -681,6 +681,41 @@ mod tests {
         (app, anchor, lens, orig_mat)
     }
 
+    /// Two shapes of a reference drawn flat below its cell, the first with a solid core
+    /// (solid_cores.rs, a loose entity): switching the light in the air leaves the shapes'
+    /// components and children, the reference's root and the node lookups as they were.
+    #[test]
+    fn a_solid_core_of_one_flat_shape_does_not_change_the_root() {
+        use crate::solid_cores::tests as cores;
+        let mut app = cores::app(Some(true));
+        let cored = cores::add(&mut app, cores::tank());
+        let plain = cores::add(&mut app, nvf_assets::nif_material::nif_material(StandardMaterial::default()));
+        let cell = app.world_mut().spawn((Transform::IDENTITY, Visibility::Inherited)).id();
+        let shapes = [(&cored, "Tank"), (&plain, "Lens")].map(|(m, name)| {
+            let e = cores::place(&mut app, m);
+            app.world_mut().entity_mut(e).insert((RefVisual(STAT_REF), Name::new(name), ChildOf(cell)));
+            e
+        });
+        let mut resolve = |on: bool| {
+            app.insert_resource(crate::medium_air_demand::AirWanted(on));
+            app.update();
+            assert_eq!(cores::cores(&mut app).len(), usize::from(on));
+            let w = app.world_mut();
+            let kept = shapes.map(|e| (w.entity(e).archetype().id(), w.get::<Children>(e).map(|c| c.to_vec())));
+            let found = w
+                .run_system_once(|rigs: Rigs, visuals: Visuals, nodes: NodesRead| {
+                    [None, Some("Tank"), Some("Lens")].map(|n| resolve_node(STAT_REF, n, &rigs, &visuals, &nodes))
+                })
+                .unwrap();
+            (kept, found)
+        };
+        let off = resolve(false);
+        assert_eq!(off.1[0], Some(shapes[0]));
+        for on in [true, false, true] {
+            assert!(resolve(on) == off, "light {on}");
+        }
+    }
+
     fn run_sync(app: &mut App, game: &Game<'_>) {
         let game_ptr = game as *const Game<'_> as usize;
         app.world_mut()

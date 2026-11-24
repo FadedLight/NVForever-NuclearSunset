@@ -27,7 +27,10 @@
 //!   bevy_pbr's `NvfOutdoorSun`, which sets `DIRECTIONAL_LIGHT_FLAGS_NVF_OUTDOOR_SUN_BIT`
 //!   in its GPU flags: V touches that light only, never the first-person arms' shade light
 //!   (player_body.rs), a menu's lights or an interior's directional light (the same `Sun`
-//!   entity indoors, unmarked there);
+//!   entity indoors, unmarked there). The light in the air (#3032 stage 3,
+//!   `medium_air_demand::AirWanted`) asks for this marker alone, to find that light in the
+//!   render world: with the surface switches off it gets the marker and nothing else here
+//!   (no view bindings, no shader defs, no GPU parts);
 //! - the world camera, the water reflection camera and a scope's lens camera get
 //!   [`SunVisibilityView`], extracted as bevy_pbr's `NvfSunVisibilityBindings` (a uniform,
 //!   the cloud texture (filterable), the terrain map (unfilterable, read with loads), a
@@ -603,9 +606,9 @@ impl Plugin for SunVisibilityPlugin {
             .add_systems(Startup, debug_aids)
             .add_systems(PostUpdate, (log_mask.run_if(resource_changed::<SunVisibility>), mark_targets.run_if(marking_needed)).chain());
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
-        render_app.init_resource::<SunVisibilityGpu>().add_systems(ExtractSchedule, extract_sun_visibility).add_systems(
+        render_app.init_resource::<SunVisibilityGpu>().init_resource::<CloudVolumeFrame>().add_systems(ExtractSchedule, extract_sun_visibility).add_systems(
             Render,
-            prepare_sun_visibility.in_set(RenderSystems::PrepareResourcesFlush).after(crate::volumetric_clouds_lightvol::gpu::publish_light_volume_reader),
+            prepare_sun_visibility.in_set(CloudShadowsDecided).in_set(RenderSystems::PrepareResourcesFlush).after(crate::volumetric_clouds_lightvol::gpu::publish_light_volume_reader),
         );
     }
 }
@@ -641,10 +644,10 @@ fn log_mask(vis: Res<SunVisibility>, mut last: Local<Option<(bool, bool, DebugMo
 /// Anything carrying one of the plumbing's markers.
 type Marked = Or<(With<OutdoorSunLight>, With<SunVisibilityView>)>;
 
-/// Whether [`mark_targets`] has anything to do: the plumbing is on, or markers are left
-/// to take off.
-pub(crate) fn marking_needed(vis: Res<SunVisibility>, marked: Query<(), Marked>) -> bool {
-    vis.active() || !marked.is_empty()
+/// Whether [`mark_targets`] has anything to do: the plumbing is on, the light in the air
+/// wants the sun marked, or markers are left to take off.
+pub(crate) fn marking_needed(vis: Res<SunVisibility>, air: Option<Res<crate::medium_air_demand::AirWanted>>, marked: Query<(), Marked>) -> bool {
+    vis.active() || air.is_some_and(|a| a.0) || !marked.is_empty()
 }
 
 type ViewCandidate = (Entity, Has<SunVisibilityView>, Has<FlyCam>, Has<ReflectionCamera>, Has<LensCamera>);
@@ -654,19 +657,22 @@ type ViewFilter = Or<(With<FlyCam>, With<ReflectionCamera>, With<LensCamera>, Wi
 type LightCandidate = (Entity, Has<Sun>, Has<OutdoorSunLight>);
 type LightFilter = Or<(With<Sun>, With<OutdoorSunLight>)>;
 
-/// Put [`OutdoorSunLight`] on the sun light while outdoors and [`SunVisibilityView`] on the
-/// world cameras while the plumbing is on; take them off otherwise.
+/// Put [`OutdoorSunLight`] on the sun light while outdoors and the plumbing is on or the
+/// light in the air wants it (absent: off), and [`SunVisibilityView`] on the world cameras
+/// while the plumbing is on; take them off otherwise.
 pub(crate) fn mark_targets(
     mut commands: Commands,
     vis: Res<SunVisibility>,
+    air: Option<Res<crate::medium_air_demand::AirWanted>>,
     sky: Option<Res<SkyState>>,
     lights: Query<LightCandidate, LightFilter>,
     views: Query<ViewCandidate, ViewFilter>,
 ) {
     let active = vis.active();
+    let sun_wanted = active || air.is_some_and(|a| a.0);
     let outdoors = sky.is_some_and(|s| s.interior.is_none());
     for (e, sun, marked) in &lights {
-        let want = active && outdoors && sun;
+        let want = sun_wanted && outdoors && sun;
         if want && !marked {
             commands.entity(e).try_insert(OutdoorSunLight);
         } else if !want && marked {
@@ -907,6 +913,55 @@ fn source_told(told: &mut Option<CloudSourceInUse>, now: CloudSourceInUse, wante
     (last != Some(now) && (last.is_some() || wanted)).then_some(now)
 }
 
+/// What the surfaces' cloud shadow is this frame, for the other readers of the sun's visibility
+/// (the light in the air, medium_air_grid.rs): one decision, one window and one strength for the
+/// ground and the shafts (#3032). Written by [`prepare_sun_visibility`] each frame the light's render
+/// side is open (else the default, [`CloudSourceInUse::Off`], as while no view takes the sun
+/// visibility); read after it ([`CloudShadowsDecided`]), in `RenderSystems::PrepareResourcesFlush` or later.
+#[derive(Resource, Clone, Default)]
+pub(crate) struct CloudVolumeFrame {
+    /// The surfaces' source.
+    pub(crate) source: CloudSourceInUse,
+    /// The light volume may become the source as soon as it has a front ([`volume_expected`]): a
+    /// reader with a pipeline of its own asks for it now.
+    pub(crate) expected: bool,
+    /// The surfaces' uniform as written (its `volume` and `light_volume` count with
+    /// [`MASK_CLOUD_VOLUME`] only).
+    pub(crate) uniform: SunVisibilityUniform,
+    /// The near and far levels the surfaces bind (stand-ins for a level of presence 0), while the
+    /// light volume is in their layout.
+    pub(crate) levels: Option<[TextureView; 2]>,
+}
+
+impl CloudVolumeFrame {
+    /// Nothing for anybody (and nothing written while that is so already).
+    fn clear(&mut self) {
+        if self.source != CloudSourceInUse::Off || self.levels.is_some() {
+            *self = CloudVolumeFrame::default();
+        }
+    }
+}
+
+/// [`prepare_sun_visibility`]'s set in the render schedule: a reader of [`CloudVolumeFrame`] runs after
+/// it.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CloudShadowsDecided;
+
+/// Whether the light volume can become the cloud shadows' source once it has a front: Cloud shadows
+/// on, the light volume in the layout ([`volume_layout`]: with the Volumetric clouds row off it never
+/// is), and the aid asks for the volume or, for `Auto`, the clouds are traced. The aids `volume`,
+/// `share` and `depth` expect it whatever is traced, as [`CloudSourceInUse::decide`] takes the volume
+/// for them.
+pub fn volume_expected(cloud_on: bool, asked: CloudSource, traced: bool, room: bool) -> bool {
+    cloud_on
+        && room
+        && match asked {
+            CloudSource::Weather => false,
+            CloudSource::Auto => traced,
+            CloudSource::Volume | CloudSource::Share | CloudSource::Depth => true,
+        }
+}
+
 struct GpuParts {
     buffer: UniformBuffer<SunVisibilityUniform>,
     sampler: Sampler,
@@ -1111,8 +1166,10 @@ pub fn usable_uniform(packed: SunVisibilityUniform, terrain_uploaded: bool) -> S
 /// level's presence (faded in over `LVR_ARRIVAL_SECS`), and bindings 45 and 46 its front sets
 /// (the stand-in for a level without one). While it is not asked for ([`volume_wanted`]) none of
 /// that runs: the uniform is the packed one, and in the frame the layout goes the views are let go.
+/// For the light in the air ([`CloudVolumeFrame`]) the frame's source, uniform and level views are
+/// left while that light's render side is open, and then alone.
 fn prepare_sun_visibility(
-    mut gpu: ResMut<SunVisibilityGpu>,
+    (mut gpu, mut shared, air): (ResMut<SunVisibilityGpu>, ResMut<CloudVolumeFrame>, Option<Res<crate::medium_air_grid::AirGate>>),
     mut bound: Query<&mut NvfSunVisibilityBindings>,
     images: Res<RenderAssets<GpuImage>>,
     fallback: Res<FallbackImage>,
@@ -1120,16 +1177,21 @@ fn prepare_sun_visibility(
     (device, queue): (Res<RenderDevice>, Res<RenderQueue>),
 ) {
     if bound.is_empty() {
+        shared.clear();
         return;
     }
     let gpu = &mut *gpu;
-    let Some(parts) = gpu.parts.as_mut() else { return };
+    let Some(parts) = gpu.parts.as_mut() else {
+        shared.clear();
+        return;
+    };
     let uploaded = |id: Option<AssetId<Image>>| id.and_then(|id| images.get(id)).map(|g| &g.texture_view);
     let terrain_map = uploaded(gpu.terrain);
     let mut uniform = usable_uniform(gpu.uniform, terrain_map.is_some());
     let wanted = volume_wanted(gpu.cloud_on, gpu.gate.row);
     // The light volume's views to bind, where they may have changed.
     let mut light: Option<[TextureView; 2]> = None;
+    let mut source = None;
     if wanted || gpu.volume.told.is_some() {
         let reader = reader.as_deref().filter(|_| gpu.volume.on);
         let ready = reader.map_or([false; 2], |r| r.ready());
@@ -1138,6 +1200,7 @@ fn prepare_sun_visibility(
         if let Some(told) = source_told(&mut gpu.volume.told, use_, wanted) {
             info!("cloud shadows: source {}", told.line());
         }
+        source = Some(use_);
         if let (Some(r), Some(stand_in)) = (reader, gpu.volume.stand_in.as_ref()) {
             // Only the levels the source reads are present (a level left out has presence 0 and its stand-in bound).
             let used = use_.levels();
@@ -1149,6 +1212,12 @@ fn prepare_sun_visibility(
     }
     if std::mem::take(&mut gpu.volume.release) && light.is_none() {
         light = Some([0, 1].map(|_| fallback.d2_array.texture_view.clone()));
+    }
+    if air.is_some_and(|gate| gate.is_open()) {
+        let source = source.unwrap_or_else(|| CloudSourceInUse::decide(gpu.cloud_on, gpu.source, [false; 2], gpu.gate));
+        *shared = CloudVolumeFrame { source, expected: volume_expected(gpu.cloud_on, gpu.source, gpu.gate.traced, gpu.volume.on), uniform, levels: light.clone() };
+    } else {
+        shared.clear();
     }
     if parts.written != Some(uniform) {
         parts.buffer.set(uniform);
@@ -1366,6 +1435,47 @@ pub(crate) mod tests {
         assert!(app.world().get::<OutdoorSunLight>(sun).is_none());
         assert!(app.world().get::<SunVisibilityView>(cam).is_none());
         assert_eq!(SunVisibilityUniform::pack(&SunVisibility::default()), SunVisibilityUniform::default());
+    }
+
+    /// The light in the air (#3032 stage 3) marks the outdoor sun alone: with both surface
+    /// rows off the sun light gets [`OutdoorSunLight`] (render world: `NvfOutdoorSun`), the
+    /// views no bindings and the plumbing stays off; not indoors, not the arms' shade light;
+    /// the demand off again takes the marker off; an absent or false demand marks nothing.
+    #[test]
+    fn light_in_the_air_marks_the_outdoor_sun_only() {
+        use crate::medium_air_demand::AirWanted;
+        let mut app = App::new();
+        app.insert_resource(SunVisibility::default()).insert_resource(SkyState::default()).add_systems(Update, mark_targets.run_if(marking_needed));
+        let sun = app.world_mut().spawn((Sun, DirectionalLight::default())).id();
+        let shade = app.world_mut().spawn(DirectionalLight::default()).id();
+        let cam = app.world_mut().spawn(FlyCam { yaw: 0.0, pitch: 0.0, speed: 0.0 }).id();
+        app.update();
+        assert!(app.world().get::<OutdoorSunLight>(sun).is_none(), "no demand resource: unmarked");
+        app.insert_resource(AirWanted(false));
+        app.update();
+        assert!(app.world().get::<OutdoorSunLight>(sun).is_none(), "demand off: unmarked");
+
+        app.insert_resource(AirWanted(true));
+        app.update();
+        let w = app.world();
+        assert!(w.get::<OutdoorSunLight>(sun).is_some(), "the air marks the outdoor sun");
+        assert!(w.get::<OutdoorSunLight>(shade).is_none(), "never the arms' shade light");
+        assert!(w.get::<SunVisibilityView>(cam).is_none(), "no view bindings");
+        assert!(!w.resource::<SunVisibility>().active(), "the plumbing stays off");
+
+        // Indoors the same light is unmarked; outdoors again, marked.
+        app.world_mut().resource_mut::<SkyState>().interior = Some(Default::default());
+        app.update();
+        assert!(app.world().get::<OutdoorSunLight>(sun).is_none());
+        app.world_mut().resource_mut::<SkyState>().interior = None;
+        app.update();
+        assert!(app.world().get::<OutdoorSunLight>(sun).is_some());
+
+        // The demand off: the marker goes.
+        app.insert_resource(AirWanted(false));
+        app.update();
+        assert!(app.world().get::<OutdoorSunLight>(sun).is_none());
+        assert!(app.world().get::<SunVisibilityView>(cam).is_none());
     }
 
     /// Only the sun light outdoors takes the factor: not the arms' shade light or a menu's
@@ -1810,6 +1920,30 @@ pub(crate) mod tests {
         assert!(extract.find("gpu.volume.leave();").expect("left there") < extract.find("return;").expect("a return"));
     }
 
+    /// The light volume is expected (the air asks for its variant's pipelines) whenever
+    /// [`CloudSourceInUse::decide`] could give it with both fronts, and never with the cloud
+    /// shadows off, the aid `weather`, the weather-only layout (the Volumetric clouds row off too), or
+    /// (for `Auto`) nothing traced.
+    #[test]
+    fn the_volume_is_expected_wherever_it_can_become_the_source() {
+        for asked in [CloudSource::Auto, CloudSource::Weather, CloudSource::Volume, CloudSource::Share, CloudSource::Depth] {
+            for cloud_on in [false, true] {
+                for (row, fits) in [(true, true), (true, false), (false, true), (false, false)] {
+                    for traced in [false, true] {
+                        let gate = AutoGate { row, sky_shown: true, traced };
+                        let room = volume_layout(cloud_on, row, || fits);
+                        let use_ = CloudSourceInUse::decide(cloud_on, asked, [true, true], gate);
+                        let use_ = if room { use_ } else { use_.without_room() };
+                        let reads = matches!(use_, CloudSourceInUse::Volume { .. } | CloudSourceInUse::Debug { .. });
+                        assert_eq!(volume_expected(cloud_on, asked, traced, room), reads, "{asked:?} on {cloud_on} row {row} fits {fits} traced {traced}");
+                    }
+                }
+            }
+        }
+        assert!(!volume_expected(true, CloudSource::Auto, false, true), "nothing traced");
+        assert_eq!(CloudVolumeFrame::default().source, CloudSourceInUse::Off);
+    }
+
     #[test]
     fn cloud_sources_parse() {
         assert_eq!(CloudSource::parse(" Weather "), Some(CloudSource::Weather));
@@ -2200,6 +2334,33 @@ pub(crate) mod tests {
                 assert_eq!(binds(m, 46), volume, "{case}: binding 46");
                 assert!(m.entry_points.iter().any(|e| e.stage == naga::ShaderStage::Fragment), "{case}: a fragment entry point");
             }
+        }
+        // The light in the air's grid (a compute pipeline of its own): the flat variant has its
+        // bindings 0-7 alone, the light volume's links the shared reader and adds 8-11 and the
+        // mean entry.
+        // Each in every walk of the columns, with its workgroup.
+        use crate::medium_air_grid::GridWalk;
+        for (volume, walk) in [false, true].into_iter().flat_map(|v| GridWalk::ALL.map(|w| (v, w))) {
+            let mut defs: Vec<ShaderDefVal> = if volume { vec![crate::medium_air_grid::AIR_VOLUME_DEF.into()] } else { Vec::new() };
+            defs.extend(walk.defs().iter().map(|d| ShaderDefVal::from(*d)));
+            defs.extend([ShaderDefVal::UInt("MAX_CASCADES_PER_LIGHT".into(), 4), ShaderDefVal::UInt("MAX_DIRECTIONAL_LIGHTS".into(), 10), ShaderDefVal::UInt("MAX_RECT_LIGHTS".into(), 8)]);
+            defs.extend(["AVAILABLE_STORAGE_BUFFER_BINDINGS__GE_3", "AVAILABLE_STORAGE_BUFFER_BINDINGS__GE_6"].map(ShaderDefVal::from));
+            pipeline += 1;
+            let id = *ids.get("nvforever/medium_air_grid.wesl").expect("the air's grid registered");
+            let compiled = cache.get(pipeline, id, &defs).unwrap_or_else(|e| panic!("the air's grid, volume {volume}, {walk:?}: {e}"));
+            let m = &compiled.0;
+            for binding in 0..8 {
+                assert!(binds(m, binding), "the air's grid, volume {volume}: binding {binding}");
+            }
+            for binding in 8..12 {
+                assert_eq!(binds(m, binding), volume, "the air's grid, volume {volume}: binding {binding}");
+            }
+            assert!(!binds(m, 45) && !binds(m, 46), "none of the surfaces' bindings");
+            let entry = |name: &str| m.entry_points.iter().any(|e| e.stage == naga::ShaderStage::Compute && e.name == name);
+            assert!(entry("air_grid"), "volume {volume}");
+            let chunks = if walk == GridWalk::Serial { 1 } else { 4 };
+            assert_eq!(m.entry_points.iter().find(|e| e.name == "air_grid").map(|e| e.workgroup_size), Some([8, 8, chunks]), "volume {volume}, {walk:?}");
+            assert_eq!(entry("air_cloud_mean"), volume);
         }
     }
 

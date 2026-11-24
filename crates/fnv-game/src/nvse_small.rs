@@ -653,6 +653,11 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // ---- Stewie's Tweaks ----
         // Recognized loaded settings follow their actual engine consumers;
         // unbound games and other keys retain their existing layered-file query.
+        // Takes `Key:Section` and does NOT trim surrounding whitespace [observed: Fallout:
+        // New Vegas 1.4.0.525 + xNVSE 6.4.9 + lStewieAl's Tweaks 1005, 2026-11-24,
+        // `GSDocMitchellHouse`, `w4h_08_stewie_get_value_whitespace` (`wave4h_reconcile.json`,
+        // #3803): `PROBE|w4h_08_stewie_get_value_whitespace|sk(0=0,L=0,R=0,M=0)|ks(0=1,L=0,R=0,M=0)|bare(0=0,L=0,R=0)`];
+        // ASCII case-insensitive matching stays [hypothesis].
         "stewiegetvalue" | "stewval" => {
             let ks = text(args, 0);
             let Some((key, section)) = ks.split_once(':') else { return Some(Ok(zero)) };
@@ -663,7 +668,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                 return Some(Ok(XVal::Num(value)));
             }
             let ini = g.mod_files.read_text("NVSE\\Plugins\\nvse_stewie_tweaks.ini");
-            match ini.and_then(|t| crate::mod_files::ini_get(&t, &section.trim().to_ascii_lowercase(), key.trim())) {
+            match ini.and_then(|t| crate::mod_files::ini_get(&t, &section.to_ascii_lowercase(), key)) {
                 Some(v) => v.parse::<f64>().map(XVal::Num).unwrap_or(XVal::Str(v.trim_matches('"').to_string())),
                 None => zero,
             }

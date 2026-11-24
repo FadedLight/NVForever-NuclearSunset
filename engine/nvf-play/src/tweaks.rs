@@ -2983,9 +2983,9 @@ pub fn apply_modular_overrides_to_settings(overrides: &fnv_game::stewie_inis::St
     }
     let mut applied = fnv_game::stewie_inis::apply_modular_tweaks_to_game(overrides, &mut settings.game);
     macro_rules! bool_tweak {
-        ($key:expr, $field:ident) => {
+        ($key:expr, $($field:ident).+) => {
             if let Some(v) = overrides.get_bool("Tweaks", $key) {
-                settings.$field = v;
+                settings.$($field).+ = v;
                 applied += 1;
             }
         };
@@ -3018,7 +3018,7 @@ pub fn apply_modular_overrides_to_settings(overrides: &fnv_game::stewie_inis::St
     bool_tweak!("bCompressDuplicateConsoleMessages", console_compress_repeats);
     bool_tweak!("bConsolePrintsIncludeTimestamp", console_timestamps);
     bool_tweak!("bLivingAnatomyShowDR", living_anatomy_dr);
-    bool_tweak!("bSynchronizeContainerCategories", sync_categories);
+    bool_tweak!("bSynchronizeContainerCategories", game.sync_categories);
     bool_tweak!("bNoFastTravelTimeChange", no_travel_time);
     bool_tweak!("bNoFastTravelIfLegsCrippled", no_travel_crippled_leg);
     bool_tweak!("bDisableSellingItems", no_selling);
@@ -3027,7 +3027,7 @@ pub fn apply_modular_overrides_to_settings(overrides: &fnv_game::stewie_inis::St
     bool_tweak!("bHoldCrouchToSneak", hold_to_sneak);
     bool_tweak!("bAddInventoryDropItemHotkey", drop_key);
     bool_tweak!("bAimingUnholstersWeapons", aiming_draws_weapon);
-    bool_tweak!("bBarterCheckActorBuySellFlags", vendor_lists_both);
+    bool_tweak!("bBarterCheckActorBuySellFlags", game.vendor_lists_both);
     bool_tweak!("bNoPlayerStaggerAnims", no_player_stagger);
     bool_tweak!("bPreventReloadWeaponUnholstering", ready_does_not_draw);
     bool_tweak!("bReloadingPreventsWeaponHotkeys", no_hotkeys_while_reloading);

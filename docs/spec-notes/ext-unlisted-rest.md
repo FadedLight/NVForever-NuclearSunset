@@ -293,11 +293,20 @@ commands that touch the menus, the sky or the minimap ran one per launch].
   `w4c_a03_has_action_ref` (`P=0(00000000)|Doc=0(00000000)|Door=1(00000000)|Cont=0|Acti=0|Furn=0|Stat=0|Misc=0|Dyn0=0(00000000)|Dyn1=0(00000000)`),
   `w4c_a03c_has_action_ref_doc_real` (`pl=0|doc(h=1,g=00000000,lnk=00000000,par=00000000)|door(h=1,g=00000000,lnk=00000000,par=00000000)` — placed Doc Mitchell `0x00104C0F` sitting in furniture `0x001059B0` and scripted front door `0x00103E61` both return `1` while `Player` returns `0`),
   `w4c_a03d_has_action_ref_doors_actors` (`spawnNpc=0|doors(tot=2,hasAct=1,hasScr=1)` — freshly spawned `PlaceAtMe` NPC returns `0`, and only the 1 scripted door of 2 doors returns `1`),
-  and `w4c_a03b_has_action_ref_1arg` (`COMPILE_FAIL`)]. NVForever returns `1` when the
-  calling reference has an active `ctx.action_ref` / `Game::action_refs` entry, active
-  `Game::furniture_use`, or a `DOOR` base with an attached script, and `0` otherwise
-  [hypothesis: exact engine condition for when a scripted door or non-door ref acquires or
-  clears action state outside the probed references].
+  and `w4c_a03b_has_action_ref_1arg` (`COMPILE_FAIL`)]. Wave 4D follow-up
+  [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
+  `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+  `w4d_02_has_action_ref_triggers` (`tools/capture/nvse/catalogs/wave4d_extenders.json`,
+  #3679): `front(1,1)|unscr(001062AC:0,1,1)|doc(1,1)|spawn(0,1)|cont(001062C6:0,1,1)`;
+  no DLL or source consulted] further showed that unscripted door `001062AC` and
+  container `001062C6` both transition `0 -> 1` upon `Activate Player 1` and retain `1`
+  on the next tick, a freshly spawned NPC transitions `0 -> 1` after 1 AI tick, and
+  scripted front door `00103E61` and Doc Mitchell `00104C0F` remain `1` throughout.
+  NVForever returns `1` when the calling reference has an active `ctx.action_ref` /
+  `Game::action_refs` entry (populated on `Activate` and retained across ticks), active
+  `Game::furniture_use`, an active non-player AI `current_package`, or a `DOOR` base with
+  an attached script, and `0` otherwise [hypothesis: exact clearing rules on cell unload or
+  unprobed reference types outside the probed interactions].
 
 **Constant answers** (each [observed] for the inputs probed; what each changes is not seen):
 

@@ -540,11 +540,29 @@ fn has_action_ref_tracks_active_action_furniture_and_scripted_doors() {
     g.set_furniture_use(FormId(NPC_REF), None);
     assert_eq!(n(&mut g, "NpcRef.HasActionRef"), 0.0);
 
-    // Explicit active action reference recorded in Game::action_refs returns 1.
-    g.action_refs.insert(FormId(BOX_REF), FormId::PLAYER_REF);
-    assert_eq!(n(&mut g, "BoxRef.HasActionRef"), 1.0);
-    g.action_refs.remove(&FormId(BOX_REF));
+    // Freshly spawned/idle NPC transitions 0 -> 1 once an AI package becomes active
+    // [observed: w4d_02_has_action_ref_triggers (`spawn(0,1)`)], while Player stays 0.
+    g.extra.entry(FormId(NPC_REF)).or_default().current_package = Some(FormId(0x999));
+    assert_eq!(n(&mut g, "NpcRef.HasActionRef"), 1.0);
+    assert_eq!(n(&mut g, "PlayerREF.HasActionRef"), 0.0);
+    g.extra.entry(FormId(NPC_REF)).or_default().current_package = None;
+    assert_eq!(n(&mut g, "NpcRef.HasActionRef"), 0.0);
+
+    // Unscripted door and container start at 0, acquire HasActionRef = 1 upon
+    // `Activate Player 1`, and retain 1 across subsequent ticks
+    // [observed: w4d_02_has_action_ref_triggers (`unscr(001062AC:0,1,1)|cont(001062C6:0,1,1)`)].
+    assert_eq!(n(&mut g, "PlainDoorRef.HasActionRef"), 0.0);
+    q(&mut g, "PlainDoorRef.Activate PlayerREF 1");
+    assert_eq!(n(&mut g, "PlainDoorRef.HasActionRef"), 1.0);
+    g.tick();
+    assert_eq!(n(&mut g, "PlainDoorRef.HasActionRef"), 1.0, "unscripted door retains HasActionRef next tick");
+
     assert_eq!(n(&mut g, "BoxRef.HasActionRef"), 0.0);
+    q(&mut g, "BoxRef.Activate PlayerREF 1");
+    assert_eq!(n(&mut g, "BoxRef.HasActionRef"), 1.0);
+    g.tick();
+    assert_eq!(n(&mut g, "BoxRef.HasActionRef"), 1.0, "container retains HasActionRef next tick");
+    assert_eq!(n(&mut g, "ScriptedDoorRef.HasActionRef"), 1.0, "scripted door remains 1");
 }
 
 #[test]

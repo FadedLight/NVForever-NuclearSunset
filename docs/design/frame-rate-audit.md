@@ -1103,7 +1103,8 @@ streaming-hitches.md §3.1 against night stutter). Pipelines with identical desc
 are 2-3 a phase; merging them would leave 98 of 102 batch sets at Goodsprings and 125 of
 132 at Novac. What remains is Bevy's design, one dispatch (and a barrier) per batch set;
 merging the dispatches of a phase means one set of buffers per phase instead of per batch
-set, a rework of its GPU preprocessing, left for upstream.
+set, a rework of its GPU preprocessing, left for upstream. [2026-11-24] Done after all:
+§13, "Merged scene unpacking".
 
 ### Leaf cards in the depth prepass (#2066)
 
@@ -1401,10 +1402,16 @@ with the NPCs, so the passes that moved are what to read:
 | FSR 3.1 Quality instead of DLSS | 7.07 | the upscaler → 0.70 (Goodsprings: 2.14 → 0.81) |
 | Light shafts, bloom, glow, sharpen, haze, clouds, terrain shadows, water, grass, aerial perspective, terrain textures, anisotropic, eye adaptation, each off | 7.02-7.28 | within the noise |
 
-The dearest switches for what they show: the mesh terrain blend (about 0.5 ms of GPU time,
-much of it in more batch sets: every blended mesh has its own material clone binding 421
-resources, mesh_terrain_blend.rs), the 9 × 9 full-detail ring (0.6 ms) and, on the
-processor, the distant LOD (0.7 ms).
+The dearest switches for what they show: the mesh terrain blend (about 0.5 ms of GPU time:
+opaque 0.38, culling 0.11, shadows 0.07), the 9 × 9 full-detail ring (0.6 ms) and, on the
+processor, the distant LOD (0.7 ms). [corrected 2026-11-24] The blend's cost is not its
+material clones: there is one clone per source material and publication
+(mesh_terrain_blend.rs), and a bindless slab holds each resource once, so the clones of a
+publication share the 421 resources they bind (mostly the fallback image at the unused
+palette indices) and their slabs. The opaque share is the blend's own fragment work, which
+already stops after three height reads where a fragment has no ground contact
+(nif_surface_bindings.wesl `mesh_terrain_lookup`); the culling share was its extra batch
+sets' dispatches, which the merged scene unpacking below removes.
 
 ### Result
 
@@ -1417,15 +1424,40 @@ more than two runs of main differ (0.05 % of the pixels by more than 24 of 255 a
 Goodsprings, 0.000 % at night); the Vulkan validation layer reports nothing new; 21 smoke
 scenarios of the touched systems pass.
 
+### Merged scene unpacking (2026-11-24)
+
+`uniform_allocation` and `bin_unpacking` were one dispatch per batch set (98-132 a frame in
+the main view alone, §10 "Culling dispatches per batch set"), each followed by a barrier,
+so a few microseconds of work each took 0.07-0.25 ms of GPU time per pass. Now every batch
+set of a view, phase and mesh indexed-ness is packed into one set of buffers (bevy#26580's
+idea, which does not apply over #2064 as it is) and each step is one dispatch for all of
+them: a job per batch set in a storage array, a workgroup-to-job table, the job's offsets
+added to the batch-local indices (vendored bevy_render and bevy_pbr, engine/vendor/README.md
+"Merged scene unpacking"). The batch sets' own buffers are no longer uploaded.
+
+[observed 2026-11-24, the branch before and after in one session, interleaved, two rounds,
+the settings above] Both passes fell from 0.07-0.25 ms each to under the log's top entries
+(below 0.06 ms in Novac,
+0.04 elsewhere) in every view. GPU time (the sum of the top passes, DLSS included):
+
+| View | Before | After |
+|---|---|---|
+| Novac 12:00 | 5.31 | 5.00 |
+| Goodsprings 12:00 | 4.97 | 4.55 |
+| Freeside 14:00 | 4.38 | 4.05 |
+| Prospector Saloon 20:00 | 3.00 | 2.88 |
+| Goodsprings 23:00 | 4.84 | 4.43 |
+
+Novac's frame, the one not held at 160 Hz: 7.25 → 6.94 ms (−4.3 %). Screenshots differ from
+the build before by no more than two runs of that build differ from each other (Goodsprings
+0.04 % of the pixels by more than 24 of 255, Goodsprings at night and the saloon 0.000 %),
+and the multi-chunk scan (a batch set of more than 256 draws) ran at Goodsprings.
+
 ### Left, largest first
 
-- **The mesh terrain blend's material clones**: binding the publication's origin, coverage,
-  atlases and palette once for all clones would let the blended meshes batch like the rest.
-- **Culling dispatches** (`uniform_allocation` + `bin_unpacking`, 0.3-0.5 ms of GPU time
-  here, §9): one dispatch per batch set with a barrier between; merging them is a patch to
-  Bevy's GPU preprocessing.
-- **bevy#26580** (scene-unpacking uploads in three buffers per view and phase) does not apply
-  over NVForever's own upload patches; worth merging by hand for the render thread.
+- **The mesh terrain blend's fragment cost** (opaque 0.38 ms in Novac): not its material
+  clones (see the correction above). What is left is the blend's own lookup and detail
+  sampling; measuring it needs a GPU trace of the blended draws.
 - **Cell fades leave every streamed mesh dithering**: `--cell-fade 0` took Novac's prepass and
   opaque pass down about 0.07 ms each (fade.rs keeps the fully drawn range for life, so the
   prepass keeps a discarding fragment stage); taking the ranges off after a fade needs the

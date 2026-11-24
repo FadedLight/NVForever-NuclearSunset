@@ -138,9 +138,10 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
       `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`; GECK wiki `SetArmorDT`;
       observed: `w4e_c01_ysi_armordt_sibling_formlist2`
       (`tools/capture/nvse/catalogs/wave4e_mods.json`, #3803): `armorDT: N` acts as a
-      `>= N` minimum DT threshold honoring live `SetArmorDT` overrides; hypothesis:
-      skipped on non-`ARMO` forms when paired with an explicit `form` selector; design:
-      negative, non-finite, or non-numeric thresholds stay `Match::Unknown`].
+      `>= N` minimum DT threshold (`armorDT(lth6=[(zdt05)],met12=[(zdt10)],cmb15=[(zdt14)],pwr22=[(zdt20)])`);
+      hypothesis: honoring live `SetArmorDT` overrides and skipped on non-`ARMO` forms
+      when paired with an explicit `form` selector; design: negative, non-finite, or
+      non-numeric thresholds stay `Match::Unknown`].
     - `armorPower` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
       `schemas/fnv/objects.json` `ARMO.BMDT.general_flags` bit 5 `"Power Armor"` / GECK
       wiki `IsPowerArmor`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1`
@@ -207,8 +208,9 @@ v1.4d (`140`), 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base
 isolated clean-room staging copy (read-only `PrintToConsole` probes; zero writes to game
 install or Saves), `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`,
 `w4e_03_ysi_unmatched_icon_fallback`, `w4e_04_ysi_worldref_arg_vs_dot`,
-`w4e_c01_ysi_armordt_sibling_formlist2` (`tools/capture/nvse/catalogs/wave4e_mods.json`,
-#3803) and `w4c_b4_15b_ysi_no_json_fallback` (`tools/capture/nvse/catalogs/wave4c_extenders.json`,
+`w4e_05_ysi_ini_precedence_and_gating`, `w4e_c01_ysi_armordt_sibling_formlist2`
+(`tools/capture/nvse/catalogs/wave4e_mods.json`, #3803) and
+`w4c_b4_15b_ysi_no_json_fallback` (`tools/capture/nvse/catalogs/wave4c_extenders.json`,
 #3679); zero DLL, PDB, or third-party source consulted]:
 - **Receiver vs explicit argument (`w4e_04_ysi_worldref_arg_vs_dot`):** calling
   `rRef.ySIGetTrait` as a dot-receiver unwraps a placed world reference to its base form,
@@ -228,23 +230,23 @@ install or Saves), `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`,
   `(trait, value, form)` order, returns `1` for `"tag"`, `"string"`, `"icon"`, and
   `"filename"`, and writes `"icon"` and `"filename"` into the same tag-scoped icon store
   so changing a tagged form's icon propagates to sibling forms sharing that tag on both
-  `"icon"` and `"filename"` queries (`10I=[interface\icons\sib_test.dds]|9I=[interface\icons\sib_test.dds]|9F=[interface\icons\sib_test.dds]`).
+  `"icon"` and `"filename"` queries (`sibIcon(10I=[interface\icons\sib_test.dds],9I=[interface\icons\sib_test.dds],9F=[interface\icons\sib_test.dds])`).
   Session overrides take precedence over JSON rules (including explicit `""` tag clearing).
 - **Unmatched icon/filename fallback (`w4e_03_ysi_unmatched_icon_fallback`,
   `w4c_b4_15b_ysi_no_json_fallback`):** when `menus/ySI/*.json` packs are loaded and a
   form has no matched tag/icon (or a non-item / explicit world-ref arg is queried), both
   `ySIGetTrait "icon"` and `ySIGetTrait "filename"` return
-  `"interface\\icons\\Misc_Unknown.dds"` (`docIcon=[interface\icons\Misc_Unknown.dds]`,
-  `argFile=[interface\icons\Misc_Unknown.dds]`). When no valid ySI JSON packs are loaded
-  (absent or rejected by bounds/syntax), `"tag"`, `"string"`, `"icon"`, and `"filename"`
-  all return `""` (`PROBE|w4c_b4_15b_ysi_no_json_fallback|st=[](0)|wp=[](0)|pl=[](0)`).
+  `"interface\\icons\\Misc_Unknown.dds"` (`doc(tag=[],icon=[interface\icons\Misc_Unknown.dds])|worldRefArg(tag=[],file=[interface\icons\Misc_Unknown.dds])`).
+  When no valid ySI JSON packs are loaded (absent or rejected by bounds/syntax), `"tag"`,
+  `"string"`, `"icon"`, and `"filename"` all return `""`
+  (`PROBE|w4c_b4_15b_ysi_no_json_fallback|st=[](0)|wp=[](0)|pl=[](0)`).
 - **Metadata trait names rejected (`w4e_02_ysi_metadata_traits`):** `ySIGetTrait` returns
   `""` for all 6 JSON icon-rule metadata names (`"template"`, `"systemcolor"`,
   `"category"`, `"name"`, `"tab"`, `"count"`) even on tagged forms whose `ySI.json` rule
   sets those keys, and `ySISetTrait` for those names returns `0` (rejected no-op) with no
   invented `"ySIDefault"` fallback.
-- **BarterMenu XML injection (`w4e_c01_ysi_armordt_sibling_formlist2`):** `ySI.xml`
-  injects into `BarterMenu` with `_ySI=1`, `_ySIPipBoy=0`.
+- **BarterMenu XML injection (`w4e_05_ysi_ini_precedence_and_gating`):** `ySI.xml`
+  injects into `BarterMenu` with `barter(mm=1053,ysi=1,pip=0)` (`_ySI=1`, `_ySIPipBoy=0`).
 Unrecognized traits continue to return `""` (get) and `0` (set). No `yUI` provider
 presence/version is advertised (`ext-version.md`). This does **not** repair JAM sorting
 or establish full ySI/JAM compatibility. A configuration with unresolved potentially

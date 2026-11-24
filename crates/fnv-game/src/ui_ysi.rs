@@ -78,9 +78,10 @@ const HUD_MENU_CODE: u16 = 1004;
 
 /// Menus that host `menus/ySI/ySI.xml` when present in the VFS [documented: ySI - Sorting
 /// Ycons v1.4b (Nexus Mods 74358), shipped `menus/ySI/ySI.xml` (no yUI/ySI DLL or source
-/// consulted); observed: `BarterMenu` injection (`_ySI=1`, `_ySIPipBoy=0`) in
-/// `w4e_c01_ysi_armordt_sibling_formlist2` (`tools/capture/nvse/catalogs/wave4e_mods.json`,
-/// #3803); hypothesis: remaining target menu list (`docs/spec-notes/ysi-ui-injection.md`)].
+/// consulted); observed: `BarterMenu` injection (`barter(mm=1053,ysi=1,pip=0)`, i.e.
+/// `_ySI=1`, `_ySIPipBoy=0`) in `w4e_05_ysi_ini_precedence_and_gating`
+/// (`tools/capture/nvse/catalogs/wave4e_mods.json`, #3803); hypothesis: remaining target
+/// menu list (`docs/spec-notes/ysi-ui-injection.md`)].
 pub const TARGET_MENUS: &[(u16, &str)] = &[
     (HUD_MENU_CODE, "HUDMainMenu"),
     (menus::INVENTORY, "InventoryMenu"),

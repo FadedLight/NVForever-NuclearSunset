@@ -176,11 +176,12 @@ fn flst_contains_recursive(g: &Game<'_>, root_list: FormId, needle: FormId) -> b
 }
 
 /// Evaluates `armorDT` minimum threshold against an `ARMO`'s effective Damage Threshold
-/// (honoring live `SetArmorDT` overrides) [documented: Sorting Icons 1.4b
-/// `menus/ySI/ySI.json`, `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`, GECK wiki
-/// `SetArmorDT`; observed: `w4e_c01_ysi_armordt_sibling_formlist2` (#3803): `dt >= threshold`;
-/// hypothesis: non-applicable `armorDT` on non-`ARMO` forms is skipped (`Match::Yes`) when
-/// paired with an explicit `form` selector, and disqualifies (`Match::No`) otherwise].
+/// [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`, `schemas/fnv/objects.json`
+/// `ARMO.DNAM.damage_threshold`, GECK wiki `SetArmorDT`; observed:
+/// `w4e_c01_ysi_armordt_sibling_formlist2` (#3803): `dt >= threshold` on authored `ARMO`
+/// records; hypothesis: honoring live `SetArmorDT` overrides and skipping non-applicable
+/// `armorDT` (`Match::Yes`) on non-`ARMO` forms when paired with an explicit `form`
+/// selector (disqualifying as `Match::No` otherwise)].
 /// [design] Negative, non-finite, or non-numeric thresholds remain `Match::Unknown`.
 fn armor_dt(g: &Game<'_>, item: FormId, value: &Json, explicit_form: bool) -> Match {
     let Some(threshold) = value.as_f64().filter(|n| n.is_finite() && *n >= 0.0) else {

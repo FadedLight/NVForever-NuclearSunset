@@ -82,6 +82,7 @@ fn vats_parent_scene_with_style(mode: &str, style: &str) -> VatsParentScene {
         .add_systems(Update, (nvf_play::combat::equip_sync, nvf_play::control::read_controls, observe_parent_use).chain().in_set(nvf_play::PlaySet::Input))
         .init_resource::<VatsParentObserved>()
         .add_systems(Update, observe_parent_execution.after(nvf_play::vats_mode::VatsUpdate));
+    nvf_play::vats_mode::touch::register_settings(&mut app);
     let window = app.world_mut().spawn((Window { resolution: bevy::window::WindowResolution::new(1000, 1000), focused: true, ..default() }, PrimaryWindow)).id();
     let pad = app.world_mut().spawn(Gamepad::default()).id();
     let mut camera_value = Camera::default();

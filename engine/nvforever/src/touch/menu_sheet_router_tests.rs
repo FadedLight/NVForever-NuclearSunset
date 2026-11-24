@@ -81,6 +81,7 @@ mod menu_sheet_router_controls {
             .add_message::<nvf_play::ui_sounds::UiSound>().add_message::<nvf_play::crime::ItemsTaken>()
             .add_message::<nvf_play::pickpocket::Pickpocketed>()
             .add_plugins(menu::MenuPlugin);
+        barter_touch::register_settings(&mut app);
         app.add_systems(PostUpdate,(bevy::ui::update::update_clipping_system,ApplyDeferred,painted_ui_stack)
             .chain().after(bevy::ui::ui_layout_system));
         let row=app.world().resource::<nvf_play::settings::Settings>().index(barter_touch::KEY).unwrap();

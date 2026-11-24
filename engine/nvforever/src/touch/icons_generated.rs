@@ -1,5 +1,5 @@
 // Generated from original owned SVG families. Do not edit.
-const SVG_SOURCE_SHA256: &str = "dc63ebe9defc1a5b2f8b381694730ee405239d6b7a84903ceed07f48b0f15c24";
+const SVG_SOURCE_SHA256: &str = "9c9176ff88bd146f60683c5b633cebd9a84a6cd1db26a08620df088eb6bfe4d7";
 const FAMILIES: &[IconFamily] = &[
     IconFamily { id: "precise-line", label: "Precise line", stroke_width: 1.6, line_cap: LineCap::Round, line_join: LineJoin::Round, icons: &[
         IconSource { id: "pause", label: "Pause", primitives: &[

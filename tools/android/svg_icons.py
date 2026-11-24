@@ -203,7 +203,7 @@ def compile_manifest(path: Path) -> tuple[list[dict], str]:
         if not identity(icon["id"]) or icon["id"] in ids or not label_valid(icon["label"]) or icon["file"] != icon["id"] + ".svg" or type(icon["legacyIndex"]) is not int or icon["legacyIndex"] != index:
             raise ValueError("Unsafe icon identity/path or unstable legacy index")
         ids.add(icon["id"])
-    ids, result, digest = set(), [], hashlib.sha256(path.read_bytes())
+    ids, result, digest = set(), [], hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n"))
     for style in families:
         validate_style(style)
         if style["id"] in ids:
@@ -219,7 +219,7 @@ def compile_manifest(path: Path) -> tuple[list[dict], str]:
             except ValueError as error:
                 raise ValueError(f'{style["id"]}/{icon["file"]}: {error}') from error
             compiled.append({"id": icon["id"], "label": icon["label"], "primitives": primitives})
-            digest.update(f'{style["id"]}/{icon["file"]}'.encode()); digest.update(source)
+            digest.update(f'{style["id"]}/{icon["file"]}'.encode()); digest.update(source.replace(b"\r\n", b"\n"))
         result.append({**style, "icons": compiled})
         ids.add(style["id"])
     return result, digest.hexdigest()

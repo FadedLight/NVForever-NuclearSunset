@@ -1,5 +1,10 @@
 # Observer checks: gameplay guesses the original game can settle
 
+**This file takes no new checks** (#3674). A new check is a file of its own in
+[observer-checks/](observer-checks/README.md), so that pull requests adding checks do not
+conflict here. The numbered checks below stay until they are settled, keep their numbers,
+and get their partial answers here.
+
 Guesses about how the original behaves that a capture can settle without the owner.
 The observer can run scripts, take screenshots, record video, and tap keys, so it can
 also drive menus. Sorted by how much of the game each check moves, most first.
@@ -3645,24 +3650,6 @@ already talking takes over at once, same topic or another; nothing is queued or 
      With a weapon that takes several kinds (12 gauge and its slugs, or the .357 with
      .38 Special), say whether the other kinds it can fire are at full strength.
 
-## Added 2026-11-21 (the compass's actor ticks against the strip, #3310)
-
-261. **Where does an actor's tick on the compass end against the strip's line?** (P3;
-     #3310, hud.md §11.) The HUD file's box puts the tick's top at the compass window's
-     top (the group's run-time y 10, read from the original, over the template's 5, and
-     the tick's y -10); ours since #3310 draws the 26-unit tick so its bar ends 22 units
-     down the window, about 4 above the strip's upper line, where it ended on that line
-     before [hypothesis: the picture's bar is its top 22 texel rows, drawn a texel a
-     unit]. Outdoors at 1920 x 1080, HUD scale 100 % (1.125 pixels a unit, hud.md §4),
-     with a neutral NPC about 300 units ahead (Goodsprings, the settler of §14.5) and a
-     hostile one (a gecko), take one frame each, heading steady, and measure on the raw
-     1920 x 1080 capture, not a resized one: the tick's solid end, the top of its fade
-     and the span between, against the strip's doubled line and the bracket's long line
-     above it, in pixels. A fade and bar spanning about 25 pixels (22 units) agree with
-     the 22-row hypothesis, about 20 pixels (17.9 units) with our 26-unit size; a bar
-     ending about 4-5 pixels above the strip's upper line agrees with the new place, one
-     touching it says the old place was right.
-
 ## Added 2026-11-21 (placing the custom map marker with the mouse, #3324)
 
 262. **What does a left click on an empty spot of the Pip-Boy's World Map and Local Map do
@@ -3799,23 +3786,6 @@ already talking takes over at once, same topic or another; nothing is queued or 
      altogether, the Pip-Boy still on, does the music come back (ours: yes)? Last, with
      the Radio volume at 0 and a station playing: is the music still turned down (ours:
      no)?
-
-## Added 2026-11-21 (a suitcase lying on a bed, #3323)
-
-267. **Is a suitcase lying on a bed the crosshair's target, from every aim at it?** (P3;
-     #3323, simulation.md §5 crosshair activation.) A player reports the Suitcase
-     0x000AFA24 lying on BedQueenRight 0x000D72C7 in BisonSteve02 can be looted in the
-     original [reported: the player's issue, not captured]. Ours since #3323: a bed's
-     boxes are set aside when one of them wholly holds, along the ray, the box of
-     something the player can activate, entered before the first collision hit; otherwise
-     the nearest box or collision hit wins [design]. Stand beside that bed and sweep the
-     crosshair over the suitcase's lid, its side, its edge against the mattress, a corner
-     hanging over the bed's edge if there is one, and the bare mattress beside it. At each
-     aim write down the HUD prompt (Open Suitcase or the bed's) and what E does (the
-     suitcase's container menu or the bed's sleep/wait menu); log `GetCrosshairRef`
-     separately, as it may name another reference than the prompt. Record which aims give
-     the suitcase and which the bed, without reading a rule into them yet; compare with
-     ours afterwards (aim for aim in the same spot in NVForever).
 
 ## Added 2026-11-21 (relief on the landscape's texture layers, #3322)
 
@@ -4139,6 +4109,20 @@ capture setup, so every part of a check that needs an interior is still open.
        neither plant's reading changed. Whether a bullet struck the plant itself was not
        confirmed: the crosshair read no reference at 150 units. These positions are
        meaningful because the same reading followed the grabbed nettles above.
+
+## Added 2026-11-23 (enemies left behind in another cell, #3390)
+
+281. **How long does an enemy left in an unloaded cell stay in combat with the player?**
+     (P2: #3390; alert.md §2.) Ours [design]: it is hidden 1 s after it was last measured,
+     Lost at 15 s without detecting the player (fCombatDetectionLostTime), Normal once
+     hidden for 30 s (fCombatTargetLostRemoveTime), since nothing searches there. In the
+     original, have an interior enemy (the Broc Flower cave's rats) fight the player, read
+     its `IsInCombat`, `GetCombatTarget` and `GetCurrentAIProcedure` and the player's
+     `IsInCombat` once a second, leave by the load door and go on reading for 5 minutes,
+     sneaking now and then to see the sneak word. Say when each ends, whether the enemy
+     follows through the door, and whether it fights on at once when the player goes back
+     in after 20 s and after 2 minutes. Then the same outdoors: outrun an enemy until its
+     cell unloads.
 
 ## Added 2026-11-23 (the GOODBYE topic without the Goodbye flag, #3477)
 

@@ -3490,8 +3490,14 @@ impl Vm<'_, '_> {
         };
         // Called on no reference, the function fails and stops the script [observed:
         // nvse-inv foreach.read.after, "script call failed"].
+        // Exception: JIP LN ProjectUITile logs the null-ref diagnostic, returns 0.0,
+        // and continues script execution without enqueueing a projection [observed:
+        // w4g_10_project_ui_tile_errors, tools/capture/nvse/catalogs/wave4g_f2_extenders.json].
         if on.is_some_and(|v| v.as_form().is_none()) {
             self.host.no_reference_call(lname, on, c);
+            if lname == "projectuitile" {
+                return Ok(Some(XVal::Num(0.0)));
+            }
             return Err(VmError::NoReference(lname.to_string()));
         }
         let mut args = Vec::with_capacity(c.args.len());

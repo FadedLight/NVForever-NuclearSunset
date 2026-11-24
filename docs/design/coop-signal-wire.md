@@ -45,7 +45,9 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
   JSON error body: a client treats any 429 as "wait `Retry-After` seconds, then retry" and does
   not parse the body. The Worker's own limit (10 a minute on lookups and creates) is
   approximate per location and only a soft first check; its 429 is the JSON error body
-  `rate_limited` with `Retry-After: 60`. The stand-in has no limit.
+  `rate_limited` with `Retry-After: 60`. One lobby also answers at most one info lookup a
+  second (#3795 section 5), whoever asks; past that, the same JSON body with `Retry-After: 1`.
+  The stand-in has no limit.
 
 ### `GET /v1/lobbies/{code}/ws`: the lobby socket
 

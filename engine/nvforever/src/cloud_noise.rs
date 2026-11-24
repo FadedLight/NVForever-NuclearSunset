@@ -426,10 +426,10 @@ mod tests {
         assert_eq!((*l0.iter().min().unwrap(), *l0.iter().max().unwrap()), (0, 255));
         assert!((0.2..0.8).contains(&p.base.means[0]), "base mean {}", p.base.means[0]);
         let e0 = &p.erosion.bytes[..p.erosion.offsets[1]];
-        for c in 0..3 {
+        for (c, &mean) in p.erosion.means.iter().enumerate().take(3) {
             let ch: Vec<u8> = e0.iter().skip(c).step_by(4).copied().collect();
             assert_eq!((*ch.iter().min().unwrap(), *ch.iter().max().unwrap()), (0, 255), "erosion channel {c}");
-            assert!((0.2..0.9).contains(&p.erosion.means[c]), "erosion mean {c}: {}", p.erosion.means[c]);
+            assert!((0.2..0.9).contains(&mean), "erosion mean {c}: {mean}");
         }
         assert!(e0.iter().skip(3).step_by(4).all(|&a| a == 255));
     }

@@ -1792,6 +1792,7 @@ mod tests {
     /// again while the game runs (#3032 decision 10).
     #[test]
     fn volumetric_clouds_keep_the_view_hdr_with_glow_and_upscaler_off() {
+        let _hdr = crate::hdr::test_lock();
         for selected in [ScreenAa::Off, ScreenAa::Taa] {
             let (mut app, camera) = aa_app(selected, true);
             app.world_mut().resource_mut::<Graphics>().glow = false;

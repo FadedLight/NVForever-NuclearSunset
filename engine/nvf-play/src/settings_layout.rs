@@ -332,8 +332,8 @@ mod shared_table_tests {
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
     /// shadows row; #2981's authored materials row and its reflections row; #2701's
     /// full-detail scenery row; #3014's distant objects row; #2993's aerial perspective row;
-    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row), by the group it registers with.
-    const KNOWN: [(&str, &str); 153] = [
+    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row; #3783's occlusion culling row), by the group it registers with.
+    const KNOWN: [(&str, &str); 154] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -459,6 +459,7 @@ mod shared_table_tests {
         ("terrain-anti-tiling", "Graphics"),
         ("terrain-parallax", "Graphics"),
         ("mesh-terrain-blend", "Graphics"),
+        ("occlusion-culling", "Graphics"),
         ("full-detail", "Graphics"),
         ("distant-objects", "Graphics"),
         ("smooth-terrain", "Graphics"),

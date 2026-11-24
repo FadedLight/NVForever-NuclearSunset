@@ -95,6 +95,17 @@ Why: the window blit is the last pass that writes the swapchain, and the HUD is 
 into the picture before it, so the HUD's brightness in nits can only be set there.
 Upstream's blit copies the colour unchanged.
 
+Graphics pass (2026-11-23), for bevy#26239 (open upstream): GPU occlusion culling's depth
+pyramid is built from the main pass's region of the depth buffer only, and the downsampling
+shader reads that region (`src/mip_generation/experimental/depth.rs`,
+`downsample_depth.wesl`, a `bytemuck` dependency as upstream's, in `Cargo.toml`). Before it,
+with an upscaler's `MainPassResolutionOverride` the pyramid was made from the whole
+display-size texture while meshes were tested in render-rectangle coordinates. Upstream saw
+only hidden meshes drawn; in NVForever, whose upscaler glue copies the display-size depth
+back over the prepass depth (upscaler/prep.rs `expand_depth`), visible rocks, posts and
+plants were culled. The culling stays an experiment behind `NVF_OCCLUSION_CULLING=1`
+(nvforever gpu_occlusion.rs).
+
 Source: crates.io `bevy_core_pipeline` 0.20.1, archive SHA-256
 `2463cf477b683bfe8567c43142295d00ed980f8e2a293c0a69e2f9e10e9c0aaf`.
 
@@ -115,6 +126,16 @@ Why: the exposure is `curve(average) − average`. With one byte entry per 0.086
 average and bytes 0.067 EV apart, a curve `y = x` (no change) came out as a sawtooth
 between 0 and about −0.15 EV, so a daylight picture was darkened by up to 10 %, by an
 amount that jumped as the view's average crossed an entry.
+
+A second change (graphics pass 2026-11-23), marked `NVForever (upstream Bevy's fix,
+backported)`, in `src/auto_exposure/auto_exposure.wesl`: `compute_histogram` adds its
+workgroup's bins to the global histogram from the first 64 invocations only, and skips
+empty bins. Upstream 0.20.1 let all 256 invocations of the 16 × 16 workgroup do it; the
+indices past 63 were clamped onto bin 63, so the brightest bin was counted 194 times over
+(the metered average and exposure moved when bright pixels were in view) and every
+workgroup made ~200 contended atomics on that one address (the pass went from ~0.14 ms to
+below the GPU log's top entries at 4K with DLSS Quality on an RTX 5090). Upstream Bevy's
+main has the same guard.
 
 HDR output: `src/msaa_writeback.rs` fills `BlitPipelineKey`'s two new fields (`false`,
 `false`), as the vendored bevy_core_pipeline's key needs them.
@@ -542,9 +563,50 @@ The shader that reads the bindings is nvforever's (`ssao_lighting.wesl`, patched
 component; without it the layouts and shader defs are upstream's, and the pipeline keys are
 the same keys numbered differently (the packed fields above the new bit moved up by one).
 As for the sun visibility, a meshlet view must not get the component.
+Graphics pass 2026-11-23, four more changes:
+
+- `src/cluster/gpu.rs`, `src/cluster/mod.rs`: bevy#25869 (GPU clustering keeps each view's
+  clustering buffers from frame to frame instead of making new ones; merged upstream after
+  0.20.1) and bevy#26588 (the clustering metadata staging buffers no longer pile up in a
+  list that is never emptied). nvforever still clusters on the CPU unless
+  `NVF_GPU_CLUSTERING=1` (main.rs): the buffer churn behind #897 is gone, but the GPU
+  path's cost has to be measured first.
+- `src/render/pbr_functions.wesl`, comments `NVForever shadow early-out`: a point or spot
+  light whose range does not reach the fragment, or that lies behind the shading normal,
+  gives shadow 0 without reading its shadow map or marching contact shadows, and a shadow
+  receiver facing away from a directional light likewise. The light's contribution there is
+  0 either way (Bevy's range falloff and N·L, and nvforever's display sum, lights.rs), so
+  the picture is unchanged. Not under `STANDARD_MATERIAL_CLEARCOAT`, whose second lobe has
+  a normal of its own.
+- `src/render/mesh_preprocess.wesl`, comment `NVForever: meshes that opt out of frustum
+  culling`: a mesh with `NoFrustumCulling` is never occlusion culled either (first-person
+  shapes write a squeezed depth their boxes do not describe; nvforever gpu_occlusion.rs).
+- bevy#26239 (open upstream; the `src/render/light.rs` and `src/meshlet/` parts): the
+  depth pyramid covers the main pass's region of the depth buffer (with bevy_core_pipeline
+  and bevy_render below).
+- bevy#26418 (open upstream, fixes bevy#26257; `src/render/gpu_preprocess.rs`, with its
+  stale-job clearing part in bevy_render's `batching/gpu_preprocessing.rs`): the GPU
+  preprocessing bind groups (bin unpacking, uniform allocation, preprocess, indirect
+  parameters) are kept from frame to frame, keyed by their resources, offsets and sizes, and
+  dropped after two unused frames, instead of being made again for every view, phase and
+  batch set each frame on the render thread. Its tests need upstream's `wgpu` `noop`
+  dev-dependency and are not built here.
+- Merged scene unpacking (`src/render/unpack_bins.wesl`, `src/render/allocate_uniforms.wesl`
+  and the bind groups and dispatches in `src/render/gpu_preprocess.rs`, with bevy_render's
+  `SceneUnpackingClassBuffers` below; comments start `NVForever merged scene unpacking`):
+  `unpack_bins` and each step of `allocate_uniforms` run as one dispatch for all the batch
+  sets of a view, phase and mesh indexed-ness instead of one dispatch per batch set, each
+  dispatch in a compute pass with a barrier after it. Every batch set is a job in a storage
+  array; each workgroup looks its job up in a workgroup-to-job table and adds the job's
+  offsets to the batch-local indices the shaders used before. The fan buffer has one entry
+  per workgroup; steps 2 and 3 run only when some batch set has more than 256 bins, and
+  then only each batch set's own workgroups do work. [observed 2026-11-24, Novac 12:00,
+  4K DLSS Quality, maxed settings] `uniform_allocation` 0.21 and `bin_unpacking` 0.20 ms
+  a frame → both under 0.05; process CPU time 27.3 → 23.6 ms a frame.
+
 ## bevy_light 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
-Vendored 2026-11-18, unchanged but for two patches. The first (shadow caster candidates, for
+Vendored 2026-11-18, unchanged but for three patches. The first (shadow caster candidates, for
 the ALC shadows' (once Lamp shadows) performance pass: nvforever light_shadow_casters.rs, docs/design/graphics-enhanced.md
 §3.17 "Performance pass"), marked `NVForever shadow caster candidates`, in `src/lib.rs`:
 
@@ -646,6 +708,12 @@ of `fog.wesl` and `pbr_functions.wesl` (fog.rs, haze.rs, aerial.rs, at run time)
 Upstream has no way for an application to hand its own values to the fog shader (the
 uniform's free fields were used up by the desert haze, §3.16).
 
+The third (graphics pass 2026-11-23), marked `NVForever small casters`, in
+`src/lib.rs` `check_dir_light_mesh_visibility`: a caster whose bounding radius (box half
+diagonal times the largest scale) is below `nvf_small_caster_texels()` texels of a
+cascade's map (`Cascade::texel_size`) is left out of that cascade; `NVF_SMALL_CASTER_TEXELS`
+(default 1, 0 off). Meshes with `NoFrustumCulling` are never left out.
+
 ## bevy_render 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 [documented: `src/render_resource/pipeline_cache.rs::create_pipeline_task`, #2317]
@@ -707,6 +775,18 @@ only the CPU writes (`render_binned_mesh_instance_buffer`, `bin_metadata_buffer`
 `unpack_bins.wesl`). Upstream writes all three every frame: about 300 of a Goodsprings
 frame's 400 `queue.write_buffer` calls, each a copy with its own barrier before the frame's
 first pass. Test aid `NVF_PLAY_TEST_SAME_WRITES=1` writes every frame again.
+
+Merged scene unpacking (with bevy_pbr's of that name above), in
+`batching/gpu_preprocessing.rs`: each view and phase keeps one `SceneUnpackingClassBuffers`
+for indexed and one for non-indexed meshes. `write_binned_instance_buffers` packs every
+multi-drawn batch set's three CPU-written buffers into them each frame (the idea of
+bevy#26580, open upstream, which packs them into shared buffers bound per batch set; that
+PR does not apply over #2064 and binds ranges, where the merged dispatches need one
+binding), with a `GpuSceneUnpackingJob` per batch set and the workgroup-to-job tables, and
+writes each packed buffer with `write_buffer_if_changed`. The batch sets' own buffers are
+CPU staging only and no longer uploaded (no GPU buffer, no write per batch set), and their
+fan buffers are not allocated. The uniform metadata buffers with a dynamic offset per batch
+set stay empty.
 
 Gated render assets (#2661), in `src/erased_render_asset.rs`, marked `NVForever gated
 materials`: `ErasedRenderAssetPlugin::gated(Arc<AtomicBool>)` runs the asset type's
@@ -939,6 +1019,10 @@ each part marked by a comment starting `NVForever`:
 
 Without the setters and with `NVF_PIPELINE_THREADS=0`, upstream's path runs (no list pool
 either), except that the modules are made outside the lock.
+
+Graphics pass 2026-11-23: bevy#26239 (open upstream), `src/view/mod.rs`
+(`ExtractedView::main_pass_viewport`) and `src/occlusion_culling/mod.rs`, with
+bevy_core_pipeline below.
 
 HDR output (docs/design/hdr-output.md), marked `NVForever HDR output` in
 `src/view/window/mod.rs`: the statics `NVF_HDR_SURFACE` (asked for), `NVF_HDR_SURFACE_ACTIVE`

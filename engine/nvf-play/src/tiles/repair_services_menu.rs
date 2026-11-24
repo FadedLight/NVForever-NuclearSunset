@@ -135,6 +135,8 @@ pub struct RowShown {
     pub equipped: bool,
     pub condition: f32,
     pub ready: bool,
+    /// Resolved ySI tag/icon/template for this row when ySI is active (`None` otherwise).
+    pub ysi: Option<fnv_game::ui_ysi::YsiItemDisplay>,
 }
 
 /// One whole state of the view, as the menu shows it: a frame with the same writes nothing but
@@ -202,7 +204,7 @@ impl Snapshot {
     pub(crate) fn of(v: &View, pointer_pick: bool, navigated: u32, w: &Words) -> Self {
         let chosen = v.rows.get(v.selected);
         Snapshot {
-            rows: v.rows.iter().map(|r| RowShown { key: (r.item, r.extra), name: r.name.clone(), text: r.label.clone(), equipped: r.extra.equipped, condition: r.condition, ready: r.ready }).collect(),
+            rows: v.rows.iter().map(|r| RowShown { key: (r.item, r.extra), name: r.name.clone(), text: r.label.clone(), equipped: r.extra.equipped, condition: r.condition, ready: r.ready, ysi: r.ysi.clone() }).collect(),
             selected: chosen.map(|_| v.selected),
             pointer_pick,
             navigated,
@@ -393,6 +395,7 @@ fn write(ui: &mut Ui, s: &Snapshot, st: &mut RepairServicesTiles) {
                 ui.set_trait(t, "filename", Value::Str(MARK_PICTURE.into()));
             }
         }
+        fnv_game::ui_ysi::apply_row_icon(ui, &fnv_ui::MemSource::default(), row.tile, shown.ysi.as_ref());
     }
     set(ui, LIST, "_num_filtered", Value::Num(0.0));
     // [hypothesis] The one list of this menu takes the pointer, as the container's two
@@ -646,7 +649,7 @@ pub(crate) mod tests {
     }
 
     fn row(id: u32, condition: f32, quote: Quote, ready: bool) -> RowView {
-        RowView { item: FormId(id), extra: Extra { condition: Some(condition), ..Extra::default() }, count: 1, name: format!("Item {id}"), label: format!("Item {id}"), condition, quote, ready, icon: None, stat: None }
+        RowView { item: FormId(id), extra: Extra { condition: Some(condition), ..Extra::default() }, count: 1, name: format!("Item {id}"), label: format!("Item {id}"), condition, quote, ready, icon: None, stat: None, ysi: None }
     }
 
     /// Two rows ready, one beyond the vendor; the first a weapon, worn at a quarter.
@@ -1019,6 +1022,60 @@ pub(crate) mod tests {
         assert!(line.contains("repair all ready true (61 caps)"), "{line}");
         assert!(line.contains("meter 12 of 50") || line.contains("meter 13 of 50"), "{line}");
         assert!(line.contains("Force 4"), "{line}");
+    }
+
+    #[test]
+    fn ysi_row_icons_attach_when_ysi_xml_is_present_and_noop_when_absent() {
+        let mut v = view();
+        v.rows[0].ysi = Some(fnv_game::ui_ysi::YsiItemDisplay {
+            tag: Some("(f01)".into()),
+            icon: Some("icons\\pistol.dds".into()),
+            template: fnv_game::ui_ysi::YSI_DEFAULT_TEMPLATE.into(),
+        });
+
+        // Without ySI.xml: complete no-op, zero ySIImage tiles created.
+        let (mut plain_ui, mut plain_st) = (fixture(|s| s), RepairServicesTiles::default());
+        frame(&mut plain_ui, snapshot(&v), &mut plain_st);
+        assert!(list::child(&plain_ui, plain_st.rows[0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).is_none());
+
+        // With ySI.xml injected into RepairServicesMenu: tagged row gets ySIDefault + filename,
+        // untagged row gets ySINoTag, and clicking ySIImage maps to Row(0).
+        let ysi_xml = r#"
+<rect name="ySI">
+  <_ySI> 1 </_ySI>
+  <_ySIBlanks> 1 </_ySIBlanks>
+  <_ySIWidth> 24 </_ySIWidth>
+  <_ySIHeight> 24 </_ySIHeight>
+</rect>
+<template name="ySIDefault">
+  <image name="ySIImage">
+    <filename> icons\default.dds </filename>
+    <width> <copy src="ySI" trait="_ySIWidth"/> </width>
+    <height> <copy src="ySI" trait="_ySIHeight"/> </height>
+    <visible> 1 </visible>
+  </image>
+</template>
+<template name="ySINoTag">
+  <image name="ySIImage">
+    <filename> icons\blank.dds </filename>
+    <width> <copy src="ySI" trait="_ySIWidth"/> <onlyif src="ySI" trait="_ySIBlanks"/> </width>
+    <height> <copy src="ySI" trait="_ySIHeight"/> </height>
+    <visible> 1 </visible>
+  </image>
+</template>
+"#;
+        let (mut ui, mut st) = (fixture(|s| s), RepairServicesTiles::default());
+        let src = MemSource::default().with(fnv_game::ui_ysi::YSI_XML_PATH, ysi_xml);
+        let root = ui.menu(REPAIR_SERVICES_MENU).unwrap();
+        assert!(fnv_game::ui_ysi::publish_for_menu(&mut ui, &src, root, Some(MENU_CODE)));
+        ui.update();
+        frame(&mut ui, snapshot(&v), &mut st);
+
+        let img0 = list::child(&ui, st.rows[0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).expect("tagged row icon");
+        let img1 = list::child(&ui, st.rows[1].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).expect("untagged row icon");
+        assert_eq!(ui.tile(img0).get("filename").map(Value::text).as_deref(), Some("icons\\pistol.dds"));
+        assert_eq!(ui.tile(img1).get("filename").map(Value::text).as_deref(), Some("icons\\blank.dds"));
+        assert_eq!(st.clicked(&ui, img0), Some(RepairServicesTile::Row(0)));
     }
 }
 

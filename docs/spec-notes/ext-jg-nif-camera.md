@@ -25,7 +25,7 @@ the pages' and their meaning a [hypothesis]. Not probed yet: set `jgnif` of
 | Get3DDistanceBetweenNiNodes `ref1 ref2 node1 node2` | the distance between the two nodes in the world, the references' places and the nodes above included (`nif_blocks::node_world`, as GetNifBlockTranslationAlt's world place) [documented]; 0 without either [hypothesis] |
 | Get3DDistanceToNiNode `node x y z` | from the node to the point [documented] |
 | Get3DDistanceFromHitToNiNode `node` | from where the last hit on the calling reference struck: the engine tells each shot's and blow's point (`Game::note_hit_point`) [documented: in OnHit or the hit's event]; 0 before any [hypothesis] |
-| GetNiBound `[block] [pc]` | [x, y, z, radius] in the world, the root's without a block [documented], and for a block the reference does not have [hypothesis: §4 bound gave four values]: the sphere round the boxes of the shapes under the node, the node's own place with radius 0 when it has none [hypothesis: the engine's boxes for the file's bounds]; an empty array before the engine told the tree [hypothesis] |
+| GetNiBound `[block] [pc]` | [x, y, z, radius] in the world, the root's without a block [documented]: the sphere round the boxes of the shapes under the node, the node's own place with radius 0 when it has none [hypothesis: the engine's boxes for the file's bounds]. A missing block name returns the exact 4-element zero bound `[0.0, 0.0, 0.0, 0.0]` (not the root's bound) [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JohnnyGuitarNVSE 528, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, `w4c_b3_11b_jgnif_nodes_bounds` (`tools/capture/nvse/catalogs/wave4c_extenders.json`, #3679: `dHead=636.6,dRef=665.1|bndRoot=4(r=72.1),bndMiss=4(r=0.0)|grp(0,-1,-1)|sq=0`) and `w4d_35_jg_camera_overlay_nif_bound` (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679: `head(n=4,x=2284.2,r=12.04)|miss(n=4,0.0,0.0,0.0,r=0.00)|camRef(preIS=FF001314,preUI=FF001318)`), no DLL or source consulted; hypothesis: empty array before the engine told the tree] |
 | GetNiPSysModifierValue, SetNiPSysModifierValue `block id [value] [pc]` | the particle system of that name, or emitting from a node of that name, of a placed model: its values by the page's IDs 0-19 [documented: the table]; 0 order (not kept), 1 active, 16 the particles' base scale [hypothesis]; the setter changes the engine's live system while it lives, 1 when it found one [documented: "success:bool"] |
 | GetParticleEmitterSpawnRate, SetParticleEmitterSpawnRate `block [value] [pc]` | the system's birth rate per second; set, it replaces any keyed rate [hypothesis] |
 | Get/SetAlphaPropertyValue `block item [value] [pc]` | the shape's NiAlphaProperty from the model file: item 0 the flags, 1 the threshold [hypothesis: the page is a template; the fields' order, nif.xml]; set for the session's reads and queued via `SceneEdit::AlphaProperty` so `nvforever::nif_mirror` updates the drawn shape's private `NifMaterial::base.alpha_mode` live (`nvf_assets::nif_spawn::alpha_mode`) [design] |
@@ -77,8 +77,15 @@ between `TEMP_REF_BASE` (`0xFE40_0000..0xFE7F_0000`, enforced in `Game::temp_ref
 or a loaded plugin record at the same FormID win first, falling back to `REFR` for the
 built-in overlay references so `IsFormValid` and `IsReference` report `1` and
 NIF/particle script calls (including `ModelHasBlock`) accept them without raising
-`NoReference` [hypothesis: exact native FormIDs and renderer-side overlay pass behavior
-are unobserved].
+`NoReference`. In original JohnnyGuitarNVSE 528, `EditorIDToFormID` resolves both
+`JG_CameraOverlayRef_PreIS` and `JG_CameraOverlayRef_PreUI` as live runtime `0xFF`
+references [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JohnnyGuitarNVSE 528,
+2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+`w4d_35_jg_camera_overlay_nif_bound`
+(`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+`camRef(preIS=FF001314,preUI=FF001318)`; no DLL or source consulted]; NVForever's fixed
+`0xFE7F_0001`/`0xFE7F_0002` window is `[design]` and renderer-side overlay pass behavior
+remains `[hypothesis]`.
 
 **Renderer-side 3D camera overlay consumer (`engine/nvforever/src/camera_overlay.rs`).**
 `camera_overlay::sync` runs in `PostUpdate` ahead of `nif_attachments::produce` and
@@ -128,7 +135,7 @@ what NVForever does with each:
 | `between`: head to pelvis above 0, a node to itself | `1 0` | the engine's node places; the records-only lab candidate has no 3D and gives `0 0` |
 | `tonode`: the head 80-160 from the player's place, a missing block | `1 0` | as `between` |
 | `fromhit`: no hit yet | `0` | `0` |
-| `bound`: the root's size and radius above 0, a missing block's size | `4 1 4` | a missing block gives the root's bound [hypothesis from the 4]; in the candidate empty |
+| `bound`: the root's size and radius above 0, a missing block's size | `4 1 4` | a missing block gives a 4-element zero-radius bound `[0, 0, 0, 0]` (`w4c_b3_11b_jgnif_nodes_bounds`: `bndRoot=4(r=72.1),bndMiss=4(r=0.0)`); in the records-only candidate empty |
 | `missing`: a missing block's particle and property values | `0 0 0 0` | `0 0 0 0` |
 | `camera`: the camera within 200 of the player, the local place's height above 50 | `1 0` | the engine's camera; the candidate has none |
 | `screen`: WorldToScreen into variables | did not compile | not asked any more |

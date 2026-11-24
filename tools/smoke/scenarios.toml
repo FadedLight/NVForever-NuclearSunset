@@ -30269,6 +30269,7 @@ expect = [
   { text = "frame generation: DLSS Frame Generation (NVIDIA, through Streamline;", label = "the row's choice running" },
   { re = 'latency reduction: NVIDIA Reflex through Streamline \(sl\.reflex, eLowLatency\) on the window', label = "latency calls through Streamline's Reflex" },
   { re = 'DLSS-G: options: mode On, 1 generated frame\(s\) per real frame \(at most \d+\), 1280x720, depth and motion 853x480, back buffers left to DLSS-G, user interface recomposition on: eOk', label = "frame generation on in play at 2x" },
+  { re = 'DLSS-G: queue parallelism eBlockNoClientQueues: each frame.s first submit waits on DLSS-G.s inputs fence \(first value [1-9]\d*\)', label = "DLSS-G leaves the game's queue free, the next frame waiting on its inputs fence (docs/design/dlss-frame-generation.md \"Queue parallelism\")" },
   { re = 'DLSS-G: 1\d\.\d s: \d+ real frames, \d+ presented \((1\.[89]|2\.[0-2])\d* per real frame\), status eOk', label = "about two presented per real frame over ten seconds" },
   { re = 'fps counter: FPS \d+ +\(\d+ rendered\) +[\d.]+ ms ', label = "the overlay's FPS row reads the frames shown and the rendered ones apart" },
   { re = 'DLSS: evaluates: ([1-9]\d*) ok, 0 failed', label = "DLSS's evaluates with the shared frame numbers, none failed" },
@@ -35908,3 +35909,66 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error" },
 ]
 note = "The same start, spot search and poses as terrain-parallax-ground-pack (round 2, 2026-11-22), not yet checked by a run. The shots are saved as terrain-parallax-ground-pack-off-shots/terrain_parallax_ab_<seconds>s_<a|b|c>.png."
+
+[[scenario]]
+name = "gpu-occlusion-culling"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; nvforever gpu_occlusion.rs, engine/vendor/README.md bevy#26239): with the experiment NVF_OCCLUSION_CULLING=1 the main camera gets Bevy's two-phase GPU occlusion culling at Novac noon, the depth pyramid is built from the main pass's region and the culling passes compile, without a rendering error. Whether anything visible is culled is checked in screenshots against a run without it (§13)"
+areas = ["renderer", "graphics"]
+paths = [
+  "engine/nvforever/src/gpu_occlusion.rs", "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/depth.rs",
+  "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/downsample_depth.wesl", "engine/vendor/bevy_pbr/src/render/mesh_preprocess.wesl",
+  "engine/vendor/bevy_render/src/view/mod.rs",
+]
+env = { NVF_OCCLUSION_CULLING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Novac", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 20
+expect = [
+  { text = "occlusion culling: on for the main camera", count = 1, label = "the test aid turns it on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the culling or depth pyramid passes" },
+]
+
+[[scenario]]
+name = "occlusion-culling-row-pick"
+source = "#3783, docs/settings-reference.md occlusion-culling: the Graphics row Occlusion culling is off by default and is read once at the start; turning it on in the page keeps this run as it was (off) and writes the next start's choice. occlusion-culling-row starts in the same home"
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+note = "The home's INI may hold the row from an earlier run: the test aid keeps this run off, Defaults puts the row back to Off, then a click turns it on (as settings-switch-write does)."
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_OCCLUSION_CULLING = "0", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:16", NVF_PLAY_TEST_SETTINGS = "11:page,13:occlusion-culling", NVF_PLAY_TEST_PAUSE_MENU = "12:defaults" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 18
+expect = [
+  { text = "occlusion culling: off", count = 1, label = "the test aid keeps this run off" },
+  { text = "pause menu: settings back to their defaults", label = "Defaults puts the row back to Off" },
+  { text = "settings: occlusion-culling on", label = "the row turned on in the page" },
+]
+order = [["pause menu: settings back to their defaults", "settings: occlusion-culling on"]]
+forbid = [{ text = "occlusion culling: on for the main camera", label = "the run's state changed before the next start" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "occlusion-culling-row"
+source = "#3783, docs/settings-reference.md occlusion-culling: a start in occlusion-culling-row-pick's home reads the saved row and turns the culling on for the main camera"
+note = "runs after occlusion-culling-row-pick in the same home."
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 14
+expect = [{ text = "occlusion culling: on for the main camera", count = 1, label = "the saved row turns it on at the next start" }]
+forbid = [{ text = "occlusion culling: off", label = "the saved row not read" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "gpu-light-clustering"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; main.rs, engine/vendor/README.md bevy#25869, bevy#26588): NVF_GPU_CLUSTERING=1 keeps Bevy's GPU light clustering, with its per-view buffers kept from frame to frame, at Goodsprings at night with the town's lamps, without a rendering error (the default stays CPU clustering)"
+areas = ["renderer", "graphics"]
+paths = ["engine/vendor/bevy_pbr/src/cluster/gpu.rs", "engine/vendor/bevy_pbr/src/cluster/mod.rs"]
+env = { NVF_GPU_CLUSTERING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "23"]
+run_seconds = 20
+expect = [
+  { text = "lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)", count = 1, label = "GPU clustering is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the clustering passes" },
+]

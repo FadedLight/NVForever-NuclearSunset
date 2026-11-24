@@ -95,6 +95,8 @@ const ROW_W: f32 = 400.0 - ROW_X - 5.0;
 const NAME_X: f32 = 40.0;
 const NAME_Y: f32 = 20.0;
 const WRAP: f32 = 300.0;
+/// Width reserved for a ySI row icon when ySI is active (0 in vanilla).
+const YSI_ICON_ADVANCE: f32 = 30.0;
 const MARK: Rect = Rect { min: Vec2::new(15.0, 18.0), max: Vec2::new(40.0, 43.0) };
 /// A row is 51 high and its name's further lines 35 below the first [hypothesis: as the
 /// barter menu's rows, measured there, barter-menu.md §3].
@@ -884,7 +886,9 @@ pub(crate) fn wg_text(m: &MenuModel) -> String {
 
 /// Each row's height as drawn: a name broken over more lines makes its row taller.
 fn row_heights(c: &mut Ctx, m: &MenuModel) -> Vec<f32> {
-    m.list(Side::Player).rows.iter().map(|r| ROW_H + LINE_PITCH * c.lines(2, &row_text(r), Some(WRAP)).len().saturating_sub(1) as f32).collect()
+    let rows = &m.list(Side::Player).rows;
+    let wrap = WRAP - if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    rows.iter().map(|r| ROW_H + LINE_PITCH * c.lines(2, &row_text(r), Some(wrap)).len().saturating_sub(1) as f32).collect()
 }
 
 /// The first row to draw: the list's own first row, or a later one when the rows from
@@ -905,11 +909,14 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, 
     let x0 = MAIN.min.x + LIST.min.x + ROW_X;
     let mut y = MAIN.min.y + LIST.min.y;
     let rows = &m.list(Side::Player).rows;
+    let icon_advance = if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    let name_x = NAME_X + icon_advance;
+    let wrap = WRAP - icon_advance;
     let selected = m.selected[Side::Player as usize];
     let mut fit = 0;
     for i in first..rows.len() {
         let r = &rows[i];
-        let lines = c.lines(2, &row_text(r), Some(WRAP));
+        let lines = c.lines(2, &row_text(r), Some(wrap));
         let h = heights[i];
         if y + h > MAIN.min.y + LIST.max.y {
             break;
@@ -924,8 +931,11 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, 
                 p.spawn((at(mk.min.x, mk.min.y, mk.width(), mk.height()), BackgroundColor(bright)));
             }
         }
+        if let Some(icon) = r.ysi.as_ref().and_then(|d| d.icon.as_deref()) {
+            c.image(p, icon, at(x0 + NAME_X, y + 14.0, 24.0, 24.0), bright);
+        }
         for (k, l) in lines.iter().enumerate() {
-            c.set(p, 2, l, x0 + NAME_X, y + NAME_Y - THICK + LINE_PITCH * k as f32, Align::Left, bright);
+            c.set(p, 2, l, x0 + name_x, y + NAME_Y - THICK + LINE_PITCH * k as f32, Align::Left, bright);
         }
         p.spawn((at(x0, y, ROW_W, h), RowButton(i), Pickable::default())).observe(on_row_over).observe(on_touch_row_press).observe(on_row_click);
         y += h;

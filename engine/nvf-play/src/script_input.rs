@@ -454,14 +454,24 @@ pub(crate) fn init_mod_file_roots(d: &nvf_assets::GameData) {
 }
 
 /// Once the game's Data is open: mods' files are read from NVForever's mods layer, then
-/// the game's Data, and the archives answer FileExists (fnv_game::mod_files).
-fn mod_file_roots(data: Option<Res<nvf_assets::GameData>>, ready: Option<Res<ModFileRootsReady>>, mut done: Local<bool>) {
+/// the game's Data, and the archives answer FileExists (fnv_game::mod_files). Also reloads
+/// `kNVSE.ini` (`[Anim Fixes] sLegacyAnimTimePaths`) because `Game::new` can run before
+/// VFS roots are populated here.
+fn mod_file_roots(
+    data: Option<Res<nvf_assets::GameData>>,
+    ready: Option<Res<ModFileRootsReady>>,
+    mut script: Option<ResMut<crate::script::ScriptState>>,
+    mut done: Local<bool>,
+) {
     if ready.is_some() || *done {
         return;
     }
     let Some(d) = data else { return };
     *done = true;
     init_mod_file_roots(&d);
+    if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) {
+        rt.game.reload_knvse_ini();
+    }
 }
 
 #[cfg(test)]
@@ -606,6 +616,58 @@ mod kill_cam_state_tests {
         app.world_mut().remove_resource::<crate::phys::PhysState>();
         app.update();
         assert_eq!(is_in_air(&mut app, None), XVal::Num(0.0));
+    }
+
+    #[test]
+    fn mod_file_roots_reloads_knvse_ini_into_existing_script_runtime() {
+        let mut previous = None;
+        fnv_game::mod_files::update_roots(|r| previous = Some(std::mem::take(r)));
+        struct Guard {
+            root: std::path::PathBuf,
+            previous: Option<fnv_game::mod_files::Roots>,
+        }
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                if let Some(prev) = self.previous.take() {
+                    fnv_game::mod_files::set_roots(prev);
+                }
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("nvf-mod-file-roots-knvse-ini-{}-{stamp}", std::process::id()));
+        let plugins = root.join("NVSE").join("Plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let _guard = Guard { root: root.clone(), previous };
+
+        std::fs::write(
+            plugins.join("kNVSE.ini"),
+            b"[Anim Fixes]\nsLegacyAnimTimePaths = B42Inject,B42Interact,B42Loot\n",
+        )
+        .unwrap();
+
+        // Game::new runs BEFORE mod_file_roots populates VFS roots: defaults hold initially.
+        let mut app = App::new();
+        app.insert_resource(ScriptState::over_no_plugins())
+            .add_systems(Update, mod_file_roots);
+        {
+            let game = &app.world().resource::<ScriptState>().rt.as_ref().unwrap().game;
+            assert!(game.knvse_ini.legacy_anim_time_paths.is_empty());
+        }
+
+        // Once GameData opens, mod_file_roots updates roots and reloads kNVSE.ini immediately.
+        let data = nvf_assets::GameData::new(
+            std::sync::Arc::new(fnv_vfs::Vfs::open(&root, &[]).unwrap()),
+            std::sync::Arc::new(fnv_nif::Schema::default()),
+        );
+        app.insert_resource(data);
+        app.update();
+
+        let game = &app.world().resource::<ScriptState>().rt.as_ref().unwrap().game;
+        assert_eq!(game.knvse_ini.legacy_anim_time_paths, vec!["b42inject", "b42interact", "b42loot"]);
     }
 }
 

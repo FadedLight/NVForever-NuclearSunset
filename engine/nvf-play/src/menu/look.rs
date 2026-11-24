@@ -51,6 +51,8 @@ const PRICE_RIGHT: f32 = 403.0;
 /// Names wrap at 300 in the barter lists and 370 in the container's.
 const WRAP_BARTER: f32 = 300.0;
 const WRAP_CONTAINER: f32 = 370.0;
+/// Width reserved for a ySI row icon when ySI is active (0 in vanilla).
+const YSI_ICON_ADVANCE: f32 = 30.0;
 /// The heading: a line at the top with the title 50 in (the barter file 10 above the
 /// line, the container file 12.5), the arrows 17.5 × 35 at 30 and after the title, the
 /// caps or weight figure right-aligned at 449, 20 down.
@@ -265,8 +267,10 @@ pub fn first_shown(heights: &[f32], first: usize, selected: usize) -> usize {
 
 /// The lines of each row of a list as drawn, and the rows' heights.
 fn row_lines(m: &MenuModel, side: Side, kit: &Kit) -> (Vec<Vec<Line>>, Vec<f32>) {
-    let wrap = if matches!(m.mode, Mode::Barter(_)) { WRAP_BARTER } else { WRAP_CONTAINER };
-    let texts: Vec<Vec<Line>> = m.list(side).rows.iter().map(|r| kit.body.font.lines(&row_text(r), Some(wrap/kit.text_size))).collect();
+    let rows = &m.list(side).rows;
+    let icon_advance = if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    let wrap = (if matches!(m.mode, Mode::Barter(_)) { WRAP_BARTER } else { WRAP_CONTAINER }) - icon_advance;
+    let texts: Vec<Vec<Line>> = rows.iter().map(|r| kit.body.font.lines(&row_text(r), Some(wrap/kit.text_size))).collect();
     let heights = texts.iter().map(|t| (row_height(t.len())*kit.text_size).max(ROW_H)).collect();
     (texts, heights)
 }
@@ -527,6 +531,7 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side, x0
             }
         }
         let row_w = width - BAR_W - 5.0;
+        let name_x = NAME_X + if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
         let (texts, heights) = row_lines(m, side, c.kit);
         let first = shown_from(m, side, &heights, first);
         let mut y = 0.0;
@@ -561,9 +566,12 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, side: Side, x0
                 if let Some(mark) = mark {
                     c.image(row, mark, at(MARK_AT, MARK_AT, MARK, MARK), bright);
                 }
+                if let Some(icon) = r.ysi.as_ref().and_then(|d| d.icon.as_deref()) {
+                    c.image(row, icon, at(NAME_X, MARK_AT, 24.0, 24.0), bright);
+                }
                 for (k, line) in texts[i].iter().enumerate() {
                     super::readability::line(row,&c.kit.body,line,
-                        Vec2::new(NAME_X,(TEXT_Y+BODY_BASE+LINE_PITCH*k as f32)*c.kit.text_size),c.kit.text_size,bright);
+                        Vec2::new(name_x,(TEXT_Y+BODY_BASE+LINE_PITCH*k as f32)*c.kit.text_size),c.kit.text_size,bright);
                 }
                 if barter {
                     let price = r.price.map_or("--".to_string(), barter::price_text);

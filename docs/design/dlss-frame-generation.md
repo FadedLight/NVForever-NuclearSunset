@@ -144,6 +144,41 @@ and calls after: at most three moves can happen meanwhile).
   exit with DLSS-G set up crashed in `nvngx_dlssg.dll` [observed: the player's logs and dumps,
   2026-11-15]; that the detach is what crashed is a [hypothesis] the change tests.
 
+### Queue parallelism (2026-11-23)
+
+By default DLSS-G blocks "client's presenting queue ... until DLSSG workload execution completes"
+[documented: Streamline v2.14.16 `include/sl_dlss_g.h:55-66` `DLSSGQueueParallelismMode`; the
+facts are gathered in [streamline.md](../spec-notes/streamline.md) "Queue parallelism"]. wgpu has
+one queue, which presents, so the next frame's GPU work waited for all of DLSS-G's generation. The
+options now ask for `eBlockNoClientQueues` ("only supported on Vulkan presently ... maximum
+performance benefit from queue-level paralleism"): the next frame's work can run while DLSS-G
+generates on its own queues (`ProgrammingGuideDLSS_G.md`, Version 2.14.16, §17.0: gains are "most
+apparent in GPU-limited applications").
+
+Measured [observed, 2026-11-23, RTX 5090, driver 621.24, 3840x2160, DLSS Quality, every graphics
+setting at the top, Goodsprings at noon, 4x, no frame limit, Display sync Off, 45 s runs one at a
+time]: 96.5 real / 385 presented fps against 91.0 / 364 with `NVF_DLSSG_QUEUE=block` (+6%); Reflex's simulation to
+present latency 10.7 against 10.1 ms (run to run noise); steady slowest frames 14-18 ms in both; no
+present errors. With the frame limit reached (2x, Variable refresh, 152 / 76 fps) the two modes
+measure the same.
+
+The game must then keep its hands off DLSS-G's inputs (depth, motion, the HUD-less copy, the UI
+buffer) until DLSS-G has read them: "client must must wait on
+DLSSGState::inputsProcessingCompletionFence and associated value, before it can modify or destroy
+the tagged resources" [documented: same, `:59-63`; `:170-177`]. After each present with the mode
+on, `state` keeps that fence and `lastPresentInputsProcessingCompletionFenceValue`;
+`wait_for_inputs`, first in the next frame's `Render` on the render thread, stages a GPU wait on it
+(all commands) for the queue's next submit (wgpu-hal `Queue::add_wait_semaphore`), and wgpu-hal's relay semaphores keep every later
+submit behind that one. The Vulkan type is not in the headers or the guide; NVIDIA's sample waits
+on it as a timeline `VkSemaphore` with that value on its graphics queue, at the start of the frame,
+"before any of the inputs are modified in the subsequent command list submission", when DLSS-G
+was on last frame [documented: NVIDIA-RTX/Streamline_Sample tag v2.14.16, commit 94da85b65,
+`src/SLWrapper.cpp:250-279` `QueueGPUWaitOnSyncObjectSet`, `src/StreamlineSample.cpp:828-836` in
+`RenderScene`]. A wait no submit took is taken back before the next is staged, and when DLSS-G is
+loaded or unloaded. The log says it once:
+`DLSS-G: queue parallelism eBlockNoClientQueues: each frame's first submit waits on DLSS-G's
+inputs fence (first value N)`. `NVF_DLSSG_QUEUE=block` keeps the default mode, for comparisons.
+
 ### Frame pacing
 
 While DLSS-G runs, the frame cap (the page's, or variable refresh's) divided by the frames DLSS-G

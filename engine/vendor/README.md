@@ -87,6 +87,16 @@ average and bytes 0.067 EV apart, a curve `y = x` (no change) came out as a sawt
 between 0 and about −0.15 EV, so a daylight picture was darkened by up to 10 %, by an
 amount that jumped as the view's average crossed an entry.
 
+A second change (graphics pass 2026-11-23), marked `NVForever (upstream Bevy's fix,
+backported)`, in `src/auto_exposure/auto_exposure.wesl`: `compute_histogram` adds its
+workgroup's bins to the global histogram from the first 64 invocations only, and skips
+empty bins. Upstream 0.20.1 let all 256 invocations of the 16 × 16 workgroup do it; the
+indices past 63 were clamped onto bin 63, so the brightest bin was counted 194 times over
+(the metered average and exposure moved when bright pixels were in view) and every
+workgroup made ~200 contended atomics on that one address (the pass went from ~0.14 ms to
+below the GPU log's top entries at 4K with DLSS Quality on an RTX 5090). Upstream Bevy's
+main has the same guard.
+
 ## bevy_pbr 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 Bevy's 3D passes, for FSR upscaling (docs/design/fsr-upscaling.md), which draws the main
@@ -495,6 +505,35 @@ The shader that reads the bindings is nvforever's (`ssao_lighting.wesl`, patched
 component; without it the layouts and shader defs are upstream's, and the pipeline keys are
 the same keys numbered differently (the packed fields above the new bit moved up by one).
 As for the sun visibility, a meshlet view must not get the component.
+Graphics pass 2026-11-23, four more changes:
+
+- `src/cluster/gpu.rs`, `src/cluster/mod.rs`: bevy#25869 (GPU clustering keeps each view's
+  clustering buffers from frame to frame instead of making new ones; merged upstream after
+  0.20.1) and bevy#26588 (the clustering metadata staging buffers no longer pile up in a
+  list that is never emptied). nvforever still clusters on the CPU unless
+  `NVF_GPU_CLUSTERING=1` (main.rs): the buffer churn behind #897 is gone, but the GPU
+  path's cost has to be measured first.
+- `src/render/pbr_functions.wesl`, comments `NVForever shadow early-out`: a point or spot
+  light whose range does not reach the fragment, or that lies behind the shading normal,
+  gives shadow 0 without reading its shadow map or marching contact shadows, and a shadow
+  receiver facing away from a directional light likewise. The light's contribution there is
+  0 either way (Bevy's range falloff and N·L, and nvforever's display sum, lights.rs), so
+  the picture is unchanged. Not under `STANDARD_MATERIAL_CLEARCOAT`, whose second lobe has
+  a normal of its own.
+- `src/render/mesh_preprocess.wesl`, comment `NVForever: meshes that opt out of frustum
+  culling`: a mesh with `NoFrustumCulling` is never occlusion culled either (first-person
+  shapes write a squeezed depth their boxes do not describe; nvforever gpu_occlusion.rs).
+- bevy#26239 (open upstream; the `src/render/light.rs` and `src/meshlet/` parts): the
+  depth pyramid covers the main pass's region of the depth buffer (with bevy_core_pipeline
+  and bevy_render below).
+- bevy#26418 (open upstream, fixes bevy#26257; `src/render/gpu_preprocess.rs`, with its
+  stale-job clearing part in bevy_render's `batching/gpu_preprocessing.rs`): the GPU
+  preprocessing bind groups (bin unpacking, uniform allocation, preprocess, indirect
+  parameters) are kept from frame to frame, keyed by their resources, offsets and sizes, and
+  dropped after two unused frames, instead of being made again for every view, phase and
+  batch set each frame on the render thread. Its tests need upstream's `wgpu` `noop`
+  dev-dependency and are not built here.
+
 ## bevy_light 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 Vendored 2026-11-18, unchanged but for two patches. The first (shadow caster candidates, for
@@ -598,6 +637,12 @@ uniform grows by 48 bytes; the mesh view bind group keeps its entries. nvforever
 of `fog.wesl` and `pbr_functions.wesl` (fog.rs, haze.rs, aerial.rs, at run time) read it.
 Upstream has no way for an application to hand its own values to the fog shader (the
 uniform's free fields were used up by the desert haze, §3.16).
+
+Graphics pass 2026-11-23, one more change, marked `NVForever small casters`, in
+`src/lib.rs` `check_dir_light_mesh_visibility`: a caster whose bounding radius (box half
+diagonal times the largest scale) is below `nvf_small_caster_texels()` texels of a
+cascade's map (`Cascade::texel_size`) is left out of that cascade; `NVF_SMALL_CASTER_TEXELS`
+(default 1, 0 off). Meshes with `NoFrustumCulling` are never left out.
 
 ## bevy_render 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
@@ -893,6 +938,10 @@ each part marked by a comment starting `NVForever`:
 Without the setters and with `NVF_PIPELINE_THREADS=0`, upstream's path runs (no list pool
 either), except that the modules are made outside the lock.
 
+Graphics pass 2026-11-23: bevy#26239 (open upstream), `src/view/mod.rs`
+(`ExtractedView::main_pass_viewport`) and `src/occlusion_culling/mod.rs`, with
+bevy_core_pipeline below.
+
 ## bevy_shader 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 The shader cache, for composed shaders kept between runs (perf/pipeline-cache, 2026-11-19).
@@ -932,6 +981,19 @@ is queued again rather than failed for the run. `get` is
 takes the pipeline as an `Option` (`None` for the list's builds, which are not compiled
 again when a shader changes). Tests: `a_module_asked_twice_at_once_is_made_once_and_a_stale_one_is_not_kept`,
 `a_build_dropped_unfinished_wakes_its_waiters`, `shaders_are_found_by_a_path_only_they_have`.
+
+## bevy_core_pipeline 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
+
+Vendored 2026-11-23 (graphics pass) for bevy#26239 (open upstream): GPU occlusion culling's
+depth pyramid is built from the main pass's region of the depth buffer only, and the
+downsampling shader reads that region (`src/mip_generation/experimental/depth.rs`,
+`downsample_depth.wesl`, a `bytemuck` dependency as upstream's). Before it, with an
+upscaler's `MainPassResolutionOverride` the pyramid was made from the whole display-size
+texture while meshes were tested in render-rectangle coordinates. Upstream saw only
+hidden meshes drawn; in NVForever, whose upscaler glue copies the display-size depth back
+over the prepass depth (upscaler/prep.rs `expand_depth`), visible rocks, posts and plants
+were culled. The culling stays an experiment behind `NVF_OCCLUSION_CULLING=1`
+(nvforever gpu_occlusion.rs).
 
 ## wgpu-hal 30.0.1 (MIT OR Apache-2.0, the gfx-rs developers)
 

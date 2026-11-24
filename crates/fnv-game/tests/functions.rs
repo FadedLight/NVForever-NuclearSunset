@@ -2753,10 +2753,12 @@ fn kill_actor_drops_dead_detector_same_tick_and_is_actor_detected_invalid_receiv
     use fnv_script::vm::XVal;
     let f = fixture();
     let mut g = game(&f);
-    // Two living actors detect Player, and CHILD_REF also detects ADULT_REF.
+    // Two living actors detect Player. CHILD_REF also detects ADULT_REF
+    // and is itself seen by CREA_REF.
     actor_detected_seen(&mut g, CHILD_REF, PLAYER);
     actor_detected_seen(&mut g, CREA_REF, PLAYER);
     actor_detected_seen(&mut g, CHILD_REF, ADULT_REF);
+    actor_detected_seen(&mut g, CREA_REF, CHILD_REF);
     assert_eq!(g.detecting_actors(FormId::PLAYER_REF).len(), 2);
     assert_eq!(call(&mut g, 0x102D, Some(CHILD_REF), &[r(PLAYER)]), 1.0);
     assert_eq!(call(&mut g, 0x102D, Some(CHILD_REF), &[r(ADULT_REF)]), 1.0);
@@ -2785,6 +2787,13 @@ fn kill_actor_drops_dead_detector_same_tick_and_is_actor_detected_invalid_receiv
     );
     assert_eq!(same_tick, Ok(XVal::Num(10000.0)), "same-tick: nDet=1, gdP=0, gdA=0, detA=0, detP=0");
     assert_eq!(g.detecting_actors(FormId::PLAYER_REF), vec![FormId(CREA_REF)]);
+    assert!(g.detection.get(FormId(CHILD_REF), FormId(PLAYER)).is_none());
+    assert!(g.detection.get(FormId(CHILD_REF), FormId(ADULT_REF)).is_none());
+    assert!(
+        g.detection.get(FormId(CREA_REF), FormId(CHILD_REF)).is_some_and(|d| d.seen),
+        "the living observer's sight of the dead actor survives",
+    );
+    assert_eq!(call(&mut g, 0x102D, Some(CREA_REF), &[r(CHILD_REF)]), 1.0);
 
     // Re-establish a live detection on ADULT_REF so we prove invalid/null receivers do
     // not fall back to self_ref (ADULT_REF) and always return 0 while continuing.

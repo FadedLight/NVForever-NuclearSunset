@@ -332,14 +332,14 @@ output:
 - `PROBE|w4g_05_isactordetected_and_setclass_invalid|detNext(nDet=1,p=0,d=0,a1=0)`
 
 [design] On actor death (`Game::die`, called by `KillActor` and fatal combat damage),
-NVForever calls `self.detection.forget(r)` immediately so `GetDetectingActors`,
+NVForever immediately clears detections made by the dead actor. `GetDetectingActors`,
 `GetDetected`, `IsActorDetected`, and sneak-detection queries exclude the dead detector
-on the same tick without waiting for the quarter-second engine pruning round. Explicit
-null/non-form receivers on `IsActorDetected` log `no_reference_call` and return `0`
-without falling back to `self_ref`, continuing script execution. Missing receivers and
-cold/restored detection caches continue to read `0`; non-death cache expiry remains
-owned by the engine's measurement round (every quarter-second, forgetting pairs older
-than one game-time second).
+on the same tick. This cleanup preserves living observers' cached detections of
+that actor. Explicit null/non-form receivers on `IsActorDetected` log
+`no_reference_call` and return `0` without falling back to `self_ref`, continuing
+script execution. Missing receivers and cold/restored detection caches continue
+to read `0`. Normal cache expiry remains owned by the engine's measurement round
+(every quarter-second, forgetting pairs older than one game-time second).
 
 Process qualification: six authored shared VM controls cover explicit receiver
 precedence, incoming/outgoing pairs, player/self exclusion, teammates, mixed typed

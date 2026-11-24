@@ -539,9 +539,14 @@ impl Detections {
             .map(|((d, _), (det, _))| (*d, *det))
     }
 
-    /// Forget every pair one of whose actors is `r` (it unloaded, died or was disabled).
+    /// Forget every pair involving `r` after unload or disable.
     pub fn forget(&mut self, r: FormId) {
         self.pairs.retain(|(d, t), _| *d != r && *t != r);
+    }
+
+    /// Forget detections made by `r`, preserving other actors' detections of it.
+    pub fn forget_detector(&mut self, r: FormId) {
+        self.pairs.retain(|(d, _), _| *d != r);
     }
 
     /// Forget pairs not measured since `time`.

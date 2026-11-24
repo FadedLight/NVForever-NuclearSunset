@@ -29,49 +29,61 @@ use std::collections::{HashSet, VecDeque};
 const MAX_NESTED_FLST_VISITS: usize = 256;
 
 /// Evaluates an extended ySI predicate key. Returns `Match::Unknown` for unrecognized keys
-/// or malformed predicate values.
+/// or malformed predicate values. When `explicit_form` is true (rule carries an explicit
+/// `form` selector with `formlist: 0`), non-applicable record-type predicates on mismatched
+/// record types are ignored (`Match::Yes`) instead of disqualifying (`Match::No`)
+/// [hypothesis: matches yUI v1.4d runtime behavior].
 pub(crate) fn eval(
     g: &Game<'_>,
     item: FormId,
     fields: &Map<String, Json>,
     name: &str,
     value: &Json,
+    explicit_form: bool,
 ) -> Match {
     match name {
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (`"ammoMod": "FalloutNV.esm"`, companion to `ammoForm`)]
         "ammoMod" => Match::Yes,
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json; schemas/fnv/objects.json WEAP.NAM0]
-        "ammoForm" => weapon_ammo_match(g, item, fields, value),
+        "ammoForm" => weapon_ammo_match(g, item, fields, value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (values 3, 7); schemas/fnv/objects.json WEAP.DATA.clip_size;
         //  observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d, bSortingIcons=1): >= N threshold]
-        "weaponClipRounds" => weapon_threshold_ge(g, item, "DATA", "clip_size", value),
+        "weaponClipRounds" => weapon_threshold_ge(g, item, "DATA", "clip_size", value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 4); schemas/fnv/objects.json WEAP.DNAM.projectile_count;
         //  observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d, bSortingIcons=1): >= N threshold]
-        "weaponNumProjectiles" => weapon_threshold_ge(g, item, "DNAM", "projectile_count", value),
+        "weaponNumProjectiles" => weapon_threshold_ge(g, item, "DNAM", "projectile_count", value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (values 10, 11); schemas/fnv/objects.json WEAP.DNAM.attack_animation]
-        "weaponAttackAnim" => weapon_int_field(g, item, "DNAM", "attack_animation", value),
+        "weaponAttackAnim" => weapon_int_field(g, item, "DNAM", "attack_animation", value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 3); schemas/fnv/objects.json WEAP.DNAM.grip_animation]
-        "weaponHandgrip" => weapon_int_field(g, item, "DNAM", "grip_animation", value),
+        "weaponHandgrip" => weapon_int_field(g, item, "DNAM", "grip_animation", value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 2); schemas/fnv/objects.json WEAP.VNAM]
-        "weaponSoundLevel" => weapon_int_field(g, item, "VNAM", "", value),
+        "weaponSoundLevel" => weapon_int_field(g, item, "VNAM", "", value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json; schemas/fnv/objects.json ARMO.DNAM.damage_threshold;
-        //  GECK wiki SetArmorDT; hypothesis: >= N minimum DT threshold honoring live SetArmorDT overrides]
-        "armorDT" => armor_dt(g, item, value),
+        //  GECK wiki SetArmorDT; observed: w4e_c01_ysi_armordt_sibling_formlist2 (#3803): >= N minimum DT threshold]
+        "armorDT" => armor_dt(g, item, value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (values 54, 20, 16); schemas/fnv/objects.json ALCH/MGEF]
-        "aidRestoresAV" => aid_effect_av(g, item, value, true),
+        "aidRestoresAV" => aid_effect_av(g, item, value, true, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 54); schemas/fnv/objects.json ALCH/MGEF]
-        "aidDamagesAV" => aid_effect_av(g, item, value, false),
+        "aidDamagesAV" => aid_effect_av(g, item, value, false, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 1);
         //  observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d, bSortingIcons=1): matches WaterPurified, rejects SalisburySteak/NukaCola]
-        "aidIsWater" => aid_is_water(g, item, value),
+        "aidIsWater" => aid_is_water(g, item, value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 1);
         //  observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d, bSortingIcons=1): matches BleakVenom]
-        "aidIsPoisonous" => aid_is_poisonous(g, item, value),
+        "aidIsPoisonous" => aid_is_poisonous(g, item, value, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 1); schemas/fnv/gameplay.json RCPE.RCIL]
-        "miscComponent" => recipe_membership(g, item, value, true),
+        "miscComponent" => recipe_membership(g, item, value, true, explicit_form),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 1); schemas/fnv/gameplay.json RCPE.RCOD]
-        "miscProduct" => recipe_membership(g, item, value, false),
+        "miscProduct" => recipe_membership(g, item, value, false, explicit_form),
         _ => Match::Unknown,
+    }
+}
+
+fn mismatched_type(explicit_form: bool) -> Match {
+    if explicit_form {
+        Match::Yes
+    } else {
+        Match::No
     }
 }
 
@@ -166,16 +178,17 @@ fn flst_contains_recursive(g: &Game<'_>, root_list: FormId, needle: FormId) -> b
 /// Evaluates `armorDT` minimum threshold against an `ARMO`'s effective Damage Threshold
 /// (honoring live `SetArmorDT` overrides) [documented: Sorting Icons 1.4b
 /// `menus/ySI/ySI.json`, `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`, GECK wiki
-/// `SetArmorDT`; hypothesis: `dt >= threshold`].
-/// [design] Non-`ARMO` forms disqualify as `Match::No`; negative, non-finite, or non-numeric
-/// thresholds remain `Match::Unknown`.
-fn armor_dt(g: &Game<'_>, item: FormId, value: &Json) -> Match {
-    if g.data.sig(item) != Some(*b"ARMO") {
-        return Match::No;
-    }
+/// `SetArmorDT`; observed: `w4e_c01_ysi_armordt_sibling_formlist2` (#3803): `dt >= threshold`;
+/// hypothesis: non-applicable `armorDT` on non-`ARMO` forms is skipped (`Match::Yes`) when
+/// paired with an explicit `form` selector, and disqualifies (`Match::No`) otherwise].
+/// [design] Negative, non-finite, or non-numeric thresholds remain `Match::Unknown`.
+fn armor_dt(g: &Game<'_>, item: FormId, value: &Json, explicit_form: bool) -> Match {
     let Some(threshold) = value.as_f64().filter(|n| n.is_finite() && *n >= 0.0) else {
         return Match::Unknown;
     };
+    if g.data.sig(item) != Some(*b"ARMO") {
+        return mismatched_type(explicit_form);
+    }
     let base = g.unclone(item);
     let dt = g
         .world
@@ -209,9 +222,9 @@ fn threshold_ge(value: &Json, actual: i64) -> Match {
     }
 }
 
-fn weapon_threshold_ge(g: &Game<'_>, item: FormId, sub: &str, path: &str, value: &Json) -> Match {
+fn weapon_threshold_ge(g: &Game<'_>, item: FormId, sub: &str, path: &str, value: &Json, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"WEAP") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     match crate::nvse::record_value(g, item, sub, path) {
         Some(XVal::Num(n)) if n.is_finite() => threshold_ge(value, n.trunc() as i64),
@@ -219,9 +232,9 @@ fn weapon_threshold_ge(g: &Game<'_>, item: FormId, sub: &str, path: &str, value:
     }
 }
 
-fn weapon_int_field(g: &Game<'_>, item: FormId, sub: &str, path: &str, value: &Json) -> Match {
+fn weapon_int_field(g: &Game<'_>, item: FormId, sub: &str, path: &str, value: &Json, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"WEAP") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     match crate::nvse::record_value(g, item, sub, path) {
         Some(XVal::Num(n)) if n.is_finite() => number_set(value, n.trunc() as i64),
@@ -229,9 +242,9 @@ fn weapon_int_field(g: &Game<'_>, item: FormId, sub: &str, path: &str, value: &J
     }
 }
 
-fn weapon_ammo_match(g: &Game<'_>, item: FormId, fields: &Map<String, Json>, value: &Json) -> Match {
+fn weapon_ammo_match(g: &Game<'_>, item: FormId, fields: &Map<String, Json>, value: &Json, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"WEAP") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     let Some(plugin) = fields.get("ammoMod").and_then(Json::as_str) else {
         return Match::Unknown;
@@ -265,9 +278,9 @@ fn weapon_ammo_match(g: &Game<'_>, item: FormId, fields: &Map<String, Json>, val
     }
 }
 
-fn aid_effect_av(g: &Game<'_>, item: FormId, value: &Json, restores: bool) -> Match {
+fn aid_effect_av(g: &Game<'_>, item: FormId, value: &Json, restores: bool, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"ALCH") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     let base = g.unclone(item);
     let effects = g.data.effect_items.get(&base).map(Vec::as_slice).unwrap_or(&[]);
@@ -300,9 +313,9 @@ fn aid_effect_av(g: &Game<'_>, item: FormId, value: &Json, restores: bool) -> Ma
     }
 }
 
-fn aid_is_water(g: &Game<'_>, item: FormId, value: &Json) -> Match {
+fn aid_is_water(g: &Game<'_>, item: FormId, value: &Json, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"ALCH") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     let base = g.unclone(item);
     let restores_dehydration = g
@@ -323,16 +336,16 @@ fn aid_is_water(g: &Game<'_>, item: FormId, value: &Json) -> Match {
     bool_pred(value, restores_dehydration, false)
 }
 
-fn aid_is_poisonous(g: &Game<'_>, item: FormId, value: &Json) -> Match {
+fn aid_is_poisonous(g: &Game<'_>, item: FormId, value: &Json, explicit_form: bool) -> Match {
     if g.data.sig(item) != Some(*b"ALCH") {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     bool_pred(value, g.is_poison(item), false)
 }
 
-fn recipe_membership(g: &Game<'_>, item: FormId, value: &Json, ingredient: bool) -> Match {
+fn recipe_membership(g: &Game<'_>, item: FormId, value: &Json, ingredient: bool, explicit_form: bool) -> Match {
     if g.world.forms.item(g.unclone(item)).is_none() {
-        return Match::No;
+        return mismatched_type(explicit_form);
     }
     let target = g.unclone(item);
     let has = g.data.recipes.keys().copied().any(|id| {

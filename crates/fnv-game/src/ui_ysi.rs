@@ -43,7 +43,12 @@ pub struct YsiItemDisplay {
 }
 
 /// Picks the icon template name: explicit non-empty rule template, else `ySIDefault` when
-/// tagged/icon-bearing or `ySINoTag` otherwise [design: `docs/spec-notes/ysi-filename.md`].
+/// tagged/icon-bearing or `ySINoTag` otherwise [documented: ySI - Sorting Ycons v1.4b
+/// (Nexus Mods 74358), shipped `menus/ySI/ySI.xml` and `menus/ySI/ySI.json` declare the
+/// `ySIDefault` and `ySINoTag` template names (no yUI/ySI DLL or source consulted);
+/// hypothesis: unprobed row-rendering fallback from an omitted rule template to
+/// `ySIDefault`/`ySINoTag` (note `ySIGetTrait "template"` returns `""` in yUI v1.4d per
+/// `w4e_02_ysi_metadata_traits`)].
 pub fn row_template_or_default(template: Option<&str>, has_icon_or_tag: bool) -> String {
     if let Some(t) = template.map(str::trim).filter(|s| !s.is_empty()) {
         return t.to_string();
@@ -71,8 +76,11 @@ pub fn menu_has_ysi(ui: &Ui, tile: TileId) -> bool {
 /// Menu class code of `HUDMainMenu` (`fnv_ui::value::MENU_CLASSES`).
 const HUD_MENU_CODE: u16 = 1004;
 
-/// Menus that host `menus/ySI/ySI.xml` when present in the VFS [design:
-/// `docs/spec-notes/ysi-ui-injection.md`].
+/// Menus that host `menus/ySI/ySI.xml` when present in the VFS [documented: ySI - Sorting
+/// Ycons v1.4b (Nexus Mods 74358), shipped `menus/ySI/ySI.xml` (no yUI/ySI DLL or source
+/// consulted); observed: `BarterMenu` injection (`_ySI=1`, `_ySIPipBoy=0`) in
+/// `w4e_c01_ysi_armordt_sibling_formlist2` (`tools/capture/nvse/catalogs/wave4e_mods.json`,
+/// #3803); hypothesis: remaining target menu list (`docs/spec-notes/ysi-ui-injection.md`)].
 pub const TARGET_MENUS: &[(u16, &str)] = &[
     (HUD_MENU_CODE, "HUDMainMenu"),
     (menus::INVENTORY, "InventoryMenu"),

@@ -696,28 +696,35 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // ---- yUI ----
         // `"tag"|"string"|"icon"|"filename" [form]` and `trait value [form]`: ySI's
         // sorting tag and icon of the form, else of the calling reference's base
-        // [documented: GECK wiki ySIGetTrait, ySISetTrait; hypothesis: the 5 yUI v1.4d
-        // (plugin version 140) rules below; observed: empty `""` return when no ySI
-        // JSON packs exist via `w4c_b4_15b_ysi_no_json_fallback` in #3679]:
+        // [documented: GECK wiki ySIGetTrait, ySISetTrait; observed: Fallout: New Vegas
+        // 1.4.0.525 + xNVSE 6.4.9 + yUI v1.4d (140), 2026-11-24, `GSDocMitchellHouse`
+        // (`0x00103DF9`), 10 official base masters, isolated clean-room staging copy,
+        // `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`,
+        // `w4e_03_ysi_unmatched_icon_fallback`, `w4e_04_ysi_worldref_arg_vs_dot`,
+        // `w4e_c01_ysi_armordt_sibling_formlist2` (`tools/capture/nvse/catalogs/wave4e_mods.json`,
+        // #3803) and `w4c_b4_15b_ysi_no_json_fallback` (`wave4c_extenders.json`, #3679);
+        // zero DLL, PDB, or third-party source consulted]:
         // - Dot-receiver unwraps a placed world reference to its base form, whereas an
-        //   explicit form argument is NOT unwrapped [hypothesis].
-        // - `"string"` is an exact alias for `"tag"` on both get and set [hypothesis].
-        // - `"icon"` and `"filename"` share the same tag-scoped store [hypothesis]; when
-        //   `menus/ySI/*.json` packs are loaded, an unmatched/untagged form's `"icon"`
-        //   falls back to `"interface\\icons\\Misc_Unknown.dds"` [hypothesis], while
-        //   returning `""` when no ySI JSON packs exist (`w4c_b4_15b_ysi_no_json_fallback`).
+        //   explicit form argument is NOT unwrapped (`w4e_04_ysi_worldref_arg_vs_dot`).
+        // - `"string"` is an exact alias for `"tag"` on both get and set (`w4e_01_ysi_string_alias`).
+        // - `"icon"` and `"filename"` share the exact same non-aborting path and tag-scoped
+        //   store (`w4e_c01_ysi_armordt_sibling_formlist2`): when `menus/ySI/*.json` packs
+        //   are loaded, an unmatched/untagged/non-item form falls back to
+        //   `"interface\\icons\\Misc_Unknown.dds"` (`w4e_03_ysi_unmatched_icon_fallback`),
+        //   while returning `""` when no ySI JSON packs exist (`w4c_b4_15b_ysi_no_json_fallback`).
         // - Metadata trait names (`"template"`, `"systemcolor"`, `"category"`, `"name"`,
         //   `"tab"`, `"count"`) return `""` on `ySIGetTrait` and `0` (rejected no-op) on
-        //   `ySISetTrait` [hypothesis].
+        //   `ySISetTrait` (`w4e_02_ysi_metadata_traits`).
         "ysigettrait" | "ysisettrait" => {
             const UNMATCHED_ICON: &str = "interface\\icons\\Misc_Unknown.dds";
             let set = name == "ysisettrait";
             let trait_name = text(args, 0).to_ascii_lowercase();
             let at = if set { 2 } else { 1 };
-            // [hypothesis] Explicit form arguments do NOT unwrap placed world references;
-            // dot-receiver calls unwrap to base form.
-            let f = if let Some(explicit) = form(args, at) {
-                Some(g.unclone(explicit))
+            // [observed: w4e_04] Explicit form arguments do NOT unwrap placed world
+            // references, and an explicit empty/null form argument does not fall back to
+            // implicit `self`; omitted form arguments use `subject` and unwrap to base.
+            let f = if args.get(at).is_some() {
+                form(args, at).map(|explicit| g.unclone(explicit))
             } else {
                 subject.map(|s| {
                     let orig = g.unclone(s);
@@ -764,9 +771,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                 }
             } else {
                 XVal::Str(match trait_name.as_str() {
-                    // [hypothesis] "string" returns the raw tag.
+                    // [observed: w4e_01_ysi_string_alias] "string" returns the raw tag.
                     "tag" | "string" => effective_tag(g, f).unwrap_or_default(),
-                    "icon" => {
+                    // [observed: w4e_03, w4e_04, w4e_c01, w4c_b4_15b] "icon" and "filename"
+                    // share the same non-aborting path, tag-scoped override store, and
+                    // loaded-JSON Misc_Unknown.dds / absent-JSON "" fallback.
+                    "icon" | "filename" => {
                         let fallback = |g: &mut Game<'_>| {
                             if crate::ysi_filename::has_loaded_book(g) {
                                 UNMATCHED_ICON.to_string()

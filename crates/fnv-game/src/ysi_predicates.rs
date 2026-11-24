@@ -55,10 +55,7 @@ pub(crate) fn eval(
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (value 2); schemas/fnv/objects.json WEAP.VNAM]
         "weaponSoundLevel" => weapon_int_field(g, item, "VNAM", "", value),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json; schemas/fnv/objects.json ARMO.DNAM.damage_threshold;
-        //  GECK wiki SetArmorDT; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official
-        //  base masters, isolated clean-room staging, yUI 140 + synthetic w4e_armordt.json, GSDocMitchellHouse
-        //  (0x00103DF9), Wave 4E black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`: >= N minimum DT
-        //  threshold (6->zdt05, 12->zdt10, 15->zdt14, 22->zdt20); zero DLL/PDB/source consulted]
+        //  GECK wiki SetArmorDT; hypothesis: >= N minimum DT threshold honoring live SetArmorDT overrides]
         "armorDT" => armor_dt(g, item, value),
         // [documented: Sorting Icons 1.4b menus/ySI/ySI.json (values 54, 20, 16); schemas/fnv/objects.json ALCH/MGEF]
         "aidRestoresAV" => aid_effect_av(g, item, value, true),
@@ -80,12 +77,8 @@ pub(crate) fn eval(
 
 /// Evaluates `formlist: 2` against `mod` + `form` [documented: Sorting Icons 1.4b
 /// `menus/ySI/ySI.json` (`"formlist": 2`), `schemas/fnv/objects.json` `WEAP`/`ARMO.REPL`,
-/// GECK wiki `SetRepairList`; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9,
-/// 2026-11-24, 10 official base masters, isolated clean-room staging, yUI 140 + ySI.json,
-/// GSDocMitchellHouse (0x00103DF9), Wave 4E black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`:
-/// `formlist: 2` resolves `WeapBrassKnuckles` (`0x4324` -> `"(fna1)"`); zero DLL/PDB/source
-/// consulted; hypothesis: recursive nested `FLST` traversal and mixed live non-`FLST`
-/// direct equality]:
+/// GECK wiki `SetRepairList`; hypothesis: `REPL` repair-list matching, recursive nested
+/// `FLST` traversal, and mixed live non-`FLST` direct equality]:
 /// - When a resolved target form is an `FLST`, matches if `item`'s effective repair list
 ///   (`REPL`, including `SetRepairList` overrides) equals that `FLST` OR if `item` is
 ///   reachable through `FLST` membership (including nested `FLST`s with a cycle guard).
@@ -173,11 +166,7 @@ fn flst_contains_recursive(g: &Game<'_>, root_list: FormId, needle: FormId) -> b
 /// Evaluates `armorDT` minimum threshold against an `ARMO`'s effective Damage Threshold
 /// (honoring live `SetArmorDT` overrides) [documented: Sorting Icons 1.4b
 /// `menus/ySI/ySI.json`, `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`, GECK wiki
-/// `SetArmorDT`; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10
-/// official base masters, isolated clean-room staging, yUI 140 + synthetic `w4e_armordt.json`,
-/// GSDocMitchellHouse (0x00103DF9), Wave 4E black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`:
-/// `dt >= threshold` (`6->zdt05`, `12->zdt10`, `15->zdt14`, `22->zdt20`); zero DLL/PDB/source
-/// consulted].
+/// `SetArmorDT`; hypothesis: `dt >= threshold`].
 /// [design] Non-`ARMO` forms disqualify as `Match::No`; negative, non-finite, or non-numeric
 /// thresholds remain `Match::Unknown`.
 fn armor_dt(g: &Game<'_>, item: FormId, value: &Json) -> Match {

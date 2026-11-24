@@ -696,29 +696,26 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // ---- yUI ----
         // `"tag"|"string"|"icon"|"filename" [form]` and `trait value [form]`: ySI's
         // sorting tag and icon of the form, else of the calling reference's base
-        // [documented: GECK wiki ySIGetTrait, ySISetTrait; observed: Fallout: New Vegas
-        // 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official base masters, isolated
-        // clean-room staging, yUI 140 + ySI.json, GSDocMitchellHouse (0x00103DF9),
-        // Wave 4E black-box probes `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`,
-        // `w4e_03_ysi_unmatched_icon_fallback`, `w4e_04_ysi_worldref_arg_vs_dot`, and
-        // `w4e_c01_ysi_armordt_sibling_formlist2`; zero DLL/PDB/source consulted]:
+        // [documented: GECK wiki ySIGetTrait, ySISetTrait; hypothesis: the 5 yUI v1.4d
+        // (plugin version 140) rules below; observed: empty `""` return when no ySI
+        // JSON packs exist via `w4c_b4_15b_ysi_no_json_fallback` in #3679]:
         // - Dot-receiver unwraps a placed world reference to its base form, whereas an
-        //   explicit form argument is NOT unwrapped (`w4e_04`).
-        // - `"string"` is an exact alias for `"tag"` on both get and set (`w4e_01`).
-        // - `"icon"` and `"filename"` share the same tag-scoped store (`w4e_c01`); when
+        //   explicit form argument is NOT unwrapped [hypothesis].
+        // - `"string"` is an exact alias for `"tag"` on both get and set [hypothesis].
+        // - `"icon"` and `"filename"` share the same tag-scoped store [hypothesis]; when
         //   `menus/ySI/*.json` packs are loaded, an unmatched/untagged form's `"icon"`
-        //   falls back to `"interface\\icons\\Misc_Unknown.dds"` (`w4e_03`), while
-        //   returning `""` when no ySI JSON packs exist (`w4c_b4_15b`).
+        //   falls back to `"interface\\icons\\Misc_Unknown.dds"` [hypothesis], while
+        //   returning `""` when no ySI JSON packs exist (`w4c_b4_15b_ysi_no_json_fallback`).
         // - Metadata trait names (`"template"`, `"systemcolor"`, `"category"`, `"name"`,
         //   `"tab"`, `"count"`) return `""` on `ySIGetTrait` and `0` (rejected no-op) on
-        //   `ySISetTrait` (`w4e_02`).
+        //   `ySISetTrait` [hypothesis].
         "ysigettrait" | "ysisettrait" => {
             const UNMATCHED_ICON: &str = "interface\\icons\\Misc_Unknown.dds";
             let set = name == "ysisettrait";
             let trait_name = text(args, 0).to_ascii_lowercase();
             let at = if set { 2 } else { 1 };
-            // [observed: w4e_04_ysi_worldref_arg_vs_dot] Explicit form arguments do NOT
-            // unwrap placed world references; dot-receiver calls unwrap to base form.
+            // [hypothesis] Explicit form arguments do NOT unwrap placed world references;
+            // dot-receiver calls unwrap to base form.
             let f = if let Some(explicit) = form(args, at) {
                 Some(g.unclone(explicit))
             } else {
@@ -742,14 +739,13 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             if set {
                 let v = text(args, 1);
                 match trait_name.as_str() {
-                    // [observed: w4e_01_ysi_string_alias, w4e_c01_ysi_armordt_sibling_formlist2]
+                    // [hypothesis] "string" is an exact alias for "tag" and returns 1.
                     "tag" | "string" => {
                         g.small.ysi_tag.insert(f, v);
                         yes(true)
                     }
-                    // [documented: GECK wiki YSISetTrait ("icon"); observed:
-                    // w4e_c01_ysi_armordt_sibling_formlist2 ("icon" and "filename" share
-                    // the tag-scoped store; (trait, value, form) order returns 1)]
+                    // [documented: GECK wiki YSISetTrait ("icon"); hypothesis: "icon" and
+                    // "filename" share the tag-scoped store; (trait, value, form) order returns 1]
                     "icon" | "filename" => {
                         match effective_tag(g, f) {
                             Some(t) => {
@@ -761,14 +757,14 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                         }
                         yes(true)
                     }
-                    // [observed: w4e_02_ysi_metadata_traits] Metadata trait names and
-                    // unknown traits are rejected no-ops returning 0 in yUI 140.
+                    // [hypothesis] Metadata trait names and unknown traits are rejected
+                    // no-ops returning 0 on yUI v1.4d (plugin version 140).
                     "template" | "systemcolor" | "category" | "name" | "tab" | "count" => zero,
                     _ => zero,
                 }
             } else {
                 XVal::Str(match trait_name.as_str() {
-                    // [observed: w4e_01_ysi_string_alias] "string" returns the raw tag.
+                    // [hypothesis] "string" returns the raw tag.
                     "tag" | "string" => effective_tag(g, f).unwrap_or_default(),
                     "icon" => {
                         let fallback = |g: &mut Game<'_>| {
@@ -795,8 +791,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                                 .unwrap_or_else(|| fallback(g)),
                         }
                     }
-                    // [observed: w4e_02_ysi_metadata_traits] All 6 icon-rule metadata
-                    // trait names return "" in yUI 140.
+                    // [hypothesis] All 6 icon-rule metadata trait names return "" on yUI
+                    // v1.4d (plugin version 140).
                     "template" | "systemcolor" | "category" | "name" | "tab" | "count" => {
                         String::new()
                     }

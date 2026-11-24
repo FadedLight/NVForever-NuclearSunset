@@ -495,16 +495,13 @@ pub(crate) fn number_set(value: &Json, number: i64) -> Match {
     }
 }
 
-/// Match a boolean ySI predicate: `1` / `true` = required true, `0` / `false` = required
-/// false [observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d) on `weaponHasScope`;
-/// Wave 4E black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`, 2026-11-24, 10 official
-/// base masters, isolated clean-room staging, GSDocMitchellHouse (0x00103DF9): JSON bool
-/// `true` and integer `0` both match; zero DLL/PDB/source consulted], and `-1` = required
-/// false only when `allow_neg_one` is true (armor biped-slot rules [documented: Sorting
-/// Icons 1.4b menus/ySI/ySI.json uses `1` and `-1` on armor slot rules such as
-/// `"armorHat": 1, "armorMask": -1`]; on non-slot flags `-1` was observed not to match
-/// false in `yUI 1.4d` and stays `Match::Unknown`). Any other JSON value remains
-/// `Match::Unknown`.
+/// Match a boolean ySI predicate: `1` = required true, `0` = required false [observed:
+/// FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d) on `weaponHasScope`], JSON `true`/`false`
+/// [hypothesis], and `-1` = required false only when `allow_neg_one` is true (armor
+/// biped-slot rules [documented: Sorting Icons 1.4b menus/ySI/ySI.json uses `1` and `-1`
+/// on armor slot rules such as `"armorHat": 1, "armorMask": -1`]; on non-slot flags `-1`
+/// was observed not to match false in `yUI 1.4d` and stays `Match::Unknown`). Any other
+/// JSON value remains `Match::Unknown`.
 pub(crate) fn bool_pred(value: &Json, actual: bool, allow_neg_one: bool) -> Match {
     if let Some(b) = value.as_bool() {
         return if actual == b { Match::Yes } else { Match::No };

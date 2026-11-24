@@ -873,7 +873,7 @@ fn json_backed_tag_and_icon_traits_honor_overrides_tag_sharing_and_clearing() {
     );
 
     // Explicitly clearing a tag to "" suppresses the JSON tag without affecting other forms;
-    // with ySI.json loaded, untagged "icon" falls back to Misc_Unknown.dds (w4e_03).
+    // with ySI.json loaded, untagged "icon" falls back to Misc_Unknown.dds [hypothesis].
     success(&mut g, "ySISetTrait \"tag\" \"\" OwnYsiItem");
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiItem)"),
@@ -1702,9 +1702,9 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
     let f = armor_and_mode2_fixture();
     let mut g = game(&f);
 
-    // w4e_01_ysi_string_alias: "string" returns only the raw sorting tag (not "{tag} {name}").
-    // Priority-25 weaponIsAutomatic=false (JSON bool) beats priority-20 (w01) for non-auto weapons;
-    // verify JSON bool matching first, then restore clean (w01) config for trait checks.
+    // "string" returns only the raw sorting tag (not "{tag} {name}") [hypothesis].
+    // Priority-25 weaponIsAutomatic=false (JSON bool [hypothesis]) beats priority-20 (w01)
+    // for non-auto weapons; verify JSON bool matching first, then restore clean (w01) config.
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiDirectGun)"),
         XVal::Str("(nonauto)".into())
@@ -1733,7 +1733,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
     );
     let mut g = game(&f);
 
-    // w4e_01: "string" is an exact alias for "tag" on both get and set (leaving siblings unchanged).
+    // "string" is an exact alias for "tag" on both get and set (leaving siblings unchanged) [hypothesis].
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiReplGun)"),
         XVal::Str("(w01)".into())
@@ -1747,7 +1747,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str(String::new())
     );
 
-    // w4e_02_ysi_metadata_traits: all 6 metadata names return "" on get and 0 (no-op) on set.
+    // All 6 metadata names return "" on get and 0 (no-op) on set [hypothesis].
     for meta in ["template", "systemcolor", "category", "name", "tab", "count"] {
         assert_eq!(
             success(&mut g, &format!("SetFunctionValue (ySIGetTrait \"{meta}\" OwnYsiReplGun)")),
@@ -1767,8 +1767,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
     // JSON icon rule's template still flows to Game::ysi_item_display (untouched by rejected set).
     assert_eq!(g.ysi_item_display(FormId(0x874)).unwrap().template, "ySICustom");
 
-    // w4e_03_ysi_unmatched_icon_fallback: unmatched/untagged forms return Misc_Unknown.dds when
-    // ySI.json is loaded.
+    // Unmatched/untagged forms return Misc_Unknown.dds when ySI.json is loaded [hypothesis].
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiDirectGun)"),
         XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
@@ -1778,7 +1777,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
     );
 
-    // w4e_c01: ySISetTrait "icon" and "filename" share the tag-scoped store and return 1.
+    // ySISetTrait "icon" and "filename" share the tag-scoped store and return 1 [hypothesis].
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySISetTrait \"icon\" \"Owned/sib_icon.dds\" OwnYsiReplGun)"),
         XVal::Num(1.0)
@@ -1796,8 +1795,8 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str("Owned/sib_file.dds".into())
     );
 
-    // w4e_01: ySISetTrait "string" mutates both "tag" and "string" per-form (leaving siblings),
-    // and ySISetTrait "tag" likewise updates "string".
+    // ySISetTrait "string" mutates both "tag" and "string" per-form (leaving siblings),
+    // and ySISetTrait "tag" likewise updates "string" [hypothesis].
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySISetTrait \"string\" \"(zstr)\" OwnYsiReplGun)"),
         XVal::Num(1.0)
@@ -1823,8 +1822,8 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str("(w4et)".into())
     );
 
-    // w4e_04_ysi_worldref_arg_vs_dot: dot-receiver unwraps placed world ref to base form,
-    // whereas explicit 2nd-arg world ref does NOT unwrap.
+    // Dot-receiver unwraps placed world ref to base form, whereas explicit 2nd-arg world
+    // ref does NOT unwrap [hypothesis].
     let ext = extended_fixture();
     files.write(
         "ySI.json",

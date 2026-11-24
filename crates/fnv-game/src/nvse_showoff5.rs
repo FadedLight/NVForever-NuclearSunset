@@ -276,14 +276,17 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         }
         // `[numPerks] [title]`: the menu on its perks page alone, no level gained; the
         // level's perks by default (1 at a perk level, else 0, which only browses); 0 when
-        // no perk is left to take [documented: ShowPerkMenu]. Returns 1 even when
-        // SkillMenu / LevelUpMenu is already open [observed: so_36_show_perk_menu_while_open:
-        // 1,1,1]; same-frame GetLevelUpMenuPoints 1 0 reads 0 [observed:
-        // so_26_levelup_perk_menu_points: 1,0,0,1,-1].
+        // no perk is left to take [documented: ShowPerkMenu]. Allowed when no menu is open
+        // or when SkillMenu / LevelUpMenu (`menus::LEVEL_UP`) is already open [observed:
+        // so_36_show_perk_menu_while_open: 1,1,1]; refused while any other menu is open so
+        // `Game::open_menu` does not overwrite another menu without firing its close event
+        // [hypothesis: other menus unprobed; design: preserve open-menu lifecycle]. Same-frame
+        // GetLevelUpMenuPoints 1 0 reads 0 [observed: so_26_levelup_perk_menu_points:
+        // 1,0,0,1,-1].
         "showperkmenu" => {
             let level = g.player_level() as i32;
             let sheet = crate::levelup::PerkSheet::of_player(g, level);
-            if !sheet.available.contains(&true) {
+            if !sheet.available.contains(&true) || g.menu.is_some_and(|m| m != crate::game::menus::LEVEL_UP) {
                 return Some(Ok(zero));
             }
             let n = num(args, 0, -1.0) as i32;

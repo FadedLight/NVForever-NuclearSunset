@@ -390,3 +390,57 @@ fn show_perk_menu_force_recoil_and_spell_usage_follow_wave4_observations() {
     q(&mut g, "player.AddItem TestChem 1 1\nplayer.EquipItem TestChem 0 1");
     assert_eq!(n(&mut g, "player.GetSpellUsageNumEx TestChem"), 30.0);
 }
+
+#[test]
+fn show_perk_menu_menu_guard_allows_none_and_levelup_only() {
+    let f = fixture();
+    let mut g = game(&f);
+
+    // (a) Succeeds when no menu is open.
+    assert_eq!(g.menu, None);
+    assert_eq!(n(&mut g, "ShowPerkMenu 0"), 1.0);
+    assert_eq!(g.menu, Some(menus::LEVEL_UP));
+    let ask = g.showoff.b5.levelup.open_as.clone().unwrap();
+    assert!(ask.perks_only);
+    assert_eq!(ask.count, Some(0));
+    g.close_menu();
+    g.showoff.b5.levelup.open_as = None;
+
+    // (b) Succeeds while SkillMenu or LevelUpMenu (both menus::LEVEL_UP) is open.
+    assert_eq!(n(&mut g, "ShowSkillMenu 3"), 1.0);
+    assert_eq!(g.menu, Some(menus::LEVEL_UP));
+    assert_eq!(n(&mut g, "ShowPerkMenu 1"), 1.0);
+    assert_eq!(g.menu, Some(menus::LEVEL_UP));
+    let ask = g.showoff.b5.levelup.open_as.clone().unwrap();
+    assert!(ask.perks_only);
+    assert_eq!(ask.count, Some(1));
+    g.close_menu();
+    g.showoff.b5.levelup.open_as = None;
+
+    g.open_menu(menus::LEVEL_UP);
+    assert_eq!(n(&mut g, "ShowPerkMenu 2"), 1.0);
+    assert_eq!(g.menu, Some(menus::LEVEL_UP));
+    assert_eq!(g.showoff.b5.levelup.open_as.as_ref().and_then(|a| a.count), Some(2));
+    g.close_menu();
+    g.showoff.b5.levelup.open_as = None;
+
+    // (c) Refuses without replacing the open menu when Container, Pip-Boy, or Barter is open,
+    // preserving the active menu and its close event.
+    for other in [fnv_game::runner::CONTAINER_MENU, menus::INVENTORY, menus::STATS, menus::MAP, menus::BARTER] {
+        g.events.clear();
+        g.open_menu(other);
+        assert_eq!(g.menu, Some(other));
+        assert_eq!(n(&mut g, "ShowPerkMenu 1"), 0.0, "must refuse while menu {other} is open");
+        assert_eq!(g.menu, Some(other), "menu {other} must not be overwritten");
+        assert!(g.showoff.b5.levelup.open_as.is_none(), "levelup.open_as must stay untouched");
+        assert!(
+            !g.events.iter().any(|e| matches!(e.kind, fnv_game::trace::EventKind::MenuOpened { menu: menus::LEVEL_UP })),
+            "must not emit MenuOpened(LEVEL_UP) while menu {other} is open"
+        );
+        g.close_menu();
+        assert!(
+            g.events.iter().any(|e| matches!(e.kind, fnv_game::trace::EventKind::MenuClosed { menu } if menu == other)),
+            "closing menu {other} must still emit MenuClosed"
+        );
+    }
+}

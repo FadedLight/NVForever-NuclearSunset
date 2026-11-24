@@ -128,13 +128,19 @@ fn the_cursor_traits() {
 fn the_debug_texts() {
     let f = fixture();
     let mut g = game(&f);
-    q(&mut g, "DebugTextCreate \"MyDebugText1\" 100 100 \"My Text\"");
+    // Fresh create returns 1; duplicate name returns -1 without overwriting
+    // [observed: w4c_b4_03_sup6_bobbypin_debugtext].
+    assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 100 100 \"My Text\""), 1.0);
+    assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 200 200 \"Updated\""), -1.0);
+    let initial = g.sup.debug_texts["MyDebugText1"].clone();
+    assert_eq!((initial.x, initial.y, initial.text.as_str()), (100.0, 100.0, "My Text"));
     assert_eq!(n(&mut g, "DebugTextExists \"MyDebugText1\""), 1.0);
     q(&mut g, "DebugTextSetPos \"MyDebugText1\" 600 700\nDebugTextSetString \"MyDebugText1\" \"My New Text\"\nDebugTextSetZoom \"MyDebugText1\" 20");
     let t = g.sup.debug_texts["MyDebugText1"].clone();
     assert_eq!((t.x, t.y, t.text.as_str(), t.zoom), (600.0, 700.0, "My New Text", 20.0));
     q(&mut g, "DebugTextDestroy \"MyDebugText1\"");
     assert_eq!(n(&mut g, "DebugTextExists \"MyDebugText1\""), 0.0);
+    assert_eq!(n(&mut g, "DebugTextCreate \"MyDebugText1\" 50 60 \"Recreated\""), 1.0);
 }
 
 #[test]

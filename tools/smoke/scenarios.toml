@@ -35895,3 +35895,37 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error" },
 ]
 note = "The same start, spot search and poses as terrain-parallax-ground-pack (round 2, 2026-11-22), not yet checked by a run. The shots are saved as terrain-parallax-ground-pack-off-shots/terrain_parallax_ab_<seconds>s_<a|b|c>.png."
+
+[[scenario]]
+name = "gpu-occlusion-culling"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; nvforever gpu_occlusion.rs, engine/vendor/README.md bevy#26239): with the experiment NVF_OCCLUSION_CULLING=1 the main camera gets Bevy's two-phase GPU occlusion culling at Novac noon, the depth pyramid is built from the main pass's region and the culling passes compile, without a rendering error. Whether anything visible is culled is checked in screenshots against a run without it (§13)"
+areas = ["renderer", "graphics"]
+paths = [
+  "engine/nvforever/src/gpu_occlusion.rs", "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/depth.rs",
+  "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/downsample_depth.wesl", "engine/vendor/bevy_pbr/src/render/mesh_preprocess.wesl",
+  "engine/vendor/bevy_render/src/view/mod.rs",
+]
+env = { NVF_OCCLUSION_CULLING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Novac", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 20
+expect = [
+  { text = "occlusion culling: on for the main camera (NVF_OCCLUSION_CULLING=1)", count = 1, label = "the experiment is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the culling or depth pyramid passes" },
+]
+
+[[scenario]]
+name = "gpu-light-clustering"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; main.rs, engine/vendor/README.md bevy#25869, bevy#26588): NVF_GPU_CLUSTERING=1 keeps Bevy's GPU light clustering, with its per-view buffers kept from frame to frame, at Goodsprings at night with the town's lamps, without a rendering error (the default stays CPU clustering)"
+areas = ["renderer", "graphics"]
+paths = ["engine/vendor/bevy_pbr/src/cluster/gpu.rs", "engine/vendor/bevy_pbr/src/cluster/mod.rs"]
+env = { NVF_GPU_CLUSTERING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "23"]
+run_seconds = 20
+expect = [
+  { text = "lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)", count = 1, label = "GPU clustering is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the clustering passes" },
+]

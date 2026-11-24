@@ -202,6 +202,8 @@ pub fn load_modular_inis(mod_files: &ModFiles) -> (usize, StewieIniMap) {
 /// Query a `key:section` setting across `nvse_stewie_tweaks.ini` layered beneath
 /// `Data\NVSE\Plugins\Tweaks\INIs\*.ini` (sorted `A..Z`, modular files overriding the
 /// base INI) [design]. When no modular `.ini` files exist, reads only the base INI.
+/// Does NOT trim `key` or `section` (matching observed `StewieGetValue`/`StewVal`
+/// whitespace semantics in `w4h_08_stewie_get_value_whitespace`).
 pub fn query_value(mod_files: &ModFiles, key: &str, section: &str) -> Option<String> {
     let mut merged = StewieIniMap::default();
     if let Some(base) = mod_files.read_text_any_case(BASE_INI_PATH) {
@@ -210,7 +212,7 @@ pub fn query_value(mod_files: &ModFiles, key: &str, section: &str) -> Option<Str
     for (_, text) in mod_files.read_folder_inis(MODULAR_INIS_DIR) {
         merged.parse_into(&text);
     }
-    merged.get(section, key).map(str::to_string)
+    merged.entries.get(&(section.to_ascii_lowercase(), key.to_ascii_lowercase())).cloned()
 }
 
 /// Apply recognized modular tweak overrides from `Data\NVSE\Plugins\Tweaks\INIs\*.ini`

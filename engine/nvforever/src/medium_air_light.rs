@@ -407,8 +407,10 @@ mod tests {
         assert!(matches!(step(&mut app, 0.1)[..], [(_, true)]), "and made anew in the first open frame");
     }
 
+    /// Closes the gate (true) or opens it again.
+    type Close = fn(&mut App, bool);
     /// What closes the gate and opens it again.
-    const CLOSED: [(&str, fn(&mut App, bool)); 3] = [
+    const CLOSED: [(&str, Close); 3] = [
         ("under water", |app, on| app.world_mut().resource_mut::<crate::underwater::CameraSubmerged>().0 = on),
         ("indoors", |app, on| app.world_mut().resource_mut::<crate::sky::SkyState>().interior = on.then(Default::default)),
         ("night", |app, on| app.world_mut().resource_mut::<crate::sky::SkyState>().hour = if on { 1.0 } else { 13.0 }),

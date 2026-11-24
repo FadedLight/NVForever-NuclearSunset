@@ -146,7 +146,9 @@ fn read_aid(mut aid: ResMut<AirAid>) {
 pub(crate) fn follow_demand(
     aid: Res<AirAid>,
     graphics: Option<Res<crate::graphics::Graphics>>,
-    (device, adapter, mut support): (Option<Res<RenderDevice>>, Option<Res<RenderAdapter>>, Option<ResMut<AirSupport>>),
+    device: Option<Res<RenderDevice>>,
+    adapter: Option<Res<RenderAdapter>>,
+    mut support: Option<ResMut<AirSupport>>,
     mut wanted_now: ResMut<AirWanted>,
     mut row_was: Local<Option<bool>>,
 ) {

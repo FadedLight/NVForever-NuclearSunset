@@ -913,7 +913,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 220] = [
+    const KNOWN: [(&str, &str); 223] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -947,6 +947,9 @@ mod android_profile_tests {
         ("vats-style", "Gameplay"),
         ("vats-slowdown", "Gameplay"),
         ("difficulty", "Gameplay"),
+        ("difficulty-player-damage", "Gameplay"),
+        ("difficulty-npc-damage", "Gameplay"),
+        ("difficulty-kill-xp", "Gameplay"),
         ("hardcore", "Gameplay"),
         ("lip-sync", "Gameplay"),
         ("true-iron-sights", "Gameplay"),
@@ -1300,7 +1303,7 @@ mod android_profile_tests {
         assert_eq!(all.len(), list.len());
         all.sort_unstable();
         assert_eq!(all, (0..list.len()).collect::<Vec<_>>(), "each registered row once");
-        assert_eq!(keys(&list, &l, "Gameplay")[..11], ["[Game]", "difficulty", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "vats-style", "vats-slowdown", "kill-camera"]);
+        assert_eq!(keys(&list, &l, "Gameplay")[..14], ["[Game]", "difficulty", "difficulty-player-damage", "difficulty-npc-damage", "difficulty-kill-xp", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "vats-style", "vats-slowdown", "kill-camera"]);
         assert_eq!(keys(&list, &l, "Audio"), ["[Volume]", "volume-master", "volume-music", "volume-footstep", "volume-voice", "volume-effects", "volume-radio", "", "[Sound]", "music", "voice", "reverb", "voice-reverb"]);
         assert_eq!(keys(&list, &l, "Controls")[..6], ["[Input]", "@device", "button-style", "@automatic-input", "@rumble", ""]);
         assert_eq!(
@@ -1331,7 +1334,7 @@ mod android_profile_tests {
         let l = resolve_layout(&list);
         let closed = |p: &Placement| p.heading != Some("V.A.T.S.") && p.heading != Some("Camera");
         let g = lines(&list, &l, "Gameplay", closed);
-        assert_eq!(g[..10], ["[Game]", "difficulty", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "[Camera]", "[Dialogue]"]);
+        assert_eq!(g[..13], ["[Game]", "difficulty", "difficulty-player-damage", "difficulty-npc-damage", "difficulty-kill-xp", "hardcore", "reload-slows", "UsePipBoy", "sound-cover", "", "[V.A.T.S.]", "[Camera]", "[Dialogue]"]);
         let p = l.placement_of(list.iter().position(|s| s.key == "vats-style").unwrap()).unwrap();
         assert_eq!(l.shown_count(&p, |_| true), 3);
         assert_eq!(l.shown_count(&p, |i| i != LayoutItem::Setting(list.iter().position(|s| s.key == "vats-slowdown").unwrap())), 2);

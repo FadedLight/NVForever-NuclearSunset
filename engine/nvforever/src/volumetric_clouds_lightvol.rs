@@ -619,21 +619,46 @@ pub struct LvSchedule {
     pub levels: [LvLevelState; 2],
     last: Option<CloudVolumeUniform>,
     pending: bool,
+    /// The fronts as they stood when the last plan's work was encoded: every layer of each was
+    /// written by an earlier frame's commands (the shared reader's candidates, stage 2i M2).
+    settled: [Option<LvBake>; 2],
+    /// The fronts that survived this frame's drop checks, before this frame's promotions.
+    kept: [Option<LvBake>; 2],
+}
+
+/// Whether two bakes are the same one (set, window, lattice): what the shared reader compares
+/// (the frozen uniform is left out, so a value that is not a number cannot make a bake unequal
+/// to itself).
+fn lv_same_bake(a: &LvBake, b: &LvBake) -> bool {
+    a.set == b.set && a.lo == b.lo && a.grid == b.grid && a.cam == b.cam
 }
 
 impl LvSchedule {
     pub fn new(cfg: LvConfig) -> LvSchedule {
-        LvSchedule { cfg, levels: [LvLevelState::default(); 2], last: None, pending: false }
+        LvSchedule { cfg, levels: [LvLevelState::default(); 2], last: None, pending: false, settled: [None; 2], kept: [None; 2] }
     }
 
-    /// The last plan's work was encoded.
+    /// The last plan's work was encoded: its fronts are whole from the next frame on.
     pub fn encoded(&mut self) {
         self.pending = false;
+        self.settled = [self.levels[0].front, self.levels[1].front];
     }
 
     /// The sets the trace reads now (near, far).
     pub fn fronts(&self) -> [Option<usize>; 2] {
         [self.levels[0].front.map(|b| b.set), self.levels[1].front.map(|b| b.set)]
+    }
+
+    /// The bakes the shared reader may read during this frame (stage 2i M2; `LightVolumeReader`,
+    /// light_volume_reader.wesl): per level the front that was whole before this frame's work (all
+    /// its layers encoded by an earlier frame) and still stands after this frame's drop checks.
+    /// No texel of it is written during this frame: the back sweep writes the other set; a set
+    /// promoted this frame is not read until the next one (its last layers are drawn this frame,
+    /// by the trace pass, which views drawn earlier, such as the water reflection, would not see);
+    /// a dropped front, a reset, or a plan that was not encoded gives none. A front promoted this
+    /// frame takes over one frame later than in the trace.
+    pub fn reader_bakes(&self) -> [Option<LvBake>; 2] {
+        [0, 1].map(|i| self.settled[i].filter(|s| self.kept[i].is_some_and(|k| lv_same_bake(s, &k))))
     }
 
     /// The frame's plan for the uniform `u` (as the march uploads it, its block zero) and the
@@ -650,6 +675,7 @@ impl LvSchedule {
                 event = Some("a frame's sweep was not drawn");
             }
             self.levels = [LvLevelState::default(); 2];
+            self.settled = [None; 2];
         }
         if let Some(last) = self.last {
             if lv_weather_jumped(&last, u) {
@@ -678,6 +704,8 @@ impl LvSchedule {
                 level.back = None;
             }
         }
+        // The fronts the drop checks left, before any promotion (the shared reader's rule).
+        self.kept = [self.levels[0].front, self.levels[1].front];
         // A near sweep reads one far set beyond its window for all its layers: a far front gone
         // (dropped) under it restarts it.
         let far_front = self.levels[1].front.map(|b| b.set);
@@ -767,6 +795,171 @@ fn lv_start(i: usize, set: usize, u: &CloudVolumeUniform, (cam, field): (Vec3, D
     LvBake { set, lo: w.lo, cam: w.cam, grid, light: u.light_dir.truncate(), outer: outer.map(|o| o.set), snap }
 }
 
+// ---- Stage 2i M2: the shared reader of the light volume (light_volume_reader.wesl) ----
+//
+// [design, plan-check-stage2i Decision 6] One reader of the completed fronts for every user outside
+// the trace (the ground cloud shadows now, reflections later): the render
+// world's `gpu::LightVolumeReader` (the fronts' views and windows, made by
+// `gpu::publish_light_volume_reader` each frame the light volume ran), the shader struct
+// [`LightVolumeWindow`] a user packs from it, and the WESL module `nvforever::light_volume_reader`
+// whose header is the contract. The functions below are its CPU mirror.
+
+/// The real seconds over which a level that becomes readable fades in for a reader that mixes it
+/// over another source ([`lvr_presence`]) [engineering choice: a front's arrival changes the
+/// picture from the fallback's pattern to the volume's, which must not show as a pop. Seconds, not
+/// frames: the first fronts arrive while cells are still loading, at a few frames a second, when a
+/// fade counted in frames took many seconds (the stills of 0d2c21e79, shot about 9 s after the near
+/// level and 2.6 s after the far one arrived, showed the fallback almost whole)].
+pub const LVR_ARRIVAL_SECS: f32 = 1.0;
+
+/// light_volume_reader.wesl `LightVolumeWindow`, field for field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, bevy::render::render_resource::ShaderType)]
+pub struct LightVolumeWindow {
+    /// Per level: xy the camera's position in nodes from the front's lowest node, z the spacing
+    /// across, w the spacing up (units).
+    pub near: Vec4,
+    pub far: Vec4,
+    /// x, y: nodes across (near, far); z, w: layers.
+    pub size: Vec4,
+    /// xyz: the camera (world); w: the bend's radius.
+    pub cam: Vec4,
+    /// x: the slab floor (Bevy y), y: the guard band (cells), z, w: the levels' presence (0..1).
+    pub floor: Vec4,
+}
+
+/// One level as the reader sees it this frame: the set to bind, its window vector (the trace's
+/// `lv_near`/`lv_far` for that front: the camera's position in nodes from its corner, across, up),
+/// its nodes across and layers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LvReaderLevel {
+    pub set: usize,
+    pub window: Vec4,
+    pub nodes: u32,
+    pub layers: u32,
+}
+
+/// The shader struct for the reader's `levels` (absent: zero window, two nodes and layers, presence
+/// 0, never sampled), the camera `cam`, the slab floor `floor`, the bend's radius `bend`, the guard
+/// band `guard` (cells) and each level's `presence`.
+pub fn lvr_window(levels: [Option<LvReaderLevel>; 2], (cam, floor, bend, guard): (Vec3, f32, f32, f32), presence: [f32; 2]) -> LightVolumeWindow {
+    let window = |l: Option<LvReaderLevel>| l.map_or(Vec4::ZERO, |l| l.window);
+    let nodes = |l: Option<LvReaderLevel>| l.map_or(2.0, |l| l.nodes as f32);
+    let layers = |l: Option<LvReaderLevel>| l.map_or(2.0, |l| l.layers as f32);
+    let p = |i: usize| if levels[i].is_some() && presence[i].is_finite() { presence[i].clamp(0.0, 1.0) } else { 0.0 };
+    LightVolumeWindow {
+        near: window(levels[0]),
+        far: window(levels[1]),
+        size: Vec4::new(nodes(levels[0]), nodes(levels[1]), layers(levels[0]), layers(levels[1])),
+        cam: cam.extend(bend),
+        floor: Vec4::new(floor, guard, p(0), p(1)),
+    }
+}
+
+/// The reader's levels for the camera at field position `field` (world x, z plus
+/// [`lv_drift_units`] of this frame's uniform): [`LvSchedule::reader_bakes`] with each one's window
+/// measured as the trace measures its front's ([`lv_level_vec`]).
+pub fn lv_reader_levels(schedule: &LvSchedule, field: DVec2) -> [Option<LvReaderLevel>; 2] {
+    schedule.reader_bakes().map(|b| b.map(|b| LvReaderLevel { set: b.set, window: lv_level_vec(field, &b), nodes: b.grid.nodes, layers: b.grid.layers }))
+}
+
+/// A level's presence for a reader that fades it in: 0 while it is not readable (`readable` none),
+/// then a smoothstep from 0 to 1 over `arrival` real seconds of its being readable without a break.
+pub fn lvr_presence(readable: Option<f32>, arrival: f32) -> f32 {
+    let Some(secs) = readable.filter(|s| s.is_finite()) else { return 0.0 };
+    let t = (secs / arrival.max(1e-3)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The hand-over weight of a level at `edge` cells inside its window (negative outside) with the
+/// guard band `guard` and presence `presence`: 0 outside, rising linearly to 1 a guard band inside,
+/// times the presence (light_volume_reader.wesl `clamp(r.x / guard, 0.0, 1.0) * presence`; the
+/// trace's [`lv_guard`] for a presence of 1).
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror the tests hold the shader to
+pub fn lvr_weight(edge: f32, guard: f32, presence: f32) -> f32 {
+    if edge.is_nan() || edge < 0.0 {
+        return 0.0;
+    }
+    (edge / guard.max(1e-3)).clamp(0.0, 1.0) * presence.clamp(0.0, 1.0)
+}
+
+/// light_volume_reader.wesl `lvr_rise`: the distance along a ray whose bent height above the floor
+/// is `bh < 0` at its start and `bh + b s + a s^2` along it to the floor; -1 when it never gets
+/// there.
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror the tests hold the shader to
+pub fn lvr_rise(a: f32, b: f32, bh: f32) -> f32 {
+    if a <= 1e-12 {
+        if b <= 1e-6 {
+            return -1.0;
+        }
+        return -bh / b;
+    }
+    let root = (b * b - 4.0 * a * bh).sqrt();
+    if b >= 0.0 {
+        -2.0 * bh / (b + root)
+    } else {
+        (root - b) / (2.0 * a)
+    }
+}
+
+/// light_volume_reader.wesl `lvr_level`: x how far inside the window the point at node coordinate
+/// `c` and bent height `bh` is (cells, -1 outside or under the floor), y the depth there from
+/// `fetch` (node x, layer, node z), bilinear across and linear in height.
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror the tests hold the shader to
+pub fn lvr_level(fetch: &dyn Fn(IVec3) -> f32, c: Vec2, bh: f32, up: f32, size: Vec2) -> Vec2 {
+    let nodes = size.x.max(2.0);
+    let layers = size.y.max(2.0);
+    let edge = c.x.min(nodes - 1.0 - c.x).min(c.y.min(nodes - 1.0 - c.y));
+    if bh < 0.0 || edge < 0.0 || edge.is_nan() {
+        return Vec2::new(-1.0, 0.0);
+    }
+    let y = (bh / up.max(1.0)).min(layers - 1.0);
+    Vec2::new(edge, lv_trilinear(Vec3::new(c.x, y, c.y), layers as u32, fetch))
+}
+
+/// light_volume_reader.wesl `lvr_optical_depth`, line for line: (the depth over the covered share,
+/// the covered share) at world `p` for the light from `l`, the levels' nodes from `near` and `far`.
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror the tests hold the shader to
+pub fn lvr_optical_depth(w: &LightVolumeWindow, near: &dyn Fn(IVec3) -> f32, far: &dyn Fn(IVec3) -> f32, p: Vec3, l: Vec3) -> Vec2 {
+    let (pn, pf) = (w.floor.z, w.floor.w);
+    if pn.max(pf) <= 0.0 {
+        return Vec2::ZERO;
+    }
+    let cam = w.cam.truncate();
+    let twice_r = 2.0 * w.cam.w.max(1.0);
+    let mut rel = p - cam;
+    let mut bh = cam.y + rel.y + (rel.x * rel.x + rel.z * rel.z) / twice_r - w.floor.x;
+    if bh < 0.0 {
+        let a = (l.x * l.x + l.z * l.z) / twice_r;
+        let b = l.y + 2.0 * (rel.x * l.x + rel.z * l.z) / twice_r;
+        let t = lvr_rise(a, b, bh);
+        if t < 0.0 {
+            return Vec2::ZERO;
+        }
+        rel += l * t;
+        bh = 0.0;
+    }
+    let guard = w.floor.y.max(1e-3);
+    let (mut optical, mut keep) = (0.0f32, 1.0f32);
+    let xz = Vec2::new(rel.x, rel.z);
+    if pn > 0.0 {
+        let r = lvr_level(near, w.near.truncate().truncate() + xz / w.near.z.max(1.0), bh, w.near.w, Vec2::new(w.size.x, w.size.z));
+        let wn = (r.x / guard).clamp(0.0, 1.0) * pn;
+        optical += wn * r.y;
+        keep = 1.0 - wn;
+    }
+    if pf > 0.0 && keep > 0.0 {
+        let r = lvr_level(far, w.far.truncate().truncate() + xz / w.far.z.max(1.0), bh, w.far.w, Vec2::new(w.size.y, w.size.w));
+        let wf = (r.x / guard).clamp(0.0, 1.0) * pf;
+        optical += keep * wf * r.y;
+        keep *= 1.0 - wf;
+    }
+    let covered = 1.0 - keep;
+    if covered <= 0.0 {
+        return Vec2::ZERO;
+    }
+    Vec2::new(optical / covered, covered)
+}
+
 /// The march module's WESL conditions resolved for one variant of the trace (`light_volume`: the
 /// shader def LIGHT_VOLUME; no CLOUD_VIEWS), for the plain-WGSL test assemblers
 /// ([`lv_resolve_variant`]).
@@ -816,9 +1009,10 @@ pub fn lv_resolve_variant(src: &str, light_volume: bool, views: bool) -> String 
 /// sweep starts.
 pub(crate) mod gpu {
     use super::{
-        lv_active, lv_config, lv_grid, lv_near_taps, lv_sweep_evaluations, LvConfig, LvGrid, LvLevels, LvPlan, LvSchedule, LV_FAR_FOOTPRINT,
-        LV_FOOTPRINT, LV_NODES,
+        lv_active, lv_config, lv_drift_units, lv_grid, lv_near_taps, lv_reader_levels, lv_sweep_evaluations, lvr_presence, lvr_window, LightVolumeWindow, LvConfig, LvGrid, LvLevels, LvPlan, LvReaderLevel, LvSchedule, LV_FAR_FOOTPRINT,
+        LV_FOOTPRINT, LV_GUARD, LV_NODES,
     };
+    use bevy::math::DVec2;
     use crate::medium::MediumTraceUniform;
     use crate::volumetric_clouds::{variant_suffix, view_variant, CloudVolumeUniform};
     use bevy::core_pipeline::FullscreenShader;
@@ -918,6 +1112,8 @@ pub(crate) mod gpu {
         /// This frame's plan, from prepare to the encode.
         plan: Option<LvPlan>,
         groups: Option<LvGroups>,
+        /// Where this frame's plan measured the shared reader's windows from (stage 2i M2).
+        reader_at: Option<LvReaderAt>,
         /// The near taps last named in the log ([`lv_near_taps`]).
         told_taps: u32,
     }
@@ -950,9 +1146,21 @@ pub(crate) mod gpu {
         }
     }
 
-    /// The state while on, and the pipelines, which outlive it.
+    /// The frame's camera (world), its field position, the slab floor and the bend's radius, as
+    /// the plan saw them: what [`publish_light_volume_reader`] measures the windows from.
+    #[derive(Clone, Copy, Debug)]
+    struct LvReaderAt {
+        cam: Vec3,
+        field: DVec2,
+        floor: f32,
+        bend: f32,
+    }
+
+    /// The state while on, whether [`lv_prepare`] made this frame's plan (the shared reader takes
+    /// nothing from a state the medium did not prepare this frame), and the pipelines, which
+    /// outlive the state.
     #[derive(Resource, Default)]
-    pub(crate) struct LvGpu(Option<LvState>, pub(crate) LvPipelines);
+    pub(crate) struct LvGpu(Option<LvState>, bool, pub(crate) LvPipelines);
 
     impl LvGpu {
         /// Whether nothing is held.
@@ -968,9 +1176,116 @@ pub(crate) mod gpu {
 
         /// Drops everything but the pipelines (the volume off, no light, the row off, nothing traced).
         pub(crate) fn clear(&mut self) {
+            self.1 = false;
             if self.0.take().is_some() {
                 info!("volumetric clouds: light volume off (textures released)");
             }
+        }
+    }
+
+    /// One level of the shared reader: the front set's whole array (R16Float, filterable) and its
+    /// window.
+    #[derive(Clone)]
+    pub(crate) struct LightVolumeLevelView {
+        pub view: TextureView,
+        pub level: LvReaderLevel,
+    }
+
+    /// The light volume's shared reader (stage 2i M2; the contract is light_volume_reader.wesl's
+    /// header): per level the completed front a reader outside the trace may sample during this
+    /// frame ([`super::LvSchedule::reader_bakes`]: no texel of it is written this frame, whatever
+    /// order the views draw in), its window measured from this frame's camera and drift, and the
+    /// frames it has been readable without a break (a swap of fronts is no break; a drop is). Empty
+    /// while the light volume is off, has no completed front, or made no plan for more than
+    /// [`LVR_KEEP_FRAMES`] frames. Made in
+    /// `RenderSystems::PrepareResourcesFlush` (after the medium's prepare step); a user packs
+    /// [`LightVolumeReader::window`] into its own uniform and binds the views before
+    /// `RenderSystems::PrepareBindGroups`.
+    #[derive(Resource, Default, Clone)]
+    pub(crate) struct LightVolumeReader {
+        pub levels: [Option<LightVolumeLevelView>; 2],
+        pub cam: Vec3,
+        pub floor: f32,
+        pub bend: f32,
+        pub guard: f32,
+        /// When each level became readable without a break since (a swap of fronts is no break).
+        pub ready_since: [Option<std::time::Instant>; 2],
+        /// Frames in a row the light volume made no plan while its state was held.
+        unplanned: u32,
+    }
+
+    impl LightVolumeReader {
+        /// Whether a level is readable this frame (near, far).
+        pub fn ready(&self) -> [bool; 2] {
+            [self.levels[0].is_some(), self.levels[1].is_some()]
+        }
+
+        /// Each level's presence for a reader that fades a level in over `arrival` real seconds.
+        pub fn presence(&self, arrival: f32) -> [f32; 2] {
+            [0, 1].map(|i| if self.levels[i].is_some() { lvr_presence(self.ready_since[i].map(|t| t.elapsed().as_secs_f32()), arrival) } else { 0.0 })
+        }
+
+        /// The shader struct with these presences (light_volume_reader.wesl `LightVolumeWindow`).
+        pub fn window(&self, presence: [f32; 2]) -> LightVolumeWindow {
+            lvr_window([0, 1].map(|i| self.levels[i].as_ref().map(|l| l.level)), (self.cam, self.floor, self.bend, self.guard), presence)
+        }
+    }
+
+    /// Frames the shared reader keeps its last levels while the light volume's state is held but
+    /// the medium's prepare step made no plan (its view's image not ready that frame, say): nothing
+    /// was swept, so the sets are as they were and a reader falling back for one frame would show a
+    /// pop. Longer (the medium stopped running) empties it. For those frames the camera, the drift
+    /// (the windows) and the presences are the last planned frame's and the drop checks are not
+    /// rerun (the milestone review's note; light_volume_reader.wesl's header states the exception).
+    pub const LVR_KEEP_FRAMES: u32 = 4;
+
+    /// Makes the shared reader for this frame from the light volume's state: its levels when the
+    /// medium's prepare step planned the light volume this frame, the last ones for up to
+    /// [`LVR_KEEP_FRAMES`] frames without a plan while the state is held, else none.
+    pub(crate) fn publish_light_volume_reader(gpu: Option<ResMut<LvGpu>>, mut reader: ResMut<LightVolumeReader>) {
+        let (held, fresh) = match gpu {
+            Some(mut g) => {
+                let planned = std::mem::replace(&mut g.1, false);
+                let fresh = g.0.as_ref().filter(|_| planned).and_then(|state| {
+                    let at = state.reader_at?;
+                    let levels = lv_reader_levels(&state.schedule, at.field);
+                    let views: [Option<LightVolumeLevelView>; 2] =
+                        [0, 1].map(|i| levels[i].and_then(|level| state.levels[i].as_ref().map(|sets| LightVolumeLevelView { view: sets[level.set & 1].whole.clone(), level })));
+                    Some((at, views))
+                });
+                (g.0.is_some(), fresh)
+            }
+            None => (false, None),
+        };
+        let reader = &mut *reader;
+        match fresh {
+            Some((at, views)) => {
+                for (i, v) in views.iter().enumerate() {
+                    reader.ready_since[i] = if v.is_some() { Some(reader.ready_since[i].unwrap_or_else(std::time::Instant::now)) } else { None };
+                }
+                reader.levels = views;
+                (reader.cam, reader.floor, reader.bend, reader.guard) = (at.cam, at.floor, at.bend, LV_GUARD);
+                reader.unplanned = 0;
+            }
+            None if held && reader.unplanned < LVR_KEEP_FRAMES => reader.unplanned += 1,
+            None => {
+                if reader.levels.iter().any(Option::is_some) || reader.ready_since.iter().any(Option::is_some) {
+                    *reader = LightVolumeReader::default();
+                }
+            }
+        }
+    }
+
+    /// The shared reader's resource and its system in the render world (added once, by its first
+    /// user).
+    pub(crate) struct LightVolumeReaderPlugin;
+
+    impl Plugin for LightVolumeReaderPlugin {
+        fn build(&self, app: &mut App) {
+            let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) else { return };
+            render_app
+                .init_resource::<LightVolumeReader>()
+                .add_systems(bevy::render::Render, publish_light_volume_reader.in_set(bevy::render::RenderSystems::PrepareResourcesFlush));
         }
     }
 
@@ -1105,9 +1420,9 @@ pub(crate) mod gpu {
                 per_frame(cfg.levels.near(), &gn, cfg.spread[0]),
                 per_frame(cfg.levels.far(), &gf, cfg.spread[1])
             );
-            gpu.0 = Some(LvState { key, producer_layout, trace_layout, views: false, slices, offsets, levels, snaps, schedule: LvSchedule::new(cfg), plan: None, groups: None, told_taps: lv_near_taps(clouds, cfg.taps) });
+            gpu.0 = Some(LvState { key, producer_layout, trace_layout, views: false, slices, offsets, levels, snaps, schedule: LvSchedule::new(cfg), plan: None, groups: None, reader_at: None, told_taps: lv_near_taps(clouds, cfg.taps) });
         }
-        let LvGpu(state, pipelines) = gpu;
+        let LvGpu(state, planned, pipelines) = gpu;
         let Some(state) = state.as_mut() else { return *clouds };
         // Only a variant to draw with is asked for (a cold build takes long); both ids are kept.
         let views = view_variant(clouds);
@@ -1126,6 +1441,10 @@ pub(crate) mod gpu {
             info!("volumetric clouds: light volume: {taps} near taps now (LIGHT_TAPS {})", cfg.taps);
         }
         let plan = state.schedule.plan(clouds, cx.cam);
+        // The shared reader's frame of reference (stage 2i M2): the trace's own (`LvSchedule::plan`'s
+        // field position for this camera and drift).
+        let field = DVec2::new(f64::from(cx.cam.x), f64::from(cx.cam.z)) + lv_drift_units(clouds);
+        state.reader_at = Some(LvReaderAt { cam: cx.cam, field, floor: clouds.slab.x, bend: clouds.reach.y });
         for (snap, level) in state.snaps.iter_mut().zip(&plan.levels) {
             if let Some(u) = level.as_ref().and_then(|p| p.upload) {
                 snap.set(u);
@@ -1140,6 +1459,7 @@ pub(crate) mod gpu {
         }
         let trace = plan.trace;
         state.plan = Some(plan);
+        *planned = true;
         trace
     }
 
@@ -1207,7 +1527,7 @@ pub(crate) mod gpu {
     /// compiles, the volume is off or no level has a finished set yet, so the trace draws its
     /// legacy variant meanwhile (a plan that could not be encoded resets the sets next frame).
     pub(crate) fn lv_encode(gpu: &mut LvGpu, ctx: &mut RenderContext, (cache, device): (&PipelineCache, &RenderDevice), inputs: LvInputs, diagnostics: Option<&DiagnosticsRecorder>) -> Option<(RenderPipeline, BindGroup)> {
-        let LvGpu(state, pipelines) = gpu;
+        let LvGpu(state, _, pipelines) = gpu;
         let state = state.as_mut()?;
         // The producer for each level with layers this frame, the trace by this frame's uniform.
         let mut producers: [Option<RenderPipeline>; 2] = [None, None];
@@ -1275,5 +1595,347 @@ mod near_tap_tests {
         let here = include_str!("volumetric_clouds_lightvol.rs").replace("\r\n", "\n");
         assert!(here.contains("                lv_near_taps(clouds, cfg.taps),\n                per_frame("));
         assert!(include_str!("volumetric_clouds.rs").contains("lv_near_taps(&uniform(&drawn_inputs(START.inputs(VolumeInputs::default()))), "));
+    }
+}
+
+/// The shared reader (stage 2i M2): its bookkeeping, its window arithmetic against the trace's,
+/// the projection to the floor, the hand-over weights and the fallback, on the CPU mirror; and the
+/// module's text against the march's reader.
+#[cfg(test)]
+mod reader_tests {
+    use super::*;
+    use crate::volumetric_clouds::LIGHT_REACH;
+
+    /// A uniform with the tests' slab (the plane 21,024 up, 40,000 tall), the default bend,
+    /// a light `elevation` degrees up at azimuth 30, and the drift `drift` (texture repeats of
+    /// 60,000 units, through the vigour's first octave's whole cells and fraction).
+    #[allow(clippy::field_reassign_with_default)]
+    fn frame_uniform(elevation: f32, drift: [f64; 2]) -> CloudVolumeUniform {
+        let mut u = CloudVolumeUniform::default();
+        u.slab = Vec4::new(21_024.0, 40_000.0, 400_000.0, 300_000.0);
+        u.reach = Vec4::new(LIGHT_REACH, crate::volumetric_clouds::shell_radius(f32::NAN, f32::NAN), 0.01, 196.0);
+        u.march = Vec4::new(0.0, LIGHT_STEPS as f32, 0.0, 0.0);
+        let (e, a) = (elevation.to_radians(), 30f32.to_radians());
+        u.light_dir = Vec3::new(e.cos() * a.cos(), e.sin(), e.cos() * a.sin()).extend(1.0);
+        u.nscale.z = 1.0;
+        (u.map.x, u.map.y) = (1.0 / 60_000.0, 1.0 / 60_000.0);
+        u.height.x = 4.0;
+        let cells = |d: f64| d * 4.0;
+        let (x, z) = (cells(drift[0]), cells(drift[1]));
+        u.cells_v = bevy::math::UVec4::new(x.floor() as i64 as i32 as u32, z.floor() as i64 as i32 as u32, 0, 0);
+        u.vigour = Vec4::new((x - x.floor()) as f32, (z - z.floor()) as f32, 0.0, 0.0);
+        u
+    }
+
+    fn cfg() -> LvConfig {
+        LvConfig { levels: LvLevels::Both, cells: [LV_ACROSS, LV_FAR_ACROSS], taps: 0, spread: LV_SPREAD }
+    }
+
+    /// A schedule after 120 drawn frames of `u` at `cam`, then the plan of the frame being drawn:
+    /// the reader is asked between a frame's plan and its encode, as `lv_prepare` and
+    /// `publish_light_volume_reader` ask it (asked after an encode, on a frame that promoted a
+    /// front, the settled set is the new one and the kept set the old one, so it gives none).
+    /// Both levels must be readable then.
+    fn drawn_schedule(u: &CloudVolumeUniform, cam: Vec3) -> LvSchedule {
+        let mut s = LvSchedule::new(cfg());
+        for _ in 0..120 {
+            let _ = s.plan(u, cam);
+            s.encoded();
+        }
+        let _ = s.plan(u, cam);
+        assert!(s.reader_bakes().iter().all(Option::is_some), "both levels readable on the frame being drawn");
+        s
+    }
+
+    /// The reader names a front only from the frame after its last layer was encoded, keeps the
+    /// previous front on the frame a new one is promoted, and never names a set the frame's plan
+    /// writes; a plan that was not encoded, a dropped front (a teleport) or a reset gives none.
+    #[test]
+    fn the_reader_reads_only_fronts_whole_before_the_frame() {
+        let mut s = LvSchedule::new(cfg());
+        let cam = Vec3::new(-20_000.0, 900.0, 5_000.0);
+        let mut last_fronts = [None; 2];
+        let mut promoted_at: [Option<u32>; 2] = [None; 2];
+        let at = |frame: u32| frame_uniform(45.0 + 0.0025 * frame as f32, [0.0001 * f64::from(frame), 0.0]);
+        for frame in 0..200u32 {
+            let u = at(frame);
+            let plan = s.plan(&u, cam);
+            let reader = s.reader_bakes();
+            for (i, (written, read)) in plan.levels.iter().zip(reader).enumerate() {
+                // A set the plan writes this frame is never the reader's.
+                if let (Some(p), Some(b)) = (written.as_ref(), read.as_ref()) {
+                    if p.to > p.from {
+                        assert_ne!(p.set, b.set, "frame {frame} level {i}: the reader's set is written this frame");
+                    }
+                }
+                // A front promoted this frame is not read until the next one; the old one is.
+                if plan.fronts[i] != last_fronts[i] {
+                    promoted_at[i] = Some(frame);
+                    assert_eq!(read.map(|b| b.set), last_fronts[i], "frame {frame} level {i}: on the promotion frame the reader keeps the old front");
+                } else if let Some(f) = plan.fronts[i] {
+                    assert_eq!(read.map(|b| b.set), Some(f), "frame {frame} level {i}: the reader reads the front once it is whole");
+                }
+            }
+            last_fronts = plan.fronts;
+            s.encoded();
+        }
+        assert!(promoted_at.iter().all(Option::is_some), "both levels were promoted: {promoted_at:?}");
+        // A plan that was never encoded: the next frame has no reader (everything restarts).
+        let u = at(199);
+        let _ = s.plan(&u, cam);
+        assert!(s.reader_bakes().iter().all(Option::is_some), "the fronts stand before the missed encode");
+        let _ = s.plan(&u, cam);
+        assert!(s.reader_bakes().iter().all(Option::is_none), "a plan that was not drawn drops the reader with the fronts");
+        s.encoded();
+        // A teleport drops the fronts: no reader that frame.
+        let mut s = LvSchedule::new(cfg());
+        for frame in 0..120u32 {
+            let _ = s.plan(&frame_uniform(45.0, [0.0; 2]), cam);
+            assert!(frame < 40 || s.reader_bakes().iter().all(Option::is_some), "frame {frame}");
+            s.encoded();
+        }
+        let _ = s.plan(&frame_uniform(45.0, [0.0; 2]), cam + Vec3::new(300_000.0, 0.0, 0.0));
+        assert!(s.reader_bakes().iter().all(Option::is_none), "a dropped front is not read");
+    }
+
+    /// The reader's windows are the trace's: for every level a world point's node coordinate
+    /// through the window (`window.xy + (P - cam).xz / across`) is the field point's own position
+    /// in nodes from the front's lowest node (`lv_node_pos` of `world + repeat x drift`, the
+    /// addressing the producer writes), whatever the drift since the bake; the trace's block says
+    /// the same for the camera; the bent height is `bent_y`'s.
+    #[test]
+    fn the_reader_addresses_the_field_as_the_trace_does() {
+        let mut s = LvSchedule::new(cfg());
+        let cam0 = Vec3::new(12_345.0, 700.0, -54_321.0);
+        let mut last = None;
+        for frame in 0..120u32 {
+            let drift = [0.0002 * f64::from(frame), -0.0001 * f64::from(frame)];
+            let cam = cam0 + Vec3::new(3.0 * frame as f32, 0.0, 2.0 * frame as f32);
+            let u = frame_uniform(40.0, drift);
+            let plan = s.plan(&u, cam);
+            let field = |p: Vec3| DVec2::new(f64::from(p.x), f64::from(p.z)) + lv_drift_units(&u);
+            let levels = lv_reader_levels(&s, field(cam));
+            for (i, l) in levels.iter().enumerate() {
+                let Some(l) = l else { continue };
+                let bake = s.reader_bakes()[i].expect("a reader level has its bake");
+                for p in [cam, cam + Vec3::new(9_000.0, 0.0, -14_000.0), cam + Vec3::new(-25_000.0, 0.0, 30_000.0)] {
+                    let rel = p - cam;
+                    let via_window = Vec2::new(l.window.x + rel.x / l.window.z, l.window.y + rel.z / l.window.z);
+                    let own = lv_node_pos(field(p), bake.lo, &bake.grid);
+                    assert!((via_window - own).abs().max_element() < 2e-3, "frame {frame} level {i}: {via_window} against {own}");
+                }
+                if plan.fronts[i] == Some(l.set) {
+                    let t = if i == 0 { plan.trace.lv_near } else { plan.trace.lv_far };
+                    assert_eq!(t, l.window, "frame {frame} level {i}: the trace's own vector for the same front");
+                }
+                assert_eq!((l.window.z, l.window.w, l.nodes, l.layers), (bake.grid.across, bake.grid.up, bake.grid.nodes, bake.grid.layers));
+            }
+            last = Some((levels, u, cam));
+            s.encoded();
+        }
+        // The CPU mirror reads a point above the floor at its own bent height (a layer coordinate
+        // of `bent_y`'s height over the spacing): a field linear in the layer gives it back.
+        let (levels, u, cam) = last.expect("frames ran");
+        assert!(levels.iter().all(Option::is_some));
+        let w = lvr_window(levels, (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 1.0]);
+        let layer = |n: IVec3| n.y as f32;
+        let p = cam + Vec3::new(4_000.0, 25_000.0, -3_000.0);
+        let r = lvr_optical_depth(&w, &layer, &layer, p, u.light_dir.truncate());
+        let want = (bent_y(p - cam, cam.y, u.reach.y) - u.slab.x) / w.near.w;
+        assert_eq!(r.y, 1.0, "inside the near window, past its guard band");
+        assert!((r.x - want).abs() < 1e-3, "{} against {want}", r.x);
+    }
+
+    /// A receiver under the bent floor is moved along the light to it (its bent height zero there,
+    /// the distance positive), so it reads what the floor point reads; a light under the horizon
+    /// with no curvature to bring it up reports no data.
+    #[test]
+    fn a_receiver_under_the_floor_reads_where_its_light_meets_the_floor() {
+        let u = frame_uniform(45.0, [0.0; 2]);
+        let r = u.reach.y;
+        let cam = Vec3::new(1_000.0, 2_000.0, -500.0);
+        for elevation in [6.0f32, 15.0, 34.0, 60.0, 89.0] {
+            for azimuth in [0.0f32, 70.0, 200.0, 310.0] {
+                let (e, a) = (elevation.to_radians(), azimuth.to_radians());
+                let l = Vec3::new(e.cos() * a.cos(), e.sin(), e.cos() * a.sin());
+                for p in [cam, cam + Vec3::new(20_000.0, -1_500.0, 7_000.0), cam + Vec3::new(-60_000.0, 3_000.0, -90_000.0)] {
+                    let rel = p - cam;
+                    let bh = bent_y(rel, cam.y, r) - u.slab.x;
+                    assert!(bh < 0.0);
+                    let a2 = (l.x * l.x + l.z * l.z) / (2.0 * r);
+                    let b = l.y + 2.0 * (rel.x * l.x + rel.z * l.z) / (2.0 * r);
+                    let t = lvr_rise(a2, b, bh);
+                    assert!(t > 0.0, "{elevation} {azimuth}: {t}");
+                    let on = bent_y(rel + l * t, cam.y, r) - u.slab.x;
+                    assert!(on.abs() < 2.0, "{elevation} {azimuth}: bent height {on} where the floor should be");
+                }
+            }
+        }
+        assert_eq!(lvr_rise(0.0, -0.1, -100.0), -1.0, "never reaches the floor");
+        assert_eq!(lvr_rise(0.0, 0.5, -100.0), 200.0, "the straight case");
+        // The floor point and the receiver under it read the same depth.
+        let s = drawn_schedule(&u, cam);
+        let field = DVec2::new(f64::from(cam.x), f64::from(cam.z)) + lv_drift_units(&u);
+        let w = lvr_window(lv_reader_levels(&s, field), (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 1.0]);
+        let smooth = |n: IVec3| 0.01 * n.x as f32 + 0.02 * n.z as f32 + 3.0 * n.y as f32;
+        let l = u.light_dir.truncate();
+        let p = cam + Vec3::new(3_000.0, -1_000.0, 2_000.0);
+        let rel = p - cam;
+        let t = lvr_rise((l.x * l.x + l.z * l.z) / (2.0 * r), l.y + 2.0 * (rel.x * l.x + rel.z * l.z) / (2.0 * r), bent_y(rel, cam.y, r) - u.slab.x);
+        let below = lvr_optical_depth(&w, &smooth, &smooth, p, l);
+        let floor = lvr_optical_depth(&w, &smooth, &smooth, p + l * (t - 0.01), l);
+        assert!(below.y > 0.0 && (below - floor).abs().max_element() < 1e-2, "{below} against {floor}");
+    }
+
+    /// A ground receiver under a known column reads that column: the column is put on one node of
+    /// the near front, addressed the way the producer writes it (the field position of the node,
+    /// `(lo + n) x across - repeat x drift`, on the bent floor), the receiver set back from that
+    /// floor point along the light to a ground height well under the floor, at slanted suns of an
+    /// azimuth on neither axis, with x and z distinct (a swapped axis, a wrong sign of the light,
+    /// the wrong end of the layers or a camera-relative slip each miss the column and read 0).
+    #[test]
+    fn a_ground_receiver_reads_the_column_above_it_along_the_light() {
+        for (elevation, drift) in [(50.0f32, [0.0, 0.0]), (25.0, [0.137, -0.291]), (70.0, [-3.25, 1.5])] {
+            let u = frame_uniform(elevation, drift);
+            let cam = Vec3::new(-73_728.0, 12_500.0, -12_500.0);
+            let s = drawn_schedule(&u, cam);
+            let bake = s.reader_bakes()[0].expect("a near front");
+            let field = DVec2::new(f64::from(cam.x), f64::from(cam.z)) + lv_drift_units(&u);
+            let w = lvr_window(lv_reader_levels(&s, field), (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 0.0]);
+            let (n0x, n0z) = (bake.lo[0] + 70, bake.lo[1] + 52);
+            let across = f64::from(bake.grid.across);
+            let d = lv_drift_units(&u);
+            let q = Vec2::new((n0x as f64 * across - d.x) as f32, (n0z as f64 * across - d.y) as f32);
+            let qr = q - Vec2::new(cam.x, cam.z);
+            let qy = u.slab.x - qr.length_squared() / (2.0 * u.reach.y);
+            let l = u.light_dir.truncate();
+            let ground = cam.y - 800.0;
+            let p = Vec3::new(q.x, qy, q.y) - l * ((qy - ground) / l.y);
+            let column = |n: IVec3| if (n.x, n.z) == (70, 52) { 6.0 } else { 0.0 };
+            let none = |_: IVec3| -> f32 { panic!("the far level has presence 0 here") };
+            let r = lvr_optical_depth(&w, &column, &none, p, l);
+            assert_eq!(r.y, 1.0, "elevation {elevation}: inside the near window");
+            assert!((r.x - 6.0).abs() < 0.05, "elevation {elevation}, drift {drift:?}: the receiver under the column reads {} (receiver {p}, floor point {q})", r.x);
+            // One cell to the side along x, then along z: nothing.
+            for side in [Vec3::new(500.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 500.0)] {
+                assert!(lvr_optical_depth(&w, &column, &none, p + side, l).x < 0.05, "elevation {elevation}: the column leaks a cell away");
+            }
+        }
+    }
+
+    /// The hand-over weight is 0 outside a window and at its edge, rises linearly over the guard
+    /// band to 1 and stays there, times the presence; the presence rises smoothly from 0 to 1 over
+    /// the arrival frames. Moving a receiver across the near window's edge and then the far
+    /// window's changes the reader's result by no more than the field's own change (no seam), the
+    /// covered share going from 1 to 0 at the far edge.
+    #[test]
+    fn the_hand_over_is_continuous() {
+        let g = LV_GUARD;
+        assert_eq!(lvr_weight(-0.01, g, 1.0), 0.0);
+        assert_eq!(lvr_weight(0.0, g, 1.0), 0.0);
+        assert_eq!(lvr_weight(g, g, 1.0), 1.0);
+        assert_eq!(lvr_weight(10.0 * g, g, 1.0), 1.0);
+        assert_eq!(lvr_weight(0.5 * g, g, 0.5), 0.25);
+        assert_eq!(lvr_weight(f32::NAN, g, 1.0), 0.0);
+        let mut prev = 0.0;
+        for k in 0..=1_000 {
+            let e = -1.0 + k as f32 * 0.01;
+            let w = lvr_weight(e, g, 1.0);
+            assert!((w - prev).abs() <= 0.01 / g + 1e-6, "a jump at {e}");
+            assert_eq!(w, lv_guard(Vec3::new(e, 0.0, 1.0e3), u32::MAX, u32::MAX, g), "the trace's guard for presence 1 at {e}");
+            prev = w;
+        }
+        assert_eq!(lvr_presence(None, LVR_ARRIVAL_SECS), 0.0);
+        assert_eq!(lvr_presence(Some(0.0), LVR_ARRIVAL_SECS), 0.0);
+        assert_eq!(lvr_presence(Some(LVR_ARRIVAL_SECS), LVR_ARRIVAL_SECS), 1.0);
+        assert_eq!(lvr_presence(Some(10.0 * LVR_ARRIVAL_SECS), LVR_ARRIVAL_SECS), 1.0);
+        assert_eq!(lvr_presence(Some(f32::NAN), LVR_ARRIVAL_SECS), 0.0);
+        let steps: Vec<f32> = (0..=60).map(|f| lvr_presence(Some(f as f32 / 60.0 * LVR_ARRIVAL_SECS), LVR_ARRIVAL_SECS)).collect();
+        assert!(steps.windows(2).all(|p| p[1] >= p[0] && p[1] - p[0] <= 1.6 / 60.0), "{steps:?}");
+        // Across the windows: a vertical sun, so the receiver reads the floor straight above it.
+        let u = frame_uniform(89.9, [0.0; 2]);
+        let cam = Vec3::new(0.0, 500.0, 0.0);
+        let s = drawn_schedule(&u, cam);
+        let field = DVec2::new(0.0, 0.0) + lv_drift_units(&u);
+        let levels = lv_reader_levels(&s, field);
+        let w = lvr_window(levels, (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 1.0]);
+        // One smooth field over world x, as each level's nodes sample it.
+        let world_x = |l: Vec4, n: IVec3| (n.x as f32 - l.x) * l.z;
+        let near = |n: IVec3| 2.0 + (world_x(w.near, n) / 50_000.0).sin();
+        let far = |n: IVec3| 2.0 + (world_x(w.far, n) / 50_000.0).sin();
+        let l = u.light_dir.truncate();
+        let (mut last, mut seen_far_edge) = (None::<Vec2>, false);
+        let mut x = 0.0f32;
+        while x < 300_000.0 {
+            let r = lvr_optical_depth(&w, &near, &far, Vec3::new(x, 0.0, 0.0), l);
+            if let Some(p) = last {
+                let field_step = 250.0 / 50_000.0 * 1.01 + 1e-3;
+                assert!((r.y - p.y).abs() <= 250.0 / (LV_GUARD * LV_FAR_ACROSS) + 1e-3, "covered jumps at x {x}: {p} to {r}");
+                if r.y > 0.0 && p.y > 0.0 {
+                    assert!((r.x - p.x).abs() <= field_step + 0.02, "depth jumps at x {x}: {p} to {r}");
+                }
+            }
+            seen_far_edge |= r.y == 0.0;
+            last = Some(r);
+            x += 250.0;
+        }
+        assert!(seen_far_edge, "the far window ends inside the walk");
+    }
+
+    /// A level with no front, or with presence 0, is never read: none ready gives no data, the
+    /// near level alone gives none outside its window, a level fading in covers only its presence.
+    #[test]
+    fn a_missing_front_gives_no_data() {
+        let u = frame_uniform(60.0, [0.0; 2]);
+        let cam = Vec3::new(0.0, 500.0, 0.0);
+        let l = u.light_dir.truncate();
+        let panic_fetch = |_: IVec3| -> f32 { panic!("a level without a front was read") };
+        let none = lvr_window([None, None], (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 1.0]);
+        assert_eq!((none.floor.z, none.floor.w), (0.0, 0.0), "no level, no presence whatever was asked");
+        assert_eq!(lvr_optical_depth(&none, &panic_fetch, &panic_fetch, cam, l), Vec2::ZERO);
+        let s = drawn_schedule(&u, cam);
+        let field = DVec2::new(0.0, 0.0) + lv_drift_units(&u);
+        let [near, far] = lv_reader_levels(&s, field);
+        let one = |_: IVec3| 1.0;
+        let near_only = lvr_window([near, None], (cam, u.slab.x, u.reach.y, LV_GUARD), [1.0, 1.0]);
+        assert_eq!(lvr_optical_depth(&near_only, &one, &panic_fetch, Vec3::new(1_000.0, 0.0, 0.0), l), Vec2::new(1.0, 1.0));
+        assert_eq!(lvr_optical_depth(&near_only, &one, &panic_fetch, Vec3::new(1_000_000.0, 0.0, 0.0), l), Vec2::ZERO, "outside the near window, no far level");
+        let fading = lvr_window([near, far], (cam, u.slab.x, u.reach.y, LV_GUARD), [0.25, 0.0]);
+        let r = lvr_optical_depth(&fading, &one, &panic_fetch, Vec3::new(1_000.0, 0.0, 0.0), l);
+        assert!((r - Vec2::new(1.0, 0.25)).abs().max_element() < 1e-6, "{r}");
+        // A light under the horizon meets the bent floor only far outside every window: no data.
+        assert_eq!(lvr_optical_depth(&near_only, &one, &panic_fetch, Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, -0.2, 0.98).normalize()), Vec2::ZERO);
+    }
+
+    /// The reader module repeats the march reader's addressing and nesting word for word, and is
+    /// valid WGSL by itself; its struct is the Rust one's, field for field.
+    #[test]
+    fn the_reader_module_matches_the_trace_and_is_valid_wgsl() {
+        let reader = include_str!("light_volume_reader.wesl").replace("\r\n", "\n");
+        let march = include_str!("volumetric_clouds_march.wesl").replace("\r\n", "\n");
+        for line in [
+            "    let edge = min(min(c.x, nodes - 1.0 - c.x), min(c.y, nodes - 1.0 - c.y));",
+            "    let y = min(bh / max(up, 1.0), layers - 1.0);",
+            "    let y0 = min(floor(y), layers - 2.0);",
+            "    let uv = (c + 0.5) / nodes;",
+            "    let nodes = max(size.x, 2.0);",
+            "    let layers = max(size.y, 2.0);",
+        ] {
+            assert!(reader.contains(line) && march.contains(line), "{line}");
+        }
+        assert!(march.contains("let r = vc_lv_fetch(vc_lv_near, ns, v.lv_near.xy + p.xz / max(v.lv_near.z, 1.0), bh, v.lv_near.w, v.lv_size.xz);"));
+        assert!(reader.contains("let r = lvr_level(tn, s, w.near.xy + rel.xz / max(w.near.z, 1.0), bh, w.near.w, w.size.xz);"));
+        assert!(march.contains("return cam.y + rel.y + dot(rel.xz, rel.xz) / (2.0 * max(v.reach.y, 1.0));"), "the march's bend");
+        assert!(reader.contains("var bh = cam.y + rel.y + dot(rel.xz, rel.xz) / twice_r - w.floor.x;"));
+        for nest in ["optical += keep * wf * r.y;", "keep *= 1.0 - wf;", "keep = 1.0 - wn;"] {
+            assert!(reader.contains(nest), "{nest}");
+        }
+        assert!(march.contains("optical += keep * w * r.y;") && march.contains("keep *= 1.0 - w;"));
+        let fields: Vec<usize> = ["    near: vec4<f32>,", "    far: vec4<f32>,", "    size: vec4<f32>,", "    cam: vec4<f32>,", "    floor: vec4<f32>,"].iter().map(|f| reader.find(f).unwrap_or_else(|| panic!("{f}"))).collect();
+        assert!(fields.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(<LightVolumeWindow as bevy::render::render_resource::ShaderType>::min_size().get(), 80, "five vec4s");
+        assert!(!reader.contains("@group(") && !reader.contains("@if("), "no bindings and no conditions: the user binds");
+        let module = wgpu::naga::front::wgsl::parse_str(&reader).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&reader)));
+        wgpu::naga::valid::Validator::new(wgpu::naga::valid::ValidationFlags::all(), wgpu::naga::valid::Capabilities::empty()).validate(&module).unwrap_or_else(|e| panic!("{e:?}"));
     }
 }

@@ -436,6 +436,9 @@ of the body of 2026-11-20 (removed with that body, so they cannot be printed
 again here) [hypothesis]: |p95| against the fine depth to the top 0.013 to 0.028 for
 the volume alone, 0.05 to 0.11 for the eight taps (the baseline); the largest crease 0.05 to 0.29 against
 the taps' 0.30 to 1.75.
+Since stage 2i M2 a shared reader of the completed fronts (`LightVolumeReader`,
+`light_volume_reader.wesl`) gives the ground's cloud shadows their depth (graphics-enhanced.md §3.23,
+"Ground shadows from the light volume").
 Not built: a cross-fade between generations.
 
 ## What is not done
@@ -608,6 +611,18 @@ Read once at the start, usable in a played run (they do not make a run unattende
   the medium's seam (`MediumRay` in, `MediumSample` out) and its history do not see it. The wisps' phases
   are the base noise's, so they do not drift against the body and the reprojection is unaffected.
   Smoke: `volumetric-clouds` checks the defaults.
+- `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto` (#3032 stage 2i, M2; graphics-enhanced.md
+  §3.23, "Ground shadows from the light volume"; default auto): where Cloud shadows come from while
+  that row is on. `auto`: the light volume's completed fronts where they have data, the weather's
+  flat layers elsewhere, mixed through the windows' guard bands and while a level fades in (about a
+  second); the layers whole unless the volumetric sky is what the player sees: this row on with the
+  medium's buffer shown (its composing material ready, the flat sky hidden), its clouds asked of the
+  medium, and a front to read (sun_visibility.rs `AutoGate`);
+  `weather`: the layers only (the shadows before M2, for paired pictures); `volume`: the volume only,
+  no shadow where it has no data; `share` and `depth`: debug views of the reader in place of K, its
+  covered share (presence and guard bands included, 0 no data) and its optical depth over 8 (shown
+  as grey with `NVF_PLAY_DEBUG_SUN_VISIBILITY=cloud`). Log line `cloud shadows: source <what and
+  why>` whenever the source in use changes.
 - `NVF_PLAY_DEBUG_MEDIUM_TILE=<1|2|3>`: one ray per tile of this side a frame (3); 1 casts every
   texel every frame through the history. Any other value is 3 (4 is not built). No effect in the
   reference mode.

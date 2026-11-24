@@ -113,6 +113,14 @@
 //! clouds' scroll clock, the dome's and this one ([`cloud_seconds`]), for screenshots;
 //! `NVF_PLAY_DEBUG_CLOUD_REFERENCE=<percentile 0..100 | off>` sets the clear reference's
 //! percentile, or turns the relative rule off (the absolute product, as before it).
+//!
+//! - **The light volume's shadow** [design, #3032 stage 2i M2; docs/design/graphics-enhanced.md
+//!   §3.23, "Ground shadows from the light volume"]: while the volumetric clouds' light volume has
+//!   completed fronts, sun_visibility.wesl takes K from its optical depth (`exp(-depth)`, this
+//!   module's strength and low-sun band) where it has data and from this module's layers elsewhere
+//!   ([`crate::sun_visibility::CloudSource`]). Nothing here changes for it: the layers' image, the
+//!   absolute cover and the plane are made as before; this module hands over only the strength and
+//!   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto` ([`parse_source`]).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -204,6 +212,37 @@ pub fn follow_graphics(g: Res<crate::graphics::Graphics>, mut shadows: ResMut<Cl
 pub fn follow_switch(shadows: Res<CloudShadows>, mut sink: ResMut<crate::sun_visibility::SunVisibility>) {
     if sink.cloud_enabled != shadows.enabled {
         sink.cloud_enabled = shadows.enabled;
+    }
+}
+
+/// `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` (#3032 stage 2i M2; auto when unset,
+/// empty or unknown, with a warning for an unknown value): where the cloud shadows come from
+/// (sun_visibility.rs [`crate::sun_visibility::CloudSource`]).
+pub fn parse_source(value: Option<&str>) -> crate::sun_visibility::CloudSource {
+    use crate::sun_visibility::CloudSource;
+    match value {
+        None => CloudSource::Auto,
+        Some(v) => CloudSource::parse(v).unwrap_or_else(|| {
+            warn!("cloud shadows: NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE={v} unknown (weather, volume, auto, share or depth); auto");
+            CloudSource::Auto
+        }),
+    }
+}
+
+/// Hands the sun-visibility plumbing the source the aid asks for and the strength in force (the
+/// shadow from the light volume takes the same strength as the weather's layers, and needs it
+/// whether or not a layer image is published). Once, at the start (neither changes in a run).
+fn hand_over_source(sink: Option<ResMut<crate::sun_visibility::SunVisibility>>) {
+    let Some(mut sink) = sink else { return };
+    let value = std::env::var("NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE").ok();
+    let source = parse_source(value.as_deref());
+    if value.is_some() {
+        info!("cloud shadows: source asked for: {} (NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE)", source.name());
+    }
+    let strength = calibration().strength;
+    if sink.cloud_source != source || sink.cloud_strength != strength {
+        sink.cloud_source = source;
+        sink.cloud_strength = strength;
     }
 }
 
@@ -554,6 +593,7 @@ impl Plugin for CloudShadowsPlugin {
             .init_resource::<CloudCoverPublished>()
             .init_resource::<CloudCoverRefused>()
             .init_resource::<CloudCoverEmpty>()
+            .add_systems(Startup, hand_over_source)
             .add_systems(
                 Update,
                 (

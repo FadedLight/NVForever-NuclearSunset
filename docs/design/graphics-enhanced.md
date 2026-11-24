@@ -3589,7 +3589,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
 | `volumetric_clouds_march.wesl` | the march: plain functions, called by the medium's trace |
 | `volumetric_clouds_model2.rs`, `_model2_tests.rs` | the body's CPU mirror and its tests |
 | `volumetric_clouds_light.wesl`, `.rs` | the light of one sample (a leaf module), its mirror, the light's colours |
-| `volumetric_clouds_lightvol.wesl`, `.rs`, `_lightvol_tests.rs` | the light volume's producer and its schedule |
+| `volumetric_clouds_lightvol.wesl`, `.rs`, `_lightvol_tests.rs` | the light volume's producer, its schedule, the shared reader |
 | `volumetric_clouds_wisp.rs`, `_air.rs`, `_tune.rs` | the wisps' mirror, the haze's dome colours, the live file |
 | `cloud_noise.rs`, `cloud_shadows.rs` | the generated noise; the weather's cover |
 
@@ -3989,6 +3989,89 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   ray mixes toward diffuse light sampled from the current weather's dome (two elevations,
   volumetric_clouds_air.rs) by the opacity-weighted distance through air thinning with height; empty sky,
   coverage and reprojection stay as they are.
+- **Ground shadows from the light volume** [design; Kim and Neumann 2001, "Opacity Shadow Maps", and
+  Bauer 2019 slides 33 and 35, documented, for the form: the clouds' shadow looked up in a precomputed
+  product toward the sun]. Cloud shadows (sun-visibility.md) alone take the weather's flat layers,
+  composed on the 20,000-unit plane, which are not the clouds the volume draws. The light volume
+  already holds the optical depth toward the light through the real field (slant and bend included),
+  its layer zero at the slab floor, the shadows' plane bent with the horizon.
+  - *The shared reader* (`volumetric_clouds_lightvol.rs` `gpu::LightVolumeReader`, the WESL module
+    `nvforever::light_volume_reader`, whose header is the contract; CPU mirror `lvr_optical_depth`):
+    one reader for every user outside the trace (the shadows now;
+    reflections later). Per level it holds the front a reader may sample this frame, its window
+    measured as the trace measures its front's (the camera's position in nodes from the front's
+    corner under this frame's drift), the floor, the bend and the guard. The front is one whose
+    every layer was encoded in an earlier frame and that survived this frame's drop checks
+    (`LvSchedule::reader_bakes`), so no texel of it is written during the frame, whatever order the
+    views draw in (the water reflection draws before the trace pass that sweeps) and if this frame's
+    sweep fails; a front promoted this frame is read from the next. `lvr_optical_depth` moves a point
+    under the bent floor along the light to it (exact: the slab holds no cloud under its floor) and
+    reads a point above it at its own bent height (a mountain top: the depth from there, not from the
+    floor); the near level is mixed over the far one through its guard band, the far one over nothing
+    through its own, each times its presence; it returns the depth over the covered share and that
+    share (0: no data). The trace's binding and reader are unchanged.
+  - *The route*: the receivers sample the reader themselves (bindings 45 and 46 of the mesh view bind group,
+    the sun visibility's own, and five vec4s more in its uniform), not a cached transmission map in the
+    existing 2D binding: that map would still need window coordinates and an edge fallback in the receiver
+    (the old binding repeats, which would tile it), a pass, and either two maps or one at the far level's
+    resolution. Cost per lit fragment of a sun-lit view: one texture read where one level covers it (a
+    receiver under the floor reads one layer), two in a guard band, plus the weather's one where the volume
+    covers it in part or not at all; two a level for a receiver above the floor; one square root and one
+    exponential. The layers' path alone, the baseline, is one read.
+  - *The fragment texture budget* [design; counts from this
+    build's code]: wgpu counts every sampled texture a pipeline layout shows the fragment stage,
+    outside binding arrays, against `max_sampled_textures_per_shader_stage`. The fullest mesh view
+    layout holds 11 with the two arrays (shadow maps 2, depth and motion prepasses 2, the tonemapping
+    table of a view that is not HDR 1, the transmission texture every 3D camera has 1, the sun
+    visibility 2 + 2, the ambient occlusion 1); the fullest material holds 21 when not bindless (the
+    terrain's: StandardMaterial's 8 with `pbr_specular_textures`, its 13 layers) and 10 when the
+    world's materials are bindless (the sky's, which stays non-bindless). So the fullest pipeline
+    needs 32 not bindless, 21 bindless; a non-bindless NIF pipeline at the reviewed view (depth
+    prepass, transmission, no motion, no table, no occlusion) 18 with the arrays, 16 without. The
+    arrays are bound only when the fullest count (measured at the start from bevy_pbr's own layout
+    and the materials' derived layouts on the device) plus 4 fits the limit; otherwise the views
+    take the weather-only layout (no bindings 45-46, no `NVF_CLOUD_VOLUME`: the shader compiles
+    without the reader and K is the layers'), logged in one line `cloud shadows: ...`
+    (sun_visibility.rs `CloudVolumeRoom`, tests `cloud_volume_room_decides_the_layout`,
+    `the_weather_only_layout_leaves_out_bindings_45_and_46`, `shader_variants_are_valid_wgsl`).
+    A 16-texture adapter cannot draw the non-bindless terrain even without the arrays (30); the
+    budget matters between about 30 and 36.
+  - *K*: `1 - strength (1 - exp(-depth))` with the layers' strength (`STRENGTH`, the calibration aid
+    included) and their low-sun band (sine 0.02 to 0.1), mixed over the layers' K by the covered
+    share; where the volume has no data (beyond the far window, no front yet, the light volume off,
+    the volumetric clouds off) the layers' K whole. The automatic source takes the volume only while
+    the volumetric sky is shown (the medium's buffer written whole with its composing material
+    ready, so the flat sky is hidden), its clouds are asked of the medium and a level is readable;
+    otherwise the layers' K whole (sun_visibility.rs `AutoGate`, test
+    `auto_source_follows_the_sky_the_player_sees`). A level that becomes readable fades in over one
+    real second (`LVR_ARRIVAL_SECS`; counted in frames first, which at the few frames a second of a
+    start took many seconds), so a front's arrival is no pop; a dropped front (a teleport, a
+    weather jump) falls back at once. With the volume not in use the uniform is the packed one and
+    the shader's first statement hands K to the layers' function, word for word: the
+    picture is theirs alone. Not relative: the layers' K is divided by a percentile of its own map so an
+    overcast does not dim the whole scene; the volume's is absolute, so under a full overcast the
+    ground takes the whole strength (the picture is the judge).
+  - *Where each level serves* [arithmetic, not looked at]: a receiver at the ground reference reads
+    the floor 20,000 / tan(elevation) units toward the sun. The near window covers about 31,500 units
+    each way (2,000 of them guard), so it serves the ground around the camera only with the sun above
+    about 34 degrees; below, the far level (cells of 4,000 units, its light filtered to 8,000) gives
+    the shadow next to the player too, a broad soft dimming rather than a cloud's outline. The far
+    window (about 252,000 each way, 16,000 guard) reaches the camera's ground down to about 4.9
+    degrees, where the low-sun band still leaves about 90 % of the shadow: around that elevation the
+    hand-over to the layers sweeps across the scene (smooth, no seam, but the pattern changes).
+    A start above the ground moves all of this up (the ground reference is the first output's camera
+    height rounded to 1,024, cloud_shadows.rs `GROUND_SNAP`): the floor is then 20,000 units over that
+    height, so its point lies farther sunward for a receiver on the ground.
+  - *In motion*: the levels are addressed in the field's coordinates under this frame's drift, so the
+    shadows move with the wind every frame and need no reprojection; a swap of fronts (every 8 frames
+    near, 32 to 40 far) changes them only by the sun's progress, a weather fade's and the bend's tilt
+    since the snapshot, and moves the guard bands by whole cells (the window is re-snapped per bake).
+  - Aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto` (volumetric-medium.md, "Debug
+    aids"); log line `cloud shadows: source ...` when the source in use changes. Tests:
+    `volumetric_clouds_lightvol.rs` `reader_tests` (the bookkeeping, the windows against the trace's,
+    the projection, the hand-over, the fallback, the module's text and validity) and
+    `sun_visibility.rs` (`cloud_volume_off_is_todays_cloud`, `cloud_volume_hands_over_to_the_weather`,
+    the variants linked with the reader).
 - **What follows the weather** (from `SkyState` and the cover every frame, through weather
   fades: no weather names, no per-weather result kept): the amount (so the threshold, the types and the
   share of sky move smoothly through a fade), the drift (the layers' ONAM speeds along the wind, as the

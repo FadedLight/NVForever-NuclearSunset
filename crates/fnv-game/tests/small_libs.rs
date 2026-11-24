@@ -895,6 +895,93 @@ fn stewie_worn_armor_weightless_queries_follow_handoff_and_keep_item_mask_fallba
 }
 
 #[test]
+fn stewie_965_970_queries_follow_handoff_and_retain_sync_category_child_choice() {
+    files();
+    let f = fixture();
+    let mut g = game(&f);
+    let ini = b"[Tweaks]\n\
+bSynchronizeContainerCategories=1\n\
+bBarterCheckActorBuySellFlags=1\n\
+bDontOpenDoorsAfterLockpick=1\n\
+bNoSkipDialog=1\n\
+bRestoreLockedDoorSound=0\n\
+[Synchronized Container Categories]\n\
+bPreventSwitchWhenEmptyingCategory=0\n\
+[Other]\n\
+bPreventSwitchWhenEmptyingCategory=9\n";
+    assert!(g.mod_files.write_bytes("NVSE/Plugins/nvse_stewie_tweaks.ini", ini));
+
+    // Unbound headless games retain the layered INI fallback.
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bSynchronizeContainerCategories:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \"bPreventSwitchWhenEmptyingCategory:Synchronized Container Categories\")"), n(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bBarterCheckActorBuySellFlags:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \"bRestoreLockedDoorSound:Tweaks\")"), n(0.0));
+
+    // Default bound settings: parent switches off, child bPreventSwitchWhenEmptyingCategory retained true,
+    // bRestoreLockedDoorSound always true (NVForever already plays DRSLocked on refused locks).
+    let defaults = fnv_game::tweaks::Tweaks::default();
+    g.bind_stewie_stat_settings(&defaults);
+    assert_eq!(q(&mut g, "SetFunctionValue (GetPluginVersion \"lStewieAl's Tweaks\")"), n(945.0));
+    for name in ["StewVal", "StewieGetValue"] {
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \" bSynchronizeContainerCategories : Tweaks \")")), n(0.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \" bPreventSwitchWhenEmptyingCategory : Synchronized Container Categories \")")), n(1.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bBarterCheckActorBuySellFlags:Tweaks\")")), n(0.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bDontOpenDoorsAfterLockpick:Tweaks\")")), n(0.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bNoSkipDialog:Tweaks\")")), n(0.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bRestoreLockedDoorSound:Tweaks\")")), n(1.0));
+        assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bPreventSwitchWhenEmptyingCategory:Other\")")), n(9.0));
+    }
+
+    // Live mutations reflect immediately without mutating unrelated fields.
+    g.tweaks.sync_categories = true;
+    g.tweaks.prevent_switch_when_emptying_category = false;
+    g.tweaks.vendor_lists_both = true;
+    g.tweaks.no_door_after_pick = true;
+    g.tweaks.no_skip_dialogue = true;
+    let before = g.tweaks.clone();
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bSynchronizeContainerCategories:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \"bPreventSwitchWhenEmptyingCategory:Synchronized Container Categories\")"), n(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bBarterCheckActorBuySellFlags:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewVal \"bDontOpenDoorsAfterLockpick:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (StewieGetValue \"bNoSkipDialog:Tweaks\")"), n(1.0));
+    assert_eq!(g.tweaks, before, "queries do not mutate settings");
+
+    // Snapshot/restore clears application authority until rebound.
+    let saved = g.snapshot();
+    let mut restored = Game::restore(&f.data, World::new(&f.forms, &f.refs, SimConfig::default()), GameConfig { strict: true, ..Default::default() }, &saved).unwrap();
+    assert!(restored.mod_files.write_bytes("NVSE/Plugins/nvse_stewie_tweaks.ini", ini));
+    assert_eq!(q(&mut restored, "SetFunctionValue (StewVal \"bRestoreLockedDoorSound:Tweaks\")"), n(0.0));
+    restored.bind_stewie_stat_settings(&defaults);
+    assert_eq!(q(&mut restored, "SetFunctionValue (StewVal \"bRestoreLockedDoorSound:Tweaks\")"), n(1.0));
+    assert_eq!(q(&mut restored, "SetFunctionValue (StewieGetValue \"bPreventSwitchWhenEmptyingCategory:Synchronized Container Categories\")"), n(1.0));
+}
+
+#[test]
+fn add_item_and_add_item_health_percent_request_refresh_only_while_item_menu_open() {
+    let f = fixture();
+    let mut g = game(&f);
+
+    // Closed menus: AddItem and AddItemHealthPercent leave refresh_items_list_pending false.
+    q(&mut g, "PlayerREF.AddItem TestAmmo 2");
+    assert!(!g.refresh_items_list_pending());
+    q(&mut g, "PlayerREF.AddItemHealthPercent TestAmmo 1 0.5");
+    assert!(!g.refresh_items_list_pending());
+
+    // Open Inventory, Container, or Barter menu: both functions request a one-shot refresh.
+    for code in [fnv_game::game::menus::INVENTORY, fnv_game::game::menus::CONTAINER, fnv_game::game::menus::BARTER] {
+        g.open_menu(code);
+        q(&mut g, "PlayerREF.AddItem TestAmmo 1");
+        assert!(g.take_refresh_items_list(), "AddItem refreshes open menu {code}");
+        assert!(!g.refresh_items_list_pending());
+
+        q(&mut g, "PlayerREF.AddItemHealthPercent TestAmmo 1 0.75");
+        assert!(g.take_refresh_items_list(), "AddItemHealthPercent refreshes open menu {code}");
+        assert!(!g.refresh_items_list_pending());
+        g.close_menu();
+    }
+}
+
+#[test]
 fn hnvse_merge_region_lists_unions_overridden_cell_regions_when_enabled() {
     files();
     fn tes4_with_masters(masters: &[&str]) -> Vec<u8> {

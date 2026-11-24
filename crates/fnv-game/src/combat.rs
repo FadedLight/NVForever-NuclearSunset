@@ -1229,11 +1229,13 @@ impl Game<'_> {
 
     /// Run the OnFire blocks of the weapon `actor` fired (its object script)
     /// [documented: block name; observed: the detonator's script, `DetonatorOnFire`, is
-    /// an OnFire block], and fire JIP's `SetOnFireWeaponEventHandler` event
-    /// [documented: SetOnFireWeaponEventHandler]. Returns whether an OnFire block ran.
+    /// an OnFire block], fire JIP's `SetOnFireWeaponEventHandler` event
+    /// [documented: SetOnFireWeaponEventHandler], and fire ShowOff's
+    /// `ShowOff:OnFireWeapon` event (`nvse_showoff.rs`). Returns whether an OnFire block ran.
     pub fn weapon_fired(&mut self, actor: FormId, weapon: FormId) -> bool {
         let ran = self.item_event(actor, weapon, event::ON_FIRE, None);
         self.fire_weapon_jip_event(actor, weapon, false);
+        self.showoff_on_fire_weapon(actor, weapon, false);
         ran
     }
 

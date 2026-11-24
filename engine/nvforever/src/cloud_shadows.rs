@@ -120,7 +120,7 @@
 //!   module's strength and low-sun band) where it has data and from this module's layers elsewhere
 //!   ([`crate::sun_visibility::CloudSource`]). Nothing here changes for it: the layers' image, the
 //!   absolute cover and the plane are made as before; this module hands over only the strength and
-//!   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto` ([`parse_source`]).
+//!   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` ([`parse_source`]).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;

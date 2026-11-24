@@ -3578,9 +3578,9 @@ Off, Performance, Normal, High) or `--graphics-only volumetric-clouds` (Normal;
 The clouds are the cloud source of the volumetric medium (docs/design/volumetric-medium.md: the far
 buffer, the levels, the tiles, the history, the upsample). The medium casts a ray per 3x3 tile of a
 buffer a share of the render size and calls the march once for each; the proxy in the main pass
-composes the result over the dome. This section is the source: what cloud is where, how it is lit
-and how it is marched. Nothing else reads it: the cloud shadows on the ground come from the weather's
-flat layers, as without the row. One density model ships (the code calls it the lean model
+composes the result over the dome. This section is the source: what cloud is where, how it is lit,
+how it is marched, and what else reads it (the cloud shadows on the ground, while the volume is drawn:
+"Ground shadows from the light volume" below). One density model ships (the code calls it the lean model
 and names its functions `vc_m2_*`); a run draws with it and nothing else.
 
 | File (`engine/nvforever/src`) | Holds |
@@ -3674,7 +3674,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
 - **The domain** [engineering choice]. Its base is the cloud shadows' plane: 20,000 units above the
   ground reference, the camera's height (snapped to 1,024) when the worldspace's first composition is
   made, held until the worldspace changes. That suits a start on the ground (about 290 m up at 70
-  units a metre: low for real clouds, but the cloud shadows on the ground and the clouds share the plane, and
+  units a metre: low for real clouds, but the cloud shadows on the ground and the clouds must agree, and
   `NVF_PLAY_DEBUG_CLOUD_SHADOW=<height>,...` moves both together); a start in the air puts the plane,
   and so the clouds, 20,000 units above that height. Above it cloud may occupy 24,000 units
   (`NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT=<16000..80000>`). The sizes that scale with the domain (the
@@ -4018,24 +4018,24 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     receiver under the floor reads one layer), two in a guard band, plus the weather's one where the volume
     covers it in part or not at all; two a level for a receiver above the floor; one square root and one
     exponential. The layers' path alone, the baseline, is one read.
-  - *The fragment texture budget* [design; counts from this
-    build's code]: wgpu counts every sampled texture a pipeline layout shows the fragment stage,
+  - *The fragment texture budget* [design; counted in the code]: wgpu counts every sampled texture a pipeline layout shows the fragment stage,
     outside binding arrays, against `max_sampled_textures_per_shader_stage`. The fullest mesh view
     layout holds 11 with the two arrays (shadow maps 2, depth and motion prepasses 2, the tonemapping
     table of a view that is not HDR 1, the transmission texture every 3D camera has 1, the sun
-    visibility 2 + 2, the ambient occlusion 1); the fullest material holds 21 when not bindless (the
-    terrain's: StandardMaterial's 8 with `pbr_specular_textures`, its 13 layers) and 10 when the
+    visibility 2 + 2, the ambient occlusion 1); the fullest material holds 27 when not bindless (the
+    terrain's: StandardMaterial's 8 with `pbr_specular_textures`, its layers' 19) and 10 when the
     world's materials are bindless (the sky's, which stays non-bindless). So the fullest pipeline
-    needs 32 not bindless, 21 bindless; a non-bindless NIF pipeline at the reviewed view (depth
-    prepass, transmission, no motion, no table, no occlusion) 18 with the arrays, 16 without. The
-    arrays are bound only when the fullest count (measured at the start from bevy_pbr's own layout
+    needs 38 not bindless, 21 bindless. The
+    arrays are bound only while the Volumetric clouds row is on with Cloud shadows (`volume_layout`),
+    and when the fullest count (measured once, when they are first wanted, from bevy_pbr's own layout
     and the materials' derived layouts on the device) plus 4 fits the limit; otherwise the views
     take the weather-only layout (no bindings 45-46, no `NVF_CLOUD_VOLUME`: the shader compiles
     without the reader and K is the layers'), logged in one line `cloud shadows: ...`
     (sun_visibility.rs `CloudVolumeRoom`, tests `cloud_volume_room_decides_the_layout`,
     `the_weather_only_layout_leaves_out_bindings_45_and_46`, `shader_variants_are_valid_wgsl`).
-    A 16-texture adapter cannot draw the non-bindless terrain even without the arrays (30); the
-    budget matters between about 30 and 36.
+    A 16-texture adapter cannot draw the non-bindless terrain even without the arrays (36); the
+    budget matters between 36 and 41. Either row's switch asks for the other layout's pipelines, kept
+    from then on, as the Cloud shadows row's switch does without the volume.
   - *K*: `1 - strength (1 - exp(-depth))` with the layers' strength (`STRENGTH`, the calibration aid
     included) and their low-sun band (sine 0.02 to 0.1), mixed over the layers' K by the covered
     share; where the volume has no data (beyond the far window, no front yet, the light volume off,
@@ -4050,7 +4050,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the shader's first statement hands K to the layers' function, word for word: the
     picture is theirs alone. Not relative: the layers' K is divided by a percentile of its own map so an
     overcast does not dim the whole scene; the volume's is absolute, so under a full overcast the
-    ground takes the whole strength (the picture is the judge).
+    ground takes the whole strength [engineering choice].
   - *Where each level serves* [arithmetic, not looked at]: a receiver at the ground reference reads
     the floor 20,000 / tan(elevation) units toward the sun. The near window covers about 31,500 units
     each way (2,000 of them guard), so it serves the ground around the camera only with the sun above
@@ -4066,12 +4066,13 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     shadows move with the wind every frame and need no reprojection; a swap of fronts (every 8 frames
     near, 32 to 40 far) changes them only by the sun's progress, a weather fade's and the bend's tilt
     since the snapshot, and moves the guard bands by whole cells (the window is re-snapped per bake).
-  - Aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto` (volumetric-medium.md, "Debug
-    aids"); log line `cloud shadows: source ...` when the source in use changes. Tests:
+  - Aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` (volumetric-medium.md,
+    "Debug aids"); log line `cloud shadows: source ...` when the source in use changes while the
+    Volumetric clouds row is on, and when it goes off. Smoke: `volumetric-clouds-shadows`. Tests:
     `volumetric_clouds_lightvol.rs` `reader_tests` (the bookkeeping, the windows against the trace's,
     the projection, the hand-over, the fallback, the module's text and validity) and
     `sun_visibility.rs` (`cloud_volume_off_is_todays_cloud`, `cloud_volume_hands_over_to_the_weather`,
-    the variants linked with the reader).
+    `with_the_volumetric_clouds_off_the_cloud_shadows_are_the_weathers_alone`, the variants linked with the reader).
 - **What follows the weather** (from `SkyState` and the cover every frame, through weather
   fades: no weather names, no per-weather result kept): the amount (so the threshold, the types and the
   share of sky move smoothly through a fade), the drift (the layers' ONAM speeds along the wind, as the
@@ -4107,6 +4108,9 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the lens's and the extra cameras'.
   - The sky material's uniform is a vector longer (the fair sun's disc, zero) and sky.wesl tests it.
   - The shaders' sources are registered at the start; none is compiled.
+  - With Cloud shadows or Terrain shadows on, their uniform is six vectors longer (zero; the shader reads
+    none of them) and the views' component holds two texture views more, not bound; layouts and pipelines
+    are as without the row. The shared reader's system finds no light volume (a flag read a frame).
   - With Cloud shadows on, the cloud textures are read as without the row (the volume's look through a
     texture's alpha waits until it wants the cover, and then reads the file once more); a colour texture's
     shape is checked before it is decoded, not after.

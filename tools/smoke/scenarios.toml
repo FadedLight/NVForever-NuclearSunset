@@ -2801,6 +2801,29 @@ forbid = [
 ]
 
 [[scenario]]
+name = "volumetric-clouds-shadows"
+source = "[design, #3032 stage 2i] docs/design/graphics-enhanced.md §3.23 (Ground shadows from the light volume), engine/nvforever/src/sun_visibility.rs (CloudSourceInUse, volume_layout, CloudVolumeRoom), light_volume_reader.wesl and volumetric_clouds_lightvol.rs (LightVolumeReader): Cloud shadows with the Volumetric clouds row on, at Goodsprings at noon under NVBlackMountainWeather: the adapter's textures are counted once, the views take the light volume's arrays, and once the volumetric sky is shown and a level is complete the surfaces take their cloud shadows from the light volume, without a shader, pipeline or rendering error. The look is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
+run_seconds = 40
+expect = [
+  { text = "sun visibility: cloud on terrain off debug off", label = "Cloud shadows is on from the start" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", count = 1, label = "the adapter has room for the arrays, counted once" },
+  { re = 'cloud shadows: source the light volume \(', label = "the surfaces read the light volume (sun_visibility.rs)" },
+  { text = "volumetric medium: the trace read a completed near set of the light volume", label = "the light volume they read has finished sweeps" },
+]
+forbid = [
+  { re = 'pipeline \d+ failed after \d+ ms: ', label = "a pipeline failed" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light volume in the receivers" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light volume in the receivers" },
+  { text = "failed to process shader", label = "a receiver's shader that does not build with the reader" },
+  { text = "failed and will not be tried again", label = "a receiver's pipeline that failed for good" },
+  { text = "panicked", label = "a panic with the shadows from the volume" },
+]
+
+[[scenario]]
 name = "volumetric-clouds-taa-turn"
 source = "[design, #3032] engine/nvforever/src/medium.rs, medium_trace.wesl, medium_resolve.wesl: the volumetric medium's default mode under native TAA at a fixed 1280x720, with the view turning at 60 degrees a second (NVF_PLAY_DEBUG_MEDIUM_TURN) so the reprojection, the clamp and the cut test run, at the level High: the buffer at two fifths (512x288) and its 171x96 trace target are made, both passes' pipelines compile, the trace pass draws, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. The look of the turn is checked in pictures by hand"
 areas = ["renderer", "graphics", "weather"]

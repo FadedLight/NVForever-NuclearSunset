@@ -797,7 +797,7 @@ fn lv_start(i: usize, set: usize, u: &CloudVolumeUniform, (cam, field): (Vec3, D
 
 // ---- Stage 2i M2: the shared reader of the light volume (light_volume_reader.wesl) ----
 //
-// [design, plan-check-stage2i Decision 6] One reader of the completed fronts for every user outside
+// [design] One reader of the completed fronts for every user outside
 // the trace (the ground cloud shadows now, reflections later): the render
 // world's `gpu::LightVolumeReader` (the fronts' views and windows, made by
 // `gpu::publish_light_volume_reader` each frame the light volume ran), the shader struct
@@ -808,8 +808,9 @@ fn lv_start(i: usize, set: usize, u: &CloudVolumeUniform, (cam, field): (Vec3, D
 /// over another source ([`lvr_presence`]) [engineering choice: a front's arrival changes the
 /// picture from the fallback's pattern to the volume's, which must not show as a pop. Seconds, not
 /// frames: the first fronts arrive while cells are still loading, at a few frames a second, when a
-/// fade counted in frames took many seconds (the stills of 0d2c21e79, shot about 9 s after the near
-/// level and 2.6 s after the far one arrived, showed the fallback almost whole)].
+/// fade counted in frames took many seconds (judged by eye in stills of the development build
+/// 0d2c21e79, about 9 s after the near level and 2.6 s after the far one arrived: the fallback almost
+/// whole)].
 pub const LVR_ARRIVAL_SECS: f32 = 1.0;
 
 /// light_volume_reader.wesl `LightVolumeWindow`, field for field.
@@ -1236,7 +1237,7 @@ pub(crate) mod gpu {
     /// was swept, so the sets are as they were and a reader falling back for one frame would show a
     /// pop. Longer (the medium stopped running) empties it. For those frames the camera, the drift
     /// (the windows) and the presences are the last planned frame's and the drop checks are not
-    /// rerun (the milestone review's note; light_volume_reader.wesl's header states the exception).
+    /// rerun (light_volume_reader.wesl's header states the exception).
     pub const LVR_KEEP_FRAMES: u32 = 4;
 
     /// Makes the shared reader for this frame from the light volume's state: its levels when the

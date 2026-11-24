@@ -128,8 +128,9 @@ bitflags::bitflags! {
 /// there is none. They are in the layout only with `cloud_volume` (layout key
 /// [`MeshPipelineViewLayoutKey::NVF_CLOUD_VOLUME`], pipeline key
 /// `MeshPipelineKey::NVF_CLOUD_VOLUME_VISIBILITY`, shader def `NVF_CLOUD_VOLUME`), which the
-/// game leaves off on adapters whose fragment stage has too few sampled textures for them
-/// (nvforever `sun_visibility.rs` `CloudVolumeRoom`): the weather-only layout.
+/// game leaves off while its Volumetric clouds row is off and on adapters whose fragment stage has
+/// too few sampled textures for them (nvforever `sun_visibility.rs` `volume_layout`,
+/// `CloudVolumeRoom`): the weather-only layout.
 #[derive(Component, Clone)]
 pub struct NvfSunVisibilityBindings {
     pub uniform: Buffer,

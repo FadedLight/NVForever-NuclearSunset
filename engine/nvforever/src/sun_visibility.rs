@@ -31,9 +31,10 @@
 //! - the world camera, the water reflection camera and a scope's lens camera get
 //!   [`SunVisibilityView`], extracted as bevy_pbr's `NvfSunVisibilityBindings` (a uniform,
 //!   the cloud texture (filterable), the terrain map (unfilterable, read with loads), a
-//!   sampler at view bindings 39-42, and since #3032 stage 2i M2 the volumetric clouds' light
-//!   volume's near and far front sets at 45-46, read through the shared reader
-//!   light_volume_reader.wesl for the cloud shadows from the volume, [`CloudSource`]), which gives their
+//!   sampler at view bindings 39-42, and since #3032 stage 2i M2, while the Volumetric clouds row
+//!   is on ([`volume_layout`]), the volumetric clouds' light volume's near and far front sets at
+//!   45-46, read through the shared reader light_volume_reader.wesl for the cloud shadows from the
+//!   volume, [`CloudSource`]), which gives their
 //!   pipelines the shader defs `NVF_SUN_VISIBILITY` (+ `NVF_CLOUD_VISIBILITY`,
 //!   `NVF_TERRAIN_VISIBILITY`) and their bind group the bindings (engine/vendor/README.md);
 //! - [`HOOK_EDITS`], patched into `apply_pbr_lighting` after lights.rs's display-value
@@ -352,8 +353,7 @@ pub const MASK_CLOUD_VOLUME_ONLY: u32 = 8;
 pub const MASK_CLOUD_VOLUME_SHARE: u32 = 16;
 pub const MASK_CLOUD_VOLUME_DEPTH: u32 = 32;
 
-/// Why the cloud shadows take the weather's layers alone this frame (#3032 stage 2i M2; the
-/// milestone review's must-fix 1 for the automatic source).
+/// Why the cloud shadows take the weather's layers alone this frame (#3032 stage 2i M2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WeatherWhy {
     /// `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather`.
@@ -372,8 +372,7 @@ pub enum WeatherWhy {
     NoRoom,
 }
 
-/// What the automatic source needs to know besides the reader's levels (#3032 stage 2i M2, the
-/// milestone review's must-fix 1): `Auto` takes the light volume's shadows only where they belong
+/// What the automatic source needs to know besides the reader's levels (#3032 stage 2i M2): `Auto` takes the light volume's shadows only where they belong
 /// to the sky the player sees: the volumetric clouds drawn (the row on and the medium's buffer
 /// shown, the flat sky hidden).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -685,7 +684,7 @@ pub(crate) fn mark_targets(
 }
 
 /// Sampled textures kept free on the fragment stage above the fullest pipeline's count with the
-/// light volume's two arrays before they are bound (#3032 stage 2i M2, review must-fix 2)
+/// light volume's two arrays before they are bound (#3032 stage 2i M2)
 /// [engineering choice: covers what the count below does not see: a morph-target mesh's texture in
 /// the mesh bind group, a material added later, a view key bit a later change sets].
 pub const CLOUD_VOLUME_ROOM_MARGIN: u32 = 4;
@@ -699,7 +698,7 @@ pub const CLOUD_VOLUME_ROOM_MARGIN: u32 = 4;
 pub const FULLEST_VIEW_TEXTURES: u32 = 11;
 
 /// Whether the light volume's two arrays (bindings 45-46) fit the adapter's fragment stage
-/// (#3032 stage 2i M2, the milestone review's must-fix 2). wgpu counts every sampled texture of a
+/// (#3032 stage 2i M2). wgpu counts every sampled texture of a
 /// pipeline layout that the fragment stage sees, outside binding arrays, against
 /// `max_sampled_textures_per_shader_stage` (wgpu-core binding_model.rs
 /// `BindingTypeMaxCountValidator`): the mesh view layout's plus the material's (bindless materials
@@ -954,7 +953,7 @@ fn extract_sun_visibility(
     if views.is_empty() {
         return;
     }
-    // The automatic source's gate (#3032 stage 2i M2, review must-fix 1): read every frame, as the
+    // The automatic source's gate (#3032 stage 2i M2): read every frame, as the
     // sky's state changes without the switches changing.
     gpu.gate = AutoGate {
         row: graphics.as_deref().is_some_and(|g| g.volumetric_clouds),
@@ -968,7 +967,7 @@ fn extract_sun_visibility(
     let (cloud, terrain) = (vis.cloud_on(), vis.terrain_on());
     (gpu.cloud_on, gpu.source, gpu.strength) = (cloud, vis.cloud_source, vis.cloud_strength);
     // The light volume's arrays only while the Volumetric clouds row is on and where the adapter
-    // has room for them (review must-fix 2): measured once, constant for the run, so the key bit
+    // has room for them: measured once, constant for the run, so the key bit
     // changes only with the cloud variant and the row.
     let row = gpu.gate.row;
     let cloud_volume = volume_layout(cloud, row, || {
@@ -1536,7 +1535,7 @@ pub(crate) mod tests {
         assert_eq!(with_cloud_volume(packed, CloudSourceInUse::Volume { near: true, far: false, only: false }, f32::NAN, window).volume.x, 0.0, "a strength that is not a number casts nothing");
     }
 
-    /// Review must-fix 2 (#3032 stage 2i M2): the light volume's arrays are bound only when the
+    /// #3032 stage 2i M2: the light volume's arrays are bound only when the
     /// fullest pipeline's fragment textures with them, plus the margin, fit the adapter's
     /// `max_sampled_textures_per_shader_stage`; else the weather-only layout, where every source but
     /// the aid `weather` takes the weather's layers. The counts here are this build's: the fullest
@@ -1608,10 +1607,10 @@ pub(crate) mod tests {
     /// The automatic source's gate when the volumetric sky is shown.
     const SHOWN: AutoGate = AutoGate { row: true, sky_shown: true, traced: true };
 
-    /// Review must-fix 1 (#3032 stage 2i M2): `Auto` takes the light volume's shadows only while the
+    /// #3032 stage 2i M2: `Auto` takes the light volume's shadows only while the
     /// volumetric sky is what the player sees: the sky shown (row on, buffer written whole, composing
     /// material ready: the flat sky hidden) and traced, and only the levels that are readable; otherwise the
-    /// weather's layers. The aids `volume`, `share` and `depth` ignore the gate.
+    /// weather's layers. The aids `volume`, `share` and `depth` ask for the row alone.
     #[test]
     fn auto_source_follows_the_sky_the_player_sees() {
         let both = [true, true];
@@ -1970,7 +1969,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Should-fix 3 of the milestone review (#3032 stage 2i M2): the real receivers composed as
+    /// #3032 stage 2i M2: the real receivers composed as
     /// the pipeline composes them. bevy_pbr's `pbr_functions` takes lights.rs's display-value
     /// patch and then [`HOOK_EDITS`] (lights.rs's order), every vendored bevy_pbr and bevy_render
     /// module, nvforever's and nvf_assets' are registered under their `embedded://` paths in
@@ -2079,7 +2078,7 @@ pub(crate) mod tests {
 
     /// sun_visibility.wesl in each of its eight variants (cloud, terrain, cloud volume on or off;
     /// the game binds the volume only with the cloud variant, the others are valid too) is valid
-    /// WGSL. Without `NVF_CLOUD_VOLUME` (the weather-only layout, review must-fix 2) nothing names
+    /// WGSL. Without `NVF_CLOUD_VOLUME` (the weather-only layout) nothing names
     /// bindings 45-46, the window or the reader, and K is the weather's.
     #[test]
     fn shader_variants_are_valid_wgsl() {

@@ -489,7 +489,7 @@ marked `NVForever sun visibility`, for nvforever's `sun_visibility.rs`:
   `light_far`: filterable float 2D arrays, `R16Float`, sampled with 42), which the cloud
   shadows read from the volume (nvforever `light_volume_reader.wesl`); nvforever's own
   one-texel, two-layer stand-in when there is none. nvforever leaves `cloud_volume` off
-  on an adapter whose fragment stage has too few sampled textures for two more (the
+  while its Volumetric clouds row is off and on an adapter whose fragment stage has too few sampled textures for two more (the
   weather-only layout, `sun_visibility.rs` `CloudVolumeRoom`). The entries 39-46 are
   made by the public `nvf_sun_visibility_layout_entries`, which the tests read.
 - `src/render/mesh.rs`: `MeshPipelineKey::NVF_SUN_VISIBILITY`, `NVF_CLOUD_VISIBILITY` and

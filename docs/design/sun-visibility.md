@@ -46,12 +46,13 @@ Axes are Bevy's world axes (y up), units game units. In the shader
   `light_volume` blocks: with the volumetric clouds on, K comes from the light volume where it has
   data (graphics-enhanced.md §3.23, "Ground shadows from the light volume"; mask bit 4, bit 8 for
   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=volume`); with bit 4 clear K is the layers' as
-  before, word for word. Bindings 45 and 46 are in the layout only with the cloud variant on an
-  adapter with room for them (`CloudVolumeRoom`, measured once at the start and logged in one
+  before, word for word. Bindings 45 and 46 are in the layout only with the cloud variant, while the
+  Volumetric clouds row is on (`volume_layout`), on an
+  adapter with room for them (`CloudVolumeRoom`, measured once, when they are first wanted, and logged in one
   line: the fullest pipeline's fragment textures with them, the view layout's at its fullest
   and the world material with the most outside binding arrays, plus 4 kept free, against
   `max_sampled_textures_per_shader_stage`); otherwise the views have the weather-only layout
-  and K is the layers' whatever the aid asks (the milestone review's must-fix 2).
+  and K is the layers' whatever the aid asks.
 - Shader defs: `NVF_SUN_VISIBILITY` while the plumbing is on for the view,
   `NVF_CLOUD_VISIBILITY` while Cloud shadows is switched on (or the test producer sets a
   cloud), `NVF_TERRAIN_VISIBILITY` while Terrain shadows is switched on, `NVF_CLOUD_VOLUME`

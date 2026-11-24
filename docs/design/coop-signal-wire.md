@@ -64,7 +64,7 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
 | `accept` | host | `peer`, `candidates` | Let this guest in. My candidates so far. |
 | `decline` | host | `peer`, `reason` | Turn this guest away. |
 | `candidates` | either | `peer` (host only, optional), `candidates` | Found more (trickle). From the host, no `peer` means every accepted guest. |
-| `connected` | guest | `path` | My path is up (`direct`, `lan`, `relay`). For the host's lobby screen. |
+| `connected` | guest | `path` | My path is up: `direct`, `lan`, `relay` (through another guest) or `hosted-relay` (through `nvf-relay`), at most 16 characters. For the host's lobby screen; only `direct` and `lan` make the guest a helper. |
 | `reconnect` | guest | none | My path was lost. Start the checks again. |
 | `relay_ask` | guest | `helper`, `candidates` | I can't reach the host: ask that guest to relay for me. These are my candidates, for its checks. |
 | `relay_answer` | guest | `for`, `accept`, `reason`, `candidates` | My answer to `for`'s request. Accepting, I send my candidates. Refusing, `reason` is `off`, `busy` or `no_direct_path`. |

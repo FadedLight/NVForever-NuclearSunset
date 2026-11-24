@@ -900,14 +900,11 @@ pub fn volume_layout(cloud_on: bool, row: bool, fits: impl FnOnce() -> bool) -> 
 }
 
 /// The source to name in the log this frame, if any: a change while the light volume is asked for
-/// (`wanted`, [`volume_wanted`]), and once the one left when it is not any more; nothing else.
-/// `told` is the one named last, none while it is not asked for.
+/// (`wanted`, [`volume_wanted`]), and once the one left when it is not any more, where that is
+/// another; nothing else. `told` is the one named last, none while it is not asked for.
 fn source_told(told: &mut Option<CloudSourceInUse>, now: CloudSourceInUse, wanted: bool) -> Option<CloudSourceInUse> {
-    if *told == Some(now) {
-        return None;
-    }
     let last = std::mem::replace(told, wanted.then_some(now));
-    (last.is_some() || wanted).then_some(now)
+    (last != Some(now) && (last.is_some() || wanted)).then_some(now)
 }
 
 struct GpuParts {
@@ -1041,8 +1038,7 @@ fn extract_sun_visibility(
     });
     let uniform = gpu.uniform;
     gpu.volume.set(cloud_volume, || light_fallback(&device, &queue));
-    // Out of the layout the light volume's views are not bound: any will do.
-    let light = gpu.volume.stand_in.clone().unwrap_or_else(|| fallback.d2_array.texture_view.clone());
+    let gpu = &mut *gpu;
     let parts = gpu.parts.get_or_insert_with(|| {
         let mut buffer = UniformBuffer::from(uniform);
         buffer.set_label(Some("nvf_sun_visibility"));
@@ -1067,6 +1063,8 @@ fn extract_sun_visibility(
                 b.cloud_volume = cloud_volume;
             }
         } else {
+            // Out of the layout the light volume's views are not bound: any will do.
+            let light = gpu.volume.stand_in.as_ref().unwrap_or(&fallback.d2_array.texture_view);
             commands.entity(e).try_insert(NvfSunVisibilityBindings {
                 uniform: buffer.clone(),
                 cloud_texture: fallback.d2.texture_view.clone(),
@@ -1758,6 +1756,23 @@ pub(crate) mod tests {
         assert_eq!([say(row_off, false), say(row_off, false), say(CloudSourceInUse::Off, false)], [Some(row_off), None, None], "the row off: once");
         assert_eq!([say(volume, true), say(CloudSourceInUse::Off, false), say(CloudSourceInUse::Off, false)], [Some(volume), Some(CloudSourceInUse::Off), None], "Cloud shadows off: once");
         assert!(volume_wanted(true, true) && !volume_wanted(true, false) && !volume_wanted(false, true));
+    }
+
+    /// The aid `weather` with the row on, off and on again: the source is the same throughout, so
+    /// the row going off names nothing, but nothing is remembered while it is off (the frame's
+    /// preparation then leaves the source alone) and the next activation names it again.
+    #[test]
+    fn a_forced_weather_source_is_forgotten_with_the_row_and_named_again() {
+        let gate = |row| AutoGate { row, ..SHOWN };
+        let mut told = None;
+        for activation in 0..2 {
+            let on = CloudSourceInUse::decide(true, CloudSource::Weather, [true, true], gate(true));
+            assert_eq!([source_told(&mut told, on, true), source_told(&mut told, on, true)], [Some(on), None], "{activation}");
+            let off = CloudSourceInUse::decide(true, CloudSource::Weather, [false; 2], gate(false));
+            assert_eq!((off, source_told(&mut told, off, false)), (on, None), "{activation}: the same source");
+            assert_eq!(told, None, "{activation}: nothing remembered while the row is off");
+            assert_eq!(source_told(&mut told, off, false), None);
+        }
     }
 
     /// The layout's own state: the stand-in is made once while the layout is on and goes with it,

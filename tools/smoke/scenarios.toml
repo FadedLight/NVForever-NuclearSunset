@@ -2825,10 +2825,10 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-clouds-shadows-switch"
-source = "[design, #3032 stage 2i] engine/nvforever/src/sun_visibility.rs (volume_layout, VolumeLayout, source_told): Cloud shadows on throughout, the Volumetric clouds row Off at the start, switched to Normal and Off again in play at Goodsprings at noon (two pauses of the settings page, NVF_PLAY_TEST_SETTINGS): before the first switch no pipeline has the light volume and no line names a source or counts the adapter's textures; each resume waits until the receivers' pipelines are ready, none pending; with the row on the receivers' pipelines with the light volume are asked for and the surfaces read it, with the row off again the source left is named once; no shader, pipeline or rendering error. The log cannot show what a receiver's draw gave: the pipelines asked for and ready stand for it, the pictures are checked by hand"
+source = "[design, #3032 stage 2i] engine/nvforever/src/sun_visibility.rs (volume_layout, VolumeLayout, source_told): Cloud shadows on throughout, the Volumetric clouds row Off at the start, switched to Normal and Off again in play at Goodsprings at noon (two pauses of the settings page, NVF_PLAY_TEST_SETTINGS): before the first switch no pipeline has the light volume and no line names a source or counts the adapter's textures; each resume waits until the receivers' pipelines are ready, none pending; with the row on the receivers' pipelines with the light volume are asked for and the surfaces read it, with the row off again the source left is named once; no shader, pipeline or rendering error. A screenshot toward the ground in each of the three states, judged by how much of it is one colour (NVF_PLAY_TEST_SHOT_FLATNESS), shows that receivers are drawn (with their draws skipped the view is the sky and the clear colour); what the shadow is on them is checked in pictures by hand"
 areas = ["renderer", "graphics", "weather", "settings"]
 paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/nvforever/src/settings.rs", "engine/vendor/bevy_pbr/src/render/mesh.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PIPELINE_DEFS = "1", NVF_PLAY_TEST_PAUSE = "12:14,36:38", NVF_PLAY_TEST_SETTINGS = "13:volumetric-clouds=Normal,37:volumetric-clouds=Off" }
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PIPELINE_DEFS = "1", NVF_PLAY_TEST_LOOK = "8:270:-20", NVF_PLAY_TEST_SHOT_FLATNESS = "1", NVF_PLAY_TEST_SHOTS = "11:vcs_off_a.png,34:vcs_on_b.png,46:vcs_off_c.png", NVF_PLAY_TEST_PAUSE = "12:14,36:38", NVF_PLAY_TEST_SETTINGS = "13:volumetric-clouds=Normal,37:volumetric-clouds=Off" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "cloud-shadows"]
 run_seconds = 50
 expect = [
@@ -2836,6 +2836,8 @@ expect = [
   { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", count = 1, label = "the adapter's textures counted once, not before the row is on" },
   { text = "cloud shadows: source the weather's layers (the Volumetric clouds row is off)", count = 1, label = "the source left when the row goes off, once; none named before it was on" },
   { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', count = 2, label = "each switch's resume waits for its pipelines" },
+  { re = 'vcs_(off_a|on_b|off_c)\.png: \d+ % of the view is one colour', count = 3, label = "a picture in each state was judged" },
+  { re = 'vcs_(?:off_a|on_b|off_c)\.png: (\d+) % of the view is one colour', range = [0, 60], all = true, label = "the ground is drawn in each state: before, with and after the light volume's layout" },
 ]
 order = [[
   { re = 'pipeline \d+ ready after \d+ ms: .*opaque_mesh_pipeline', label = "receivers are drawn with the weather's layout" },

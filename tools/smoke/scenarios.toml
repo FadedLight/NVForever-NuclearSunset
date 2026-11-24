@@ -35541,7 +35541,7 @@ expect = [
   { re = 'terrain: first folded material with authored height maps: [1-6] of [1-6] layers', count = 1, label = "the folded materials took the generated height maps" },
   { re = 'pipeline \d+ shader-defs: .*TERRAIN_PARALLAX', label = "a folded main-pass pipeline with the march was asked for" },
   { re = 'test aid NVF_PLAY_TEST_TERRAIN_PARALLAX_AB: 2 sequences of three shots: 9 s \(flip, grazing\), 40 s \(flip, head-on\)', count = 1 },
-  { re = 'terrain parallax ab: spot \(-?\d+, -?\d+, -?\d+\) for the readback, cell \(-?\d+, -?\d+\) quadrant \d: [1-6] folded layers \([1-6] with height maps\), \d+ drawn over them; shifted share (0\.9\d|1\.00)', count = 1, label = "a spot where the march moves almost all of what shows was found near the start" },
+  { re = 'terrain parallax ab: spot \(-?\d+, -?\d+, -?\d+\) for the readback, cell \(-?\d+, -?\d+\) quadrant \d: [1-6] folded layers \([1-6] with height maps, the base too\), \d+ drawn over them; shifted share (0\.9\d|1\.00)', count = 1, label = "a spot where the march moves almost all of what shows was found near the start" },
   { re = 'terrain parallax ab at 9 s: under the centre: the landscape at .* shifted share (0\.[5-9]\d|1\.00)', count = 1, label = "grazing: the view's centre is on ground the march moves" },
   { re = 'terrain parallax ab at 40 s: under the centre: the landscape at .* shifted share (0\.[5-9]\d|1\.00)', count = 1, label = "head-on: likewise" },
   { re = 'terrain parallax ab at 9 s \(flip\): A-B \d+\.\d+, A-C \d+\.\d+, B-C \d+\.\d+ levels over \d+x\d+ px at the centre; B = A moved by \([+-]\d+, [+-]\d+\) px .*; changed$', count = 1, label = "grazing (about 20 degrees): the switch makes a real, stable change that decorrelates the texture at the centre (changed; a fitted translation is logged but not accepted on its own); the direction is not claimed: relief warps the texture" },
@@ -35724,8 +35724,8 @@ run_seconds = 40
 timeout = 180
 expect = [
   { re = 'pbr ground pack: no sets; a diffuse for each landscape texture with the height map in its alpha', count = 1, label = "the generated alpha-height diffuses are in" },
-  { re = 'terrain: first folded material with heights from diffuse alphas: [1-6] of [1-6] layers \(depth 0\.03\)', count = 1, label = "the folded layers took the alphas" },
-  { re = 'terrain parallax ab at 9 s: under the centre: the landscape at .* shifted share (0\.[5-9]\d|1\.00)', label = "with the switch on the view's centre is on ground the march moves (alpha heights)" },
+  { re = 'terrain: first folded material with heights from diffuse alphas: [0-6] of [0-6] layers( and the base)? \(depth 0\.03\)', count = 1, label = "a folded material took the alphas (the first made may be of a base alone)" },
+  { re = 'terrain parallax ab at 9 s: under the centre: the landscape at .* [1-6] folded layers \([1-6] with height maps, the base too\).* shifted share (0\.[5-9]\d|1\.00)', label = "with the switch on the view's centre is on ground the march moves (alpha heights)" },
   { re = 'terrain parallax ab at 9 s \(flip\): .*; changed$', count = 1, label = "the switch changes the ground over alpha heights and off again is as before" },
 ]
 order = [[
@@ -35740,3 +35740,29 @@ forbid = [
   { text = "failed and will not be tried again", label = "a pipeline that failed for good (terrain-alpha-height)" },
 ]
 manual = "Open terrain-alpha-height-shots/terrain_parallax_ab_9s_a.png and _b.png: the ridge grid in relief in b only."
+
+[[scenario]]
+name = "terrain-base-height"
+source = "[design, #3846] engine/nvforever/src/terrain.rs \"Parallax\", docs/spec-notes/pbr-materials.md \"The base marches too\": over generated height sets (NVF_PLAY_TEST_PBR_GROUND_PACK=1) a quadrant without painted layers is drawn by the folded material and its base's height map moves with the Terrain parallax switch, at the aid's spot on such a quadrant (NVF_PLAY_TEST_TERRAIN_PARALLAX_AB, base); off again the picture is the first one"
+areas = ["renderer", "graphics", "terrain", "textures"]
+paths = [
+  "engine/nvforever/src/terrain.rs", "engine/nvforever/src/terrain.wesl", "engine/nvforever/src/terrain_parallax_ab.rs", "engine/nvforever/src/terrain_parallax_ab/",
+]
+env = { NVF_PLAY_TEST_PBR_GROUND_PACK = "1", NVFOREVER_HOME = "terrain-base-height-home", NVF_PLAY_TEST_SHOT_DIR = "terrain-base-height-shots", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_TERRAIN_PARALLAX_AB = "9:grazing:base" }
+args = ["--pos=-76000,-15400,12000", "--heading", "90", "--play", "--no-voice", "--no-messages", "--no-grass", "--hour", "12", "--size", "1280x720", "--graphics-only", "authored-materials,terrain-parallax,no-eye-adaptation"]
+run_seconds = 38
+timeout = 180
+expect = [
+  { re = 'pbr ground pack: [1-9]\d* height-only sets for the landscape textures', count = 1, label = "the generated ground sets are in (terrain-base-height)" },
+  { re = "terrain: first quadrant without painted layers drawn by the folded material", count = 1, label = "a quadrant of its base alone takes the folded material" },
+  { re = 'terrain parallax ab: spot .* 0 folded layers \(0 with height maps, the base too\), 0 drawn over them; shifted share 1\.00', count = 1, label = "a spot on ground of a base alone, with a height map" },
+  { re = 'terrain parallax ab at 9 s: under the centre: the landscape at .* 0 folded layers \(0 with height maps, the base too\)', count = 1, label = "the view's centre is on that ground" },
+  { re = 'terrain parallax ab at 9 s \(flip\): .*; changed$', count = 1, label = "the switch moves the base's ground, and off again is as before" },
+]
+forbid = [
+  { re = 'terrain parallax ab.*FAIL', label = "no spot found, or a shot that could not be measured (terrain-base-height)" },
+  { text = "pbr ground pack: FAIL", label = "the ground pack was not written (terrain-base-height)" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the base's height" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good (terrain-base-height)" },
+]
+manual = "Open terrain-base-height-shots/terrain_parallax_ab_9s_a.png and _b.png: the ridge grid in relief in b only."

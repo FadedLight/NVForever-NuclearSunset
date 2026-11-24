@@ -616,7 +616,12 @@ fn add_main_world(app: &mut App) -> AirGate {
     app.add_plugins(AirDemandPlugin).insert_resource(gate.clone()).init_resource::<AirCloudMean>().add_systems(
         PostUpdate,
         (
-            follow_air.run_if(air_in_use).after(bevy::camera::CameraUpdateSystems).after(bevy::transform::TransformSystems::Propagate),
+            // After underwater.rs too: this frame's fog and whether the camera is under water.
+            follow_air
+                .run_if(air_in_use)
+                .after(bevy::camera::CameraUpdateSystems)
+                .after(bevy::transform::TransformSystems::Propagate)
+                .after(crate::underwater::underwater_fog),
             follow_cloud_mean.run_if(|w: Option<Res<AirWanted>>| w.is_some_and(|w| w.0)).run_if(resource_exists::<Assets<Image>>),
             forget_cloud_mean.run_if(|w: Option<Res<AirWanted>>, images: Option<Res<Assets<Image>>>| !(w.is_some_and(|w| w.0) && images.is_some())),
         ),

@@ -62,7 +62,8 @@
 //! the same alpha: its core is the plain material's, under the clone's draw, and it has none while
 //! the clone is another source's ([`drawn_source`]).
 //!
-//! **Cost.** Off: two run conditions. On: a pass over the placed meshes' change ticks, one lookup
+//! **Cost.** Off: three run conditions; once something was followed and a material is known as
+//! animated, the materials' removals are read too. On: a pass over the placed meshes' change ticks, one lookup
 //! and comparison a core ([`place`]), the frame's material events and removals; the textures' alpha is read once per file on a
 //! background task, only for materials that pass the other rules.
 
@@ -254,6 +255,7 @@ impl Plugin for SolidCoresPlugin {
                 .before(bevy::pbr::check_entities_needing_specialization::<NifMaterial>)
                 .run_if(needed),
         );
+        app.add_systems(PostUpdate, forget_animated.after(bevy::asset::AssetEventSystems).run_if(animated_kept));
         // After the visibility check, whose answer it reports.
         app.add_systems(Last, report_reference.run_if(reference_asked));
     }
@@ -290,8 +292,18 @@ fn report_reference(mut state: ResMut<SolidCores>, whose: Query<Whose>, cores: Q
 
 /// Cores are wanted, or some are still followed and have to go.
 fn needed(wanted: Option<Res<AirWanted>>, state: Res<SolidCores>) -> bool {
-    // Materials marked as animated are forgotten with their assets, the light off as well.
-    state.on || !state.animated.is_empty() || wanted.is_some_and(|w| w.0)
+    state.on || wanted.is_some_and(|w| w.0)
+}
+
+/// Nothing is followed, and materials are known as animated from when something was.
+fn animated_kept(state: Res<SolidCores>) -> bool {
+    !state.on && !state.animated.is_empty()
+}
+
+/// With the light off all that is left to do: a material known as animated is forgotten with its
+/// asset.
+fn forget_animated(mut state: ResMut<SolidCores>, mut events: MessageReader<AssetEvent<NifMaterial>>) {
+    state.bypass_change_detection().forget_removed(events.read());
 }
 
 /// A mesh of a placed reference.
@@ -949,6 +961,23 @@ pub(crate) mod tests {
             app.insert_resource(AirWanted(true));
             app.update();
             assert!(app.world().resource::<SolidCores>().animated.is_empty(), "{what}");
+        }
+        // With the light off and nothing known as animated no system runs.
+        {
+            let mut app = app(Some(true));
+            let m = add(&mut app, tank());
+            place(&mut app, &m);
+            app.update();
+            app.insert_resource(AirWanted(false));
+            app.update();
+            let runs = |app: &mut App| {
+                use bevy::ecs::system::RunSystemOnce;
+                let w = app.world_mut();
+                (w.run_system_once(needed).unwrap(), w.run_system_once(animated_kept).unwrap())
+            };
+            assert_eq!(runs(&mut app), (false, false));
+            app.world_mut().resource_mut::<SolidCores>().animated.insert(m.id());
+            assert_eq!(runs(&mut app), (false, true), "an animated one: its removal alone is watched for");
         }
         // A material put in again under the id while the light is off is another one.
         {

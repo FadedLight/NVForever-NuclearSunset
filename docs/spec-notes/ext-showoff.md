@@ -45,12 +45,50 @@ ran.
 
 ## 4. ForceWeaponJamAnim
 
-- It returned 0 with the 10mm pistol away and 1 with it drawn [observed]. IsAnimPlayingEx 4
-  (reload) never read 1 over the 60 frames after [observed], so the jam is not a reload as
-  that function counts them.
-- A weapon without a jam animation gives 0 [documented: the .357 revolver cannot jam].
-  NVForever does not read which weapons have one yet, so any drawn weapon gives 1
-  [hypothesis], and the engine does not play the animation [not built].
+- It returned 0 with the 10mm pistol away and 1 with it drawn [observed: showoff1].
+  `IsAnimPlayingEx 4` (reload) never read 1 over the 60 frames after [observed: showoff1],
+  so the jam is not a reload as that function counts them.
+- A weapon without a jam animation gives 0 [documented: GECK wiki
+  [ForceWeaponJamAnim](https://geckwiki.com/index.php?title=ForceWeaponJamAnim), the .357
+  Magnum Revolver cannot jam], and calling it interrupts the actor's current hand action
+  (such as canceling an active reload and replacing it with the jam animation)
+  [documented: ForceWeaponJamAnim].
+- Live probes `[observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE Plugin
+  184, 2026-11-23/24, GSDocMitchellHouse (0x00103DF9), 10 official base masters, clean-room
+  script probes w1_3632_onfireweapon_and_forcejam, so_34_force_weapon_jam_revolver, and
+  w4d_08_forcejam_melee_god_nonactor (tools/capture/nvse/catalogs/wave4d_extenders.json,
+  #3679); no DLL or source consulted]` confirmed:
+  - Drawn 10mm pistol (`Weap10mmPistol` `0x0000434F`, `jam_time = 1.4`) returns **`1`**
+    both normally and under `ToggleGodMode` (`w4d_08_forcejam_melee_god_nonactor`:
+    `tgm10mm(ret=1,act=9)`); immediately afterward, `GetAnimAction` reads **`9`** (not
+    `13`), `IsAnimPlayingEx 4` remains **`0`**, and calling `ForceWeaponJamAnim` again
+    while already jamming returns **`1`** (`w1_3632_onfireweapon_and_forcejam`:
+    `Player.ForceWeaponJamAnim` with holstered/drawn 10mm, Baseball Bat `0x0000421C`, and
+    unarmed fists; `ForceJamAnim` is the wiki-documented alias [documented: GECK wiki
+    ForceWeaponJamAnim]).
+  - Drawn `.357 Magnum Revolver` (`WeapNV357Revolver` `0x0008F216`, `jam_time = 0.0`,
+    `so_34_force_weapon_jam_revolver`: `AddItem` + `EquipItem` + draw `.357` vs `10mm`),
+    holstered 10mm pistol, drawn Baseball Bat (melee, `w4d_08_forcejam_melee_god_nonactor`:
+    `melee(ret=0,act=0)`), drawn Fists (unarmed), and non-actor static references (door
+    `0x103E61`, `w4d_08_forcejam_melee_god_nonactor`: `door=0`) return **`0`**.
+- NVForever checks that the actor is alive, has its weapon drawn, and has an equipped gun
+  (`DNAM/animation_type` in `3..=9`) with finite `DNAM/jam_time > 0` (`GetWeaponAnimJamTime`;
+  honoring session overrides and `TempCloneForm` clones) [observed: FalloutNV.esm WEAP
+  DNAM `Weap10mmPistol` `jam_time = 1.4` vs `WeapNV357Revolver` `jam_time = 0.0`;
+  hypothesis: using `animation_type` `3..=9` + `DNAM/jam_time > 0` as the rules-side
+  availability gate without probing BSA `.kf` presence].
+- On success, `ForceWeaponJamAnim` / `ForceJamAnim` queues the actor (deduplicated per
+  frame, capped at 64 entries for headless runs [design]) for `nvf_play::combat::fire`
+  (`Game::take_force_jam_requests`). For the player, `nvf_play::combat::fire` interrupts
+  any active reload or attack phase via `Cycle::jam` and increments `WeaponAnim::jams`
+  (which `nvforever::player_body` plays on the reload layer, interrupting any active reload
+  clip) while reporting `AnimAction::Jam` (code `9` for `GetAnimAction`, while
+  `IsAnimPlayingEx 4` remains `0` and `SetOnReloadWeaponEventHandler` does not fire;
+  generalizing `Phase::Jammed -> AnimAction::Jam` (`9` instead of `13`) to natural vanilla
+  weapon-condition jams is [hypothesis]).
+  Repeated calls while `Cycle::jammed` is already true return `1` without restarting the
+  active jam timer [design]. NPC jam animation playback remains [not built] (`nvf-play`
+  models `Cycle` for the player only). No ShowOff DLL or source code was consulted.
 
 ## 5. The 2026-10-30 batch (#1010, `nvse_showoff2.rs`)
 
@@ -237,7 +275,7 @@ their titles have a space where the name has an underscore).
 | ReadFromJSON `path [pointer] [mode] [useCache]`, WriteToJSON `value path [pointer] [mode] [useCache] [saveFile] [compact]` | files under the game's folder through NVForever's layer (`GameRoot`, never the game folder), decoded as UTF-8 with any UTF-8 BOM stripped and `Data\...` paths also resolving through NVForever's layer/VFS [design]; objects are string maps, arrays lists, forms "@Plugin.esm:FormID" [documented]; every parser mode reads standard JSON, a pointer into a missing part makes the objects on the way [hypothesis]. `useCache` gates reading/writing `ModFiles::showoff_json` (uncached saved writes drop any stale cached entry) and escaping paths are refused even when `saveFile` is 0 [design]. ReadFromJSON on a missing file gives no value, the call fails [observed 2026-11-08: readjson.missing, TestExpr 0]; a file that is not JSON likewise, a pointer to nothing 0 [hypothesis]; WriteToJSON's failures 0 [hypothesis] |
 | CreateFolder (CreateDirectory) `path`, DumpFormList (FListDump) `list [file] [append]` | the folder made in NVForever's layer; the list's forms to the console or appended to a file there [documented], the lines in NVForever's own words |
 | GetActorFadeState | 0 for a loaded actor not fading [observed: Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, 10 official base masters, `b3_so_01_lvlup_closed_and_status_flags`: `Player.GetActorFadeState` and `rDoc.GetActorFadeState` both returned `0.0` in Doc Mitchell's house, no DLL or source consulted]; −1 for an unloaded actor [observed 2026-11-08: `showoff4.fadestate.doc`, Doc Mitchell in his unloaded house while the player stood at the airport test ground]; NVForever reports `0` for the player or a present actor in a loaded cell and `−1` otherwise [hypothesis: unloaded/non-actor is the reason for `−1`, and other fade states are unknown because NVForever does not fade actors through this state] |
-| GetCalculatedActorSpread | live actor weapon spread from the Gun Spread Formula, stance, crippled arms, `SetNoGunWobble`, and spread perks (`Game::calculated_actor_spread`) [documented: Gun Spread Formula; hypothesis: `docs/spec-notes/nvse-stubs-persistent-fall-spread-unique.md`] |
+| GetCalculatedActorSpread | live actor weapon spread from the Gun Spread Formula, stance, crippled arms, and spread perks (`Game::calculated_actor_spread`) — `SetNoGunWobble 1` does **not** zero `GetCalculatedActorSpread`; 1H guns (anim `3`, `4`) add `+0.2` right / `0` left / `+0.4` both; 2H ranged weapons (anim `5`, `6`, `8`) add `+0.4` single arm / `+0.6` both arms; thrown (anim `10`) adds `0` [documented: Gun Spread Formula; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 + ShowOffNVSE 184, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, isolated clean-room staging copy (read-only `PrintToConsole` probe; zero writes to game install or Saves), `w4c_a06b_spread_settled` (`wave4c_extenders.json`, #3679) and settled 6-type `w4d_09_spread_all_anim_types` (`wave4d_extenders.json`, #3802 / PR #3803): `PROBE\|w4d_09_spread_all_anim_types\|t3(0.1434,0.2359,0.1434,0.3284)\|t4(0.1388,0.2313,0.1388,0.3238)\|t5(0.1688,0.3538,0.3538,0.4463)\|t6(0.1434,0.3284,0.3284,0.4209)\|t8(0.1804,0.3654,0.3654,0.4579)\|t10(0.4504,0.4459,0.4504,0.4459)\|t3nw(0.1434,0.1434)`; zero DLL, PDB, or third-party source consulted; hypothesis: unprobed anim types and remaining scope/GMST details in `docs/spec-notes/nvse-stubs-persistent-fall-spread-unique.md`] |
 | IsFormLoading | 0 [decision: the page is marked Incomplete with no summary, arguments or result; nothing to build from] |
 
 Follow-ups: the three Incomplete pages need their text.
@@ -333,3 +371,32 @@ RemoveAllItemsShowOff.
   argument vectors or resolving weapon forms, leaving unmodded vanilla gameplay
   unchanged with zero allocations. No ShowOff NVSE DLL, PDB, or C++ source code was
   consulted.
+
+## 11. `ShowOff:OnFireWeapon`
+
+- **`ShowOff:OnFireWeapon`** [documented: GECK wiki Category:Event Handlers (ShowOff NVSE),
+  [SetEventHandlerAlt](https://geckwiki.com/index.php?title=SetEventHandlerAlt); observed:
+  Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE Plugin 184, 2026-11-23,
+  GSDocMitchellHouse (`0x00103DF9`), 10 official base masters, clean-room script probe
+  `w1_3632_onfireweapon_and_forcejam` in #3679 (`SetEventHandlerAlt
+  "ShowOff:OnFireWeapon"` with `begin Function { ref rWeap }`, `Player.FireWeapon` with
+  `Weap10mmPistol` `0x0000434F` and 7-pellet Caravan Shotgun `0x000CD53A`); no DLL or
+  source consulted]: dispatched when an actor fires a ranged weapon, with the firing actor
+  reference as the calling reference (`0::` filter, `GetSelf`/`GetSelfAlt`, observed for
+  `Player 0x14`; NPC-actor dispatch [documented: GECK wiki; hypothesis: unprobed in
+  committed #3679 catalog]) and the `WEAP` base form as the single argument (`1::` /
+  `"first"::` filter, `Begin Function { ref rWeapon }`, observed `0x434F` 10mm pistol and
+  `0xCD53A` Caravan Shotgun).
+- Dispatched from `Game::weapon_fired` (player shots) and `Game::projectile_fired`
+  (NPC shots and scripted `FireWeapon` shots), deduplicated per `(frame, actor, weapon)`
+  so `weapon_fired` followed by `projectile_fired` or a multi-pellet shotgun burst fires
+  once per shot [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE Plugin
+  184, 2026-11-23, GSDocMitchellHouse (`0x00103DF9`), 10 official base masters, probe
+  `w1_3632_onfireweapon_and_forcejam` in #3679: `Player.FireWeapon` on the 7-pellet
+  Caravan Shotgun `0x000CD53A` fires `ShowOff:OnFireWeapon` once, not 7 times].
+- Excludes non-actors (e.g., trap activators) and melee weapons (`DNAM/animation_type`
+  `0..=2`), and is not suppressed by player god mode (`ToggleGodMode`), unlike JIP's
+  `SetOnFireWeaponEventHandler` whose god-mode omission is a JIP-documented quirk
+  [hypothesis: non-actor, melee, and god-mode edge cases unprobed in original ShowOff].
+- Free when no `ShowOff:OnFireWeapon` handler is registered (unmodded vanilla weapon
+  firing is unchanged). No ShowOff DLL or source code was consulted.

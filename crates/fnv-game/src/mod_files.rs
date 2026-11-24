@@ -893,18 +893,13 @@ fn xval_to_json(g: &Game, v: &XVal, depth: usize) -> serde_json::Value {
     }
 }
 
-/// Put `value` at a JSON Pointer (RFC 6901) in `root`. Does NOT auto-create missing
-/// intermediate objects or promote a `null` root into `{}` [observed: Fallout: New Vegas
-/// 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-23, GSDocMitchellHouse
-/// (0x00103DF9), 10 official base masters, isolated-staging `WriteToJSON` probes
-/// `so_24_json_write_read_missing_pointer` (`WriteToJSON 123 ... "/a/b/c"` -> `0`) and
-/// `so_24_json_single_level_missing` (missing file + `"/k"` -> `0`, missing file + `""`
-/// with StringMap -> `1`, existing `{}` + `"/k"` -> `1`, existing `{}` + `"/a/b/c"` ->
-/// `0`, existing `null` + `"/k"` or `"/a/b/c"` -> `0`), intentionally excluded from the
-/// read-only #3679 catalog under `tools/capture/nvse/README.md` §10 because `WriteToJSON`
-/// writes files under the game root; no DLL or source consulted]. An array index at the
-/// final segment equal to `len` (or `-`) appends. False when any intermediate segment is
-/// missing or traverses a non-container value.
+/// Put `value` at a JSON Pointer (RFC 6901) in `root`. Promotes a `null` root (including
+/// a missing file) into `{}` so single-level pointers such as `"/k"` succeed, while
+/// failing when any intermediate segment is missing rather than auto-creating intermediate
+/// objects [hypothesis: the page does not specify missing-path creation; root-object
+/// creation is retained for missing files / null roots while missing intermediate segments
+/// return false]. An array index at the final segment equal to `len` (or `-`) appends.
+/// False when any intermediate segment is missing or traverses a non-container value.
 fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Value) -> bool {
     use serde_json::Value as J;
     if pointer.is_empty() {
@@ -913,6 +908,9 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
     }
     let Some(rest) = pointer.strip_prefix('/') else { return false };
     let parts: Vec<String> = rest.split('/').map(|p| p.replace("~1", "/").replace("~0", "~")).collect();
+    if root.is_null() {
+        *root = J::Object(serde_json::Map::new());
+    }
     let mut cur = root;
     let mut value = Some(value);
     for (i, part) in parts.iter().enumerate() {
@@ -1347,14 +1345,10 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
         }
         // `toWrite filepath [jsonPointer] [parserMode] [useCache] [saveFile]
         // [compactFormatting]`: the value converted and put at the pointer of the file's
-        // JSON (a missing file or `null` root returns `0` for any non-empty pointer,
-        // including single-level `"/k"`, and creates no file, while empty root pointer `""`
-        // creates/replaces the file [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9
-        // + ShowOffNVSE 184, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base
-        // masters, isolated-staging `WriteToJSON` probe `so_24_json_single_level_missing`,
-        // intentionally excluded from the read-only #3679 catalog under
-        // `tools/capture/nvse/README.md` §10]; malformed non-JSON files
-        // starting from null [hypothesis]); cached when
+        // JSON (a missing file, malformed non-JSON file, or `null` root starts from `null`
+        // and promotes the root to `{}` for a single-level pointer, while missing
+        // intermediate segments return `0` without creating intermediate objects
+        // [hypothesis]); cached when
         // asked, saved unless saveFile is 0, minified or indented [documented:
         // WriteToJSON]. Saved into NVForever's layer, never the game's folder
         // (`write_root`). 1 when done [documented: "success"].

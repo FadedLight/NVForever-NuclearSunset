@@ -1066,7 +1066,8 @@ about 8,300 placed references, are of its plain class [hypothesis: counted on 20
 that is not committed].
 
 **What.** While the light in the air is drawn (and only then: from its gate's "on" line to its "off" line,
-`AirDraws`, so not at night, indoors, under water or at a strength of 0) such a shape is drawn once more as its
+`AirDraws`, so not at night, indoors, under water or at a strength of 0; hidden from the first frame the
+composite stops, `AirOpen`, gone half a second later) such a shape is drawn once more as its
 solid core: the same mesh with a copy of its material as a cut-out at 0.85
 (`SOLID_CORE_CUT`), so its solid texels are in the depth prepass. The blended draw stays and is drawn
 over the core at its depth (the main pass's test is greater or equal; a hair model's layer relies on

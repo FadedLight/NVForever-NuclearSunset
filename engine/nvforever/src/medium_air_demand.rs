@@ -45,6 +45,16 @@ pub struct AirWanted(pub bool);
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub struct AirDraws(pub bool);
 
+/// Whether this frame's gate is open (main world; false by default): the answer the frame's
+/// composite is drawn by (medium_air_light.rs `follow_light` writes both, in `PostUpdate` before
+/// the visibility check), without [`AirDraws`]' delay.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
+pub struct AirOpen(pub bool);
+
+/// Whether this device can hold the volume, once asked (`None` before; [`follow_demand`]).
+#[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
+pub(crate) struct AirSupport(pub(crate) Option<bool>);
+
 /// Whether the debug aid [`AID`] asks for the light (read once at the start).
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub struct AirAid(pub bool);
@@ -110,6 +120,8 @@ impl Plugin for AirDemandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AirWanted>()
             .init_resource::<AirDraws>()
+            .init_resource::<AirOpen>()
+            .init_resource::<AirSupport>()
             .init_resource::<AirAid>()
             .init_resource::<AirStrengthSetting>()
             .add_systems(Startup, read_aid)
@@ -134,9 +146,9 @@ fn read_aid(mut aid: ResMut<AirAid>) {
 pub(crate) fn follow_demand(
     aid: Res<AirAid>,
     graphics: Option<Res<crate::graphics::Graphics>>,
-    (device, adapter): (Option<Res<RenderDevice>>, Option<Res<RenderAdapter>>),
+    (device, adapter, mut support): (Option<Res<RenderDevice>>, Option<Res<RenderAdapter>>, Option<ResMut<AirSupport>>),
     mut wanted_now: ResMut<AirWanted>,
-    (mut row_was, mut support): (Local<Option<bool>>, Local<Option<bool>>),
+    mut row_was: Local<Option<bool>>,
 ) {
     let graphics_changed = graphics.as_ref().is_some_and(|g| g.is_changed());
     if !aid.is_changed() && !graphics_changed {
@@ -148,15 +160,16 @@ pub(crate) fn follow_demand(
     }
     *row_was = Some(row);
     let next = AirWanted(granted(wanted(row, aid.0), || {
-        if support.is_none() {
+        let support = support.as_mut()?;
+        if support.0.is_none() {
             let (Some(device), Some(adapter)) = (device, adapter) else { return None };
             let answer = crate::medium_air_grid::format_supported(&adapter, &device.limits());
             if let Err(reason) = &answer {
                 warn!("volumetric medium: light in the air not drawn: {reason}");
             }
-            *support = Some(answer.is_ok());
+            support.0 = Some(answer.is_ok());
         }
-        *support
+        support.0
     }));
     wanted_now.set_if_neq(next);
 }
@@ -215,8 +228,22 @@ mod tests {
     fn a_device_without_the_volume_gets_no_demand() {
         assert!(!granted(false, || panic!("no light asked for: the device is not either")));
         assert!(granted(true, || Some(true)) && granted(true, || None) && !granted(true, || Some(false)));
-        let here = include_str!("medium_air_demand.rs").replace("\r\n", "\n");
-        assert!(here.contains("AirWanted(granted(wanted(row, aid.0), || {"), "the demand goes through it");
+        // Through the system: the row or the aid on a device that answered no.
+        for (aid, supported) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut app = App::new();
+            app.insert_resource(Graphics::preset(Preset::Vanilla))
+                .insert_resource(AirAid(aid))
+                .insert_resource(AirSupport(Some(supported)))
+                .init_resource::<AirWanted>()
+                .add_systems(Update, follow_demand);
+            app.update();
+            assert_eq!(app.world().resource::<AirWanted>().0, aid && supported);
+            for row in [true, false, true] {
+                app.world_mut().resource_mut::<Graphics>().volumetric_light = row;
+                app.update();
+                assert_eq!(app.world().resource::<AirWanted>().0, (row || aid) && supported, "row {row}, aid {aid}, supported {supported}");
+            }
+        }
         use crate::medium_air_grid::{volume_format, AIR_USAGES};
         use bevy::render::render_resource::TextureUsages;
         assert!(volume_format(AIR_USAGES, true, 1).is_ok());

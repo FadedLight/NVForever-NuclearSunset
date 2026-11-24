@@ -2,7 +2,8 @@
 //! NVForever's own for the enhanced look [design], never a parity item and never used to
 //! explain a difference from the original; nothing of it runs while the light in the air is
 //! not drawn ([`AirDraws`]: the row or the aid asks for it and its gate is open; at night, indoors,
-//! under water and at a strength of 0 there are none).
+//! under water and at a strength of 0 there are none; in the half second the gate takes to settle they
+//! are hidden, from the frame the composite stops).
 //!
 //! **Why.** The light's composite (medium_air_compose.rs) is a fullscreen pass over the
 //! finished picture that tells each pixel's distance from the depth prepass. Bevy draws no
@@ -72,7 +73,7 @@
 
 use crate::door_fade::DoorFade;
 use crate::limbs::ActorRig;
-use crate::medium_air_demand::AirDraws;
+use crate::medium_air_demand::{AirDraws, AirOpen};
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers, VisibilityRange, VisibilitySystems};
 use bevy::ecs::entity::{EntityHashMap, EntityHashSet};
@@ -239,6 +240,10 @@ fn say_reference(rested: f32, busy: bool, in_view: usize) -> bool {
     !busy && (rested >= REFERENCE_SECS || (rested >= REST_SECS && in_view > 0))
 }
 
+/// The cores' systems of a frame ([`follow`], [`place`]), after the light's gate.
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CoreSystems;
+
 pub struct SolidCoresPlugin;
 
 impl Plugin for SolidCoresPlugin {
@@ -248,6 +253,7 @@ impl Plugin for SolidCoresPlugin {
             PostUpdate,
             (follow, place)
                 .chain()
+                .in_set(CoreSystems)
                 .after(crate::nif_mirror::MirrorSystems)
                 .after(nvf_assets::nif_material::BlendedCutoutSystems)
                 .after(crate::mesh_terrain_blend::BlendConversion)
@@ -642,20 +648,22 @@ fn follow(
     }
 }
 
-/// Each core where its shape is and shown as it is, bit for bit (module notes); one that is
-/// not the core kept for its shape goes.
+/// Each core where its shape is and shown as it is, bit for bit (module notes), but not in a frame
+/// whose gate is closed ([`AirOpen`]: the light is not composed; the cores go once that has
+/// settled); one that is not the core kept for its shape goes.
 fn place(
     mut commands: Commands,
-    state: Res<SolidCores>,
+    (state, open): (Res<SolidCores>, Option<Res<AirOpen>>),
     shapes: Query<(&GlobalTransform, &InheritedVisibility), Without<SolidCore>>,
     mut cores: Query<(Entity, &SolidCore, &mut GlobalTransform, &mut InheritedVisibility)>,
 ) {
+    let open = open.is_none_or(|o| o.0);
     for (e, core, mut at, mut inherited) in &mut cores {
         let kept = state.watched.get(&core.shape).is_some_and(|w| w.core == Some(e));
         match shapes.get(core.shape) {
             Ok((shape_at, shape_inherited)) if kept => {
                 at.set_if_neq(*shape_at);
-                inherited.set_if_neq(*shape_inherited);
+                inherited.set_if_neq(if open { *shape_inherited } else { InheritedVisibility::HIDDEN });
             }
             _ => commands.entity(e).try_despawn(),
         }

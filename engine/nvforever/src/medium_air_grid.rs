@@ -674,7 +674,7 @@ fn air_in_use(wanted: Option<Res<AirWanted>>, gate: Res<AirGate>, marked: Query<
 /// Each frame while wanted: the main camera's [`AirCamera`] from the projection, the camera's
 /// fog, the sun light and the sky; taken off every camera once it is not wanted.
 #[allow(clippy::type_complexity)]
-fn follow_air(
+pub(crate) fn follow_air(
     mut commands: Commands,
     (wanted, gate): (Option<Res<AirWanted>>, Res<AirGate>),
     (sky, submerged): (Option<Res<crate::sky::SkyState>>, Option<Res<crate::underwater::CameraSubmerged>>),
@@ -711,7 +711,7 @@ fn follow_air(
     let outdoors = sky.as_ref().is_some_and(|s| s.interior.is_none()) && !submerged.is_some_and(|s| s.0);
     let sun = suns.iter().next();
     let to_light = sun.map_or(Vec3::ZERO, |t| t.back().as_vec3());
-    // The share and the gate are medium_air_light.rs's (it runs in `Last`): kept as it left them.
+    // The share and the gate are medium_air_light.rs's (it runs after this): kept as it left them.
     let (share, draws) = was.map_or((0.0, false), |w| (w.share, w.draws));
     let next = AirCamera { grid, tune: aids.tune, fog: air_fog, fog_colour, display_blend, to_light, has_light: sun.is_some() && outdoors, outdoors, share, draws };
     if was != Some(&next) {

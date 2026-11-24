@@ -1442,7 +1442,11 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "setweathertransitiontimeoverride" => {
             // NaN or infinity changes nothing.
             if let Some(s) = field_number(num(args, 0, 0.0), 0.0, F32.1) {
-                g.other.jip7.weather_transition = (s > 0.0).then_some(s);
+                let next = (s > 0.0).then_some(s);
+                if g.other.jip7.weather_transition != next {
+                    g.other.jip7.weather_transition = next;
+                    g.traits.note_weather_visual_change();
+                }
             }
             zero
         }
@@ -1478,6 +1482,23 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
                 g.set_armo_class(a, class as u8);
             }
             zero
+        }
+        // `[armor]`: 1 light, 2 medium, 3 heavy; with no armor given, the calling actor's
+        // UpperBody armour's; 0 without one, or for a form that is no armour [documented:
+        // GECK wiki GetArmorClass, alias GetAC]. A class SetArmorClass gave is read back.
+        "getarmorclass" | "getac" => {
+            use fnv_sim::forms::ArmorClass;
+            let class = match form(args, 0) {
+                Some(a) if g.is_armo(a) => Some(crate::armor_overrides::armor_class_from_flags(g.armo_general_flags(a))),
+                Some(_) => None,
+                None => subject.and_then(|r| g.body_armor(r)).map(|(_, c)| c),
+            };
+            XVal::Num(match class {
+                Some(ArmorClass::Light) => 1.0,
+                Some(ArmorClass::Medium) => 2.0,
+                Some(ArmorClass::Heavy) => 3.0,
+                None => 0.0,
+            })
         }
         // `armor path`: the ragdoll constraint template (BMCT) [documented: SetArmorRCT].
         "setarmorrct" => {

@@ -124,11 +124,28 @@ pub struct Waiting {
 pub struct JipHit {
     pub attacker: Option<FormId>,
     pub weapon: Option<FormId>,
+    pub projectile: Option<FormId>,
     pub health_damage: f64,
     pub limb_damage: f64,
+    pub fatigue_damage: f64,
+    pub base_weapon_damage: f64,
     pub location: i32,
-    /// GetHitExtendedFlag's bits: 1 critical, 2 fatal, 5 limb crippled (bit n = flag n).
+    /// GetHitExtendedFlag's bits: 0 blocking, 1 critical, 2 fatal, 5 limb crippled,
+    /// 7 sneak attack, 8 explosion hit (bit n = flag n).
     pub flags: u16,
+    /// World-space 3D impact point (`GetHit3DData 0` and first 3 elements of type 2);
+    /// `[0.0; 3]` for an explosion hit [observed: 2026-11-23, GSDocMitchellHouse
+    /// (0x00103DF9), Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 (10
+    /// official base masters), #3678 / PR #3679 probe `w1_3606_hit_3d_dir_and_base_damage`:
+    /// `GrenadeFragExplosion` placed via `PlaceAtMe`].
+    pub hit_pos: Option<[f32; 3]>,
+    /// Unit 3D incoming travel direction vector `(nx, ny, nz)` (`GetHit3DData 1` and last
+    /// 3 elements of type 2); `[0.0; 3]` for an explosion hit [observed: 2026-11-23,
+    /// GSDocMitchellHouse (0x00103DF9), Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+    /// JIP LN 57.30 (10 official base masters), #3678 / PR #3679 probe
+    /// `w1_3606_hit_3d_dir_and_base_damage`: South->North `+Y`, East->West `-X`, and
+    /// `GrenadeFragExplosion`].
+    pub hit_dir: Option<[f32; 3]>,
 }
 
 /// One `SetOn<Event>EventHandler handler 1 filters…`.
@@ -337,10 +354,12 @@ impl Game<'_> {
         if !add {
             return;
         }
-        // Refuse null/zero callable tokens at registration time with registrar
+        // Refuse null/zero callable tokens — including any numeric value that
+        // `run_function_here` (`*x as u32`) would coerce to form 0 (0.0, negative
+        // numbers, fractions below 1.0, NaN) — at registration time with registrar
         // attribution rather than enqueuing a form-0 callback that fails every frame
         // (#2603) [design].
-        let is_zero = matches!(func, XVal::Ref(0)) || matches!(func, XVal::Num(n) if n == 0.0);
+        let is_zero = matches!(func, XVal::Ref(0)) || matches!(func, XVal::Num(n) if (n as u32) == 0);
         if is_zero {
             let receiver = on.map_or_else(|| "none".into(), |r| format!("0x{:08X}", r.0));
             let callable = diagnostic_value(&func);
@@ -539,14 +558,35 @@ impl Game<'_> {
     }
 
     /// A GetHit… value of `actor`'s current or last hit; `None` when it had none.
-    pub(crate) fn hit_value(&self, actor: FormId, what: &str, k: i64) -> Option<XVal> {
-        let h = self.jip.hits.get(&actor)?;
+    pub(crate) fn hit_value(&mut self, actor: FormId, what: &str, k: i64) -> Option<XVal> {
+        let h = *self.jip.hits.get(&actor)?;
         Some(match what {
             "attacker" => XVal::Ref(h.attacker.map_or(0, |a| a.0)),
             "weapon" => XVal::Ref(h.weapon.map_or(0, |w| w.0)),
+            "projectile" => XVal::Ref(h.projectile.map_or(0, |p| p.0)),
             "health" => XVal::Num(h.health_damage),
             "limb" => XVal::Num(h.limb_damage),
+            "fatigue" => XVal::Num(h.fatigue_damage),
+            "base_weapon" => XVal::Num(h.base_weapon_damage),
             "flag" => XVal::Num(f64::from(u8::from((0..16).contains(&k) && h.flags & (1 << k) != 0))),
+            "3d" => {
+                let coords: Vec<f32> = match k {
+                    0 => h.hit_pos?.to_vec(),
+                    1 => h.hit_dir?.to_vec(),
+                    2 => {
+                        let p = h.hit_pos?;
+                        let d = h.hit_dir?;
+                        vec![p[0], p[1], p[2], d[0], d[1], d[2]]
+                    }
+                    _ => return None,
+                };
+                let entries = coords
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, c)| (fnv_script::vm::XKey::Num(i as f64), XVal::Num(f64::from(c))))
+                    .collect();
+                XVal::Array(self.ext.new_array(fnv_script::vm::ArrayKind::List, entries))
+            }
             _ => return None,
         })
     }
@@ -572,6 +612,10 @@ impl Game<'_> {
         self.sync_pc_target();
     }
 
+    fn sanitize_trigger(value: f32) -> f32 {
+        if value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 }
+    }
+
     fn trigger_mask(&self) -> u8 {
         let p = &self.jip2.told.pad;
         let left = p.held_triggers[0] || p.triggers[0] >= TRIGGER_PRESS_THRESHOLD;
@@ -579,12 +623,21 @@ impl Game<'_> {
         u8::from(left) | (u8::from(right) << 1)
     }
 
+    /// Publish sanitized controller trigger values (`0.0..=1.0`, left then right) for
+    /// `GetLeftTrigger` / `GetRightTrigger` and the frame's `Game::jip_keys` trigger edge
+    /// dispatch (`Game::tick` / `Game::page_tick`) without running script callbacks
+    /// immediately [design: engine input systems run before `PlaySet::Scripts` and outside
+    /// `with_world` / pause / menu-page guards].
+    pub fn publish_pad_triggers(&mut self, left: f32, right: f32) {
+        self.jip2.told.pad.triggers = [Self::sanitize_trigger(left), Self::sanitize_trigger(right)];
+    }
+
     /// Publish controller trigger values (`0.0..=1.0`, left then right) and immediately
     /// dispatch any `SetOnTriggerDownEventHandler` / `SetOnTriggerUpEventHandler` edge
     /// transitions (`0` left, `1` right) [documented: SetOnTriggerDownEventHandler,
     /// SetOnTriggerUpEventHandler].
     pub fn set_pad_triggers(&mut self, left: f32, right: f32) {
-        self.jip2.told.pad.triggers = [left.clamp(0.0, 1.0), right.clamp(0.0, 1.0)];
+        self.publish_pad_triggers(left, right);
         let now = self.trigger_mask();
         self.trigger_edges(now);
     }

@@ -58,6 +58,10 @@ use fnv_world::sky::{
 use nvf_assets::{GameData, TextureCache};
 use std::f32::consts::PI;
 
+#[path = "sky_ini.rs"]
+pub mod ini;
+pub use ini::{CloudUpgradeConfig, MoonlightConfig, CLOUD_UPGRADE_INI_PATH, MOONLIGHT_INI_PATH};
+
 /// Dome radius in Bevy units (inside the camera's far plane).
 const DOME_RADIUS: f32 = 350_000.0;
 /// Radius of the game's sky meshes [observed: atmosphere.nif and clouds.nif span about
@@ -286,6 +290,22 @@ impl Plugin for SkyPlugin {
     }
 }
 
+/// Live session weather visual overrides synced from `fnv_game::Game` by
+/// [`sync_weather_visuals`]: `SetWeatherRGBColor` (`NAM0` and `PNAM`),
+/// `SetWeatherImageSpaceMod` (`0IAD..5IAD`), and `SetWeatherTransitionTimeOverride`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WeatherVisualOverrides {
+    /// `SetWeatherRGBColor` (`NAM0` colour types `0..=9`, excluding type 2) by weather FormID.
+    pub colors: HashMap<u32, [[Option<[u8; 3]>; 6]; fnv_world::sky::COLOR_TYPES]>,
+    /// `SetWeatherRGBColor` type-2 (`PNAM` lower cloud layers `0..=3`) by weather FormID.
+    pub cloud_colors: HashMap<u32, [[Option<[u8; 3]>; 6]; 4]>,
+    /// `SetWeatherImageSpaceMod` (`0IAD..5IAD`) resolved adapters by weather FormID.
+    /// Outer `Some` overrides the authored slot; inner `None` explicitly clears it.
+    pub adapters: HashMap<u32, [Option<Option<Adapter>>; 6]>,
+    /// `SetWeatherTransitionTimeOverride` transition length in real seconds (`None`: weather's own).
+    pub transition_seconds: Option<f32>,
+}
+
 #[derive(Resource)]
 #[cfg_attr(test, derive(Default))]
 pub struct SkyState {
@@ -335,6 +355,9 @@ pub struct SkyState {
     /// Session `SetWeatherTraitNumeric` fog overrides (`15..=20`: day near/far, night
     /// near/far, day/night power) keyed by weather FormID, synced by [`sync_weather_fog`].
     pub weather_fog_overrides: HashMap<u32, [Option<f32>; 6]>,
+    /// Session `SetWeatherRGBColor`, `SetWeatherImageSpaceMod`, and
+    /// `SetWeatherTransitionTimeOverride` overrides synced by [`sync_weather_visuals`].
+    pub weather_visual_overrides: WeatherVisualOverrides,
     /// Each weather's image space adapters per time of day, by weather form ID.
     adapters: HashMap<u32, [Option<Adapter>; 6]>,
     changed: bool,
@@ -389,6 +412,12 @@ pub struct SkyState {
     /// A script asked for a lightning flash (TriggerLightningFX); `crate::weather_fx`
     /// draws it.
     pub lightning_request: bool,
+    /// Optional `Data\NVSE\Plugins\MoonlightNVSE.ini` configuration (`None` when absent,
+    /// leaving nighttime directional light bit-for-bit unchanged).
+    pub moonlight: Option<MoonlightConfig>,
+    /// Optional `Data\NVSE\Plugins\CloudUpgrade.ini` configuration (`None` when absent,
+    /// leaving cloud layer scrolling bit-for-bit unchanged).
+    pub cloud_upgrade: Option<CloudUpgradeConfig>,
 }
 
 /// An overriding weather region of the worldspace and its weathers.
@@ -574,6 +603,7 @@ impl SkyState {
             image_space,
             world_image_space_id,
             weather_fog_overrides: HashMap::new(),
+            weather_visual_overrides: WeatherVisualOverrides::default(),
             adapters,
             changed: true,
             script: None,
@@ -595,6 +625,8 @@ impl SkyState {
             script_wind: None,
             moon_textures: Default::default(),
             lightning_request: false,
+            moonlight: None,
+            cloud_upgrade: None,
         })
     }
 
@@ -673,6 +705,20 @@ impl SkyState {
         }
         if first && self.script.is_some_and(|sw| sw.hold) {
             info!("load: the weather stays held as a script left it");
+        }
+        if first {
+            if let Some(ml) = self.moonlight {
+                info!(
+                    "sky: loaded {MOONLIGHT_INI_PATH} (bMoonPhaseBrightness={}, mults={:?})",
+                    ml.phase_brightness, ml.phase_mults
+                );
+            }
+            if let Some(cu) = self.cloud_upgrade {
+                info!(
+                    "sky: loaded {CLOUD_UPGRADE_INI_PATH} (Speed={}, MaxSpeed={}, Volatility={})",
+                    cu.speed, cu.max_speed, cu.volatility
+                );
+            }
         }
         if let Some(region) = at {
             self.source = region.and_then(|f| self.regions.iter().position(|r| r.region.form_id == f));
@@ -963,7 +1009,11 @@ impl SkyState {
     /// Advance a weather fade by `hours` of game time.
     fn advance_fade(&mut self, hours: f32) {
         if self.prev.is_some() {
-            let length = self.weather.transition_seconds() * GAME_HOURS_PER_SECOND;
+            let secs = self
+                .weather_visual_overrides
+                .transition_seconds
+                .unwrap_or_else(|| self.weather.transition_seconds());
+            let length = secs * GAME_HOURS_PER_SECOND;
             self.fade = if length > 0.0 { (self.fade + hours / length).min(1.0) } else { 1.0 };
             if self.fade >= 1.0 {
                 self.prev = None;
@@ -979,12 +1029,14 @@ impl SkyState {
         [SkyUpper, Fog, Unused, Ambient, Sunlight, Sun, Stars, SkyLower, Horizon, EffectLighting].map(|t| self.color_bytes(t))
     }
 
-    /// A weather colour at the current hour, blended across a weather fade.
+    /// A weather colour at the current hour, blended across a weather fade, with any
+    /// live session `SetWeatherRGBColor` overrides applied.
     pub fn color(&self, ty: ColorType) -> [f32; 3] {
-        let cur = self.weather.color(&self.climate, ty, self.hour);
+        let of = |w: &Weather| w.color_with(&self.climate, ty, self.hour, self.weather_visual_overrides.colors.get(&w.form_id));
+        let cur = of(&self.weather);
         match &self.prev {
             Some(p) => {
-                let old = p.color(&self.climate, ty, self.hour);
+                let old = of(p);
                 std::array::from_fn(|i| old[i] + (cur[i] - old[i]) * self.fade)
             }
             None => cur,
@@ -992,16 +1044,38 @@ impl SkyState {
     }
 
     /// A colour type now as stored (0..255 per channel, blended on the bytes;
-    /// `fnv_world::sky::Weather::color_bytes`), blended across a weather fade.
+    /// `fnv_world::sky::Weather::color_bytes`), blended across a weather fade, with any
+    /// live session `SetWeatherRGBColor` overrides applied.
     pub fn color_bytes(&self, ty: ColorType) -> [f32; 3] {
-        let cur = self.weather.color_bytes(&self.climate, ty, self.hour);
+        let of = |w: &Weather| w.color_bytes_with(&self.climate, ty, self.hour, self.weather_visual_overrides.colors.get(&w.form_id));
+        let cur = of(&self.weather);
         match &self.prev {
             Some(p) => {
-                let old = p.color_bytes(&self.climate, ty, self.hour);
+                let old = of(p);
                 std::array::from_fn(|i| old[i] + (cur[i] - old[i]) * self.fade)
             }
             None => cur,
         }
+    }
+
+    /// Cloud layer `layer`'s colour for `w` at the current hour, with any live session
+    /// `SetWeatherRGBColor` type-2 (`PNAM`) overrides applied.
+    pub fn cloud_color_for(&self, w: &Weather, layer: usize) -> [f32; 3] {
+        w.cloud_color_with(&self.climate, layer, self.hour, self.weather_visual_overrides.cloud_colors.get(&w.form_id))
+    }
+
+    /// Effective per-time-of-day image-space adapters for weather `weather_id`: authored
+    /// `0IAD..5IAD` overlaid with any live session `SetWeatherImageSpaceMod` overrides.
+    fn adapters_for(&self, weather_id: u32) -> [Option<Adapter>; 6] {
+        let mut out = self.adapters.get(&weather_id).copied().unwrap_or([None; 6]);
+        if let Some(ov) = self.weather_visual_overrides.adapters.get(&weather_id) {
+            for (dst, val) in out.iter_mut().zip(ov) {
+                if let Some(adapter) = val {
+                    *dst = *adapter;
+                }
+            }
+        }
+        out
     }
 
     /// The image-space grade now: the base image space with the weather's adapters for
@@ -1014,8 +1088,10 @@ impl SkyState {
             return self.interior_grade.unwrap_or_default();
         }
         let Some(base) = self.image_space else { return Cinematic::default() };
-        let none = [None; 6];
-        let at = |w: &Weather| cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour);
+        let at = |w: &Weather| {
+            let adapters = self.adapters_for(w.form_id);
+            cinematic_at(&base, &adapters, &self.climate, self.hour)
+        };
         let cur = at(&self.weather);
         match &self.prev {
             Some(p) => at(p).lerp(&cur, self.fade),
@@ -1030,8 +1106,10 @@ impl SkyState {
     /// when the grade is switched off: it is light, not a colour grade.
     pub fn sun_scale(&self) -> f32 {
         let Some(base) = self.image_space else { return 1.0 };
-        let none = [None; 6];
-        let at = |w: &Weather| cinematic_at(&base, self.adapters.get(&w.form_id).unwrap_or(&none), &self.climate, self.hour).hdr.v[fnv_world::imagespace::HDR_SUNLIGHT_DIMMER];
+        let at = |w: &Weather| {
+            let adapters = self.adapters_for(w.form_id);
+            cinematic_at(&base, &adapters, &self.climate, self.hour).hdr.v[fnv_world::imagespace::HDR_SUNLIGHT_DIMMER]
+        };
         let cur = at(&self.weather);
         let dimmer = match &self.prev {
             Some(p) => at(p) + (cur - at(p)) * self.fade,
@@ -1192,6 +1270,47 @@ impl SkyState {
         moon_phase(self.days_passed + self.hour / 24.0, self.climate.moon_phase_length())
     }
 
+    /// Load optional `Data\NVSE\Plugins\MoonlightNVSE.ini` and
+    /// `Data\NVSE\Plugins\CloudUpgrade.ini` configurations from `vfs` (case-insensitive).
+    /// Absent files leave both fields `None` and vanilla sky behaviour unchanged.
+    pub fn load_plugin_inis(&mut self, vfs: &fnv_vfs::Vfs) {
+        self.moonlight = MoonlightConfig::load_from_vfs(vfs);
+        self.cloud_upgrade = CloudUpgradeConfig::load_from_vfs(vfs);
+    }
+
+    /// Nighttime directional moonlight intensity multiplier from `MoonlightNVSE.ini`:
+    /// returns `1.0` when the INI is absent, disabled (`bMoonPhaseBrightness=0`), indoors,
+    /// or when the active climate has no moon [design].
+    pub fn moon_brightness_multiplier(&self) -> f32 {
+        if self.interior.is_some() || !self.climate.has_moon() {
+            return 1.0;
+        }
+        match self.moonlight {
+            Some(cfg) => cfg.multiplier_for_phase(self.moon_phase()),
+            None => 1.0,
+        }
+    }
+
+    /// Cloud layer scroll rate (texture repeats per real second): exact vanilla
+    /// `Weather::cloud_scroll` when `CloudUpgrade.ini` is absent, otherwise modulated
+    /// by `CloudUpgradeConfig`.
+    pub fn cloud_scroll(&self, weather: &Weather, layer: usize) -> f32 {
+        match self.cloud_upgrade {
+            Some(cfg) => cfg.cloud_scroll(weather, layer),
+            None => weather.cloud_scroll(layer),
+        }
+    }
+
+    /// Cloud layer UV scroll offset (`0..1` repeats) at `secs` real seconds: exact vanilla
+    /// `Weather::cloud_offset` when `CloudUpgrade.ini` is absent, otherwise modulated
+    /// by `CloudUpgradeConfig`.
+    pub fn cloud_offset(&self, weather: &Weather, layer: usize, secs: f64) -> f32 {
+        match self.cloud_upgrade {
+            Some(cfg) => cfg.cloud_offset(weather, layer, secs),
+            None => weather.cloud_offset(layer, secs),
+        }
+    }
+
     /// The time, sun elevation and the luminance of the light and sky colours at this
     /// hour (for the time-lapse log).
     pub fn sample(&self) -> String {
@@ -1276,6 +1395,50 @@ pub fn sync_weather_fog(
     let next = game.map(|g| g.weather_fog_overrides()).unwrap_or_default();
     if sky.weather_fog_overrides != next {
         sky.weather_fog_overrides = next;
+        sky.refresh();
+    }
+}
+
+/// Sync live session `SetWeatherRGBColor`, `SetWeatherImageSpaceMod`, and
+/// `SetWeatherTransitionTimeOverride` overrides from `Game` into
+/// [`SkyState::weather_visual_overrides`]. Keyed on `(game_instance_id,
+/// weather_visual_revision)` so unchanged frames do zero work and game-instance switches
+/// or runtime drops clear stale session overrides cleanly.
+pub fn sync_weather_visuals(
+    world: Res<WorldData>,
+    script: Option<Res<nvf_play::script::ScriptState>>,
+    mut sky: ResMut<SkyState>,
+    mut seen: Local<Option<Option<(u64, u64)>>>,
+) {
+    let game = script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game);
+    let token = game.map(|g| g.weather_visual_sync_token());
+    if *seen == Some(token) {
+        return;
+    }
+    *seen = Some(token);
+    let next = match game {
+        Some(g) => {
+            let adapters = g
+                .weather_adapter_overrides()
+                .into_iter()
+                .map(|(wid, slots)| {
+                    let resolved = slots.map(|slot| {
+                        slot.map(|id| (id != 0).then(|| adapter(world.lo, world.schema, id)).flatten())
+                    });
+                    (wid, resolved)
+                })
+                .collect();
+            WeatherVisualOverrides {
+                colors: g.weather_color_overrides(),
+                cloud_colors: g.weather_cloud_color_overrides(),
+                adapters,
+                transition_seconds: g.weather_transition_override().map(|s| s as f32).filter(|s| s.is_finite()),
+            }
+        }
+        None => WeatherVisualOverrides::default(),
+    };
+    if sky.weather_visual_overrides != next {
+        sky.weather_visual_overrides = next;
         sky.refresh();
     }
 }
@@ -1974,11 +2137,12 @@ pub fn update_clouds(
             continue;
         };
         let new_texture = cl.shows != Some(w.form_id);
-        let c = w.cloud_color(&sky.climate, cl.layer, sky.hour);
+        let c = sky.cloud_color_for(w, cl.layer);
         let color = LinearRgba::new(c[0], c[1], c[2], alpha);
-        // Each set scrolls at its own weather's ONAM speeds, so a fade blends the two
-        // weathers' layers each moving at its own rate (fnv_world::sky::Weather::cloud_scroll).
-        let offset = w.cloud_offset(cl.layer, secs);
+        // Each set scrolls at its own weather's ONAM speeds (modulated when
+        // `CloudUpgrade.ini` is present), so a fade blends the two weathers' layers each
+        // moving at its own rate (fnv_world::sky::Weather::cloud_scroll).
+        let offset = sky.cloud_offset(w, cl.layer, secs);
         // The material is written only when it shows differently: a new texture, a colour
         // moved by more than a thousandth, or a scroll of more than 1/2048 of the texture
         // (under a texel; the scroll is a few thousandths of a repeat a second). Written
@@ -2013,7 +2177,7 @@ pub fn update_clouds(
         *vis = if textured && alpha > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
         if cl.set == 0 && cl.layer == 0 && *logged != Some(w.form_id) {
             *logged = Some(w.form_id);
-            let rates = [0, 1, 2, 3].map(|i| format!("{:.5}", w.cloud_scroll(i)));
+            let rates = [0, 1, 2, 3].map(|i| format!("{:.5}", sky.cloud_scroll(w, i)));
             info!(
                 "clouds: {} layer speeds {:?} (ONAM), scrolling {} texture repeats/s",
                 w.edid.as_deref().unwrap_or("?"),
@@ -2274,8 +2438,9 @@ pub fn update_sky(
     // The sun light turns with the game clock every frame, not with the sky's half-minute
     // steps (`SkyState::sun_light_hour`); its colour still changes with the sky below.
     let light_dir = to_bevy.rotation * Vec3::from_array(sun_direction(c, sky.sun_light_hour(), SUN_SOUTH));
+    let moon_mult = sky.moon_brightness_multiplier();
     if let Ok((mut light, mut t)) = sun.single_mut() {
-        aim_sun(&mut light, &mut t, light_dir, to_bevy.rotation * Vec3::Y, PI * unit * sky.sun_scale() * sun_mod);
+        aim_sun(&mut light, &mut t, light_dir, to_bevy.rotation * Vec3::Y, PI * unit * sky.sun_scale() * sun_mod, moon_mult);
     }
     if !changed {
         return;
@@ -2378,7 +2543,7 @@ pub fn initial_fog() -> DistanceFog {
 /// about it as the sun moves, instead of also rolling as they did with the world's up:
 /// less crawl along the shadows' edges while the sun light follows the clock every frame
 /// (`SkyState::sun_light_hour`). [engineering choice]
-fn aim_sun(light: &mut Mut<DirectionalLight>, t: &mut Mut<Transform>, sun_dir: Vec3, axis: Vec3, full: f32) {
+fn aim_sun(light: &mut Mut<DirectionalLight>, t: &mut Mut<Transform>, sun_dir: Vec3, axis: Vec3, full: f32, moon_mult: f32) {
     // Below the horizon the light comes from the opposite side (moonlight colour is the
     // weather's night "sunlight") [hypothesis].
     let from = if sun_dir.y >= 0.0 { sun_dir } else { -sun_dir };
@@ -2387,7 +2552,16 @@ fn aim_sun(light: &mut Mut<DirectionalLight>, t: &mut Mut<Transform>, sun_dir: V
     // switch between the two does not flip shadows at full strength [interim]. `full` is
     // scaled by the image space's Sunlight Dimmer against the Mojave's (the Big MT's sun
     // is about twice it, Dead Money's West Town's under half) [hypothesis].
-    let illuminance = full * (sun_dir.y.abs() / HORIZON_FADE.sin()).min(1.0) * if sun_dir.y >= 0.0 { SUN_SHARE } else { MOON_SHARE };
+    // When `MoonlightNVSE.ini` is absent or disabled `moon_mult` is 1.0 and nighttime
+    // illuminance stays bit-for-bit identical to vanilla.
+    let share = if sun_dir.y >= 0.0 {
+        SUN_SHARE
+    } else if moon_mult == 1.0 {
+        MOON_SHARE
+    } else {
+        MOON_SHARE * moon_mult
+    };
+    let illuminance = full * (sun_dir.y.abs() / HORIZON_FADE.sin()).min(1.0) * share;
     if light.illuminance != illuminance {
         light.illuminance = illuminance;
     }
@@ -2489,6 +2663,7 @@ mod tests {
             image_space: None,
             world_image_space_id: None,
             weather_fog_overrides: HashMap::new(),
+            weather_visual_overrides: WeatherVisualOverrides::default(),
             adapters: HashMap::new(),
             changed: true,
             script: None,
@@ -2510,6 +2685,8 @@ mod tests {
             script_wind: None,
             moon_textures: Default::default(),
             lightning_request: false,
+            moonlight: None,
+            cloud_upgrade: None,
         };
         sky.place(Some(None), false);
         assert_eq!((sky.rolls, sky.pick), (0, SAVED), "the first look keeps the saved weather");
@@ -2559,6 +2736,7 @@ mod tests {
             image_space: None,
             world_image_space_id: None,
             weather_fog_overrides: HashMap::new(),
+            weather_visual_overrides: WeatherVisualOverrides::default(),
             adapters: HashMap::new(),
             changed: true,
             script: None,
@@ -2580,6 +2758,8 @@ mod tests {
             script_wind: None,
             moon_textures: Default::default(),
             lightning_request: false,
+            moonlight: None,
+            cloud_upgrade: None,
         }
     }
 

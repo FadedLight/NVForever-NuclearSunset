@@ -184,6 +184,12 @@ const AIRBORNE_LAND: f32 = 0.35;
 /// controller's step height, the drop it walks down without leaving the ground; the
 /// original's rule is not documented (physics.md §6.4.2)].
 const FALL_GAP: f32 = 24.0;
+/// A landing counts (its log line, its clip, the view's dip) only after the body fell
+/// faster than this in the flight, units/s: on a car wreck's roof a player was logged
+/// "landed at 0 units/s" after time off the ground with no fall at all (player report
+/// R-BRQX496D, #3611), and the landing clip and dip that followed bobbed the view
+/// [engineering choice: real landings in that report were 144 to 442 units/s].
+const LAND_MIN_FALL: f32 = 30.0;
 /// Turning on the spot faster than this (radians per second) plays a turn clip
 /// [engineering choice].
 const TURN_RATE: f32 = 1.0;
@@ -728,6 +734,10 @@ struct Rig {
     /// kNVSE's replacement files for this view ([`apply_anim_overrides`]): a clip's file
     /// name, in lower case, to the replacement's path under meshes.
     overrides: Overrides,
+    /// The rig's current main body clip path (under meshes) and clip metadata, updated
+    /// each frame in [`pose_rig`] for `anim_state.rs` (`GetPlayingAnimSequencePaths`,
+    /// `GetAnimationAttributes`, `GetPlayingAnimBySequenceType`) [design].
+    active_clip: Option<(String, Arc<Clip>)>,
     /// Third person: the head bone and the eye in its space.
     head: Option<usize>,
     eye_local: Vec3,
@@ -753,6 +763,12 @@ struct Rig {
     /// The skeleton node the weapon node should hang from, and the one it was last
     /// attached to.
     weapon_parent: Option<usize>,
+    /// Where the holster clip holds the `Weapon` node under the holster bone, from the
+    /// last pose with the weapon holstered: the place it keeps on furniture
+    /// ([`pose_furniture`]).
+    holstered_weapon: Option<Transform>,
+    /// The furniture clip [`pose_furniture`] last logged the weapon's place for.
+    furniture_logged: Option<u32>,
     attached: Option<usize>,
     weapon_model: Option<Entity>,
     /// The weapon model's particle systems, when it has any: the holder carrying their
@@ -1314,6 +1330,14 @@ impl PlayerBody {
         self.body.as_ref().and_then(|b| b.first.as_ref()).is_some_and(|f| f.shown == Some(true))
     }
 
+    /// The active main body clip (path under meshes and decoded clip) for the player's
+    /// selected view, for `anim_state.rs` and `Game::set_sequence_info` [design].
+    pub fn active_clip(&self, first_person: bool) -> Option<(&str, &Arc<Clip>)> {
+        let b = self.body.as_ref()?;
+        let rig = if first_person { b.first.as_ref().unwrap_or(&b.third) } else { &b.third };
+        rig.active_clip.as_ref().map(|(p, c)| (p.as_str(), c))
+    }
+
     /// The real arms rig available for hidden draws [design: pipboy_arm.rs].
     pub fn first_person_root(&self) -> Option<Entity> {
         self.body.as_ref()?.first.as_ref().map(|f| f.root)
@@ -1396,9 +1420,9 @@ impl PlayerBody {
             Rig {
                 view, root, lens: None, folder: String::new(), skeleton: actor.skeleton,
                 animator: Animator::new(actor.skel, actor.nodes, None),
-                clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), head: None,
+                clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
                 eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None, script_used: None, translate: None,
-                weapon_node: None, weapon_parent: None, attached: None,
+                weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
                 weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(),
                 idle_logged: false, sights_turned: None, muzzle: None, muzzle_entity: None,
                 casing: None, casing_entity: None, sighting: None, scope_eye: None, sight_relief: None,
@@ -1668,8 +1692,14 @@ fn restore_warm_pose(
             *v = before;
         }
     }
-    for e in &unculled {
-        commands.entity(e).remove::<(NoFrustumCulling, WarmUnculled)>();
+    // [design: #2862] Keep WarmUnculled/NoFrustumCulling across consecutive warm frames.
+    // Removing via Commands here while draw_warm_pose checks Has<NoFrustumCulling> later
+    // in the same chain leaves the deferred removal pending, which stripped culling off
+    // every alternating warm frame while the rig stood behind the camera.
+    if pip.warm_clip().is_none() {
+        for e in &unculled {
+            commands.entity(e).remove::<(NoFrustumCulling, WarmUnculled)>();
+        }
     }
     pip.pose_hidden = false;
 }
@@ -1689,18 +1719,39 @@ fn draw_warm_pose(
     mut visibility: Query<&mut Visibility>,
     children: Query<&Children>,
     mut meshes: Query<(Has<NoFrustumCulling>, &mut Mesh3d)>,
+    unculled: Query<Entity, With<WarmUnculled>>,
     cameras: Query<(&GlobalTransform, &Projection), With<nvf_play::PlayerCamera>>,
 ) {
-    let Some(t) = pip.warm_clip() else { return };
-    let Ok((cam, projection)) = cameras.single() else { return };
+    let clear_unculled = |commands: &mut Commands| {
+        for e in &unculled {
+            commands.entity(e).remove::<(NoFrustumCulling, WarmUnculled)>();
+        }
+    };
+    let Some(t) = pip.warm_clip() else {
+        clear_unculled(&mut commands);
+        return;
+    };
+    let Ok((cam, projection)) = cameras.single() else {
+        clear_unculled(&mut commands);
+        return;
+    };
     // [design: world.rs::setup_root] The rig's parent is in game space, the camera is not.
     let eye = crate::world::bevy_to_game(cam.translation());
     let forward = crate::world::bevy_to_game(cam.forward().as_vec3());
-    let Some(body) = state.body.as_mut() else { return };
+    let Some(body) = state.body.as_mut() else {
+        clear_unculled(&mut commands);
+        return;
+    };
     let female = body.female;
-    let Some(rig) = body.first.as_mut() else { return };
+    let Some(rig) = body.first.as_mut() else {
+        clear_unculled(&mut commands);
+        return;
+    };
     let mut ctx = ActorCtx { cache: &mut parts, models: &mut models };
-    let Some(clip) = rig.clip(&mut ctx, ClipKey::PipBoy(female)) else { return };
+    let Some(clip) = rig.clip(&mut ctx, ClipKey::PipBoy(female)) else {
+        clear_unculled(&mut commands);
+        return;
+    };
     // [design: this file] Capture descendants, including extra weapon nodes and the lens.
     let outer = rig.lens.map_or(rig.root, |l| l[0]);
     for e in std::iter::once(outer).chain(children.iter_descendants(outer)) {
@@ -1728,7 +1779,7 @@ fn draw_warm_pose(
     a.layers[i].time = t;
     a.layers[i].ease = 1.0;
     a.end();
-    a.pose();
+    a.pose_unsmoothed();
     a.apply(&mut transforms);
     a.layers = layers;
     a.locals = locals;
@@ -2239,6 +2290,7 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
         clips: HashMap::new(),
         variants: HashMap::new(),
         overrides: Arc::default(),
+        active_clip: None,
         head,
         eye_local,
         looking,
@@ -2249,6 +2301,8 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
         translate,
         weapon_node,
         weapon_parent,
+        holstered_weapon: None,
+        furniture_logged: None,
         attached: weapon_parent,
         weapon_model: None,
         weapon_emitter: None,
@@ -2377,6 +2431,9 @@ struct Posed<'a> {
     sequences: &'a [crate::script_sequences::Sample],
     /// Script-layer blends can use the device-menu clock while the world is held.
     sequence_dt: f32,
+    /// Menu real time for first-person seam smoothing while the Pip-Boy arm clip runs
+    /// under a held virtual clock (`--menu-pause original`) [design: #2862].
+    pipboy_dt: f32,
     /// The Pip-Boy shows: seconds into its clip (first person).
     pipboy: Option<f32>,
     /// The sway of the arms (first person, `view_sway.rs`).
@@ -2403,7 +2460,7 @@ fn land_mine_grip() -> (Quat, Vec3) {
 /// would do by itself [hypothesis: the clips of the opening share track priorities with
 /// the standing idle, so both cannot play; idles.md §4].
 fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &mut ActorCtx, (transforms, parents): (&mut Query<&mut Transform>, &Query<&ChildOf>)) -> Option<(Vec3, Option<Quat>)> {
-    let Posed { root, look_pitch, special, sequences, sequence_dt, pipboy, sway, sights } = posed;
+    let Posed { root, look_pitch, special, sequences, sequence_dt, pipboy_dt, pipboy, sway, sights } = posed;
     rig.carry = None;
     let pipboy = pipboy.filter(|_| rig.view == View::First).and_then(|t| Some((rig.clip(ctx, ClipKey::PipBoy(f.female))?, t)));
     let draw = rig.clip(ctx, ClipKey::Equip(f.stance, f.prefix, true));
@@ -2470,6 +2527,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
     // first-person view).
     if f.hands.in_hand {
         rig.weapon_parent = draw.as_ref().and_then(|c| c.keys.prn.as_ref()).and_then(|(_, b)| bone(b)).or_else(|| bone("Bip01 R Hand"));
+        rig.holstered_weapon = None;
     } else {
         // The holster clip's `prn:` names the holster bone [observed: `Bip01 Pelvis` for
         // pistols, `Bip01 Spine2` for rifles, `Bip01 Translate` in first person]; the
@@ -2478,6 +2536,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
         if let Some(b) = from_keys.and_then(|(_, b)| bone(b)) {
             rig.weapon_parent = Some(b);
         }
+        rig.holstered_weapon = rig.weapon_node.and_then(|n| holster.as_ref()?.weapon_end(skel.locals[n]));
     }
 
     // The frame's clips.
@@ -2668,6 +2727,14 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
             want.push((c.clone(), TAG_EQUIP, 1.0, Mode::Once));
         }
     }
+    // Record the rig's main body clip (movement/jump/turn, else standing idle) for
+    // `anim_state.rs` (`GetPlayingAnimSequencePaths`, `GetAnimationAttributes`).
+    let main_clip = want
+        .iter()
+        .filter(|(_, tag, _, _)| *tag == TAG_JUMP || (*tag >= TAG_MOVE && *tag < TAG_MOVE + 4) || *tag == TAG_TURN)
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .or_else(|| want.iter().find(|(_, tag, _, _)| *tag == TAG_IDLE));
+    rig.active_clip = main_clip.map(|(c, ..)| (c.path.clone(), c.clip.clone()));
     let a = &mut rig.animator;
     a.begin();
     let covered = special.covers();
@@ -2825,6 +2892,10 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
         let layer = &mut a.layers[i];
         layer.rate = 0.0;
         layer.time = sequence.time;
+        layer.weight = sequence.weight;
+        layer.target = sequence.weight;
+        layer.weight_as_blend = true;
+        layer.additive = sequence.additive.clone();
         layer.sequence_priority = sequence.request.priority;
         layer.fade_out = sequence.request.ease_out;
     }
@@ -2850,7 +2921,9 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
     let carried = carried.filter(|(c, _)| c.root_reach() > nvf_assets::anim_play::CARRY_MIN);
     a.advance(f.dt, rate);
     if rig.view == View::First {
-        a.advance_pose_blends((sequence_dt - f.dt).max(0.0), |layer| layer.tag & 0x4000_0000 != 0);
+        let seq_extra = (sequence_dt - f.dt).max(0.0);
+        a.advance_pose_blends(seq_extra, |layer| layer.tag & 0x4000_0000 != 0);
+        a.advance_seam_clock((pipboy_dt - f.dt - seq_extra).max(0.0));
     }
     // A draw or a holster with movement inertia: over the last part of its time the clip
     // hands the arms over to what follows (the hold, the arms down) along the settling
@@ -3052,6 +3125,21 @@ fn pose_furniture(rig: &mut Rig, o: &crate::furniture::BodyClip, special: &IdleS
         a.layers.retain(|l| l.tag >= TAG_SPECIAL);
         a.restart(&o.clip, TAG_FURNITURE, 1.0, mode, 0.0);
         rig.furniture = Some(o.serial);
+    }
+    // The holstered weapon keeps its place on the holster bone: the seat clips have no
+    // `Weapon` track (`dynamicidle_chairsit.kf`), and the holster clip, which does, also
+    // keys `Bip01 Spine2` and `Bip01 NonAccum`, so only its `Weapon` place is kept. At the
+    // node's bind transform (its place under the right hand) a rifle on the back stood up
+    // through the seated body's head [observed in NVForever: player report R-DNBYBM6D,
+    // #3612; NPCs keep the stance's `Weapon` track on furniture, `weapons.rs`].
+    if let Some(n) = rig.weapon_node {
+        a.set_rest(n, rig.holstered_weapon);
+        if rig.furniture_logged != Some(o.serial) {
+            rig.furniture_logged = Some(o.serial);
+            let on = rig.weapon_parent.and_then(|b| a.skel.names.get(b).cloned().flatten()).unwrap_or_default();
+            let place = if rig.holstered_weapon.is_some() { "at the holster clip's place" } else { "at its bind transform" };
+            info!("player body: on furniture, the weapon hangs from {on} {place}");
+        }
     }
     a.begin();
     a.want(&o.clip, TAG_FURNITURE, 1.0, mode, 0.0);
@@ -3276,12 +3364,17 @@ fn show_rigs(body: &mut Body, commands: &mut Commands, visibility: &mut Query<&m
         third.seen = Some(seen);
         debug!("player body: the camera sees {seen:?} of the body");
     }
-    if let Some(f) = body.first.as_mut().filter(|f| f.shown != Some(first)) {
+    if let Some(f) = body.first.as_mut() {
+        let want = if first { Visibility::Inherited } else { Visibility::Hidden };
         if let Ok(mut v) = visibility.get_mut(f.root) {
-            *v = if first { Visibility::Inherited } else { Visibility::Hidden };
+            if *v != want {
+                *v = want;
+            }
         }
-        debug!("player body: first-person rig {}", if first { "shown" } else { "hidden" });
-        f.shown = Some(first);
+        if f.shown != Some(first) {
+            debug!("player body: first-person rig {}", if first { "shown" } else { "hidden" });
+            f.shown = Some(first);
+        }
     }
 }
 
@@ -3361,7 +3454,7 @@ fn drive_weapon_emitters(state: Res<PlayerBody>, mut emitters: Query<&mut crate:
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn drive_body(
     mut commands: Commands,
-    (time, turbo, sim, mut told_scale, sequences, mut trace, stance_motion): (Res<Time>, Option<Res<nvf_play::script::PlayerTimeScale>>, Option<Res<nvf_play::sim::SimState>>, Local<Option<f32>>, Res<crate::script_sequences::PlayerSequences>, Local<MotionTrace>, Option<Res<nvf_play::stance::StanceMotion>>),
+    (time, play_clock, paused, turbo, sim, mut told_scale, sequences, mut trace, stance_motion): (Res<Time>, Option<Res<nvf_play::pause::PlayClock>>, Option<Res<nvf_play::pause::Paused>>, Option<Res<nvf_play::script::PlayerTimeScale>>, Option<Res<nvf_play::sim::SimState>>, Local<Option<f32>>, Res<crate::script_sequences::PlayerSequences>, Local<MotionTrace>, Option<Res<nvf_play::stance::StanceMotion>>),
     d: Res<PlayWorld>,
     intent: Res<MoveIntent>,
     control: Res<PlayerControl>,
@@ -3475,7 +3568,10 @@ fn drive_body(
     m.airborne = if grounded || swimming { 0.0 } else { m.airborne + dt };
     let was_falling = m.falling;
     m.falling = m.airborne > 0.0 && (m.falling || (m.airborne >= AIRBORNE_LOOP && ground_gap.is_none_or(|g| g > FALL_GAP)));
-    let landing = was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0;
+    let landing = was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0 && m.fall_speed > LAND_MIN_FALL;
+    if was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0 && !landing {
+        info!("player view: down again after {airborne_before:.2}s off the ground without a fall ({:.0} units/s): no landing", m.fall_speed);
+    }
     if m.airborne > 0.0 {
         m.fall_speed = m.fall_speed.max(-vertical);
     } else {
@@ -3804,7 +3900,7 @@ fn drive_body(
     let (sprint_share, winded) = stance_motion.as_deref().map_or((0.0, 0.0), |s| (s.sprint_share, s.winded));
     let lean = if third_view { crate::sprint_view::lean(sprint_share) } else { Quat::IDENTITY };
     let root = Transform { translation: Vec3::from_array(feet) - sink, rotation: Quat::from_rotation_z(-player.heading) * lean, scale: Vec3::splat(body.scale * script_scale) };
-    let third = Posed { root, look_pitch: player.pitch, special: &idles.third, sequences:&sequences.third, sequence_dt: dt, pipboy: None, sway: SwayPose::NONE, sights: None };
+    let third = Posed { root, look_pitch: player.pitch, special: &idles.third, sequences: &sequences.third, sequence_dt: dt, pipboy_dt: 0.0, pipboy: None, sway: SwayPose::NONE, sights: None };
     let third_eye = pose_rig(&mut body.third, &frame, &events, third, &mut ctx, (&mut transforms, &parents)).map(|(e, _)| e + eye_sink);
     // The third-person body's melee attack clip carries the player by its root's travel
     // (actors.md §8.13), turned by the heading and scaled with the body.
@@ -4002,7 +4098,12 @@ fn drive_body(
         m.sights_told = !m.sights_told;
         info!("true iron sights: {}", if m.sights_told { "the sights are on the eye" } else { "off the eye" });
     }
-    let first = Posed { root: Transform { translation: Vec3::from_array(at), rotation: Quat::from_rotation_z(-held), ..root }, look_pitch: pitch, special: &idles.first, sequences: &sequences.first, sequence_dt: dt.max(sequences.first_menu_dt), pipboy, sway, sights };
+    let pipboy_dt = if pipboy.is_some() && !paused.as_deref().is_some_and(|p| p.0) {
+        dt.max(play_clock.as_deref().and_then(nvf_play::pause::PlayClock::frame_secs).unwrap_or(0.0))
+    } else {
+        0.0
+    };
+    let first = Posed { root: Transform { translation: Vec3::from_array(at), rotation: Quat::from_rotation_z(-held), ..root }, look_pitch: pitch, special: &idles.first, sequences: &sequences.first, sequence_dt: dt.max(sequences.first_menu_dt), pipboy_dt, pipboy, sway, sights };
     // With movement inertia the arms' looping clips have their seams smoothed (the idle's
     // hand turned back in one frame at each loop; `nvf_assets::anim_blend` `Seams`).
     if let Some(f) = body.first.as_mut() {
@@ -4330,6 +4431,202 @@ mod tests {
         assert!(world.get::<NoFrustumCulling>(existing).is_some());
         assert!(world.resource::<WarmPose>().transforms.is_empty());
         assert!(!world.resource::<nvf_play::pipboy::PipBoy>().pose_hidden);
+    }
+
+    #[test]
+    fn warm_pose_keeps_no_frustum_culling_across_consecutive_frames_and_cleans_up_on_release_or_abort() {
+        use fnv_nif::anim::{Channel, TransformTrack};
+        let (mut app, _files) = crate::outfits::tests::asset_fixture();
+        app.init_resource::<WarmPose>()
+            .add_systems(Update, (restore_warm_pose, draw_warm_pose).chain());
+
+        let world = app.world_mut();
+        let cam_entity = world
+            .spawn((
+                GlobalTransform::IDENTITY,
+                Projection::Perspective(PerspectiveProjection::default()),
+                nvf_play::PlayerCamera,
+            ))
+            .id();
+        let outer = world.spawn((Transform::from_xyz(1.0, 2.0, 3.0), Visibility::Inherited)).id();
+        let inner = world.spawn((Transform::IDENTITY, Visibility::Inherited, ChildOf(outer))).id();
+        let root = world.spawn((Transform::IDENTITY, Visibility::Hidden, ChildOf(inner))).id();
+        let bone = world.spawn((Transform::from_xyz(10.0, 0.0, 0.0), Visibility::Inherited, ChildOf(root))).id();
+        let warm_mesh = world.spawn((Mesh3d::default(), Transform::IDENTITY, ChildOf(root))).id();
+        let pre_unculled = world.spawn((Mesh3d::default(), NoFrustumCulling, Transform::IDENTITY, ChildOf(root))).id();
+        let third_root = world.spawn((Transform::IDENTITY, Visibility::Inherited)).id();
+
+        let skel = Arc::new(PreparedSkeleton {
+            names: vec![Some("Root".into()), Some("Arm".into())],
+            parents: vec![None, Some(0)],
+            locals: vec![Transform::IDENTITY, Transform::from_xyz(10.0, 0.0, 0.0)],
+            bind_world: vec![Affine3A::IDENTITY, Affine3A::from_translation(Vec3::new(10.0, 0.0, 0.0))],
+            by_name: [("Root".into(), 0), ("Arm".into(), 1)].into_iter().collect(),
+            ..Default::default()
+        });
+        let make_clip = |x: f32, priority: i32| {
+            Arc::new(Clip {
+                name: "warm".into(),
+                start: 0.0,
+                stop: 1.0,
+                frequency: 1.0,
+                cycle_type: 2,
+                tracks: vec![(
+                    "Arm".into(),
+                    Arc::new(TransformTrack {
+                        translation: Channel::Static(Some([x, 0.0, 0.0])),
+                        rotation: Channel::Static(None),
+                        euler: None,
+                        scale: Channel::Static(None),
+                        per_cycle: None,
+                    }),
+                )],
+                priorities: vec![priority],
+                skipped: 0,
+                accum_root: None,
+                text_keys: vec![],
+                visibility: vec![],
+                emitters: vec![],
+                materials: vec![],
+                free: vec![],
+                free_visibility: vec![],
+                lights: vec![],
+            })
+        };
+        let idle = make_clip(10.0, 10);
+        let pip_clip = Arc::new(ClipInfo::new("pipboy".into(), make_clip(42.0, 98), None));
+        let mut animator = Animator::new(skel.clone(), vec![root, bone], None);
+        animator.smooth_seams(Some(SEAM_SECONDS));
+        animator.begin();
+        animator.want(&idle, TAG_IDLE, 1.0, Mode::Loop, 0.0);
+        animator.end();
+        animator.advance(0.1, 1.0);
+        animator.pose();
+        // World paused: last_dt becomes 0.0 before hidden warming runs.
+        animator.advance(0.0, 1.0);
+
+        let third_rig = Rig {
+            view: View::Third, root: third_root, lens: None, folder: String::new(), skeleton: String::new(),
+            animator: Animator::new(skel, vec![third_root, bone], None),
+            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
+            eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
+            script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
+            weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
+            sights_turned: None, muzzle: None, muzzle_entity: None, casing: None, casing_entity: None,
+            sighting: None, scope_eye: None, use_lens: false, sight_relief: None, drawn: Vec::new(),
+            spawned_forms: Vec::new(), shown: Some(false), seen: None, furniture: None,
+            since_attack: f32::INFINITY, attack_loop: None, wound_up: None, wound_hit: None,
+            sighting2: None, attack_eject: None, ejected: false, carry: None,
+        };
+        let mut first_rig = Rig {
+            view: View::First, root, lens: Some([outer, inner]), folder: String::new(), skeleton: String::new(),
+            animator,
+            clips: [(ClipKey::PipBoy(false), Some(pip_clip))].into_iter().collect(),
+            variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
+            eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
+            script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
+            weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
+            sights_turned: None, muzzle: None, muzzle_entity: None, casing: None, casing_entity: None,
+            sighting: None, scope_eye: None, use_lens: false, sight_relief: None, drawn: Vec::new(),
+            spawned_forms: Vec::new(), shown: Some(false), seen: None, furniture: None,
+            since_attack: f32::INFINITY, attack_loop: None, wound_up: None, wound_hit: None,
+            sighting2: None, attack_eject: None, ejected: false, carry: None,
+        };
+        first_rig.clips.insert(ClipKey::Idle(Stance::Stand, false, false), Some(Arc::new(ClipInfo::new("idle".into(), idle, None))));
+
+        let pb = PlayerBody {
+            body: Some(Body {
+                worn: Vec::new(), look: None, change: fnv_actor::Change::default(),
+                female: false, scale: 1.0, third: third_rig, first: Some(first_rig), first_addons: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        world.insert_resource(pb);
+        let mut pip = nvf_play::pipboy::PipBoy::default();
+        pip.phase = nvf_play::pipboy::Phase::Raising;
+        pip.warming = Some(nvf_play::pipboy::Warming {
+            since: std::time::Instant::now(),
+            frames: 0, asked_at: 0, covered: false, device: true,
+            saved_frame: nvf_play::pipboy::Frame::Device, saved_page: None, drawn: false,
+        });
+        world.insert_resource(pip);
+
+        // Consecutive cold-warm frames: NoFrustumCulling must NEVER flicker off on even/odd frames,
+        // and the hidden warm pose must apply the Pip-Boy clip (x = 42.0) despite last_dt == 0.0.
+        for step in 0..4 {
+            app.update();
+            assert!(app.world().get::<NoFrustumCulling>(warm_mesh).is_some(), "warm frame {step} lost NoFrustumCulling");
+            assert!(app.world().get::<WarmUnculled>(warm_mesh).is_some(), "warm frame {step} lost WarmUnculled");
+            assert!(app.world().get::<NoFrustumCulling>(pre_unculled).is_some(), "pre-existing NoFrustumCulling preserved");
+            assert!(app.world().get::<WarmUnculled>(pre_unculled).is_none(), "pre-existing NoFrustumCulling not tagged WarmUnculled");
+            assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Inherited);
+            let posed_x = app.world().get::<Transform>(bone).unwrap().translation.x;
+            assert!((posed_x - 42.0).abs() < 1e-4, "warm frame {step} did not pose clip unsmoothed: x={posed_x}");
+        }
+
+        // Animator seam history must still hold the pre-warm pose (10.0) when evaluated at dt == 0.
+        {
+            let mut pb = app.world_mut().resource_mut::<PlayerBody>();
+            let first = pb.body.as_mut().unwrap().first.as_mut().unwrap();
+            first.animator.pose();
+            assert!((first.animator.locals[1].translation.x - 10.0).abs() < 1e-4, "warm pose corrupted seam history");
+        }
+
+        // Abort mid-warm (camera lost): draw_warm_pose cleans up WarmUnculled immediately.
+        app.world_mut().despawn(cam_entity);
+        app.update();
+        assert!(app.world().get::<NoFrustumCulling>(warm_mesh).is_none(), "abort cleans up borrowed NoFrustumCulling");
+        assert!(app.world().get::<WarmUnculled>(warm_mesh).is_none());
+        assert!(app.world().get::<NoFrustumCulling>(pre_unculled).is_some(), "abort keeps pre-existing NoFrustumCulling");
+        assert_eq!(*app.world().get::<Visibility>(root).unwrap(), Visibility::Hidden);
+        assert_eq!(app.world().get::<Transform>(outer).unwrap().translation, Vec3::new(1.0, 2.0, 3.0));
+        assert!(!app.world().resource::<nvf_play::pipboy::PipBoy>().pose_hidden);
+    }
+
+    #[test]
+    fn show_rigs_restores_desynced_first_person_visibility() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = World::new();
+        let third_root = world.spawn(Visibility::Inherited).id();
+        let first_root = world.spawn(Visibility::Hidden).id();
+        let skel = Arc::new(PreparedSkeleton::default());
+        let make_rig = |root: Entity, view: View, shown: Option<bool>| Rig {
+            view, root, lens: None, folder: String::new(), skeleton: String::new(),
+            animator: Animator::new(skel.clone(), vec![root], None),
+            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
+            eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
+            script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
+            weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
+            sights_turned: None, muzzle: None, muzzle_entity: None, casing: None, casing_entity: None,
+            sighting: None, scope_eye: None, use_lens: false, sight_relief: None, drawn: Vec::new(),
+            spawned_forms: Vec::new(), shown, seen: None, furniture: None,
+            since_attack: f32::INFINITY, attack_loop: None, wound_up: None, wound_hit: None,
+            sighting2: None, attack_eject: None, ejected: false, carry: None,
+        };
+        let pb = PlayerBody {
+            body: Some(Body {
+                worn: Vec::new(), look: None, change: fnv_actor::Change::default(),
+                female: false, scale: 1.0,
+                third: make_rig(third_root, View::Third, None),
+                // Cached as shown == Some(true), yet ECS Visibility was externally hidden.
+                first: Some(make_rig(first_root, View::First, Some(true))),
+                first_addons: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        world.insert_resource(pb);
+        let seen = Seen { body: false, head: true, arms: true, weapon: true };
+        world.run_system_once(move |mut pb: ResMut<PlayerBody>, mut commands: Commands, mut vis: Query<&mut Visibility>| {
+            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, true);
+        }).unwrap();
+        assert_eq!(*world.get::<Visibility>(first_root).unwrap(), Visibility::Inherited);
+        assert!(world.resource::<PlayerBody>().first_person_drawn());
+        // Hiding hides cleanly; re-showing shows again.
+        world.run_system_once(move |mut pb: ResMut<PlayerBody>, mut commands: Commands, mut vis: Query<&mut Visibility>| {
+            show_rigs(pb.body.as_mut().unwrap(), &mut commands, &mut vis, seen, false);
+        }).unwrap();
+        assert_eq!(*world.get::<Visibility>(first_root).unwrap(), Visibility::Hidden);
+        assert!(!world.resource::<PlayerBody>().first_person_drawn());
     }
 
     #[test]

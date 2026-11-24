@@ -693,7 +693,7 @@ fn place_at_reticle_places_where_the_crosshair_hits() {
     assert_eq!(g.world.created().count(), 0);
     let me = g.world.get(FormId::PLAYER_REF).unwrap();
     let (heading, cell) = (me.rot[2], me.cell);
-    g.senses.reticle = Some(Reticle { start: [100.0, 200.0, 50.0], dir: [0.0, 1.0, 0.0], hit: Some(300.0) });
+    g.senses.reticle = Some(Reticle { start: [100.0, 200.0, 50.0], dir: [0.0, 1.0, 0.0], hit: Some(300.0), limb: None });
     // An item: one stack of the count, at the hit, in the player's cell, turned as the
     // player.
     let junk = call(&mut g, 0x1263, Some(PLAYER), &[r(MISC), n(3.0)]) as u32;
@@ -707,7 +707,7 @@ fn place_at_reticle_places_where_the_crosshair_hits() {
     assert_eq!(call(&mut g, 0x1263, None, &[r(CONT), n(1.0), n(0.0), n(299.0)]), 0.0);
     assert!(call(&mut g, 0x1263, None, &[r(CONT), n(1.0), n(0.0), n(300.0)]) != 0.0);
     // The ray hit nothing.
-    g.senses.reticle = Some(Reticle { start: [0.0; 3], dir: [1.0, 0.0, 0.0], hit: None });
+    g.senses.reticle = Some(Reticle { start: [0.0; 3], dir: [1.0, 0.0, 0.0], hit: None, limb: None });
     assert_eq!(call(&mut g, 0x1263, None, &[r(CONT), n(1.0)]), 0.0);
     assert_eq!(g.world.created().filter(|(_, s)| s.base == FormId(CONT)).count(), 3);
 }
@@ -1215,9 +1215,11 @@ fn image_space_modifiers_play_end_and_are_removed() {
     assert!((g.image_modifiers[1].elapsed - 0.2).abs() < 1e-9);
     let snap = g.snapshot();
     assert_eq!(snap.image_modifiers.len(), 2);
-    // Applied again, it starts again.
+    // Applied again, it stacks a second instance at elapsed 0.0 [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse, probe w1_3656_objectives_unholster_imod in #3679].
     call(&mut g, APPLY, None, &[r(IMAD_FADE)]);
-    assert_eq!(g.image_modifiers[1].elapsed, 0.0);
+    assert_eq!(g.image_modifiers.len(), 3);
+    assert!((g.image_modifiers[1].elapsed - 0.2).abs() < 1e-9);
+    assert_eq!(g.image_modifiers[2].elapsed, 0.0);
     g.frames(29);
     assert_eq!(call(&mut g, ACTIVE, None, &[r(IMAD_FADE)]), 1.0);
     g.frames(1);
@@ -2713,4 +2715,27 @@ fn is_actor_detected_keeps_get_detected_level_and_los_neighbors() {
         assert_eq!(call(&mut g, 0x10B4, Some(CHILD_REF), &[r(ADULT_REF)]), level);
         assert_eq!(call(&mut g, 0x101B, Some(CHILD_REF), &[r(ADULT_REF)]), 1.0, "line of sight is not the detection band");
     }
+}
+
+#[test]
+fn aim_anim_groups_and_braced_call_args_execute_through_game() {
+    let f = fixture();
+    let mut g = game(&f);
+    for (name, code) in [("AimUp", 18u16), ("AimDown", 19), ("AimIS", 20), ("AimISUp", 21), ("AimISDown", 22)] {
+        assert_eq!(g.anim_group_code(name), Some(code), "{name}");
+        assert_eq!(g.anim_group_name(code).as_deref(), Some(name), "{code}");
+    }
+    let res = g.run_query(
+        "ref fnAdd\nint a\nint b\nBegin Function {}\n\
+         let fnAdd := (begin Function {int x, int y}\n\
+           SetFunctionValue (x * 10 + y)\n\
+         end)\n\
+         let a := 4\n\
+         let b := 7\n\
+         PlayerREF.PlayGroup AimIS 1\n\
+         SetFunctionValue ((call fnAdd {a b}) + (call fnAdd {b, a}))\n\
+         End\n",
+        fnv_game::game::RunCtx::default(),
+    );
+    assert_eq!(res, Ok(fnv_script::vm::XVal::Num(121.0)));
 }

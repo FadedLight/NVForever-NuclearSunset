@@ -37,13 +37,41 @@ off by default, saved in `NVForever.ini` `[Settings]` [design: #3305]).
 
 ### `difficulty`: Difficulty
 
-- On the page: How hard the fights are: from Very Easy (your hits do double damage, you take
-  half) to Very Hard (half and double); Normal as they are.
+- On the page: You deal / take / kill XP: Very Easy 200/50/100%, Easy 150/75/100%, Normal
+  100/100/100%, Hard 75/150/100%, Very Hard 50/200/100%. (In a game the numbers are the load
+  order's own: a plugin's `fDiffMult*` shows.)
 - In full: How hard the fights are: from Very Easy (the player's hits do double damage and
-  the player takes half) to Very Hard (half and double); Normal as they are. (console:
-  SetGameDifficulty 0-4)
+  the player takes half) to Very Hard (half and double); Normal as they are. Custom lets
+  the three sliders under the list, Player Damage, NPC Damage and Kill XP, set each part
+  yourself; scripts' GetGameDifficulty sees Custom as Normal (2). (console:
+  SetGameDifficulty 0-4; a script's SetGameDifficulty is kept as the chosen level)
 - Shown as a list since the menu overhaul; an older slider number in the INI still loads as
-  the nearest choice.
+  the nearest of the five levels.
+- Registered in `engine/nvf-play/src/difficulty.rs`
+
+### `difficulty-player-damage`: Player damage
+
+- On the page: Custom difficulty: how much damage your hits do, from 50% to 300%.
+- In full: The damage the player's hits do to anyone, 50% to 300% in steps of 5% (100% until
+  moved). Greyed unless Difficulty is Custom; kept as the slider's part
+  (0.20 = 100%).
+- Registered in `engine/nvf-play/src/difficulty.rs`
+
+### `difficulty-npc-damage`: NPC damage
+
+- On the page: Custom difficulty: how much damage you take from NPCs and creatures (and falls
+  and blasts), from 50% to 300%.
+- In full: The damage the player takes from every source (as the five levels scale it), 50%
+  to 300% in steps of 5% (100% until moved). NPCs' hits on each other and on companions
+  are not scaled, as at every level. Greyed unless Difficulty is Custom.
+- Registered in `engine/nvf-play/src/difficulty.rs`
+
+### `difficulty-kill-xp`: Kill XP
+
+- On the page: Custom difficulty: how much XP a kill earns, from 50% to 300%.
+- In full: The XP the player earns for a kill, 50% to 300% in steps of 5% (100% until
+  moved); other XP (quests, locks, terminals) is not scaled. Greyed unless
+  Difficulty is Custom.
 - Registered in `engine/nvf-play/src/difficulty.rs`
 
 ### `hardcore`: Hardcore mode
@@ -1333,6 +1361,30 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
   ground is drawn (layers that do not show here are not read).
 - Command-line switches: `--graphics`, `--graphics-only`
 - More: docs/design/graphics-enhanced.md §3.13
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `terrain-parallax`: Terrain parallax
+
+- On the page: On: ground textures a texture pack gives height maps for (textures\pbr\)
+  show depth near you, for some GPU time. Without such a pack nothing changes.
+- In full: [design, #3322] On: where a texture pack gives a landscape layer's texture a
+  height map (`_p` in its set under `textures\pbr\`, the format of
+  docs/spec-notes/pbr-materials.md), the ground near the camera shows that relief: one
+  march over the layers' heights, blended as the layers are, moves the texture coordinate
+  every ground texture is read at, fading out by 2048 units; each layer moves as far as its
+  own set's depth asks. The base texture of a quadrant and layers without a height map
+  count as flat. Not drawn while Terrain anti-tiling is on. The shadows, the depth prepass, the
+  collision, the mesh terrain blend and the distant landscape keep the plain surface, and
+  so do layers drawn on their own (GPUs without bindless textures; a texture repeat that
+  does not divide the cell). Needs Authored materials: in the game, as this run has it
+  (greyed until a restart when it was off at the start; still available after turning it
+  off for the next start); in the launcher, as saved. The original draws no relief on its
+  landscape [observed: the maintainer's run of observer check 268, 2026-11-22, by eye], so this
+  is an enhancement that acts only with an authored ground pack. Off by
+  default and in both presets until its cost is measured (the maintainer's call); switches
+  at once, no restart.
+- Command-line switches: `--graphics-only` (`--graphics-only terrain-parallax`)
+- More: docs/spec-notes/pbr-materials.md "Terrain layers: parallax"
 - Registered in `engine/nvforever/src/settings.rs`
 
 ### `mesh-terrain-blend`: Blend meshes into ground

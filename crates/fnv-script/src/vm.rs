@@ -151,6 +151,11 @@ pub enum VmError {
     /// extender error does [observed: nvse-inv foreach.read.after, "script call failed"].
     #[error("{0} called on no reference")]
     NoReference(String),
+    /// A host command whose invalid argument aborts the calling script at runtime in
+    /// both strict and default modes (for example `SetClass` given a non-CLAS or null
+    /// class argument) [observed: w4g_05_isactordetected_and_setclass_invalid].
+    #[error("{0}")]
+    RuntimeAbort(String),
 }
 
 /// What the VM needs from the game. Every method may fail with a message; a failure
@@ -3516,6 +3521,32 @@ impl Vm<'_, '_> {
                     None => XVal::Num(0.0),
                 };
                 Ok(XVal::Num(0.0))
+            }
+            // [observed: w4g_05_isactordetected_and_setclass_invalid] SetClass on a
+            // null/empty receiver continues safely without mutating anything or falling
+            // back to implicit self; a non-CLAS or null class argument aborts the script
+            // at runtime in both strict and default modes.
+            "setclass" => {
+                let on = match &c.on {
+                    Some(e) => Some(self.xeval(e)?.value()?),
+                    None => None,
+                };
+                let mut args = Vec::with_capacity(c.args.len());
+                for a in &c.args {
+                    args.push(match a {
+                        XExpr::Axis { c } => XVal::Str(c.to_string()),
+                        other => self.xeval(other)?,
+                    });
+                }
+                if on.is_some_and(|v| v.as_form().is_none()) {
+                    self.host.no_reference_call(&lname, on, c);
+                    return Ok(XVal::Num(0.0));
+                }
+                match self.host.ext_call(&lname, on, &args) {
+                    Some(Ok(v)) => Ok(v),
+                    Some(Err(e)) => Err(VmError::RuntimeAbort(e)),
+                    None => Err(VmError::NotBuilt(format!("the extender function {name} (tasks C, D)"))),
+                }
             }
             _ => self.host_function(&lname, c)?.ok_or_else(|| VmError::NotBuilt(format!("the extender function {name} (tasks C, D)"))),
         }

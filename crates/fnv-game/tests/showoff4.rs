@@ -150,10 +150,31 @@ fn json_and_the_ini_cache_go_through_nvforevers_layer() {
     // A form is written as "@plugin:FormID" and read back as the form [documented].
     assert_eq!(n(&mut g, r#"WriteToJSON TestStatic "NVFTest\so4.json" "/form""#), 1.0);
     assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\so4.json" "/form""#), f64::from(STAT));
-    // Missing intermediate objects are NOT auto-created [observed:
-    // so_24_json_write_read_missing_pointer: WriteToJSON '/a/b/c' returns 0].
+    // WriteToJSON matrix [observed 2026-11-23: isolated-staging WriteToJSON probes
+    // so_24_json_write_read_missing_pointer and so_24_json_single_level_missing in
+    // ShowOffNVSE 184, excluded from read-only #3679 under tools/capture/nvse/README.md §10]:
+    // 1. Missing file + single-level "/k" or nested "/a/b/c" returns 0 and creates no file.
+    assert_eq!(n(&mut g, r#"WriteToJSON 42 "NVFTest\missing_single_def.json" "/k""#), 0.0);
+    assert_eq!(n(&mut g, r#"TestExpr (ReadFromJSON "NVFTest\missing_single_def.json" "/k" 0 0)"#), 0.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 42 "NVFTest\missing_single_exp.json" "/k" 0 1 1 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"TestExpr (ReadFromJSON "NVFTest\missing_single_exp.json" "/k" 0 0)"#), 0.0);
     assert_eq!(n(&mut g, r#"WriteToJSON 123 "NVFTest\missing_nested.json" "/a/b/c" 0 1 1 0"#), 0.0);
     assert_eq!(n(&mut g, r#"TestExpr (ReadFromJSON "NVFTest\missing_nested.json" "/a/b/c" 0 1)"#), 0.0);
+    // 2. Missing file + empty root pointer "" writing a StringMap returns 1 and creates the file.
+    assert_eq!(n(&mut g, r#"WriteToJSON (ar_Map "k"::42) "NVFTest\missing_root.json" "" 0 1 1 0"#), 1.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\missing_root.json" "/k" 0 0"#), 42.0);
+    // 3. Existing `{}` file + "/k" returns 1 while nested "/a/b/c" returns 0 without mutating.
+    assert_eq!(n(&mut g, r#"WriteToJSON (ar_Construct "stringmap") "NVFTest\exist_obj.json" "" 0 0 1 0"#), 1.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 42 "NVFTest\exist_obj.json" "/k" 0 1 1 0"#), 1.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\exist_obj.json" "/k" 0 1"#), 42.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\exist_obj.json" "/k" 0 0"#), 42.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 99 "NVFTest\exist_obj.json" "/a/b/c" 0 1 1 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\exist_obj.json" "/a/b/c" 0 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\exist_obj.json" "/k" 0 0"#), 42.0);
+    // 4. Existing `null` file + "/k" and "/a/b/c" both return 0.
+    assert_eq!(n(&mut g, "ref rNull\nSetFunctionValue (WriteToJSON rNull \"NVFTest\\exist_null.json\" \"\" 0 0 1 0)"), 1.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 42 "NVFTest\exist_null.json" "/k" 0 1 1 0"#), 0.0);
+    assert_eq!(n(&mut g, r#"WriteToJSON 99 "NVFTest\exist_null.json" "/a/b/c" 0 1 1 0"#), 0.0);
     assert_eq!(n(&mut g, r#"WriteToJSON 123 "NVFTest\so4.json" "/missing/b/c" 0 1 1 0"#), 0.0);
     assert_eq!(n(&mut g, r#"ReadFromJSON "NVFTest\so4.json" "/missing/b/c" 0 1"#), 0.0);
     // A missing file gives no value [observed 2026-11-08: showoff4.readjson.missing].

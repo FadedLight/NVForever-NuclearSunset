@@ -21,9 +21,10 @@
 //!
 //! - `NVF_PLAY_TEST_SHOT_FLATNESS=1`: each of those shots also logs how much of the view is
 //!   one colour ([`one_colour_percent`]), for a scenario to check without reading the file.
-//! - `NVF_PLAY_TEST_SHOT_DIFF=1`: each of those shots but the first also logs how far it is from
-//!   the one before ([`picture_difference`]), for a scenario that switches something between two
-//!   shots of one still view.
+//! - `NVF_PLAY_TEST_SHOT_DIFF=1`: each of those shots also logs how far it is from the one before
+//!   and from the one before that ([`picture_difference`]), with the tolerance that gives another
+//!   pair as far apart in time ([`difference_tolerance`]), for a scenario that switches something
+//!   between shots of one still view.
 //! - `NVF_PLAY_TEST_SHOTS=<seconds>[:<path.png>][,...]`: save a screenshot at each time,
 //!   to the path given, else as `play-<seconds>s.png` in `NVF_PLAY_TEST_SHOT_DIR`
 //!   (default: the current folder).
@@ -796,12 +797,18 @@ fn take_shots(time: crate::pause::AidTime, mut aids: ResMut<Aids>, mut commands:
             shot.observe(move |ev: On<ScreenshotCaptured>| {
                 let size = ev.image.texture_descriptor.size;
                 let Some(data) = ev.image.data.as_deref() else { return };
-                let mut last = LAST_SHOT.lock().expect("the last shot");
-                if let Some((was, pixels)) = last.as_ref().filter(|(was, _)| *was == (size.width, size.height)) {
-                    let (levels, changed) = picture_difference(pixels, data, was.0 as usize, was.1 as usize);
-                    info!("test aid: {name}: {levels:.2} levels of 255 from the shot before, {changed:.1} % of the view changed");
+                let shot: Shot = ((size.width, size.height), data.to_vec());
+                let mut last = LAST_SHOTS.lock().expect("the last shots");
+                for ((was, pixels), which) in last.iter().rev().zip(["the shot before", "two shots before"]) {
+                    if *was == shot.0 {
+                        let (levels, changed) = picture_difference(pixels, data, was.0 as usize, was.1 as usize);
+                        info!("test aid: {name}: {levels:.2} levels of 255 from {which} (tolerance {:.2}), {changed:.1} % of the view changed", difference_tolerance(levels));
+                    }
                 }
-                *last = Some(((size.width, size.height), data.to_vec()));
+                if last.len() == 2 {
+                    last.remove(0);
+                }
+                last.push(shot);
             });
         }
         if std::env::var_os("NVF_PLAY_TEST_SHOT_FLATNESS").is_some() {
@@ -815,9 +822,19 @@ fn take_shots(time: crate::pause::AidTime, mut aids: ResMut<Aids>, mut commands:
     }
 }
 
-/// The last shot's size and pixels (`NVF_PLAY_TEST_SHOT_DIFF`; a picture of the window, kept while
-/// the aid is on).
-static LAST_SHOT: Mutex<Option<((u32, u32), Vec<u8>)>> = Mutex::new(None);
+/// A shot's size and pixels.
+type Shot = ((u32, u32), Vec<u8>);
+
+/// The last two shots, the older first (`NVF_PLAY_TEST_SHOT_DIFF`; pictures of the window, kept
+/// while the aid is on).
+static LAST_SHOTS: Mutex<Vec<Shot>> = Mutex::new(Vec::new());
+
+/// How far a picture may be from one it should equal, where two of the same kind as far apart in
+/// time differ by `levels` [engineering choice: half as much again, and a tenth of a level for a
+/// view that stood still].
+fn difference_tolerance(levels: f64) -> f64 {
+    1.5 * levels + 0.1
+}
 
 /// Test aid `NVF_PLAY_TEST_SHOT_DIFF`: the mean absolute difference of two pictures of one size
 /// over the view, its lower fifth left out (the HUD), in levels of 255 over the three colour

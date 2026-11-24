@@ -36391,18 +36391,19 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-light-picture"
-source = "[design, #3032 stage 3] engine/nvforever/src/medium_air_compose.rs and .wesl, medium_air_grid*: the light changes the picture: one still view at Goodsprings at 17:30 under NVWastelandClear (frozen sky, no actors, the solid cores off by their aid, the Sun shafts and both shadow rows off), the Volumetric light row off, on and off again in play (NVF_PLAY_TEST_SETTINGS), five screenshots, each measured against the one before (NVF_PLAY_TEST_SHOT_DIFF, nvf-play test_aid.rs). Switching it on and off moves the picture further than it moves by itself, which a composite that returned its input would not; what the light looks like is checked in pictures by hand. The glow keeps the view HDR throughout, so the switch changes the light alone"
+source = "[design, #3032 stage 3] engine/nvforever/src/medium_air_compose.rs and .wesl, medium_air_grid*: the light changes the picture: one still view at Goodsprings at 17:30 under NVWastelandClear (frozen sky, no actors, the solid cores off by their aid, the Sun shafts and both shadow rows off), five screenshots 15 s apart, three with the Volumetric light row off, one with it on and one with it off again (NVF_PLAY_TEST_SETTINGS), each measured against the one before and the one before that (NVF_PLAY_TEST_SHOT_DIFF, nvf-play test_aid.rs). Over the same 15 s, switching the row moves the picture further than it moves by itself with a margin (the tolerance, which a composite that returned its input, or a slow animation, would stay inside), and over the same 30 s the off picture comes back within the tolerance of two off pictures. What the light looks like is checked in pictures by hand. The glow keeps the view HDR throughout, so the switch changes the light alone"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/solid_cores.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_CLOUD_PHASE = "100", NVF_PLAY_DEBUG_SOLID_CORES = "off", NVF_PLAY_TEST_LOOK = "8:270:5", NVF_PLAY_TEST_SHOT_DIFF = "1", NVF_PLAY_TEST_SHOTS = "14:vl_off_a.png,16:vl_off_b.png,26:vl_on_c.png,28:vl_on_d.png,38:vl_off_e.png", NVF_PLAY_TEST_PAUSE = "18:20,30:32", NVF_PLAY_TEST_SETTINGS = "19:volumetric-light,31:volumetric-light" }
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_CLOUD_PHASE = "100", NVF_PLAY_DEBUG_SOLID_CORES = "off", NVF_PLAY_TEST_LOOK = "8:270:5", NVF_PLAY_TEST_SHOT_DIFF = "1", NVF_PLAY_TEST_SHOTS = "20:vl_off_a.png,35:vl_off_b.png,50:vl_off_c.png,65:vl_on_d.png,80:vl_off_e.png", NVF_PLAY_TEST_PAUSE = "51:53,66:68", NVF_PLAY_TEST_SETTINGS = "52:volumetric-light,67:volumetric-light" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--no-actors", "--hour", "17.5", "--weather", "NVWastelandClear", "--still-sky", "--size", "1280x720", "--msaa", "4", "--sun-shadows", "--graphics-only", "anisotropic"]
-run_seconds = 42
+run_seconds = 86
 expect = [
-  { re = 'vl_on_c\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_b\.png: ([\d.]+) levels of 255 from the shot before', label = "the row on moves the picture further than it moves by itself with the row off" },
-  { re = 'vl_on_c\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', label = "and further than with the row on" },
-  { re = 'vl_off_e\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', label = "the row off moves it back" },
-  { re = 'vl_on_c\.png: ([\d.]+) levels of 255 from the shot before', range = [0.5, 60], label = "by more than rounding" },
-  { re = 'vl_off_e\.png: ([\d.]+) levels of 255 from the shot before', range = [0.5, 60], label = "and back by more than rounding" },
+  { re = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_b\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the row on moves the picture past what it moves by itself in the same time" },
+  { re = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_c\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the same against the second pair with the row off" },
+  { re = 'vl_off_e\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_b\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the row off moves it back" },
+  { re = 'vl_off_e\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_c\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "past the second pair too" },
+  { re = 'vl_off_c\.png: [\d.]+ levels of 255 from two shots before \(tolerance ([\d.]+)\)', above = 'vl_off_e\.png: ([\d.]+) levels of 255 from two shots before', label = "the last off picture is the one before the switch within two off pictures' own difference over the same 30 s" },
+  { re = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', range = [0.5, 60], label = "by more than rounding" },
   { text = "volumetric medium: light in the air: composite drawn (view none, ", count = 1, label = "the light was composed between the two" },
 ]
 forbid = [
@@ -36429,6 +36430,8 @@ expect = [
   { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth yes)", count = 2, label = "composed in both activations" },
   { text = "sun shafts: yielding to the light in the air", count = 2, label = "the shafts yield in both" },
   { text = "terrain shadows: off", count = 1, label = "the map's production stops once, with the row" },
+  { gap = ["test aid NVF_PLAY_TEST_SETTINGS: volumetric-light", "terrain shadows: published v"], range = [0, 60], label = "the first map of the run is made after the row's first switch on, none before" },
+  { gap = ["test aid NVF_PLAY_TEST_SETTINGS: volumetric-light", { re = 'pipeline \d+ asked: medium_air_' }], range = [0, 60], label = "nor any pipeline of the light" },
 ]
 order = [[
   { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-light", label = "the row switched on in play" },

@@ -1120,13 +1120,6 @@ fn task_pools(placed: Option<usize>) -> TaskPoolPlugin {
         task_pool_options.async_compute.max_threads = n;
         info!("test aid NVF_PLAY_TEST_ASYNC_THREADS: {n}");
     }
-    // The compute pool's size, to weigh its threads' wake-ups against the parallel work they
-    // take (graphics pass 2026-11-23: 8 threads at ~35 % each standing still).
-    if let Some(n) = std::env::var("NVF_PLAY_TEST_COMPUTE_THREADS").ok().and_then(|v| v.parse::<usize>().ok()) {
-        task_pool_options.compute.min_threads = n;
-        task_pool_options.compute.max_threads = n;
-        info!("test aid NVF_PLAY_TEST_COMPUTE_THREADS: {n}");
-    }
     TaskPoolPlugin { task_pool_options }
 }
 

@@ -1019,6 +1019,9 @@ over the prepass depth (upscaler/prep.rs `expand_depth`), visible rocks, posts a
 were culled. The culling stays an experiment behind `NVF_OCCLUSION_CULLING=1`
 (nvforever gpu_occlusion.rs).
 
+Source: crates.io `bevy_core_pipeline` 0.20.1, archive SHA-256
+`2463cf477b683bfe8567c43142295d00ed980f8e2a293c0a69e2f9e10e9c0aaf`.
+
 ## wgpu-hal 30.0.1 (MIT OR Apache-2.0, the gfx-rs developers)
 
 wgpu's Vulkan backend, for NVIDIA low latency (`VK_NV_low_latency2`,

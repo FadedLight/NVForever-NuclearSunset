@@ -1344,7 +1344,8 @@ said. The bench made an INI from the owner's with those values and kept the game
   controller planning (`phys::npc_plan` 1.6).
 - **Per thread** (each thread's processor time over 8-10 s, standing at Goodsprings at 160 a
   second): the 8 compute-pool threads 330-370 ms of each second, the main thread 500, the
-  render thread 330. With `NVF_PLAY_TEST_COMPUTE_THREADS=4` (a new test aid, main.rs) the
+  render thread 330. With the compute pool at 4 threads (a measuring build's test aid,
+  not kept: #1884 adds `NVF_PLAY_TEST_COMPUTE_THREADS`) the
   process used 10 % less processor time but frames were 3-6 % slower (Goodsprings 6.25 →
   6.42 ms, Novac 7.24 → 7.69): the pool's time is parallel work, not idle wake-ups.
 

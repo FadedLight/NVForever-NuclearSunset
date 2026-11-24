@@ -5442,7 +5442,8 @@ fn actor_attacks(
         // The weapon: its own, else the Fists; a creature's own attack damage in the Fists'
         // place [design: the Fists' other figures stand in for a creature's].
         let Some(id) = b.weapon.or(c.fists) else { continue };
-        let Some(mut w) = c.forms.weapons.get(&id).cloned() else { continue };
+        let mods = if b.creature_damage.is_none() { sim.world.peek(b.attacker).and_then(|st| st.inventory.as_ref()).map_or(0, |i| i.mods_in_use(id)) } else { 0 };
+        let Some(mut w) = c.forms.weapons.get(&id).map(|w| if mods != 0 { w.modded(mods) } else { w.clone() }) else { continue };
         script_weapon_critical_damage(script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game), id, &mut w);
         if let Some(d) = b.creature_damage {
             w.base_damage = d.round() as i32;
@@ -6406,8 +6407,14 @@ fn fly(
             p.by.actor = s.source;
         }
         let id = p.by.weapon;
-        // The player's weapon hits with its mods' figures (weapon-mods.md §2).
-        let w = if p.by.actor == FormId::PLAYER_REF { c.player_stats(id) } else { c.forms.weapons.get(&id).cloned() };
+        // Modded weapons hit with their mods' figures (weapon-mods.md §2); unmodded
+        // NPC weapons (`mods == 0`) stay identical to the base weapon stats.
+        let w = if p.by.actor == FormId::PLAYER_REF {
+            c.player_stats(id)
+        } else {
+            let mods = sim.world.peek(p.by.actor).and_then(|st| st.inventory.as_ref()).map_or(0, |i| i.mods_in_use(id));
+            c.forms.weapons.get(&id).map(|w| if mods != 0 { w.modded(mods) } else { w.clone() })
+        };
         let Some(mut w) = w else { continue };
         script_weapon_critical_damage(script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game), id, &mut w);
         if let Some(s) = &shot {

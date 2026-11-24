@@ -1,8 +1,8 @@
 //! Clean-room loader for `Data\Config\BetterFlashlightNVSE.ini`
 //! (`docs/spec-notes/better-flashlight-ini.md`).
 //!
-//! Only the public **Better Flashlight NVSE** v1.1.6 Nexus page
-//! (`https://www.nexusmods.com/newvegas/mods/98905`) and shipped
+//! Only the public **Better Flashlight NVSE** v1.1.5 Nexus page
+//! (`https://www.nexusmods.com/newvegas/mods/98905`) and shipped v1.1.5
 //! `Data\Config\BetterFlashlightNVSE.ini` section/key names, defaults, and inline
 //! comments were consulted; no DLL (`BetterFlashlightNVSE.dll`), PDB, shader binary
 //! (`.fxo`), or third-party implementation source was inspected.
@@ -22,7 +22,7 @@
 use bevy::prelude::*;
 
 /// Case-insensitive VFS path for `Data\Config\BetterFlashlightNVSE.ini`
-/// [documented: Better Flashlight NVSE v1.1.6 (`https://www.nexusmods.com/newvegas/mods/98905`),
+/// [documented: Better Flashlight NVSE v1.1.5 (`https://www.nexusmods.com/newvegas/mods/98905`),
 /// shipped `Data\Config\BetterFlashlightNVSE.ini` install path].
 pub const INI_PATH: &str = "config\\betterflashlightnvse.ini";
 
@@ -77,7 +77,7 @@ impl Default for BatteryConfig {
 }
 
 /// Parsed `Data\Config\BetterFlashlightNVSE.ini` configuration
-/// [documented: Better Flashlight NVSE v1.1.6 (`https://www.nexusmods.com/newvegas/mods/98905`),
+/// [documented: Better Flashlight NVSE v1.1.5 (`https://www.nexusmods.com/newvegas/mods/98905`),
 /// shipped `Data\Config\BetterFlashlightNVSE.ini`; plugin DLL and source code were never
 /// consulted].
 ///

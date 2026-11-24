@@ -1,104 +1,120 @@
 # BetterFlashlightNVSE INI spotlight configuration
 
 **Clean-room provenance:** Only the public **Better Flashlight NVSE** mod page
-(`https://www.nexusmods.com/newvegas/mods/98905`, v1.1.6) and shipped
+(`https://www.nexusmods.com/newvegas/mods/98905`, v1.1.5) and shipped v1.1.5
 `Data\Config\BetterFlashlightNVSE.ini` file (section names, key names, defaults, and
 inline comments) were consulted. No DLL (`BetterFlashlightNVSE.dll`), PDB, compiled
 shader (`.fxo`), or third-party binary or source code was opened, disassembled, or
-consulted.
+consulted. Every NVForever-specific mapping, clamp, fallback, or runtime state machine
+below beyond what the INI comments state is tagged `[design]` (NVForever's own behavior,
+not the plugin's).
 
-## VFS discovery and vanilla-unchanged gate
+## VFS discovery, vanilla-unchanged gate, and Tweaks precedence
 
 (`engine/nvforever/src/flashlight_ini.rs`, `engine/nvforever/src/flashlight.rs`; extends
 the native player spotlight described in `world.md` §8.)
 
 - At `Startup`, NVForever looks up `config\betterflashlightnvse.ini` case-insensitively
   through `nvf_assets::GameData::read` (covering loose files, MO2 layered roots, and
-  BSAs) [documented: Better Flashlight NVSE v1.1.6
+  BSAs) [documented: Better Flashlight NVSE v1.1.5
   (`https://www.nexusmods.com/newvegas/mods/98905`), shipped
-  `Data\Config\BetterFlashlightNVSE.ini` install path].
+  `Data\Config\BetterFlashlightNVSE.ini` install path; design: NVForever's own VFS
+  lookup].
 - When the INI is absent, or when `[Main] RenderEffects = 0` or `[Flashlight] Enabled = 0`
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`
-  `[Main]` and `[Flashlight]` (`;disable to turn the mod off entirely`)], NVForever
-  leaves its vanilla Pip-Boy `SpotLight` (`COLOUR`, `BRIGHTNESS`, `RANGE`, `OUTER_DEG`,
-  `INNER_DEG`, head/eye `placement`) and toggle behavior completely unchanged [design].
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`
+  `[Main] RenderEffects = 1` and `[Flashlight] Enabled = 1`
+  (`";disable to turn the mod off entirely"`)], NVForever leaves its vanilla Pip-Boy
+  `SpotLight` (`COLOUR`, `BRIGHTNESS`, `RANGE`, `OUTER_DEG`, `INNER_DEG`, head/eye
+  `placement`) and toggle behavior completely unchanged [design: NVForever's own gate].
+- **Precedence vs. NVForever Tweaks Flashlight settings (`#3280`)** [design: NVForever's
+  own precedence policy]: when both an active `Data\Config\BetterFlashlightNVSE.ini`
+  (`[Main] RenderEffects = 1` and `[Flashlight] Enabled = 1`) and NVForever's Tweaks >
+  Quality of Life > Flashlight rows (`#3280`) are present, the active
+  `BetterFlashlightNVSE.ini` takes precedence over the Tweaks Flashlight rows so
+  installing the mod works out of the box without editing Tweaks; disabling the INI
+  (`RenderEffects = 0` or `Enabled = 0`) or removing it immediately restores the Tweaks
+  Flashlight settings. Whichever of `#3280` and `#3727` merges second will merge `main`
+  and cover this precedence boundary with a regression test.
 - Parsing operates strictly on raw `&[u8]` slices (stripping optional UTF-8 BOM,
   CRLF/LF endings, `;`/`#` comments, ASCII case-insensitive section/key matching, and
-  finite `f32` validation) with safe engineering clamps (`Angle * SpotSize` clamped to
-  `1°..=85°` strictly below Bevy's `π/2` `SpotLight` limit; `SpotSize` `0.1..=4.0`;
+  finite `f32` validation) with NVForever's own safety clamps (`Angle * SpotSize` clamped
+  to `1°..=85°` strictly below Bevy's `π/2` `SpotLight` limit; `SpotSize` `0.1..=4.0`;
   `Distance` `64..=20000`; `ColorR/G/B` `0..=4`; `Dimmer`/`Intensity` `0..=16`;
   `WarmupTime` `0..=10 s`; `Flicker` `0..=2`; `OffsetX/Y/Z` `-200..=200`; `[Battery]`
   rates/threshold `0..=100`) and omitted-key fallback defaults (`SpotSize = 1.0`,
-  `[Battery] Enabled = false`, and the shipped INI's numeric baseline for omitted
-  spotlight/battery fields) [design].
+  `[Battery] Enabled = false`, and the shipped v1.1.5 INI's numeric baseline for omitted
+  spotlight/battery fields) [design: NVForever's own parser, clamps, and fallbacks].
 
 ## Wired sections and keys
 
 Every stored field has a live consumer in `engine/nvforever/src/flashlight.rs`:
 
-- `[Main] RenderEffects` and `[Flashlight] Enabled`: master activation gate
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`;
-  observed lifecycle: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official
-  base masters, isolated clean-room staging, BetterFlashlightNVSE 1.1.5 +
-  `Data\Config\BetterFlashlightNVSE.ini`, GSDocMitchellHouse (`0x00103DF9`), Wave 4E
-  black-box probe `w4e_c06_betterflashlight_toggle_lifecycle`: loads
-  `Data\Config\BetterFlashlightNVSE.ini` cleanly and activates its material-light pass
-  strictly while the Pip-Boy light is toggled on (`TogglePipBoyLight 1 -> matpass
-  visited=1755 queued=490`; `TogglePipBoyLight 0 -> pass inactive`); zero DLL/PDB/source
-  consulted].
-- `[Flashlight] Angle`, `SpotSize`, `Distance`: mapped onto native Bevy `SpotLight`
-  `outer_angle` (`Angle * SpotSize`, treating `Angle` as base cone half-angle in degrees
-  [hypothesis: GPU shader / visual-only boundary confirmed non-script-observable in Wave
-  4E `w4e_v02_betterflashlight_visual_cone` — requires interactive A/B screenshot
-  inspection]), `inner_angle` preserving NVForever's vanilla `14 / 30` softness ratio
-  [design], and `range` (`Distance`, game units) [documented: Better Flashlight NVSE
-  v1.1.6 `Data\Config\BetterFlashlightNVSE.ini` (`;light cone`,
-  `;spot size scale - shrinks the pool (cone + cookie together). 1.0 = full Angle, lower = tighter`)].
+- `[Main] RenderEffects` (shipped `1`) and `[Flashlight] Enabled` (shipped `1`,
+  `";disable to turn the mod off entirely"`): master activation gate [documented: Better
+  Flashlight NVSE v1.1.5 (`https://www.nexusmods.com/newvegas/mods/98905`),
+  `Data\Config\BetterFlashlightNVSE.ini`; hypothesis: whether `[Main] RenderEffects = 0`
+  also disables the spotlight or only post-process effects is inferred from the top-level
+  INI structure, not probed].
+- `[Flashlight] Angle` (shipped `18`), `Distance` (shipped `1800`, `";light cone"`), and
+  `SpotSize` (shipped `1.5`,
+  `";spot size scale - shrinks the pool (cone + cookie together). 1.0 = full Angle, lower = tighter"`):
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`].
+  Mapped onto NVForever's native Bevy `SpotLight` `outer_angle` (`Angle * SpotSize`,
+  treating `Angle` as base cone half-angle in degrees [hypothesis: whether the plugin
+  uses half-angle or full-angle is a visual/shader boundary not stated in the INI
+  comment]), `inner_angle` preserving NVForever's vanilla `14 / 30` softness ratio
+  [design: NVForever's own inner-cone mapping], and `range` (`Distance`, game units).
   `configured_spotlight` preserves `shadow_maps_enabled = true` and
   `shadow_map_near_z = NEAR` so native wall shadow occlusion and `#3121` first-person
-  anti-washout scaling (`lights/display_shader.rs`) continue to apply [design].
-- `[Flashlight] ColorR`, `ColorG`, `ColorB`: passed as HDR-capable display colour
-  multipliers to `lights::display_color` [documented: Better Flashlight NVSE v1.1.6
-  `Data\Config\BetterFlashlightNVSE.ini` (`;color (values above 1.0 are HDR)`);
-  design: native display-unit mapping].
-- `[Interior] Dimmer`, `Intensity` and `[Exterior] Dimmer`, `Intensity` (with
-  `[Flashlight] Dimmer`, `Intensity` as legacy per-field fallback): dynamically chosen
-  by current cell interior state (`nvf_play::Location::interior`, fallback
-  `SkyState::interior`) and mapped to display brightness
-  `BRIGHTNESS * dimmer * intensity * warmup * flicker` via `lights::lumens`
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`
-  (`;legacy fallback for configs created before interior/exterior profiles`,
-  `;brightness used in interior cells`, `;brightness used in exterior cells`);
-  design: linear product mapping into NVForever display units].
-- `[Flashlight] WarmupTime` and `Flicker`: incandescent smoothstep ramp over
-  `WarmupTime` seconds (`0` = instant) and deterministic sporadic brief brightness dips
-  bounded in `0.15..=1.0` whose frequency and depth scale with `Flicker` (`0` = steady)
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`
-  (`;sporadic flicker - mostly steady with occasional brief dips. 0 = off, higher = deeper/more often`,
-  `;warm-up ramp on toggle (seconds). incandescent feel. 0 = instant (LED)`);
-  design: smoothstep ramp and SplitMix64 0.08 s time-slot dip curve].
-- `[Flashlight] AttachToWeapon` and `OffsetX`, `OffsetY`, `OffsetZ`: when enabled and a
-  weapon is drawn in hand, aligns the spotlight to the weapon's `ProjectileNode` muzzle
-  and `+X` barrel axis (`PlayerBody::weapon_aim`, falling back to `WeaponAnim::muzzle`
-  with view rotation, or camera/head-eye placement when unarmed/holstered or when
-  `AttachToWeapon = 0`) [documented: Better Flashlight NVSE v1.1.6
-  `Data\Config\BetterFlashlightNVSE.ini` (`;light follows weapon when armed, otherwise camera`,
-  `;position offset relative to attach point (weapon or camera)`); design: native
-  weapon-node alignment], then applies `(OffsetX, OffsetY, OffsetZ)` in the attach
-  point's local game-space `(right, forward, up)` frame [hypothesis: FNV local axis
-  convention for `OffsetX/Y/Z`, since the INI comment does not specify individual axis
-  orientations; GPU shader / visual-only boundary confirmed non-script-observable in Wave
-  4E `w4e_v02_betterflashlight_visual_cone` — requires interactive A/B screenshot
-  inspection].
-- `[Battery] Enabled`, `DrainRate`, `RechargeRate`, `RechargeThreshold`: while actively
-  playing (`PlayState::Playing` and not `Paused`), drains charge (`100 -> 0`) at
-  `DrainRate` units/s when on, automatically shuts off at `0` and locks out re-toggling
-  until recharged past `RechargeThreshold` (when `> 0`), recharges at `RechargeRate`
-  units/s while off, and resets to `100%` (clearing lockout) on save load or new game
-  [documented: Better Flashlight NVSE v1.1.6 `Data\Config\BetterFlashlightNVSE.ini`
-  (`;drains while the Pip-Boy flashlight is on, recharges while off. Charge resets to full on load/new game.`,
-  `;charge needed after full depletion before the flashlight can turn on again`);
-  design: native `FlashlightRuntime` state machine without altering the save format].
+  anti-washout scaling (`lights/display_shader.rs`) continue to apply [design: NVForever's
+  own renderer policy].
+- `[Flashlight] ColorR` (shipped `2`), `ColorG` (shipped `1.85`), `ColorB` (shipped `1.65`,
+  `";color (values above 1.0 are HDR). lower the warm bias (R,G) or raise B for a cooler beam"`):
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`].
+  Passed as HDR-capable display colour multipliers to `lights::display_color` [design:
+  NVForever's own native display-unit mapping].
+- `[Interior] Dimmer` (shipped `1`), `Intensity` (shipped `0.35`,
+  `";brightness used in interior cells"`), `[Exterior] Dimmer` (shipped `3.20`),
+  `Intensity` (shipped `0.35`, `";brightness used in exterior cells"`), and `[Flashlight]
+  Dimmer` (shipped `1.0`), `Intensity` (shipped `0.35`,
+  `";legacy fallback for configs created before interior/exterior profiles"`):
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`].
+  Dynamically chosen by current cell interior state (`nvf_play::Location::interior`,
+  fallback `SkyState::interior`) and mapped to display brightness
+  `BRIGHTNESS * dimmer * intensity * warmup * flicker` via `lights::lumens` [design:
+  NVForever's own linear product mapping into display units].
+- `[Flashlight] WarmupTime` (shipped `0.4`,
+  `";warm-up ramp on toggle (seconds). incandescent feel. 0 = instant (LED)"`) and
+  `Flicker` (shipped `0.25`,
+  `";sporadic flicker - mostly steady with occasional brief dips. 0 = off, higher = deeper/more often"`):
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`].
+  Implemented as an incandescent smoothstep ramp over `WarmupTime` seconds (`0` = instant)
+  and deterministic SplitMix64 `0.08 s` time-slot sporadic brightness dips bounded in
+  `0.15..=1.0` whose frequency and depth scale with `Flicker` (`0` = steady) [design:
+  NVForever's own ramp and flicker curves].
+- `[Flashlight] AttachToWeapon` (shipped `1`,
+  `";light follows weapon when armed, otherwise camera"`) and `OffsetX`, `OffsetY`,
+  `OffsetZ` (shipped `0.0`,
+  `";position offset relative to attach point (weapon or camera)"`): [documented: Better
+  Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`]. When enabled and a
+  weapon is drawn in hand, NVForever aligns the spotlight to the weapon's `ProjectileNode`
+  muzzle and `+X` barrel axis (`PlayerBody::weapon_aim`, falling back to
+  `WeaponAnim::muzzle` with view rotation, or camera/head-eye placement when
+  unarmed/holstered or when `AttachToWeapon = 0`) [design: NVForever's own weapon-node
+  alignment], then applies `(OffsetX, OffsetY, OffsetZ)` in the attach point's local
+  game-space `(right, forward, up)` frame [hypothesis: local axis sign convention for
+  `OffsetX/Y/Z`, since the INI comment does not specify individual axis orientations].
+- `[Battery] Enabled` (shipped `1`), `DrainRate` (shipped `1`), `RechargeRate` (shipped
+  `2.5`, `";drains while the Pip-Boy flashlight is on, recharges while off. Charge resets
+  to full on load/new game."`), and `RechargeThreshold` (shipped `10`,
+  `";charge needed after full depletion before the flashlight can turn on again"`):
+  [documented: Better Flashlight NVSE v1.1.5 `Data\Config\BetterFlashlightNVSE.ini`].
+  While actively playing (`PlayState::Playing` and not `Paused`), drains charge
+  (`100 -> 0`) at `DrainRate` units/s when on, automatically shuts off at `0` and locks
+  out re-toggling until recharged past `RechargeThreshold` (when `> 0`), recharges at
+  `RechargeRate` units/s while off, and resets to `100%` (clearing lockout) on save load
+  or new game [design: NVForever's own in-memory `FlashlightRuntime` state machine
+  without altering the save format].
 
 ## Intentionally unbuilt / out-of-scope sections and keys
 

@@ -573,6 +573,18 @@ off by default, saved in `NVForever.ini` `[Settings]` [design: #3305]).
   part with the spread. Arrows: the plain crosshair's two arrows part instead.
 - Registered in `engine/nvf-play/src/reticle.rs`
 
+### `location-load-screens`: Location-specific loading screens
+
+- On the page: On: prefer loading screens matching the destination cell or worldspace over
+  generic screens. Off: mix matching and generic loading screens as in the original.
+- In full: Default Off (vanilla mixes generic loading screens into the same pool as
+  location-specific `LSCR` records). When On, destination-matching location-specific `LSCR`
+  records are always preferred over generic loading screens, falling back to generic screens
+  only when no location-specific screen matches. Optional NVForever setting following the
+  public `bLoadScreenFix` behaviour in JIP LN NVSE Plugin v57.30
+  (`docs/spec-notes/location-load-screens.md`, #3844).
+- Registered in `engine/nvf-play/src/loading.rs`
+
 ### `ui-scale`: HUD scale
 
 - On the page: Size of the in-game HUD, independent of menu scale. Takes effect at the next start.

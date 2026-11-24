@@ -754,16 +754,14 @@ fn fragment(
                         normal = mix(normal, layer_n, share);
                     }
                 }
-                @if(TERRAIN_PARALLAX) {
-                    let texel = layer_diffuse_antitiled(k, in.instance_index, parallax_taps, parallax_fp);
-                    let share = saturate(opacity[k]) * parallax_alpha[k];
-                    var layer_n = plain;
-                    @if(VERTEX_TANGENTS) if (counts.y & (1u << k)) != 0u {
-                        layer_n = terrain_world_normal(tbn, layer_normal_antitiled(k, in.instance_index, parallax_taps, parallax_fp, terrain_two_component(standard.flags), terrain_flip_y(standard.flags)), false);
-                    }
-                    colour = mix(colour, texel.rgb * tint * standard.base_color.rgb, share);
-                    normal = mix(normal, layer_n, share);
+                @if(TERRAIN_PARALLAX) let texel = layer_diffuse_antitiled(k, in.instance_index, parallax_taps, parallax_fp);
+                @if(TERRAIN_PARALLAX) let share = saturate(opacity[k]) * parallax_alpha[k];
+                @if(TERRAIN_PARALLAX) var layer_n = plain;
+                @if(TERRAIN_PARALLAX && VERTEX_TANGENTS) if (counts.y & (1u << k)) != 0u {
+                    layer_n = terrain_world_normal(tbn, layer_normal_antitiled(k, in.instance_index, parallax_taps, parallax_fp, terrain_two_component(standard.flags), terrain_flip_y(standard.flags)), false);
                 }
+                @if(TERRAIN_PARALLAX) colour = mix(colour, texel.rgb * tint * standard.base_color.rgb, share);
+                @if(TERRAIN_PARALLAX) normal = mix(normal, layer_n, share);
             }
             pbr_input.material.base_color = vec4(colour, 1.0);
             pbr_input.N = normalize(normal);

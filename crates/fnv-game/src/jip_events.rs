@@ -134,11 +134,18 @@ pub struct JipHit {
     /// 7 sneak attack, 8 explosion hit (bit n = flag n).
     pub flags: u16,
     /// World-space 3D impact point (`GetHit3DData 0` and first 3 elements of type 2);
-    /// `[0.0; 3]` for an explosion hit.
+    /// `[0.0; 3]` for an explosion hit [observed: 2026-11-23, GSDocMitchellHouse
+    /// (0x00103DF9), Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 (10
+    /// official base masters), #3678 / PR #3679 probe `w1_3606_hit_3d_dir_and_base_damage`:
+    /// `GrenadeFragExplosion` placed via `PlaceAtMe`].
     pub hit_pos: Option<[f32; 3]>,
-    /// Impact angles X/Y/Z in degrees (`GetHit3DData 1` and last 3 elements of type 2);
-    /// `[0.0; 3]` for an explosion hit.
-    pub hit_angles: Option<[f32; 3]>,
+    /// Unit 3D incoming travel direction vector `(nx, ny, nz)` (`GetHit3DData 1` and last
+    /// 3 elements of type 2); `[0.0; 3]` for an explosion hit [observed: 2026-11-23,
+    /// GSDocMitchellHouse (0x00103DF9), Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+    /// JIP LN 57.30 (10 official base masters), #3678 / PR #3679 probe
+    /// `w1_3606_hit_3d_dir_and_base_damage`: South->North `+Y`, East->West `-X`, and
+    /// `GrenadeFragExplosion`].
+    pub hit_dir: Option<[f32; 3]>,
 }
 
 /// One `SetOn<Event>EventHandler handler 1 filters…`.
@@ -565,11 +572,11 @@ impl Game<'_> {
             "3d" => {
                 let coords: Vec<f32> = match k {
                     0 => h.hit_pos?.to_vec(),
-                    1 => h.hit_angles?.to_vec(),
+                    1 => h.hit_dir?.to_vec(),
                     2 => {
                         let p = h.hit_pos?;
-                        let a = h.hit_angles?;
-                        vec![p[0], p[1], p[2], a[0], a[1], a[2]]
+                        let d = h.hit_dir?;
+                        vec![p[0], p[1], p[2], d[0], d[1], d[2]]
                     }
                     _ => return None,
                 };

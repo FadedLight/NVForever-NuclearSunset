@@ -220,6 +220,7 @@ mod effect_shaders;
 mod vats_highlight;
 mod tree;
 mod treelod;
+mod ui_project;
 mod river_flow;
 mod underwater;
 mod underwater_caustics;
@@ -1472,8 +1473,13 @@ fn main() -> AppExit {
             Some((p, String::from_utf8_lossy(&bytes).into_owned()))
         })
         .collect();
+    let hnvse_merge_region_lists = game
+        .vfs
+        .read("nvse\\plugins\\hnvse.ini")
+        .and_then(Result::ok)
+        .is_some_and(|bytes| fnv_world::audio::parse_hnvse_merge_region_lists(&String::from_utf8_lossy(&bytes)));
     let t0 = std::time::Instant::now();
-    let mut world = match WorldData::open(&args.esm_schema, opened, &args.world, bos_sources) {
+    let mut world = match WorldData::open(&args.esm_schema, opened, &args.world, bos_sources, hnvse_merge_region_lists) {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
@@ -2242,6 +2248,8 @@ fn main() -> AppExit {
             app.add_plugins(dialogue_look::DialogueLookPlugin);
             // AttachUIComponent's rects over their model nodes (ui_attach.rs, #1835).
             app.add_plugins(ui_attach::UiAttachPlugin);
+            // ProjectUITile's off-screen textures bound onto target model surfaces (ui_project.rs, #2418).
+            app.add_plugins(ui_project::UiProjectPlugin);
             // Who says a line to someone turns to them (speech_look.rs).
             app.add_plugins(speech_look::SpeechLookPlugin);
             // Who perceives whom (detection.rs): the drawn actors and the player.
@@ -2311,7 +2319,7 @@ fn main() -> AppExit {
         app.init_resource::<anim_objects::AnimObjects>()
             .add_systems(Startup, anim_objects::read)
             .add_systems(Update, anim_objects::hold.after(idles::drive).before(advance_animations))
-            .add_systems(Update, idles::play_npc_sequences.after(idles::drive))
+            .add_systems(Update, idles::play_npc_sequences.after(idles::drive).before(locomotion::drive))
             .add_systems(Last, anim_objects::report);
     }
     app.init_resource::<idles::PlayerIdles>();

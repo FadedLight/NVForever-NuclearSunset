@@ -1564,6 +1564,12 @@ pub struct Game<'a> {
     pub ui_pointer: fnv_ui::input::Pointer,
     /// The game's difficulty (`crate::difficulty`): the engine sets it from its settings.
     pub difficulty: crate::difficulty::Difficulty,
+    /// The Custom level's multipliers (`crate::difficulty`): the engine sets them from its
+    /// settings.
+    pub difficulty_custom: crate::difficulty::CustomDifficulty,
+    /// The level a script's `SetGameDifficulty` chose, for the engine to keep as the
+    /// player's choice and clear (`crate::difficulty`); `None`: none since it last looked.
+    pub difficulty_request: Option<crate::difficulty::Difficulty>,
     /// The player's tweaks (`crate::tweaks`): the engine sets them from its settings.
     pub tweaks: crate::tweaks::Tweaks,
     /// What scripts asked of the engine's combat (`crate::combat::CombatRequest`), for
@@ -1985,6 +1991,12 @@ pub struct Game<'a> {
     /// menus and loading screens, conversations included [hypothesis: as the lines of a
     /// conversation do; image-modifiers.md §3].
     pub image_modifiers: Vec<ActiveImageModifier>,
+    /// Extra stacked instance count per non-animatable IMAD form beyond the single entry
+    /// kept in [`Game::image_modifiers`] (capped at `MAX_IMOD_STACK - 1`), so repeated
+    /// non-animatable re-applies never grow `image_modifiers` without bound while
+    /// `remove_image_modifier` still fires `OnRemoveIMOD` once per stacked instance
+    /// [design]. Not saved.
+    image_modifier_extra_stacks: BTreeMap<FormId, u32>,
     /// ScriptEffectElapsedSeconds inside a ScriptEffectUpdate block (0 elsewhere).
     pub effect_elapsed: f64,
     pub(crate) depth: u32,
@@ -2198,6 +2210,12 @@ pub struct GameSnapshot {
     /// (actor, target) pairs StartCombat made hostile until StopCombat.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub forced_combat: BTreeSet<(FormId, FormId)>,
+    /// Those of `forced_combat` whose target has not been measured since StartCombat
+    /// (`Awareness::scripted`), written, empty too, whenever there are forced pairs: so
+    /// `None` beside forced pairs is a save made before this field
+    /// (`Game::restore_scripted_combat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripted_combat: Option<BTreeSet<(FormId, FormId)>>,
     /// ppNVSE's form instances [documented: CreateFormInstance, "tied to the users save
     /// game"] (`crate::nvse_pp`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2533,11 +2551,15 @@ const NO_FUNCTION_BLOCK: &str = " has no Function block";
 /// Internal callable regions. Loaded records can also occupy these numbers: allocation
 /// skips them and dispatch uses actual ownership (callable-identity.md).
 /// Ids of foreach's temporary inventory references (B5), in
-/// `[TEMP_REF_BASE, CAMERA_OVERLAY_BASE)`.
+/// `[TEMP_REF_BASE, BULLET_SNAP_SOUND_BASE)`.
 pub const TEMP_REF_BASE: u32 = 0xFE40_0000;
+/// Audio-only synthetic `SOUN` FormIDs reserved for BulletSnap pass-by folders
+/// (`nvf_play::bullet_snap`), carved out in `[BULLET_SNAP_SOUND_BASE, CAMERA_OVERLAY_BASE)`
+/// above temporary inventory references and below camera overlay references [design].
+pub const BULLET_SNAP_SOUND_BASE: u32 = 0xFE7E_0000;
 /// Fixed engine-owned runtime references (such as JohnnyGuitar's camera overlay
-/// references), carved out in `[CAMERA_OVERLAY_BASE, LAMBDA_BASE)` above temporary
-/// inventory references and below lambdas [design].
+/// references), carved out in `[CAMERA_OVERLAY_BASE, LAMBDA_BASE)` above
+/// [`BULLET_SNAP_SOUND_BASE`] and below lambdas [design].
 pub const CAMERA_OVERLAY_BASE: u32 = 0xFE7F_0000;
 /// Ids of the scripts CompileScript made from text files, below the temporary
 /// references' [decision, as the lambdas'].
@@ -2690,6 +2712,8 @@ impl<'a> Game<'a> {
             ui_extra: Default::default(),
             ui_pointer: fnv_ui::input::Pointer::default(),
             difficulty: Default::default(),
+            difficulty_custom: Default::default(),
+            difficulty_request: None,
             tweaks: Default::default(),
             combat_requests: Vec::new(),
             destruction_changes: Vec::new(),
@@ -2826,6 +2850,7 @@ impl<'a> Game<'a> {
             syncing_effects: false,
             condition_check_due: 0.0,
             image_modifiers: Vec::new(),
+            image_modifier_extra_stacks: BTreeMap::new(),
             effect_elapsed: 0.0,
             depth: 0,
             runs_open: 0,
@@ -3131,6 +3156,31 @@ impl<'a> Game<'a> {
         if displayed == Some(true) {
             self.start_quest(q);
         }
+        let (d0, c0, quest_completed) = self.quests.get(&q).map_or((false, false, false), |s| {
+            let (d, c) = s.objectives.get(&index).map_or((false, false), |o| (o.displayed, o.completed));
+            (d, c, s.completed)
+        });
+        let will_display = displayed == Some(true) && !d0;
+        let d_after = displayed.unwrap_or(d0);
+        let c_after_disp = if will_display { false } else { c0 };
+        // [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE Plugin 184,
+        // 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters, probes
+        // `w1_3656_objectives_unholster_imod` (`StartQuest 0x000E282D`,
+        // `SetObjectiveDisplayed`/`SetObjectiveCompleted` 20/30/50/5/999 +
+        // `CompleteAllObjectives` + `CompleteQuest`) and
+        // `b3_so_ex_06_on_display_complete_objective` (`SetObjectiveDisplayed 0x00104C1C 10
+        // 1` -> `dispInside=0`) in #3679] Both ShowOff:OnDisplayObjective and
+        // ShowOff:OnCompleteObjective fire PRE-update (`GetObjectiveDisplayed` /
+        // `GetObjectiveCompleted` still read `0` inside the callback), and
+        // ShowOff:OnCompleteObjective does not fire for hidden (undisplayed) objectives or
+        // completed quests.
+        let will_complete = completed == Some(true) && !c_after_disp && d_after && !quest_completed;
+        if will_display {
+            self.showoff_on_display_objective(q, index);
+        }
+        if will_complete {
+            self.showoff_on_complete_objective(q, index);
+        }
         let o = self.quest(q).objectives.entry(index).or_default();
         let (d0, c0) = (o.displayed, o.completed);
         if let Some(d) = displayed {
@@ -3153,12 +3203,6 @@ impl<'a> Game<'a> {
             // "If the quest itself is already complete, no message will be displayed"].
             let silent = !d1 || self.quest(q).completed;
             self.emit(EventKind::ObjectiveCompleted { quest: q, index, on: c1, silent });
-        }
-        if displayed.is_some() && !d0 && d1 {
-            self.showoff_on_display_objective(q, index);
-        }
-        if !c0 && c1 {
-            self.showoff_on_complete_objective(q, index);
         }
         true
     }
@@ -4075,13 +4119,14 @@ impl<'a> Game<'a> {
     }
 
     /// A temporary inventory reference for one kind of item in a container (B5).
-    /// Bounded strictly below [`CAMERA_OVERLAY_BASE`] so temporary inventory references
-    /// can never collide with reserved camera overlay references.
+    /// Bounded strictly below [`BULLET_SNAP_SOUND_BASE`] (and therefore below
+    /// [`CAMERA_OVERLAY_BASE`]) so temporary inventory references can never collide with
+    /// reserved audio-only BulletSnap `SOUN` IDs or camera overlay references.
     pub(crate) fn temp_ref(&mut self, container: FormId, item: FormId) -> FormId {
         if let Some(i) = self.temp_refs.iter().position(|&(c, x)| c == container && x == item) {
             return FormId(TEMP_REF_BASE + i as u32);
         }
-        let max = (CAMERA_OVERLAY_BASE - TEMP_REF_BASE) as usize;
+        let max = (BULLET_SNAP_SOUND_BASE - TEMP_REF_BASE) as usize;
         assert!(self.temp_refs.len() < max, "temporary inventory references exhausted");
         self.temp_refs.push((container, item));
         FormId(TEMP_REF_BASE + self.temp_refs.len() as u32 - 1)
@@ -4089,7 +4134,7 @@ impl<'a> Game<'a> {
 
     /// The container and item of a live temporary inventory reference.
     pub fn temp_item(&self, r: FormId) -> Option<(FormId, FormId)> {
-        let i = r.0.checked_sub(TEMP_REF_BASE).filter(|_| r.0 < CAMERA_OVERLAY_BASE)?;
+        let i = r.0.checked_sub(TEMP_REF_BASE).filter(|_| r.0 < BULLET_SNAP_SOUND_BASE)?;
         self.temp_refs.get(i as usize).copied()
     }
 
@@ -4764,6 +4809,7 @@ impl<'a> Game<'a> {
         self.sync_loaded_actor_effects();
         if !in_menu {
             self.update_effects(dt);
+            self.tick_man_on_fire(dt);
             self.tick_concussions();
             self.tick_radiation(dt);
             self.tick_needs(dt);
@@ -6762,34 +6808,83 @@ impl<'a> Game<'a> {
 
     // ---- image space modifiers ---------------------------------------------------
 
-    /// ApplyImageSpaceModifier: the modifier starts playing. One that is already on the
-    /// screen starts again from its beginning [hypothesis: one instance per modifier;
-    /// image-modifiers.md §3]. Dispatches xNVSE `OnApplyIMOD` with `(modifier)` when
-    /// handled [documented: GECK wiki NVSE Event Handling; hypothesis: 1-arg layout and
-    /// re-apply dispatch].
+    /// Safety cap on stacked instances tracked per IMAD form so a script re-applying an
+    /// IMAD in a loop cannot grow memory or `OnRemoveIMOD` loops without bound [design].
+    pub const MAX_IMOD_STACK: usize = 64;
+
+    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance for
+    /// `OnRemoveIMOD` counting if already active (`image-modifiers.md §3`). Non-animatable
+    /// re-applies keep a single [`ActiveImageModifier`] entry and track extra stacked
+    /// instances in `image_modifier_extra_stacks` (capped at `MAX_IMOD_STACK - 1`), while
+    /// animatable re-applies keep up to `MAX_IMOD_STACK` independent timers and the
+    /// renderer draws one instance per form [design]. Dispatches xNVSE `OnApplyIMOD`
+    /// PRE-update with `(modifier)` and `on = None` when handled so `IsImageSpaceActive`
+    /// reads `0` on first apply and `1` when stacking onto an already-active modifier
+    /// [documented: GECK wiki NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525,
+    /// xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base
+    /// masters, probes `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice +
+    /// `rimod` twice on `WhiteNonAnimated` `0x000C9AFA`) and
+    /// `b3_core_ex_06_on_apply_imod_event` (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier`
+    /// on `0x00144C41`) in #3679].
     pub fn apply_image_modifier(&mut self, modifier: FormId) {
-        self.image_modifiers.retain(|m| m.modifier != modifier);
-        self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
-        self.emit(EventKind::ImageModifierApplied { modifier });
         if self.handled("onapplyimod") {
             self.dispatch_event("OnApplyIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
         }
+        let animatable = self.data.image_modifiers.get(&modifier).is_some_and(|d| d.animatable);
+        if animatable {
+            let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+            if active >= Self::MAX_IMOD_STACK {
+                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                    self.image_modifiers.remove(pos);
+                }
+            }
+            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
+        } else if let Some(existing) = self.image_modifiers.iter_mut().find(|m| m.modifier == modifier) {
+            existing.elapsed = 0.0;
+            let extra = self.image_modifier_extra_stacks.entry(modifier).or_insert(0);
+            *extra = (*extra).saturating_add(1).min((Self::MAX_IMOD_STACK - 1) as u32);
+        } else {
+            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
+        }
+        self.emit(EventKind::ImageModifierApplied { modifier });
     }
 
-    /// RemoveImageSpaceModifier: whether the modifier was on the screen. Dispatches
-    /// xNVSE `OnRemoveIMOD` with `(modifier)` when an active modifier is removed and
-    /// handled [documented: GECK wiki NVSE Event Handling; hypothesis: 1-arg layout].
+    /// RemoveImageSpaceModifier: removes every active instance of `modifier`, returning
+    /// whether any was active. Dispatches xNVSE `OnRemoveIMOD` PRE-removal with `(modifier)`
+    /// and `on = None` once per removed stacked instance so `IsImageSpaceActive` reads `1`
+    /// inside each callback (twice when two stacked instances are removed) [documented:
+    /// GECK wiki NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525 + xNVSE
+    /// 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters,
+    /// probe `w1_3656_objectives_unholster_imod` (`imod` twice then `rimod` on
+    /// `WhiteNonAnimated` `0x000C9AFA` -> 2 `OnRemoveIMOD` callbacks with `IsActive=1`,
+    /// then 0 on inactive `rimod`) in #3679].
     pub fn remove_image_modifier(&mut self, modifier: FormId) -> bool {
-        let before = self.image_modifiers.len();
-        self.image_modifiers.retain(|m| m.modifier != modifier);
-        let was = self.image_modifiers.len() != before;
-        if was {
-            self.emit(EventKind::ImageModifierRemoved { modifier, ended: false });
+        let vec_count = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if vec_count == 0 {
+            self.image_modifier_extra_stacks.remove(&modifier);
+            return false;
+        }
+        let extra = self.image_modifier_extra_stacks.remove(&modifier).unwrap_or(0) as usize;
+        let total = vec_count.saturating_add(extra);
+        let mut removed = false;
+        for i in 0..total {
+            if !self.image_modifiers.iter().any(|m| m.modifier == modifier) {
+                break;
+            }
             if self.handled("onremoveimod") {
                 self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
             }
+            if i >= extra {
+                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                    self.image_modifiers.remove(pos);
+                    removed = true;
+                }
+            }
         }
-        was
+        if removed {
+            self.emit(EventKind::ImageModifierRemoved { modifier, ended: false });
+        }
+        removed
     }
 
     /// IsImageSpaceActive.
@@ -6800,23 +6895,35 @@ impl<'a> Game<'a> {
     /// Age the modifiers; an animatable one whose duration has passed ends [hypothesis
     /// from the shipped scripts: 29 lines wait for IsImageSpaceActive to read 0 on
     /// FadeToBlackISFX (4 s), which no script removes; image-modifiers.md §3].
-    /// Dispatches xNVSE `OnRemoveIMOD` when an active modifier expires and is handled
-    /// [hypothesis: natural duration expiry fires `OnRemoveIMOD`].
+    /// Dispatches xNVSE `OnRemoveIMOD` PRE-removal when an active modifier expires so
+    /// `IsImageSpaceActive` reads `1` inside the callback [observed: Fallout: New Vegas
+    /// 1.4.0.525 + xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official
+    /// base masters, probe `w1_3656_objectives_unholster_imod` (`imod GetHit` `0x00000162`
+    /// 0.4 s + ~1.5 s wait -> `OnRemoveIMOD` with `IsImageSpaceActive == 1`, then `0`)
+    /// in #3679].
     fn update_image_modifiers(&mut self, dt: f64) {
         let data = self.data;
-        let mut ended = Vec::new();
-        self.image_modifiers.retain_mut(|m| {
+        let mut expired = Vec::new();
+        for m in &mut self.image_modifiers {
             m.elapsed += dt;
-            let over = data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64);
-            if over {
-                ended.push(m.modifier);
+            if data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64) {
+                expired.push(m.modifier);
             }
-            !over
-        });
-        for modifier in ended {
-            self.emit(EventKind::ImageModifierRemoved { modifier, ended: true });
+        }
+        for modifier in expired {
+            let is_expired = |m: &ActiveImageModifier| {
+                m.modifier == modifier
+                    && data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64)
+            };
+            if !self.image_modifiers.iter().any(is_expired) {
+                continue;
+            }
             if self.handled("onremoveimod") {
                 self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
+            }
+            if let Some(pos) = self.image_modifiers.iter().position(is_expired) {
+                self.image_modifiers.remove(pos);
+                self.emit(EventKind::ImageModifierRemoved { modifier, ended: true });
             }
         }
     }
@@ -7162,9 +7269,13 @@ impl<'a> Game<'a> {
             say_to_unsaid: self.say_to_unsaid.clone(),
             queued_ref_events: self.queued_ref_events.clone(),
             door_open_seen: self.door_open_seen.iter().filter(|&(&r, &seen)| self.world.peek(r).is_some_and(|s| s.open != seen)).map(|(&r, &seen)| (r, seen)).collect(),
-            awareness: self.awareness.actors.iter().filter(|(_, a)| a.state.in_combat() || !a.targets.is_empty() || !a.alarms.is_empty() || a.fighting.is_some()).map(|(&r, a)| (r, a.clone())).collect(),
+            awareness: self.awareness.actors.iter().filter(|(_, a)| a.state.in_combat() || !a.targets.is_empty() || !a.alarms.is_empty() || a.fighting.is_some()).map(|(&r, a)| {
+                // `scripted` is kept as `scripted_combat` below.
+                (r, crate::awareness::Awareness { scripted: BTreeSet::new(), ..a.clone() })
+            }).collect(),
             fighting: Some(self.fighting.clone()),
             forced_combat: self.awareness.forced.clone(),
+            scripted_combat: (!self.awareness.forced.is_empty()).then(|| self.scripted_combat()),
             form_instances: self.pp.instances.iter().map(|(k, v)| (*k, v.clone())).collect(),
             object_groups: self.anims.asked_all().clone(),
             extra_misc_stats: self.jip2.misc_stats.iter().map(|(k, v)| (k.clone(), *v)).collect(),
@@ -7271,6 +7382,7 @@ impl<'a> Game<'a> {
         g.restore_jip10(&s.jip10);
         g.awareness.actors = s.awareness.clone();
         g.awareness.forced = s.forced_combat.clone();
+        g.restore_scripted_combat(s.scripted_combat.as_ref());
         // A save from before `fighting` was saved cannot say which starts had run: everyone
         // in Combat or Lost counts as started, Alert (no fight yet) does not [design:
         // docs/design/save-load.md §3.2]. A start still due in such a save does not run.

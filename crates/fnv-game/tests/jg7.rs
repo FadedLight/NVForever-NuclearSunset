@@ -99,7 +99,8 @@ fn switches() {
     assert!(!fnv_game::experience::level_up_due(&g), "ToggleLevelUpMenu 0 holds automatic level-up");
     q(&mut g, "ToggleLevelUpMenu 1");
     assert!(fnv_game::experience::level_up_due(&g), "ToggleLevelUpMenu 1 releases pending level-up");
-    // [documented: Get/SetViewmodelClipDistance, 0 the default; observed: w4c_b3_05_jg7_bounds_heap, negative preserved].
+    // [documented: Get/SetViewmodelClipDistance, 0 the default; observed:
+    // jg_25_yield_timer_and_viewmodel_clip_neg and w4c_b3_05_jg7_bounds_heap store -5.0 verbatim].
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), 0.0);
     q(&mut g, "SetViewmodelClipDistance 2.5");
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), 2.5);

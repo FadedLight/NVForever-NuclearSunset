@@ -3,7 +3,8 @@
 Only decisions that change how the game plays and that need **you**: design choices,
 feel, and places where NVForever chose to differ from the original. Most important first.
 Anything that asks "what does the original do here?" is not here: the observer can
-answer it, and it is in [observer-checks.md](handoff/observer-checks.md).
+answer it, and it is in [observer-checks.md](handoff/observer-checks.md) or, the newer ones,
+in [observer-checks/](handoff/observer-checks/README.md).
 
 Condensed 2026-10-24 from the full running log (8,300 lines, 2026-10-09 to 2026-10-23).
 Merge records, tooling, look-only guesses and items already ruled were dropped. The full
@@ -17,9 +18,9 @@ and 2026-10-25 were folded in below (items 27-32). That last full copy is
 in their spec notes.
 
 **Adding an item:** one bullet in the right tier, what was chosen and what changes if you
-rule otherwise, with its spec link. If the original game can answer it, add it to
-observer-checks.md instead. **Ruling on one:** delete the bullet and note the ruling in
-the spec it links to.
+rule otherwise, with its spec link. If the original game can answer it, add a file to
+[observer-checks/](handoff/observer-checks/README.md) instead. **Ruling on one:** delete
+the bullet and note the ruling in the spec it links to.
 
 ## Tier 1: felt in every fight or every session
 
@@ -87,6 +88,8 @@ the spec it links to.
    - [design, #2010] A Lost search with no completed share for 300 s gives up, even
      with shares still pending; each completed share renews that safety deadline.
      A different bound changes how long unavailable navigation/AI holds combat.
+     Out of the loaded area nobody searches: it gives up once its target has been
+     hidden for 30 s (#3390).
      ([alert section 2](design/alert.md))
    - Fire only with the target within 30° ahead, turning at 240°/s.
    - Creatures start blows on the run from up to 200 units beyond reach (minimum

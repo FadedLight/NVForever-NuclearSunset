@@ -580,7 +580,7 @@ impl Game<'_> {
     }
 
     pub fn player_detected_for_sneak(&self) -> bool {
-        self.detection.highest_among(FormId::PLAYER_REF, |d| !self.with_player(d)).is_some_and(|(_, d)| d.band == Band::Detected)
+        self.detection.highest_among(FormId::PLAYER_REF, |d| !self.with_player(d) && !self.is_dead(d)).is_some_and(|(_, d)| d.band == Band::Detected)
     }
 
     /// Whether `actor` may force-greet `target` as far as sight goes: nothing solid
@@ -762,7 +762,7 @@ impl Game<'_> {
 pub fn get_detected(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, String> {
     let detector = ctx.subject()?;
     let target = a.form(0)?;
-    let d = g.detection.get(detector, target).is_some_and(|d| d.band == Band::Detected);
+    let d = !g.is_dead(detector) && g.detection.get(detector, target).is_some_and(|d| d.band == Band::Detected);
     Ok(Value::Num(if d { 1.0 } else { 0.0 }))
 }
 

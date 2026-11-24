@@ -463,6 +463,9 @@ impl Game<'_> {
         e.died_day = day;
         e.killer = killer;
         e.killing_hit = fatal;
+        // A dead actor immediately stops detecting on the same tick
+        // [observed: w4g_05_isactordetected_and_setclass_invalid].
+        self.detection.forget(r);
         // JIP's ragdoll handlers: any actor ragdolled on death [documented:
         // SetOnRagdollEventHandler].
         if !lying {

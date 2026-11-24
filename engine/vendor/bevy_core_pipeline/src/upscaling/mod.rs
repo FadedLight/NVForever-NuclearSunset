@@ -11,6 +11,22 @@ use bevy_render::{
 
 mod node;
 
+/// NVForever HDR output (nvforever hdr.rs): paper white in nits, set by the settings row.
+pub static NVF_HDR_PAPER_WHITE_NITS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(200);
+/// NVForever HDR output: the HUD's white in nits (the window blit's scale).
+pub static NVF_HDR_HUD_NITS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(200);
+/// NVForever HDR output: the SDR range decoded with gamma 2.2 (as an SDR monitor shows it).
+pub static NVF_HDR_GAMMA22: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
+/// The paper white the window blit uses: 0 unless the window's surface is fp16 scRGB.
+pub fn nvf_hdr_paper_white() -> u32 {
+    use core::sync::atomic::Ordering::Relaxed;
+    if !bevy_render::view::window::NVF_HDR_SURFACE_ACTIVE.load(Relaxed) {
+        return 0;
+    }
+    NVF_HDR_HUD_NITS.load(Relaxed).clamp(80, 1000)
+}
+
 pub use node::upscaling;
 
 pub struct UpscalingPlugin;
@@ -94,6 +110,11 @@ fn prepare_view_upscaling_pipelines(
             blend_state,
             samples: 1,
             source_space: ResolvedCompositingSpace::space(resolved_space),
+            // NVForever HDR output: only the blit to a window with an HDR surface.
+            hdr: nvf_hdr_paper_white() > 0
+                && target_format == TextureFormat::Rgba16Float
+                && camera.is_some_and(|c| matches!(c.target, Some(bevy_camera::NormalizedRenderTarget::Window(_)))),
+            hdr_gamma22: NVF_HDR_GAMMA22.load(core::sync::atomic::Ordering::Relaxed),
         };
 
         if maybe_pipeline.is_none_or(|ViewUpscalingPipeline(_, cached_key)| *cached_key != key) {

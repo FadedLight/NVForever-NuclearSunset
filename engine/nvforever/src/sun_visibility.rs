@@ -358,9 +358,12 @@ pub const MASK_CLOUD_VOLUME_DEPTH: u32 = 32;
 pub enum WeatherWhy {
     /// `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather`.
     Asked,
-    /// The volumetric sky is not what the player sees: the Volumetric clouds row off, nothing to
-    /// trace (indoors, a clear sky), or the medium's buffer not shown (its composing material not
-    /// prepared, a hand-back: the flat layers are showing).
+    /// The Volumetric clouds row is off: the views have the weather-only layout, whatever was asked
+    /// ([`volume_layout`]).
+    RowOff,
+    /// The volumetric sky is not what the player sees: nothing to trace (indoors, under water, a
+    /// clear sky), or the medium's buffer not shown (its composing material not prepared, a
+    /// hand-back: the flat layers are showing).
     SkyNotShown,
     /// The light volume has no completed front.
     NoFront,
@@ -375,6 +378,8 @@ pub enum WeatherWhy {
 /// shown, the flat sky hidden).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AutoGate {
+    /// The Volumetric clouds row is on (off: the weather's layers whatever the aid asks).
+    pub row: bool,
     /// The volumetric sky is shown (medium.rs `MediumOutput::ready`: the row on, a trace this frame,
     /// its buffer written whole with the composing material prepared and the proxy's pipeline ready).
     pub sky_shown: bool,
@@ -401,12 +406,14 @@ pub enum CloudSourceInUse {
 impl CloudSourceInUse {
     /// From the switch, the aid, the levels the shared reader has this frame and, for `Auto`, the
     /// gate: the volume's shadows only while the volumetric sky is shown and traced and a level is readable;
-    /// else the weather's layers. The aids `volume`, `share` and `depth` take every readable level whatever
-    /// the gate (for paired pictures and debugging).
+    /// else the weather's layers. The aids `volume`, `share` and `depth` take every readable level whether
+    /// the sky is shown or not (for paired pictures and debugging). With the row off always the weather's
+    /// layers.
     pub fn decide(cloud_on: bool, asked: CloudSource, ready: [bool; 2], gate: AutoGate) -> Self {
         match (cloud_on, asked) {
             (false, _) => Self::Off,
             (true, CloudSource::Weather) => Self::Weather { why: WeatherWhy::Asked },
+            (true, _) if !gate.row => Self::Weather { why: WeatherWhy::RowOff },
             (true, CloudSource::Volume) => Self::Volume { near: ready[0], far: ready[1], only: true },
             (true, view @ (CloudSource::Share | CloudSource::Depth)) => Self::Debug { near: ready[0], far: ready[1], view },
             (true, CloudSource::Auto) => {
@@ -426,7 +433,7 @@ impl CloudSourceInUse {
     /// layers instead; `Off` and the aid `weather` stay.
     pub fn without_room(self) -> Self {
         match self {
-            Self::Off | Self::Weather { why: WeatherWhy::Asked } => self,
+            Self::Off | Self::Weather { why: WeatherWhy::Asked | WeatherWhy::RowOff } => self,
             _ => Self::Weather { why: WeatherWhy::NoRoom },
         }
     }
@@ -453,7 +460,8 @@ impl CloudSourceInUse {
                 "the weather's layers ({})",
                 match why {
                     WeatherWhy::Asked => "NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather",
-                    WeatherWhy::SkyNotShown => "the volumetric sky is not shown: the row off, nothing traced, or the flat layers still showing",
+                    WeatherWhy::RowOff => "the Volumetric clouds row is off",
+                    WeatherWhy::SkyNotShown => "the volumetric sky is not shown: nothing traced, or the flat layers still showing",
                     WeatherWhy::NoFront => "the light volume has no completed front: light volume off, or not swept yet",
                     WeatherWhy::NoRoom => "this adapter's fragment stage has too few sampled textures for the light volume's arrays: the weather-only layout",
                 }
@@ -820,11 +828,29 @@ struct SunVisibilityGpu {
     strength: f32,
     /// The automatic source's view of the sky this frame.
     gate: AutoGate,
-    /// Whether the light volume's arrays fit this adapter (measured once, when the first view is
-    /// bound): the views' `cloud_volume` is the cloud variant and this.
+    /// Whether the light volume's arrays fit this adapter (measured once, when the layout with them
+    /// is first wanted): the views' `cloud_volume` is the cloud variant, the row and this.
     room: Option<CloudVolumeRoom>,
-    /// The source last named in the log.
+    /// The source last named in the log (with the Volumetric clouds row on; none with it off).
     in_use: Option<CloudSourceInUse>,
+}
+
+/// Whether the views' layout has the light volume's arrays (bindings 45-46, the pipelines the
+/// reader): Cloud shadows on, the Volumetric clouds row on, and room on the adapter (`fits`, asked
+/// only then). With the row off the layout, the pipelines and the shader are the weather's alone.
+pub fn volume_layout(cloud_on: bool, row: bool, fits: impl FnOnce() -> bool) -> bool {
+    cloud_on && row && fits()
+}
+
+/// The source to name in the log this frame, if any: a change while the Volumetric clouds row is on
+/// (not Off as the first), and once the one left when it goes off; with the row off nothing else.
+/// `told` is the one named last, none while the row is off.
+fn source_told(told: &mut Option<CloudSourceInUse>, now: CloudSourceInUse, row: bool) -> Option<CloudSourceInUse> {
+    if *told == Some(now) {
+        return None;
+    }
+    let last = std::mem::replace(told, row.then_some(now));
+    (last.is_some() || (row && now != CloudSourceInUse::Off)).then_some(now)
 }
 
 struct GpuParts {
@@ -832,8 +858,8 @@ struct GpuParts {
     sampler: Sampler,
     /// The terrain binding's stand-in ([`terrain_fallback`]).
     terrain_fallback: TextureView,
-    /// The light volume bindings' stand-in ([`light_fallback`]).
-    light_fallback: TextureView,
+    /// The light volume bindings' stand-in ([`light_fallback`]), while they are in the layout.
+    light_fallback: Option<TextureView>,
     written: Option<SunVisibilityUniform>,
 }
 
@@ -904,11 +930,8 @@ fn extract_sun_visibility(
     mut gpu: ResMut<SunVisibilityGpu>,
     (device, queue, fallback): (Res<RenderDevice>, Res<RenderQueue>, Res<FallbackImage>),
     (medium_output, medium_request): (Extract<Option<Res<crate::medium::MediumOutput>>>, Extract<Option<Res<crate::medium::MediumRequest>>>),
-    layouts: Option<Res<MeshPipelineViewLayouts>>,
+    (layouts, graphics): (Option<Res<MeshPipelineViewLayouts>>, Extract<Option<Res<crate::graphics::Graphics>>>),
 ) {
-    // The automatic source's gate (#3032 stage 2i M2, review must-fix 1): read every frame, as the
-    // sky's state changes without the switches changing.
-    gpu.gate = AutoGate { sky_shown: medium_output.as_deref().is_some_and(|o| o.ready), traced: medium_request.as_deref().is_some_and(|r| r.trace.is_some()) };
     let active = vis.active();
     if !active && suns.is_empty() && views.is_empty() && marked_suns.is_empty() && bound.is_empty() {
         return;
@@ -931,20 +954,32 @@ fn extract_sun_visibility(
     if views.is_empty() {
         return;
     }
+    // The automatic source's gate (#3032 stage 2i M2, review must-fix 1): read every frame, as the
+    // sky's state changes without the switches changing.
+    gpu.gate = AutoGate {
+        row: graphics.as_deref().is_some_and(|g| g.volumetric_clouds),
+        sky_shown: medium_output.as_deref().is_some_and(|o| o.ready),
+        traced: medium_request.as_deref().is_some_and(|r| r.trace.is_some()),
+    };
     gpu.uniform = SunVisibilityUniform::pack(&vis);
     gpu.cloud = vis.cloud.as_ref().map(|c| c.image.id());
     gpu.terrain = vis.terrain.as_ref().map(|t| t.image.id());
     // The key bits follow the switches, not the publication (module notes).
     let (cloud, terrain) = (vis.cloud_on(), vis.terrain_on());
     (gpu.cloud_on, gpu.source, gpu.strength) = (cloud, vis.cloud_source, vis.cloud_strength);
-    // The light volume's arrays only where the adapter has room for them (review must-fix 2):
-    // measured once, constant for the run, so the key bit changes only with the cloud variant.
-    let room = *gpu.room.get_or_insert_with(|| {
-        let room = measure_room(&device, layouts.as_deref());
-        info!("cloud shadows: {}", room.line());
-        room
+    // The light volume's arrays only while the Volumetric clouds row is on and where the adapter
+    // has room for them (review must-fix 2): measured once, constant for the run, so the key bit
+    // changes only with the cloud variant and the row.
+    let row = gpu.gate.row;
+    let cloud_volume = volume_layout(cloud, row, || {
+        gpu.room
+            .get_or_insert_with(|| {
+                let room = measure_room(&device, layouts.as_deref());
+                info!("cloud shadows: {}", room.line());
+                room
+            })
+            .fits
     });
-    let cloud_volume = cloud && room.fits;
     let uniform = gpu.uniform;
     let parts = gpu.parts.get_or_insert_with(|| {
         let mut buffer = UniformBuffer::from(uniform);
@@ -959,8 +994,15 @@ fn extract_sun_visibility(
             min_filter: FilterMode::Linear,
             ..default()
         });
-        GpuParts { buffer, sampler, terrain_fallback: terrain_fallback(&device, &queue), light_fallback: light_fallback(&device, &queue), written: Some(uniform) }
+        GpuParts { buffer, sampler, terrain_fallback: terrain_fallback(&device, &queue), light_fallback: None, written: Some(uniform) }
     });
+    if !cloud_volume {
+        parts.light_fallback = None;
+    } else if parts.light_fallback.is_none() {
+        parts.light_fallback = Some(light_fallback(&device, &queue));
+    }
+    // Out of the layout the light volume's views are not bound: any will do.
+    let light = parts.light_fallback.as_ref().unwrap_or(&fallback.d2_array.texture_view);
     let Some(buffer) = parts.buffer.buffer() else { return };
     for e in &views {
         if let Ok((_, mut b)) = bound.get_mut(e) {
@@ -975,8 +1017,8 @@ fn extract_sun_visibility(
                 cloud_texture: fallback.d2.texture_view.clone(),
                 terrain_texture: parts.terrain_fallback.clone(),
                 sampler: parts.sampler.clone(),
-                light_near: parts.light_fallback.clone(),
-                light_far: parts.light_fallback.clone(),
+                light_near: light.clone(),
+                light_far: light.clone(),
                 cloud,
                 terrain,
                 cloud_volume,
@@ -1032,13 +1074,10 @@ fn prepare_sun_visibility(
     let terrain_map = uploaded(gpu.terrain);
     let ready = reader.as_deref().map_or([false; 2], |r| r.ready());
     let use_ = CloudSourceInUse::decide(gpu.cloud_on, gpu.source, ready, gpu.gate);
-    let room = gpu.room.is_some_and(|r| r.fits);
+    let room = volume_layout(gpu.cloud_on, gpu.gate.row, || gpu.room.is_some_and(|r| r.fits));
     let use_ = if room { use_ } else { use_.without_room() };
-    if gpu.in_use != Some(use_) {
-        if use_ != CloudSourceInUse::Off || gpu.in_use.is_some() {
-            info!("cloud shadows: source {}", use_.line());
-        }
-        gpu.in_use = Some(use_);
+    if let Some(told) = source_told(&mut gpu.in_use, use_, gpu.gate.row) {
+        info!("cloud shadows: source {}", told.line());
     }
     // Only the levels the source reads are present (a level left out has presence 0 and its stand-in bound).
     let used = use_.levels();
@@ -1047,7 +1086,8 @@ fn prepare_sun_visibility(
         r.window([0, 1].map(|i| if used[i] { p[i] } else { 0.0 }))
     });
     let uniform = with_cloud_volume(usable_uniform(gpu.uniform, terrain_map.is_some()), use_, gpu.strength, window);
-    let level_view = |i: usize| if used[i] { reader.as_deref().and_then(|r| r.levels[i].as_ref()).map_or(&parts.light_fallback, |l| &l.view) } else { &parts.light_fallback };
+    let light = parts.light_fallback.as_ref().unwrap_or(&fallback.d2_array.texture_view);
+    let level_view = |i: usize| if used[i] { reader.as_deref().and_then(|r| r.levels[i].as_ref()).map_or(light, |l| &l.view) } else { light };
     let (light_near, light_far) = (level_view(0).clone(), level_view(1).clone());
     if parts.written != Some(uniform) {
         parts.buffer.set(uniform);
@@ -1566,7 +1606,7 @@ pub(crate) mod tests {
     }
 
     /// The automatic source's gate when the volumetric sky is shown.
-    const SHOWN: AutoGate = AutoGate { sky_shown: true, traced: true };
+    const SHOWN: AutoGate = AutoGate { row: true, sky_shown: true, traced: true };
 
     /// Review must-fix 1 (#3032 stage 2i M2): `Auto` takes the light volume's shadows only while the
     /// volumetric sky is what the player sees: the sky shown (row on, buffer written whole, composing
@@ -1577,11 +1617,12 @@ pub(crate) mod tests {
         let both = [true, true];
         let volume = CloudSourceInUse::Volume { near: true, far: true, only: false };
         assert_eq!(CloudSourceInUse::decide(true, CloudSource::Auto, both, SHOWN), volume, "all conditions: the volume");
-        // The row off, nothing traced, or the flat sky still showing (composing material not ready,
-        // a hand-back): MediumOutput::ready false.
+        // Nothing traced, or the flat sky still showing (composing material not ready, a hand-back):
+        // MediumOutput::ready false.
         let hidden = AutoGate { sky_shown: false, ..SHOWN };
         let untraced = AutoGate { traced: false, ..SHOWN };
-        for gate in [hidden, untraced, AutoGate::default()] {
+        let neither = AutoGate { row: true, ..AutoGate::default() };
+        for gate in [hidden, untraced, neither] {
             assert_eq!(CloudSourceInUse::decide(true, CloudSource::Auto, both, gate), CloudSourceInUse::Weather { why: WeatherWhy::SkyNotShown }, "{gate:?}");
         }
         // No front; one level of two.
@@ -1589,8 +1630,8 @@ pub(crate) mod tests {
         let far_only = CloudSourceInUse::decide(true, CloudSource::Auto, [false, true], SHOWN);
         assert_eq!(far_only, CloudSourceInUse::Volume { near: false, far: true, only: false }, "only the readable level");
         assert_eq!(far_only.levels(), [false, true]);
-        // The aids ignore the gate.
-        for gate in [hidden, untraced, AutoGate::default()] {
+        // The aids ask for no sky shown.
+        for gate in [hidden, untraced, neither] {
             assert_eq!(CloudSourceInUse::decide(true, CloudSource::Volume, both, gate), CloudSourceInUse::Volume { near: true, far: true, only: true });
             assert_eq!(CloudSourceInUse::decide(true, CloudSource::Share, both, gate), CloudSourceInUse::Debug { near: true, far: true, view: CloudSource::Share });
             assert_eq!(CloudSourceInUse::decide(true, CloudSource::Weather, both, gate), CloudSourceInUse::Weather { why: WeatherWhy::Asked });
@@ -1601,9 +1642,32 @@ pub(crate) mod tests {
         let picked = CloudSourceInUse::decide(true, CloudSource::Auto, both, hidden);
         assert_eq!(with_cloud_volume(packed, picked, 0.6, window), packed, "the weather's layers: the old uniform");
         assert_eq!(picked.levels(), [false, false]);
-        for why in [WeatherWhy::SkyNotShown, WeatherWhy::NoFront] {
+        for why in [WeatherWhy::RowOff, WeatherWhy::SkyNotShown, WeatherWhy::NoFront] {
             assert!(CloudSourceInUse::Weather { why }.line().starts_with("the weather's layers ("), "{why:?}");
         }
+    }
+
+    /// The Volumetric clouds row off: the weather's layers whatever the aid asks, in the layout
+    /// without the light volume's arrays, with nothing measured and no line in the log; a switch
+    /// off names the layers once, and a later switch on what is read then.
+    #[test]
+    fn with_the_volumetric_clouds_off_the_cloud_shadows_are_the_weathers_alone() {
+        let off = AutoGate { row: false, ..SHOWN };
+        let row_off = CloudSourceInUse::Weather { why: WeatherWhy::RowOff };
+        for asked in [CloudSource::Auto, CloudSource::Volume, CloudSource::Share, CloudSource::Depth] {
+            let use_ = CloudSourceInUse::decide(true, asked, [true, true], off);
+            assert_eq!((use_, use_.without_room(), use_.levels()), (row_off, row_off, [false; 2]), "{asked:?}");
+        }
+        assert!(!volume_layout(true, false, || panic!("the adapter is not measured with the row off")));
+        assert!(!volume_layout(false, true, || panic!("nor with Cloud shadows off")));
+        assert!(!volume_layout(true, true, || false) && volume_layout(true, true, || true));
+        let volume = CloudSourceInUse::Volume { near: true, far: true, only: false };
+        let mut told = None;
+        let mut say = |now, row| source_told(&mut told, now, row);
+        assert_eq!([say(row_off, false), say(CloudSourceInUse::Off, false), say(row_off, false)], [None; 3], "the row off: no line");
+        assert_eq!([say(volume, true), say(volume, true)], [Some(volume), None], "named once");
+        assert_eq!([say(row_off, false), say(row_off, false), say(CloudSourceInUse::Off, false)], [Some(row_off), None, None], "switched off: once");
+        assert_eq!([say(CloudSourceInUse::Off, true), say(volume, true), say(CloudSourceInUse::Off, true)], [None, Some(volume), Some(CloudSourceInUse::Off)]);
     }
 
     #[test]

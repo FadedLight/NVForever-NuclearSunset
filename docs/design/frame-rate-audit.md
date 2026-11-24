@@ -1379,7 +1379,7 @@ said. The bench made an INI from the owner's with those values and kept the game
    for CPU clustering (#897) is gone, but `NVF_GPU_CLUSTERING=1` measured no better (Novac
    7.59 → 7.88 ms, Goodsprings at night the same), so the CPU stays the default.
 
-### What each setting costs (Novac 12:00, one run each)
+### What each setting costs (Novac and Goodsprings at 12:00, one run each)
 
 From the maxed settings, one setting changed at a time. GPU sums move ±0.2 ms between runs
 with the NPCs, so the passes that moved are what to read:
@@ -1387,9 +1387,9 @@ with the NPCs, so the passes that moved are what to read:
 | Setting changed | Frame (ms) | What moved (ms a frame) |
 |---|---|---|
 | (all at the top) | 7.07 | DLSS 1.95, opaque 1.03, prepass 0.57, shadows 0.35, culling 0.39 |
-| Mesh terrain blend off | 7.12 | opaque → 0.65, shadows → 0.28, culling → 0.28 |
-| Full detail Off (from 9 × 9) | 6.56 | opaque → 0.72, prepass → 0.28 |
-| Distant LOD off | 6.33 | main thread 4.35 → 4.00, process 26.7 → 22.7 |
+| Mesh terrain blend off | 7.12 | opaque → 0.65, shadows → 0.28, culling → 0.28 (Goodsprings: opaque 1.18 → 0.94, culling 0.49 → 0.44) |
+| Full detail Off (from 9 × 9) | 6.56 | opaque → 0.72, prepass → 0.28 (Goodsprings: opaque 1.18 → 0.86, prepass 0.42 → 0.22) |
+| Distant LOD off | 6.33 | main thread 4.35 → 4.00, process 26.7 → 22.7 (Goodsprings: main thread 3.51 → 2.21, GPU −0.17) |
 | Sun shadows Performance | 6.70 | shadows → 0.08 |
 | Shadow resolution 2048 | 7.02 | shadows → 0.16 |
 | Shadow filtering Fast | 7.12 | opaque → 0.84 |
@@ -1398,13 +1398,24 @@ with the NPCs, so the passes that moved are what to read:
 | Smooth terrain Off | 6.81 | main thread 4.35 → 4.25 |
 | DLSS Balanced | 7.14 | DLSS → 1.67 |
 | DLSS model K or Default | 7.09, 7.03 | DLSS the same (1.96) |
-| FSR 3.1 Quality instead of DLSS | 7.07 | the upscaler → 0.70 |
+| FSR 3.1 Quality instead of DLSS | 7.07 | the upscaler → 0.70 (Goodsprings: 2.14 → 0.81) |
 | Light shafts, bloom, glow, sharpen, haze, clouds, terrain shadows, water, grass, aerial perspective, terrain textures, anisotropic, eye adaptation, each off | 7.02-7.28 | within the noise |
 
 The dearest switches for what they show: the mesh terrain blend (about 0.5 ms of GPU time,
 much of it in more batch sets: every blended mesh has its own material clone binding 421
 resources, mesh_terrain_blend.rs), the 9 × 9 full-detail ring (0.6 ms) and, on the
 processor, the distant LOD (0.7 ms).
+
+### Result
+
+Main and the branch in one session, interleaved, two rounds (GPU time without the DLSS pass,
+whose own time drifted ±0.2 ms from run to run in both): Goodsprings 2.89 → 2.82 ms (−2.4 %),
+Novac 3.48 → 3.33 (−4.2 %), Freeside 2.31 → 2.10 (−8.9 %), the Prospector Saloon 1.20 → 1.06
+(−12.1 %), Goodsprings at 23:00 2.77 → 2.61 (−5.8 %). Novac's frame, the one not held at
+160 Hz: 7.62 → 7.17 ms (−5.9 %). Screenshots at a fixed frame time differ from main's by no
+more than two runs of main differ (0.05 % of the pixels by more than 24 of 255 at
+Goodsprings, 0.000 % at night); the Vulkan validation layer reports nothing new; 21 smoke
+scenarios of the touched systems pass.
 
 ### Left, largest first
 
@@ -1421,3 +1432,6 @@ processor, the distant LOD (0.7 ms).
   non-dither pipelines ready, or meshes vanish while they compile.
 - **`water::distant_water`** spends 0.26-0.29 ms a frame standing still in the `profile`
   build although it should return early.
+- **The distant trees' upkeep** (`treelod::update_distant_trees`, 0.15 ms a frame standing
+  still) walks every drawn tree cell's fade step and every wanted cell each frame; only cells
+  near the loaded area and the ring can change step.

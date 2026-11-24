@@ -21,6 +21,9 @@
 //!
 //! - `NVF_PLAY_TEST_SHOT_FLATNESS=1`: each of those shots also logs how much of the view is
 //!   one colour ([`one_colour_percent`]), for a scenario to check without reading the file.
+//! - `NVF_PLAY_TEST_SHOT_DIFF=1`: each of those shots but the first also logs how far it is from
+//!   the one before ([`picture_difference`]), for a scenario that switches something between two
+//!   shots of one still view.
 //! - `NVF_PLAY_TEST_SHOTS=<seconds>[:<path.png>][,...]`: save a screenshot at each time,
 //!   to the path given, else as `play-<seconds>s.png` in `NVF_PLAY_TEST_SHOT_DIR`
 //!   (default: the current folder).
@@ -152,6 +155,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot, ScreenshotCaptured};
 use fnv_sim::FormId;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub mod melee_knockback;
 pub(crate) mod activation_sweep;
@@ -787,6 +791,19 @@ fn take_shots(time: crate::pause::AidTime, mut aids: ResMut<Aids>, mut commands:
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let mut shot = commands.spawn(Screenshot::primary_window());
         shot.observe(save_to_disk(path));
+        if std::env::var_os("NVF_PLAY_TEST_SHOT_DIFF").is_some() {
+            let name = name.clone();
+            shot.observe(move |ev: On<ScreenshotCaptured>| {
+                let size = ev.image.texture_descriptor.size;
+                let Some(data) = ev.image.data.as_deref() else { return };
+                let mut last = LAST_SHOT.lock().expect("the last shot");
+                if let Some((was, pixels)) = last.as_ref().filter(|(was, _)| *was == (size.width, size.height)) {
+                    let (levels, changed) = picture_difference(pixels, data, was.0 as usize, was.1 as usize);
+                    info!("test aid: {name}: {levels:.2} levels of 255 from the shot before, {changed:.1} % of the view changed");
+                }
+                *last = Some(((size.width, size.height), data.to_vec()));
+            });
+        }
         if std::env::var_os("NVF_PLAY_TEST_SHOT_FLATNESS").is_some() {
             shot.observe(move |ev: On<ScreenshotCaptured>| {
                 let size = ev.image.texture_descriptor.size;
@@ -796,6 +813,26 @@ fn take_shots(time: crate::pause::AidTime, mut aids: ResMut<Aids>, mut commands:
             });
         }
     }
+}
+
+/// The last shot's size and pixels (`NVF_PLAY_TEST_SHOT_DIFF`; a picture of the window, kept while
+/// the aid is on).
+static LAST_SHOT: Mutex<Option<((u32, u32), Vec<u8>)>> = Mutex::new(None);
+
+/// Test aid `NVF_PLAY_TEST_SHOT_DIFF`: the mean absolute difference of two pictures of one size
+/// over the view, its lower fifth left out (the HUD), in levels of 255 over the three colour
+/// channels, and the share of its pixels (percent) with a channel that moved by 4 levels or more.
+/// Four bytes a pixel, row by row.
+fn picture_difference(a: &[u8], b: &[u8], width: usize, height: usize) -> (f64, f64) {
+    let (mut sum, mut changed, mut seen) = (0u64, 0u64, 0u64);
+    for (p, q) in a.chunks_exact(4).zip(b.chunks_exact(4)).take(width * (height * 4 / 5)) {
+        let d = [0, 1, 2].map(|i| p[i].abs_diff(q[i]));
+        sum += d.iter().map(|&d| u64::from(d)).sum::<u64>();
+        changed += u64::from(d.iter().any(|&d| d >= 4));
+        seen += 1;
+    }
+    let seen = seen.max(1) as f64;
+    (sum as f64 / (3.0 * seen), 100.0 * changed as f64 / seen)
 }
 
 /// Test aid `NVF_PLAY_TEST_SHOT_FLATNESS`: the share of the view, its lower fifth left out

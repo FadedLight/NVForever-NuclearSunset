@@ -2648,20 +2648,20 @@ mod tests {
         let mut f = TuneFollower::new(start);
         assert_eq!(f.tune(), start);
         // A first text: its keys over the start, one line naming them.
-        // (SKY 0.25: away from the default 0.5.)
-        let lines = f.feed(Ok("CAP=3\nSKY=0.25\n"));
-        assert_eq!(lines, vec!["volumetric medium: light in the air tune: CAP=3 SKY=0.25".to_string()]);
-        assert_eq!((f.tune().cap, f.tune().sky_weight, f.tune().strength), (3.0, 0.25, 1.0));
+        // (SKY 0.6: away from the default 0.25.)
+        let lines = f.feed(Ok("CAP=3\nSKY=0.6\n"));
+        assert_eq!(lines, vec!["volumetric medium: light in the air tune: CAP=3 SKY=0.6".to_string()]);
+        assert_eq!((f.tune().cap, f.tune().sky_weight, f.tune().strength), (3.0, 0.6, 1.0));
         // The same text again: nothing.
-        assert!(f.feed(Ok("CAP=3\nSKY=0.25\n")).is_empty());
+        assert!(f.feed(Ok("CAP=3\nSKY=0.6\n")).is_empty());
         // A line removed: that key returns to its start value.
-        assert_eq!(f.feed(Ok("SKY=0.25\n")), vec!["volumetric medium: light in the air tune: CAP=2.5".to_string()]);
+        assert_eq!(f.feed(Ok("SKY=0.6\n")), vec!["volumetric medium: light in the air tune: CAP=1.5".to_string()]);
         // A new text that changes nothing (a comment): no tune line.
-        assert!(f.feed(Ok("SKY=0.25\n# note\n")).is_empty());
+        assert!(f.feed(Ok("SKY=0.6\n# note\n")).is_empty());
         // DEPTH and GRID, and auto clearing them.
         f.feed(Ok("DEPTH=48000\nGRID=80,44,32\nVIEW=delta"));
         assert_eq!((f.tune().depth, f.tune().grid, f.tune().view), (Some(48_000.0), Some([80, 44, 32]), AirView::Delta));
-        // (SKY already returned to 0.5 with the text before, which had no SKY line; the start's
+        // (SKY already returned to 0.25 with the text before, which had no SKY line; the start's
         // DEPTH 12,000 is cleared by `auto`.)
         assert_eq!(f.feed(Ok("DEPTH=auto\nGRID=auto")), vec!["volumetric medium: light in the air tune: DEPTH=auto GRID=auto VIEW=none".to_string()]);
         // Unreadable: the start values, said once (and the change).
@@ -2868,7 +2868,7 @@ mod tests {
         }
         // RAYS rides in the uniform's curve.w (the superseded fade_from slot).
         let g = grid_at(12_000.0);
-        assert_eq!(pack(&g, CLEAR, &t.phase().normed(), &t, 0.5).curve[3], 3.0);
+        assert_eq!(pack(&g, CLEAR, &t.phase().normed(), &t, 0.5).curve[3], 4.0);
     }
 
     /// The slice width is the slope of z(c), and the composite's one-tap rule.

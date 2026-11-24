@@ -58,6 +58,8 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
 | `candidates` | either | `peer` (host only, optional), `candidates` | Found more (trickle). From the host, no `peer` means every accepted guest. |
 | `connected` | guest | `path` | My path is up (`direct`, `lan`, `relay`). For the host's lobby screen. |
 | `reconnect` | guest | none | My path was lost. Start the checks again. |
+| `relay_ask` | guest | `helper`, `candidates` | I can't reach the host: ask that guest to relay for me. These are my candidates, for its checks. |
+| `relay_answer` | guest | `for`, `accept`, `reason`, `candidates` | My answer to `for`'s request. Accepting, I send my candidates. Refusing, `reason` is `off`, `busy` or `no_direct_path`. |
 | `bye` | either | none | Leaving. From the host, this ends the lobby. |
 
 A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx","addr":"203.0.113.5:47960"}`, or
@@ -77,6 +79,9 @@ A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx","addr":"203.0.113.5:4796
 | `reconnect` | host | `peer` | That guest lost its path. A `go` follows. |
 | `connected` | host | `peer`, `path` | That guest reported its path. |
 | `left` | host | `peer` | That guest said `bye` or its socket closed. |
+| `helpers` | accepted guests | `peers` | The other guests that could relay. It is sent whenever that set changes. |
+| `relay_ask` | guest | `from`, `candidates` | Another guest asks this one to relay. |
+| `relay_answer` | guest | `helper`, `accept`, `reason`, `candidates` | A helper's answer. |
 | `closed` | anyone | `reason` | `host_left`, `expired`, `replaced` or `bye`. The socket closes. |
 | `error` | anyone | `error`, `message` | See below. |
 
@@ -84,6 +89,22 @@ Errors:
 - These close the socket, because they answer the first frame: `bad_secret`, `bad_key`,
   `wire_version`, `full`, and `host_away` (the host is reconnecting; try again).
 - These leave the socket open: `bad_message`, `unknown_peer`, `not_accepted`.
+
+## Peer relay (#3795 section 8)
+
+Guest C cannot reach the host, so the service is C's only channel. The relay exchange goes
+guest to guest and the host takes no part in it.
+
+- A guest becomes a **helper** when its `connected` path is `direct` or `lan`. It stops being
+  one on `reconnect` or when it leaves. Each change sends `helpers` to every accepted guest,
+  listing the others.
+- C sends `relay_ask` to a helper. The service passes it on as `relay_ask` with `from`.
+- The helper answers with `relay_answer`. The service passes it to C, with `helper` naming who
+  answered.
+- Both guests must be accepted, and they must be different guests; otherwise the answer is
+  `unknown_peer`.
+- After an accept, C and the helper run connectivity checks against each other's candidates.
+  The forwarding is the game's: it is end-to-end encrypted, C to host.
 
 ## Lifetimes
 

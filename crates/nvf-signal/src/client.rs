@@ -136,6 +136,14 @@ pub enum GuestEvent {
     Candidates { candidates: Vec<Candidate> },
     /// Start (or restart) the checks now.
     Go,
+    /// The other guests that could relay (they have a direct or LAN path to the host).
+    Helpers { peers: Vec<PeerNo> },
+    /// Guest `from` cannot reach the host and asks this game to relay. Answer with
+    /// [`GuestClient::relay_answer`] (`nvf_nat::relay::Policy` decides); on accepting, run checks
+    /// against `candidates`.
+    RelayAsk { from: PeerNo, candidates: Vec<Candidate> },
+    /// A helper's answer. Accepted: run checks against its `candidates`.
+    RelayAnswer { helper: PeerNo, accept: bool, reason: String, candidates: Vec<Candidate> },
     Closed { reason: String },
     Error { error: String, message: String },
 }
@@ -169,6 +177,11 @@ impl GuestClient {
             FromService::Declined { reason } => GuestEvent::Declined { reason },
             FromService::Candidates { candidates, .. } => GuestEvent::Candidates { candidates: from_wire(&candidates) },
             FromService::Go { .. } => GuestEvent::Go,
+            FromService::Helpers { peers } => GuestEvent::Helpers { peers },
+            FromService::RelayAsk { from, candidates } => GuestEvent::RelayAsk { from, candidates: from_wire(&candidates) },
+            FromService::RelayAnswer { helper, accept, reason, candidates } => {
+                GuestEvent::RelayAnswer { helper, accept, reason, candidates: from_wire(&candidates) }
+            }
             FromService::Closed { reason } => GuestEvent::Closed { reason },
             FromService::Error { error, message } => GuestEvent::Error { error, message },
             other => return Err(BadMessage(format!("not for a guest: {other:?}"))),
@@ -199,6 +212,18 @@ impl GuestClient {
     /// candidates with [`GuestClient::resend_candidates`].
     pub fn reconnect(&mut self) {
         self.out.push(text(&ToService::Reconnect));
+    }
+
+    /// Asks another guest to relay for this one, sending the candidates for its checks.
+    pub fn relay_ask(&mut self, helper: PeerNo, cands: &[Candidate]) {
+        self.out.push(text(&ToService::RelayAsk { helper, candidates: to_wire(cands) }));
+    }
+
+    /// Answers a relay request: accepting sends this game's candidates; refusing sends a
+    /// reason ("off", "busy", "no_direct_path").
+    pub fn relay_answer(&mut self, for_peer: PeerNo, accept: bool, reason: &str, cands: &[Candidate]) {
+        let candidates = if accept { to_wire(cands) } else { Vec::new() };
+        self.out.push(text(&ToService::RelayAnswer { for_peer, accept, reason: reason.to_owned(), candidates }));
     }
 
     pub fn resend_candidates(&mut self, cands: &[Candidate]) {

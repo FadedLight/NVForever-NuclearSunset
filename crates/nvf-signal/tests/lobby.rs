@@ -297,6 +297,7 @@ fn join_by_code_through_nats() {
                 }
                 GuestEvent::Candidates { candidates } => candidates.into_iter().for_each(|c| agents[1].add_remote(c)),
                 GuestEvent::Go => agents[1].start(now),
+                GuestEvent::Helpers { .. } => {}
                 other => panic!("guest: {other:?}"),
             }
         }
@@ -347,4 +348,93 @@ fn join_by_code_through_nats() {
     let (_, to_guest) = agents[0].selected().unwrap();
     assert_eq!(agents[0].selected_candidate().unwrap().kind, Kind::PeerReflexive);
     assert_eq!(to_guest.ip(), "203.0.113.2".parse::<std::net::IpAddr>().unwrap());
+}
+
+/// Section 8: guest C, with no path to the host, finds a helper and asks it through the
+/// service, guest to guest.
+#[test]
+fn relay_exchange_between_guests() {
+    let t0 = Instant::now();
+    let mut si = StandIn::new(Config::default());
+    let lobby = create(&mut si, 6, t0);
+    let mut w = Wires::default();
+    let hc = si.open(&lobby.code).unwrap();
+    let mut h = HostClient::new(&lobby.host_secret);
+    w.send(&mut si, hc, h.take_outgoing(), t0);
+    host_events(&mut h, &mut w, hc);
+
+    let join = |w: &mut Wires, si: &mut StandIn, h: &mut HostClient, name: &str, n: u8| {
+        let c = si.open(&lobby.code).unwrap();
+        let mut g = GuestClient::new(name, &key(n), &[]);
+        w.send(si, c, g.take_outgoing(), t0);
+        let peer = match guest_events(&mut g, w, c)[0] {
+            GuestEvent::Waiting { peer } => peer,
+            ref e => panic!("{e:?}"),
+        };
+        host_events(h, w, hc);
+        h.accept(peer);
+        w.send(si, hc, h.take_outgoing(), t0);
+        host_events(h, w, hc);
+        guest_events(&mut g, w, c);
+        (c, g, peer)
+    };
+    let (ac, mut a, ap) = join(&mut w, &mut si, &mut h, "A", 10);
+    let (bc, mut b, bp) = join(&mut w, &mut si, &mut h, "B", 11);
+    let (cc, mut c, cp) = join(&mut w, &mut si, &mut h, "C", 12);
+
+    // Asking before anyone is a helper still routes (C may know A from earlier).
+    c.relay_ask(99, &[]);
+    w.send(&mut si, cc, c.take_outgoing(), t0);
+    assert!(matches!(&guest_events(&mut c, &mut w, cc)[0], GuestEvent::Error { error, .. } if error == "unknown_peer"));
+
+    // A and B report direct paths: everyone hears who could relay.
+    a.connected("direct");
+    w.send(&mut si, ac, a.take_outgoing(), t0);
+    b.connected("lan");
+    w.send(&mut si, bc, b.take_outgoing(), t0);
+    let last_helpers = |ev: Vec<GuestEvent>| {
+        ev.into_iter()
+            .rev()
+            .find_map(|e| match e {
+                GuestEvent::Helpers { peers } => Some(peers),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(last_helpers(guest_events(&mut c, &mut w, cc)), vec![ap, bp]);
+    assert_eq!(last_helpers(guest_events(&mut a, &mut w, ac)), vec![bp], "not itself");
+    host_events(&mut h, &mut w, hc);
+    guest_events(&mut b, &mut w, bc);
+
+    // C asks A, which refuses; then B, which accepts with its candidates.
+    let c_cand = Candidate::new(Kind::ServerReflexive, "198.51.100.7:50000".parse().unwrap());
+    c.relay_ask(ap, &[c_cand]);
+    w.send(&mut si, cc, c.take_outgoing(), t0);
+    assert_eq!(guest_events(&mut a, &mut w, ac), vec![GuestEvent::RelayAsk { from: cp, candidates: vec![c_cand] }]);
+    assert!(host_events(&mut h, &mut w, hc).is_empty(), "the host is not involved");
+    a.relay_answer(cp, false, "busy", &[]);
+    w.send(&mut si, ac, a.take_outgoing(), t0);
+    assert_eq!(
+        guest_events(&mut c, &mut w, cc),
+        vec![GuestEvent::RelayAnswer { helper: ap, accept: false, reason: "busy".into(), candidates: vec![] }]
+    );
+    c.relay_ask(bp, &[c_cand]);
+    w.send(&mut si, cc, c.take_outgoing(), t0);
+    guest_events(&mut b, &mut w, bc);
+    let b_cand = Candidate::new(Kind::ServerReflexive, "203.0.113.9:47960".parse().unwrap());
+    b.relay_answer(cp, true, "", &[b_cand]);
+    w.send(&mut si, bc, b.take_outgoing(), t0);
+    assert_eq!(
+        guest_events(&mut c, &mut w, cc),
+        vec![GuestEvent::RelayAnswer { helper: bp, accept: true, reason: String::new(), candidates: vec![b_cand] }]
+    );
+
+    // B loses its path: it is no longer offered.
+    b.reconnect();
+    w.send(&mut si, bc, b.take_outgoing(), t0);
+    assert_eq!(last_helpers(guest_events(&mut c, &mut w, cc)), vec![ap]);
+    // A leaves: the list empties.
+    a.bye();
+    w.send(&mut si, ac, a.take_outgoing(), t0);
+    assert_eq!(last_helpers(guest_events(&mut c, &mut w, cc)), Vec::<u32>::new());
 }

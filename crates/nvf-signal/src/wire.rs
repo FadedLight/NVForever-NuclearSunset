@@ -147,6 +147,20 @@ pub enum ToService {
     },
     /// Guest: the path was lost; gather and check again.
     Reconnect,
+    /// Guest C, which cannot reach the host: ask guest `helper` to relay, with C's candidates
+    /// (#3795 section 8). Goes guest to guest; the host is not involved.
+    RelayAsk { helper: PeerNo, candidates: Vec<WireCandidate> },
+    /// Guest A's answer to a relay request from `for`. With `accept`, A's candidates, for C's
+    /// checks against A; otherwise `reason` ("off", "busy", "no_direct_path").
+    RelayAnswer {
+        #[serde(rename = "for")]
+        for_peer: PeerNo,
+        accept: bool,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        candidates: Vec<WireCandidate>,
+    },
     /// Leaving. From the host, it closes the lobby.
     Bye,
 }
@@ -183,6 +197,20 @@ pub enum FromService {
     Connected { peer: PeerNo, path: String },
     /// To the host: this guest left or dropped.
     Left { peer: PeerNo },
+    /// To every accepted guest, when it changes: the other guests with a direct or LAN path
+    /// to the host (from their `connected`), who could relay.
+    Helpers { peers: Vec<PeerNo> },
+    /// To guest A: guest `from` asks A to relay for it.
+    RelayAsk { from: PeerNo, candidates: Vec<WireCandidate> },
+    /// To guest C: `helper`'s answer.
+    RelayAnswer {
+        helper: PeerNo,
+        accept: bool,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        candidates: Vec<WireCandidate>,
+    },
     /// The lobby is over ("host_left", "expired"); the socket closes after this.
     Closed { reason: String },
     /// A message was refused ("bad_secret", "bad_key", "full", "wire_version", "bad_message",

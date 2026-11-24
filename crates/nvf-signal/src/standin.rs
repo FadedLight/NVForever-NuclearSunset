@@ -56,6 +56,8 @@ impl Default for Config {
 struct Guest {
     conn: ConnId,
     accepted: bool,
+    /// Its last `connected` path was direct or LAN: it may relay for others.
+    helper: bool,
 }
 
 struct Lobby {
@@ -235,7 +237,7 @@ impl StandIn {
                 }
                 let peer = lobby.next_peer;
                 lobby.next_peer += 1;
-                lobby.guests.insert(peer, Guest { conn, accepted: false });
+                lobby.guests.insert(peer, Guest { conn, accepted: false, helper: false });
                 self.conns.get_mut(&conn).unwrap().role = Role::Guest(peer);
                 Self::send(&mut out, conn, &FromService::Waiting { peer });
                 Self::send(&mut out, host, &FromService::Join { peer, name, key, candidates });
@@ -276,22 +278,51 @@ impl StandIn {
                     Self::send(&mut out, gc, &FromService::Candidates { peer: None, candidates: candidates.clone() });
                 }
             }
-            (Role::Guest(peer), msg @ (ToService::Candidates { .. } | ToService::Connected { .. } | ToService::Reconnect)) => {
+            (
+                Role::Guest(peer),
+                msg @ (ToService::Candidates { .. }
+                | ToService::Connected { .. }
+                | ToService::Reconnect
+                | ToService::RelayAsk { .. }
+                | ToService::RelayAnswer { .. }),
+            ) => {
                 let lobby = &self.lobbies[&code];
-                let accepted = lobby.guests.get(&peer).is_some_and(|g| g.accepted);
-                let Some(host) = lobby.host.filter(|_| accepted) else {
+                if !lobby.guests.get(&peer).is_some_and(|g| g.accepted) {
                     self.fail(&mut out, conn, "not_accepted", "wait for the host", false);
                     return out;
-                };
+                }
+                // Guest to guest (#3795 section 8): both must be accepted, and not the same.
+                let other = |p: PeerNo| lobby.guests.get(&p).filter(|g| g.accepted && p != peer).map(|g| g.conn);
                 match msg {
-                    ToService::Candidates { candidates, .. } => {
-                        Self::send(&mut out, host, &FromService::Candidates { peer: Some(peer), candidates })
-                    }
-                    ToService::Connected { path, .. } => Self::send(&mut out, host, &FromService::Connected { peer, path }),
-                    _ => {
-                        Self::send(&mut out, host, &FromService::Reconnect { peer });
-                        Self::send(&mut out, host, &FromService::Go { peer: Some(peer) });
-                        Self::send(&mut out, conn, &FromService::Go { peer: None });
+                    ToService::RelayAsk { helper, candidates } => match other(helper) {
+                        Some(to) => Self::send(&mut out, to, &FromService::RelayAsk { from: peer, candidates }),
+                        None => self.fail(&mut out, conn, "unknown_peer", "no such guest", false),
+                    },
+                    ToService::RelayAnswer { for_peer, accept, reason, candidates } => match other(for_peer) {
+                        Some(to) => Self::send(&mut out, to, &FromService::RelayAnswer { helper: peer, accept, reason, candidates }),
+                        None => self.fail(&mut out, conn, "unknown_peer", "no such guest", false),
+                    },
+                    msg => {
+                        let Some(host) = lobby.host else {
+                            self.fail(&mut out, conn, "host_away", "the host is reconnecting", false);
+                            return out;
+                        };
+                        match msg {
+                            ToService::Candidates { candidates, .. } => {
+                                Self::send(&mut out, host, &FromService::Candidates { peer: Some(peer), candidates })
+                            }
+                            ToService::Connected { path, .. } => {
+                                let helper = path == "direct" || path == "lan";
+                                Self::send(&mut out, host, &FromService::Connected { peer, path });
+                                out.extend(self.set_helper(&code, peer, helper));
+                            }
+                            _ => {
+                                Self::send(&mut out, host, &FromService::Reconnect { peer });
+                                Self::send(&mut out, host, &FromService::Go { peer: Some(peer) });
+                                Self::send(&mut out, conn, &FromService::Go { peer: None });
+                                out.extend(self.set_helper(&code, peer, false));
+                            }
+                        }
                     }
                 }
             }
@@ -302,6 +333,27 @@ impl StandIn {
                 out.push(Out { conn, text: json(&FromService::Closed { reason: "bye".into() }), close: true });
             }
             _ => self.fail(&mut out, conn, "bad_message", "not expected now", role == Role::Unbound),
+        }
+        out
+    }
+
+    /// Marks whether a guest may relay; when the set changes, tells every accepted guest the
+    /// others that may.
+    fn set_helper(&mut self, code: &str, peer: PeerNo, helper: bool) -> Vec<Out> {
+        let Some(lobby) = self.lobbies.get_mut(code) else { return Vec::new() };
+        match lobby.guests.get_mut(&peer) {
+            Some(g) if g.helper != helper => g.helper = helper,
+            Some(_) => return Vec::new(),
+            None => {}
+        }
+        Self::helpers_out(lobby)
+    }
+
+    fn helpers_out(lobby: &Lobby) -> Vec<Out> {
+        let mut out = Vec::new();
+        for (&p, g) in lobby.guests.iter().filter(|(_, g)| g.accepted) {
+            let peers = lobby.guests.iter().filter(|&(&q, h)| q != p && h.helper).map(|(&q, _)| q).collect();
+            Self::send(&mut out, g.conn, &FromService::Helpers { peers });
         }
         out
     }
@@ -330,9 +382,12 @@ impl StandIn {
                 lobby.host_gone = Some(now);
             }
             Role::Guest(peer) if lobby.guests.get(&peer).is_some_and(|g| g.conn == conn) => {
-                lobby.guests.remove(&peer);
+                let was_helper = lobby.guests.remove(&peer).is_some_and(|g| g.helper);
                 if let Some(host) = lobby.host {
                     Self::send(&mut out, host, &FromService::Left { peer });
+                }
+                if was_helper {
+                    out.extend(Self::helpers_out(lobby));
                 }
             }
             _ => {}

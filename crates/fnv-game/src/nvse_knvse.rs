@@ -338,6 +338,10 @@ fn attributes(g: &mut Game, a: Option<FormId>, path: &str) -> XVal {
         let seq_key = (a, first, k.clone());
         let (offset, last_time, calc_time) = if let Some(sequence) = g.anim_paths.sequences.get(&seq_key) {
             if g.anim_paths.sequence_clocks.get(&seq_key).is_some_and(|sc| !sc.initialized) {
+                // `calculatedTime` / `GetAnimCurrentTime` reads `-f32::MAX` before the
+                // first tick [observed: `w4e_08_knvse_legacy_anim_time`, #3803];
+                // returning `-f32::MAX` for pre-first-tick `offset` and `lastTime` is
+                // [hypothesis] (`w4e_08` on `main` reads only `t0L` pre-first-tick).
                 let invalid = f64::from(-f32::MAX);
                 (invalid, invalid, invalid)
             } else {

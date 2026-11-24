@@ -136,22 +136,21 @@ or source code was inspected or consulted.
     2026-11-24, GSDocMitchellHouse (0x00103DF9), 10 official base masters, isolated
     clean-room staging copy with staged Data\NVSE\Plugins\kNVSE.ini
     (sLegacyAnimTimePaths = W4ELegacy,B42Inject) and read-only PrintToConsole probe
-    w4e_08_knvse_legacy_anim_time (tools/capture/nvse/catalogs/wave4e_mods.json, #3803;
-    s1_knvse_legacy raw output:
-    `PROBE|s1_knvse_legacy|t1:g1=0.5640|leg(t=0.1080,f=1.00,off=-0.4560,last=0.1080)`,
-    `PROBE|s1_knvse_legacy|t2_leg:dg=0.1650|dt=0.4125|t=0.5205|f=2.50|off=-0.4560|last=0.2730`,
-    `PROBE|s1_knvse_legacy|t2_nrm:dg=0.1650|dt=0.4125|t=0.5205|f=2.50|off=-0.4560|last=0.2730`,
-    plus same-frame pre-tick `t0L=-3.40282e+38,off=-3.40282e+38,last=-3.40282e+38`);
+    w4e_08_knvse_legacy_anim_time (tools/capture/nvse/catalogs/wave4e_mods.json, #3803):
+    `PROBE|w4e_08_knvse_legacy_anim_time|t0L=-3.40282e+38|t1(l=0.1080,n=0.1080)|dg=0.1650|leg(t=0.5205,off=-0.4560,last=0.2730)|nrm(t=0.5205,off=-0.4560,last=0.2730)`;
     zero DLL, PDB, or third-party source consulted]`
     1. Immediately after `PlayAnimationPath`, before the first animation tick,
-       `GetAnimCurrentTime`, `GetAnimationAttributes["offset"]`, and
-       `GetAnimationAttributes["lastTime"]` all read `-FLT_MAX` (`-3.40282e+38`,
+       `GetAnimCurrentTime` reads `-FLT_MAX` (`t0L=-3.40282e+38`,
        `f64::from(-f32::MAX)`), not `0.0`.
-    2. After `SetAnimSequenceFrequency 2.5` (`dg = 0.1650`), **both** listed
+    2. After `SetAnimSequenceFrequency 2.5` (`dg=0.1650`), **both** listed
        `W4ELegacy\test.kf` and unlisted `W4ENormal\test.kf` advance `GetAnimCurrentTime`
        identically by the frequency-scaled delta (`t1 + dg * freq = 0.1080 + 0.4125 =
        0.5205`), while `offset` remains fixed (`-0.4560`) and `GetAnimationAttributes["lastTime"]`
        tracks unscaled `global + offset` (`0.2730 = t1 + dg`).
+  - `[hypothesis]` Immediately after `PlayAnimationPath`, before the first animation
+    tick, `GetAnimationAttributes["offset"]` and `GetAnimationAttributes["lastTime"]`
+    also return `-f32::MAX` (`-3.40282e+38`) (`w4e_08_knvse_legacy_anim_time` on `main`
+    reads only `t0L` pre-first-tick and reads `offset`/`lastTime` after ticking).
   - `[hypothesis]` Any additional runtime conditions (beyond `SetAnimSequenceFrequency`
     tested in `w4e_08_knvse_legacy_anim_time`) under which kNVSE v37's
     `sLegacyAnimTimePaths` diverges from normal paths remain unestablished.

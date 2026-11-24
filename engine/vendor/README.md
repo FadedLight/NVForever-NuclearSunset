@@ -69,6 +69,41 @@ single slow frame charged to a render system that only writes a buffer
 (`upload_light_probes`, `write_binned_instance_buffers`) can be matched to a new memory
 block. `std` is linked for the clock (wgpu-hal turns the crate's `std` feature off).
 
+## bevy_core_pipeline 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
+
+HDR output (docs/design/hdr-output.md). Changes, marked `NVForever HDR output`:
+
+- `src/blit/mod.rs`: `BlitPipelineKey` gains `hdr` (a blit to an HDR window) and
+  `hdr_gamma22`, adding the shader defs `NVF_HDR_PAPER_WHITE` and `NVF_HDR_GAMMA22`. The
+  layout gains a third binding, the uniform `BlitPipeline::nvf_hdr_scale` (x: the HUD's
+  white in nits / 80), written by `nvf_write_hdr_scale` when it changes, so moving the
+  brightness rebuilds no pipeline (it was a shader constant, one pipeline per step; PR
+  #3348 review).
+- `src/blit/blit.wesl`: under those defs the 0..1 range is decoded with gamma 2.2 and the
+  colour is scaled by `nvf_hdr_scale.x` (scRGB's 1.0 is 80 nits).
+- `src/upscaling/mod.rs`: the statics `NVF_HDR_PAPER_WHITE_NITS`, `NVF_HDR_HUD_NITS` and
+  `NVF_HDR_GAMMA22` (set by nvforever's settings), and the upscaling pipeline's key takes
+  them for a window camera whose target is `Rgba16Float` while the window's surface is
+  HDR (`bevy_render`'s `NVF_HDR_SURFACE_ACTIVE`).
+
+Why: the window blit is the last pass that writes the swapchain, and the HUD is drawn
+into the picture before it, so the HUD's brightness in nits can only be set there.
+Upstream's blit copies the colour unchanged.
+
+Graphics pass (2026-11-23), for bevy#26239 (open upstream): GPU occlusion culling's depth
+pyramid is built from the main pass's region of the depth buffer only, and the downsampling
+shader reads that region (`src/mip_generation/experimental/depth.rs`,
+`downsample_depth.wesl`, a `bytemuck` dependency as upstream's, in `Cargo.toml`). Before it,
+with an upscaler's `MainPassResolutionOverride` the pyramid was made from the whole
+display-size texture while meshes were tested in render-rectangle coordinates. Upstream saw
+only hidden meshes drawn; in NVForever, whose upscaler glue copies the display-size depth
+back over the prepass depth (upscaler/prep.rs `expand_depth`), visible rocks, posts and
+plants were culled. The culling stays an experiment behind `NVF_OCCLUSION_CULLING=1`
+(nvforever gpu_occlusion.rs).
+
+Source: crates.io `bevy_core_pipeline` 0.20.1, archive SHA-256
+`2463cf477b683bfe8567c43142295d00ed980f8e2a293c0a69e2f9e10e9c0aaf`.
+
 ## bevy_post_process 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 Bevy's post-processing, for its auto exposure, which meters the view for the game's eye
@@ -96,6 +131,9 @@ indices past 63 were clamped onto bin 63, so the brightest bin was counted 194 t
 workgroup made ~200 contended atomics on that one address (the pass went from ~0.14 ms to
 below the GPU log's top entries at 4K with DLSS Quality on an RTX 5090). Upstream Bevy's
 main has the same guard.
+
+HDR output: `src/msaa_writeback.rs` fills `BlitPipelineKey`'s two new fields (`false`,
+`false`), as the vendored bevy_core_pipeline's key needs them.
 
 ## bevy_pbr 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
@@ -548,7 +586,7 @@ Graphics pass 2026-11-23, four more changes:
 
 ## bevy_light 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
-Vendored 2026-11-18, unchanged but for two patches. The first (shadow caster candidates, for
+Vendored 2026-11-18, unchanged but for three patches. The first (shadow caster candidates, for
 the ALC shadows' (once Lamp shadows) performance pass: nvforever light_shadow_casters.rs, docs/design/graphics-enhanced.md
 §3.17 "Performance pass"), marked `NVForever shadow caster candidates`, in `src/lib.rs`:
 
@@ -650,7 +688,7 @@ of `fog.wesl` and `pbr_functions.wesl` (fog.rs, haze.rs, aerial.rs, at run time)
 Upstream has no way for an application to hand its own values to the fog shader (the
 uniform's free fields were used up by the desert haze, §3.16).
 
-Graphics pass 2026-11-23, one more change, marked `NVForever small casters`, in
+The third (graphics pass 2026-11-23), marked `NVForever small casters`, in
 `src/lib.rs` `check_dir_light_mesh_visibility`: a caster whose bounding radius (box half
 diagonal times the largest scale) is below `nvf_small_caster_texels()` texels of a
 cascade's map (`Cascade::texel_size`) is left out of that cascade; `NVF_SMALL_CASTER_TEXELS`
@@ -966,6 +1004,16 @@ Graphics pass 2026-11-23: bevy#26239 (open upstream), `src/view/mod.rs`
 (`ExtractedView::main_pass_viewport`) and `src/occlusion_culling/mod.rs`, with
 bevy_core_pipeline below.
 
+HDR output (docs/design/hdr-output.md), marked `NVForever HDR output` in
+`src/view/window/mod.rs`: the statics `NVF_HDR_SURFACE` (asked for), `NVF_HDR_SURFACE_ACTIVE`
+(the window's surface is fp16 scRGB) and `NVF_HDR_SURFACE_DECIDED` (a surface has been
+made). When the surface is made with HDR asked for (`NVF_HDR_SURFACE` or `NVF_HDR=1`) and
+it offers `Rgba16Float`, that format is chosen; `SurfaceColorSpace::Auto` makes it scRGB.
+Upstream prefers an sRGB format. `SurfaceData` keeps the SDR format and whether fp16 is
+offered; `nvf_hdr_changed` compares the asked-for output with the configured format each
+frame, and a change reconfigures the surface at once (no restart). Test aid
+`NVF_PLAY_TEST_SDR_SURFACE=1`: the surface counts as offering no `Rgba16Float`.
+
 ## bevy_shader 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 The shader cache, for composed shaders kept between runs (perf/pipeline-cache, 2026-11-19).
@@ -1005,22 +1053,6 @@ is queued again rather than failed for the run. `get` is
 takes the pipeline as an `Option` (`None` for the list's builds, which are not compiled
 again when a shader changes). Tests: `a_module_asked_twice_at_once_is_made_once_and_a_stale_one_is_not_kept`,
 `a_build_dropped_unfinished_wakes_its_waiters`, `shaders_are_found_by_a_path_only_they_have`.
-
-## bevy_core_pipeline 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
-
-Vendored 2026-11-23 (graphics pass) for bevy#26239 (open upstream): GPU occlusion culling's
-depth pyramid is built from the main pass's region of the depth buffer only, and the
-downsampling shader reads that region (`src/mip_generation/experimental/depth.rs`,
-`downsample_depth.wesl`, a `bytemuck` dependency as upstream's). Before it, with an
-upscaler's `MainPassResolutionOverride` the pyramid was made from the whole display-size
-texture while meshes were tested in render-rectangle coordinates. Upstream saw only
-hidden meshes drawn; in NVForever, whose upscaler glue copies the display-size depth back
-over the prepass depth (upscaler/prep.rs `expand_depth`), visible rocks, posts and plants
-were culled. The culling stays an experiment behind `NVF_OCCLUSION_CULLING=1`
-(nvforever gpu_occlusion.rs).
-
-Source: crates.io `bevy_core_pipeline` 0.20.1, archive SHA-256
-`2463cf477b683bfe8567c43142295d00ed980f8e2a293c0a69e2f9e10e9c0aaf`.
 
 ## wgpu-hal 30.0.1 (MIT OR Apache-2.0, the gfx-rs developers)
 

@@ -14,6 +14,7 @@ use crate::game::Game;
 use fnv_script::vm::{ArrayKind, XKey, XVal};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// The host's answer for a path in the archives too: 0 none, 1 a loose file, 2 inside an
@@ -39,11 +40,18 @@ pub struct Roots {
 }
 
 static ROOTS: Mutex<Option<Roots>> = Mutex::new(None);
+static ROOTS_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Monotonic counter incremented whenever [`set_roots`] or [`update_roots`] runs.
+pub fn roots_generation() -> u64 {
+    ROOTS_GENERATION.load(Ordering::Acquire)
+}
 
 /// Set the roots for the games made after this (the engine, `fnvtool --config`).
 pub fn set_roots(r: Roots) {
     if let Ok(mut g) = ROOTS.lock() {
         *g = Some(r);
+        ROOTS_GENERATION.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -52,6 +60,7 @@ pub fn set_roots(r: Roots) {
 pub fn update_roots(f: impl FnOnce(&mut Roots)) {
     if let Ok(mut g) = ROOTS.lock() {
         f(g.get_or_insert_with(Roots::default));
+        ROOTS_GENERATION.fetch_add(1, Ordering::Release);
     }
 }
 

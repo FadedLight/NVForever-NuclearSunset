@@ -93,3 +93,66 @@ Follow-ups (engine side, slice 2 of knvse-anim.md):
   (`Game::set_sequence_info` from `script_sequences.rs` and `anim_state.rs`).
 - **Remaining:** NPC layered sequences and runtime text-key triggers (`AddAnimTextKey` /
   `SetAnimTextKeys`).
+
+## 5. Runtime `kNVSE.ini` (`[Anim Fixes] sLegacyAnimTimePaths`)
+
+**Clean-room provenance:** File path, section name, key name, shipped default, and
+purpose come exclusively from **kNVSE Animation Plugin v37**
+(`https://www.nexusmods.com/newvegas/mods/71336`), specifically the public `;` comments
+and shipped defaults in `Data\NVSE\Plugins\kNVSE.ini`. No kNVSE DLL, PDB, disassembly,
+or source code was inspected or consulted.
+
+- **File read** [documented: kNVSE v37 shipped `kNVSE.ini`]:
+  `Data\NVSE\Plugins\kNVSE.ini`, read through `fnv_game::mod_files::read_data_file`
+  (case-insensitive loose read roots — NVForever's mods layer first, then game `Data` —
+  followed by the VFS/archive reader).
+- **Wired key** (`crates/fnv-game/src/knvse_ini.rs`, `Game::knvse_ini`):
+  - `[Anim Fixes] sLegacyAnimTimePaths`: comma-separated animation path prefixes that
+    rely on kNVSE's legacy sequence-time calculation (`; use legacy anim time algorithm
+    for these paths (these mods rely on bugged behavior from previous versions of
+    kNVSE)` [documented: kNVSE v37 `kNVSE.ini`]).
+  - **Shipped default:** `B42Inject,B42Interact,B42Loot` [documented: kNVSE v37
+    `kNVSE.ini`].
+  - **Absent-INI default:** empty (`[]`).
+  - **Vanilla & modded-install impact:** When `kNVSE.ini` is absent, no paths match and
+    vanilla/default timing is completely unchanged. Even when kNVSE v37's shipped
+    `kNVSE.ini` is present with default `B42Inject,B42Interact,B42Loot`, unmodded vanilla
+    gameplay and all other kNVSE script-sequence paths are unaffected; only kNVSE
+    script-played sequences whose path matches one of the listed segments use the legacy
+    calculation.
+- **Parser, matching, and startup reload** [design]:
+  - Parsed directly on raw `&[u8]` with no `&str` byte-index slicing (UTF-8 BOM safe,
+    `;` and `#` full-line/inline comment safe, ASCII case-insensitive section/key
+    matching, tolerant of non-UTF-8 bytes in comments or other keys).
+  - Entries are comma-split, trimmed, stripped of optional surrounding `"`, normalized to
+    lower-case backslashes without a leading `meshes\`, deduplicated preserving order,
+    and matched on whole path segments (`B42Inject` matches `B42Inject\stim.kf` and
+    `Characters\_1stPerson\B42Inject\stim.kf` without matching `NotB42Inject\stim.kf` or
+    `B42InjectExtra\stim.kf`).
+  - `Game::new` loads `KnvseIni::load()` and records `mod_files::roots_generation()`;
+    `nvf_play::script_input::mod_file_roots` calls `Game::reload_knvse_ini()` when VFS
+    roots open, and `Game::tick()` calls `Game::sync_knvse_ini()` so root updates reload
+    cleanly without overwriting manual overrides. Not serialized into save snapshots.
+- **Legacy sequence-time calculation** [hypothesis] and **double-scaling guards** [design]:
+  - For matching paths, `Game::script_sequence_time_for` returns frequency-scaled time
+    clamped to `[begin, end]` for clamped clips (`cycle == 2`) or wrapped modulo
+    `end - begin` for looping clips, falling back to `raw.max(0.0)` when sequence bounds
+    are unknown [hypothesis].
+  - `script_sequences_tick` (`auto_finish`), `nvse_knvse::attributes` (`lastScaledTime`),
+    `nvforever::script_sequences::sequence_sample_phase`, and `sequence_resume` pause/resume
+    bookkeeping (`script_sequence_raw_time_for`) avoid multiplying legacy paths by
+    `frequency` a second time [design].
+- **Keys intentionally not wired (no dead struct fields):**
+  - `[General] iConsoleLogLevel` (shipped `1`), `iErrorLogLevel` (shipped `1`): native
+    kNVSE DLL logging.
+  - `[Blend Fixes]` (`bFixBlendSamePriority=1`, `bFixBlendAnimMultipliers=1`) and
+    remaining `[Anim Fixes]` keys (`bFixEndKeyTimeShorterThanStopTime=1`,
+    `bFixWrongAKeyInRespectEndKeyAnim=1`, `bFixWrongPrnKey=1`, `bFixWrongAnimName=1`,
+    `bFixMissingPrnKey=1`, `bFixReloadStartAllowReloadTweak=1`): Gamebryo
+    `NiControllerManager` and malformed-KF export workarounds.
+  - `[Engine Fixes] bFixLoopingReloads` (shipped `1`): original-exe looping-reload bug;
+    already unconditionally satisfied by NVForever's round-by-round reload flow.
+  - `[Engine Fixes] bFixIdleStrafing` (shipped `1`): engine patch altering vanilla player
+    idle locomotion and camera-hold behavior; out of scope here under
+    `docs/design/extender-compat.md` §2 / §8.4 unless approved as a separate named
+    NVForever option.

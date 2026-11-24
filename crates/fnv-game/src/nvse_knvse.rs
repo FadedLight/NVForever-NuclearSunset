@@ -316,17 +316,19 @@ fn attributes(g: &mut Game, a: Option<FormId>, path: &str) -> XVal {
     ];
     if let Some(a) = a.filter(|&a| g.plays(a, path)) {
         let first = a == FormId::PLAYER_REF && g.senses.first_person;
-        let (offset, now) = if let Some(sequence) = g.anim_paths.sequences.get(&(a,first,k.clone())) {
-            (sequence.clock_offset, g.script_sequence_time(a,path))
+        let legacy = g.knvse_ini.uses_legacy_anim_time(path);
+        let (offset, now) = if let Some(sequence) = g.anim_paths.sequences.get(&(a, first, k.clone())) {
+            (sequence.clock_offset, g.script_sequence_time(a, path))
         } else {
-            let global = g.anim_clock(a,false);
-            let offset = g.knvse.offsets.get(&(a,k.clone())).copied().unwrap_or(0.0);
-            (offset,global+offset)
+            let offset = g.knvse.offsets.get(&(a, k.clone())).copied().unwrap_or(0.0);
+            let now = if legacy { g.script_sequence_time_for(a, path, false) } else { g.anim_clock(a, false) + offset };
+            (offset, now)
         };
+        let scaled = if legacy { now } else { now * info.frequency };
         m.extend([
             ("lastTime", XVal::Num(now)),
             ("weightedLastTime", XVal::Num(now)),
-            ("lastScaledTime", XVal::Num(now * info.frequency)),
+            ("lastScaledTime", XVal::Num(scaled)),
             // kState_Animating [documented: the State list].
             ("state", XVal::Num(1.0)),
             ("offset", XVal::Num(offset)),

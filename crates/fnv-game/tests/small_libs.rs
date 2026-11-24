@@ -1016,3 +1016,86 @@ fn knvse_transition_duration_view_weights_additive_and_non_finite_dest_frame() {
     );
     assert!((g_sync.script_sequence_time_for(FormId::PLAYER_REF, "test\\d.kf", true) - 0.35).abs() < 1e-6);
 }
+
+#[test]
+fn knvse_legacy_anim_time_paths_scopes_clock_attributes_and_resume_to_listed_prefixes() {
+    use fnv_game::nvse_knvse::SequenceInfo;
+    files();
+    let f = fixture();
+    let mut g = game(&f);
+    g.cfg.frame_seconds = 0.25;
+    g.senses.first_person = true;
+    g.knvse_ini = fnv_game::knvse_ini::KnvseIni::parse(
+        b"[Anim Fixes]\nsLegacyAnimTimePaths = B42Inject, B42Interact, B42Loot\n",
+    );
+
+    // Matching looping sequence (cycle 0, frequency 2.0, span 0.0..1.0): wraps modulo 1.0.
+    // Raw elapsed after 3 ticks of 0.25 s is 0.75 s -> scaled 1.5 s -> wraps to 0.5 s.
+    let legacy_loop = "B42Inject\\loop.kf";
+    g.set_sequence_info(
+        legacy_loop,
+        SequenceInfo { name: "Loop".into(), accum_root: String::new(), frequency: 2.0, begin: 0.0, end: 1.0, cycle: 0, text_keys: vec![] },
+    );
+    // Matching clamped sequence (cycle 2, frequency 1.0, span 0.0..0.5): clamps at 0.5.
+    let legacy_clamp = "Characters\\_1stPerson\\B42Interact\\clamp.kf";
+    g.set_sequence_info(
+        legacy_clamp,
+        SequenceInfo { name: "Clamp".into(), accum_root: String::new(), frequency: 1.0, begin: 0.0, end: 0.5, cycle: 2, text_keys: vec![] },
+    );
+    // Non-matching sequence keeps vanilla raw unclamped/unscaled timing.
+    let modern = "test\\a.kf";
+    g.set_sequence_info(
+        modern,
+        SequenceInfo { name: "Modern".into(), accum_root: String::new(), frequency: 2.0, begin: 0.0, end: 1.0, cycle: 0, text_keys: vec![] },
+    );
+
+    // Establish the actor's animation clock origin and seed all three sequences at time 0.
+    let key_loop = legacy_loop.to_ascii_lowercase();
+    let key_clamp = legacy_clamp.to_ascii_lowercase();
+    let key_modern = modern.to_ascii_lowercase();
+    let XVal::Num(now_clock) = q(&mut g, "SetFunctionValue (PlayerREF.GetAnimCurrentTime \"test\\a.kf\")") else {
+        panic!("expected numeric anim time");
+    };
+    g.knvse.offsets.insert((FormId::PLAYER_REF, key_loop), -now_clock);
+    g.knvse.offsets.insert((FormId::PLAYER_REF, key_clamp), -now_clock);
+    g.knvse.offsets.insert((FormId::PLAYER_REF, key_modern), -now_clock);
+    g.anim_paths.played.entry(FormId::PLAYER_REF).or_default().push(legacy_loop.into());
+    g.anim_paths.played.entry(FormId::PLAYER_REF).or_default().push(modern.into());
+
+    for _ in 0..3 {
+        g.tick();
+    }
+    // 3 ticks * 0.25 s = 0.75 s elapsed.
+    let t_loop = g.script_sequence_time_for(FormId::PLAYER_REF, legacy_loop, false);
+    let t_clamp = g.script_sequence_time_for(FormId::PLAYER_REF, legacy_clamp, false);
+    let t_modern = g.script_sequence_time_for(FormId::PLAYER_REF, modern, false);
+    assert!((t_loop - 0.5).abs() < 1e-6, "looping legacy path wraps scaled time: got {t_loop}");
+    assert!((t_clamp - 0.5).abs() < 1e-6, "clamped legacy path clamps at end: got {t_clamp}");
+    assert!((t_modern - 0.75).abs() < 1e-6, "non-matching path keeps vanilla raw time: got {t_modern}");
+
+    // Pause/resume on an active legacy sequence does not double-scale frequency.
+    g.knvse_ini = fnv_game::knvse_ini::KnvseIni::parse(b"[Anim Fixes]\nsLegacyAnimTimePaths = test\n");
+    assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.ActivateAnim \"test\\a.kf\" 1 1 1 1 0)"), n(1.0));
+    g.tick(); // raw 0.25 s -> legacy scaled 0.5 s
+    assert!((g.script_sequence_time_for(FormId::PLAYER_REF, modern, true) - 0.5).abs() < 1e-6);
+    assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.DeactivateAnim \"test\\a.kf\" 0)"), n(1.0));
+    g.tick(); // inactive while paused
+    assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.ActivateAnim \"test\\a.kf\" 1 1 0 1 0)"), n(1.0));
+    let resumed = g.script_sequence_time_for(FormId::PLAYER_REF, modern, true);
+    assert!((resumed - 0.5).abs() < 1e-6, "resuming legacy sequence preserves 0.5 (not double-scaled to 1.0): got {resumed}");
+
+    // GetAnimationAttributes reports lastScaledTime == lastTime (no double-scaling) on legacy path.
+    let XVal::Num(last_time) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\a.kf\"\nSetFunctionValue (a[\"lastTime\"])") else {
+        panic!("expected lastTime");
+    };
+    let XVal::Num(last_scaled) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\a.kf\"\nSetFunctionValue (a[\"lastScaledTime\"])") else {
+        panic!("expected lastScaledTime");
+    };
+    assert!((last_time - 0.5).abs() < 1e-6, "legacy lastTime: got {last_time}");
+    assert!((last_scaled - 0.5).abs() < 1e-6, "legacy lastScaledTime must not double-scale: got {last_scaled}");
+
+    // Empty sLegacyAnimTimePaths restores vanilla raw timing for all paths (5 ticks * 0.25 s = 1.25 s).
+    g.knvse_ini.legacy_anim_time_paths.clear();
+    let t_loop_vanilla = g.script_sequence_time_for(FormId::PLAYER_REF, legacy_loop, false);
+    assert!((t_loop_vanilla - 1.25).abs() < 1e-6, "vanilla default leaves path untouched: got {t_loop_vanilla}");
+}

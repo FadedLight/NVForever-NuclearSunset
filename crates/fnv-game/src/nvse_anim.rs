@@ -115,14 +115,20 @@ impl Game<'_> {
         for (key, sequence) in &self.anim_paths.sequences {
             if sequence.auto_finish && sequence.stopped.is_none() {
                 if let Some(info) = self.knvse.sequences.get(&key.2) {
-                    if info.cycle == 2 && self.script_sequence_time_for(key.0, &sequence.path, key.1) * info.frequency >= info.end - info.begin {
+                    let t = self.script_sequence_time_for(key.0, &sequence.path, key.1);
+                    let done = if self.knvse_ini.uses_legacy_anim_time(&sequence.path) {
+                        t >= info.end
+                    } else {
+                        t * info.frequency >= info.end - info.begin
+                    };
+                    if info.cycle == 2 && done {
                         stop.push(key.clone());
                     }
                 }
             }
         }
         for key in stop {
-            let at = self.script_sequence_time_for(key.0, &key.2, key.1);
+            let at = self.script_sequence_raw_time_for(key.0, &key.2, key.1);
             let stopped = self.script_sequence_now(key.0, key.1);
             let weight = self.anim_paths.sequences.get(&key).map_or(1.0, |s|s.weight);
             self.anim_paths.sequence_resume.insert(key.clone(), (at,weight));
@@ -157,14 +163,51 @@ impl Game<'_> {
             |&(value, at)| value + now - at)
     }
 
-    pub fn script_sequence_time_for(&self, actor: FormId, path: &str, first: bool) -> f64 {
+    /// Raw unscaled sequence clock time (`clock + offset`), used internally for
+    /// pause/resume bookkeeping so legacy frequency-scaled paths are not double-scaled
+    /// on resume [design].
+    pub(crate) fn script_sequence_raw_time_for(&self, actor: FormId, path: &str, first: bool) -> f64 {
         let key = path.replace('/', "\\").to_ascii_lowercase();
-        if let Some(sequence) = self.anim_paths.sequences.get(&(actor,first,key.clone())) {
-            self.script_sequence_clock(actor,first) + sequence.clock_offset
+        if let Some(sequence) = self.anim_paths.sequences.get(&(actor, first, key.clone())) {
+            self.script_sequence_clock(actor, first) + sequence.clock_offset
         } else {
-            self.script_sequence_clock(actor,false) + self.knvse.offsets.get(&(actor,key)).copied().unwrap_or(0.0)
+            self.script_sequence_clock(actor, false) + self.knvse.offsets.get(&(actor, key)).copied().unwrap_or(0.0)
         }
     }
+
+    pub fn script_sequence_time_for(&self, actor: FormId, path: &str, first: bool) -> f64 {
+        let raw = self.script_sequence_raw_time_for(actor, path, first);
+        if self.knvse_ini.uses_legacy_anim_time(path) {
+            let key = path.replace('/', "\\").to_ascii_lowercase();
+            legacy_anim_time(raw, self.knvse.sequences.get(&key))
+        } else {
+            raw
+        }
+    }
+}
+
+/// Legacy kNVSE sequence-time reporting for paths listed in `kNVSE.ini`
+/// `[Anim Fixes] sLegacyAnimTimePaths` [documented: kNVSE v37 `kNVSE.ini` comment;
+/// hypothesis: frequency-scaled time clamped to `[begin, end]` for clamped clips or
+/// wrapped modulo `end - begin` for looping clips, non-negative fallback when sequence
+/// bounds are unknown].
+fn legacy_anim_time(raw: f64, info: Option<&crate::nvse_knvse::SequenceInfo>) -> f64 {
+    let clamped_raw = raw.max(0.0);
+    let Some(info) = info else { return clamped_raw };
+    let span = info.end - info.begin;
+    if !span.is_finite() || span <= 0.0 || !info.begin.is_finite() || !info.end.is_finite() {
+        return clamped_raw;
+    }
+    let freq = if info.frequency.is_finite() && info.frequency > 0.0 { info.frequency } else { 1.0 };
+    let scaled = clamped_raw * freq;
+    if info.cycle == 2 {
+        (info.begin + scaled).clamp(info.begin, info.end)
+    } else {
+        info.begin + scaled.rem_euclid(span)
+    }
+}
+
+impl Game<'_> {
 
     /// The sequences an actor plays as far as this side knows: its body's clip, then
     /// what scripts played.
@@ -189,7 +232,7 @@ pub(crate) fn deactivate_anim_for(g: &mut Game, a: FormId, first: bool, path: &s
     }
     let norm = path.replace('/', "\\").to_ascii_lowercase();
     let key = (a, first, norm.clone());
-    let resume = g.script_sequence_time_for(a, path, first);
+    let resume = g.script_sequence_raw_time_for(a, path, first);
     let stopped = g.script_sequence_now(a, first);
     let weight = g.anim_paths.sequences.get(&key).map_or(1.0, |s| s.weight);
     g.anim_paths.sequence_resume.insert(key.clone(), (resume, weight));

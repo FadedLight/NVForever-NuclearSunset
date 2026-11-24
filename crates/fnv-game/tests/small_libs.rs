@@ -115,18 +115,47 @@ fn source_get_is_form_type_uses_the_reference_base_signature() {
     let mut g = game(&f);
     for (expression, expected) in [
         ("TestBoxRef.GetIsFormType \"ACTI\"", 1.0),
-        ("TestBoxRef.GetIsFormType \"acti\"", 1.0),
+        ("TestBoxRef.GetIsFormType \"acti\"", 0.0),
+        ("TestBoxRef.GetIsFormType \"Acti\"", 0.0),
+        ("TestBoxRef.GetIsFormType \"aCtI\"", 0.0),
         ("TestBoxRef.GetIsFormType \"REFR\"", 0.0),
         ("TestBoxRef.GetIsFormType \"MISC\"", 0.0),
-        ("TestGun.GetIsFormType \"WEAP\"", 1.0),
+        ("TestBoxRef.GetIsFormType \"ACT\"", 0.0),
+        ("TestBoxRef.GetIsFormType \"ACTIS\"", 0.0),
+        ("TestBoxRef.GetIsFormType \"\"", 0.0),
+        // Direct base forms return 0 and continue (w4g_01_getisformtype_case).
+        ("TestGun.GetIsFormType \"WEAP\"", 0.0),
+        ("TestGun.GetIsFormType \"weap\"", 0.0),
+        ("TestGun.GetIsFormType \"Weap\"", 0.0),
         ("TestGun.GetIsFormType \"Weapon\"", 0.0),
+        ("TestBox.GetIsFormType \"ACTI\"", 0.0),
         ("GetIsFormType \"ACTI\"", 0.0),
     ] {
         assert_eq!(g.run_query(&format!("Begin Function {{}}\nSetFunctionValue ({expression})\nEnd"), Default::default()).unwrap(), XVal::Num(expected), "{expression}");
     }
+    // Base-form call does not abort the script; subsequent statements still run.
+    assert_eq!(
+        g.run_query(
+            "int a\nBegin Function {}\nlet a := TestGun.GetIsFormType \"WEAP\"\nSetFunctionValue (a + 7)\nEnd",
+            Default::default(),
+        )
+        .unwrap(),
+        XVal::Num(7.0),
+    );
+    // Placed/spawned reference of the same weapon base matches strictly uppercase "WEAP".
+    assert_eq!(
+        g.run_query(
+            "ref w\nint u\nint l\nint m\nint d\nBegin Function {}\nlet w := player.PlaceAtMe TestGun 1\nlet u := w.GetIsFormType \"WEAP\"\nlet l := w.GetIsFormType \"weap\"\nlet m := w.GetIsFormType \"Weap\"\nlet d := w.GetIsFormType \"DOOR\"\nSetFunctionValue (u * 1000 + l * 100 + m * 10 + d)\nEnd",
+            Default::default(),
+        )
+        .unwrap(),
+        XVal::Num(1000.0),
+    );
+    // Temporary inventory reference preserves reference resolution and strict case-sensitivity.
     let XVal::Ref(temporary) = g.run_query("Begin Function {}\nplayer.AddItem TestGun 1\nSetFunctionValue (player.GetFirstRefForItem TestGun)\nEnd", Default::default()).unwrap() else { panic!("expected an inventory reference") };
     assert_ne!(temporary, 0);
     assert_eq!(fnv_game::nvse::call(&mut g, &Default::default(), "getisformtype", Some(FormId(temporary)), &[XVal::Str("WEAP".into())]), Some(Ok(XVal::Num(1.0))));
+    assert_eq!(fnv_game::nvse::call(&mut g, &Default::default(), "getisformtype", Some(FormId(temporary)), &[XVal::Str("weap".into())]), Some(Ok(XVal::Num(0.0))));
 }
 
 /// A data folder made for the run: the KF files the kNVSE functions look for, Stewie's

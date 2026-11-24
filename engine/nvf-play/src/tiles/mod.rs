@@ -123,7 +123,21 @@ impl MenuFiles<'_, '_> {
         }));
     }
 
+    /// Seed SUP/JIP window and cursor state from the primary window before the first
+    /// startup/load scripts run (`PreUpdate` ran before `ScriptState::rt` existed) [design].
+    pub(crate) fn sync_window_and_cursor(&self, game: &mut fnv_game::Game<'_>) {
+        if let Ok(window) = self.windows.single() {
+            game.sup.window = (f64::from(window.physical_width()), f64::from(window.physical_height()));
+            if let Some(p) = window.physical_cursor_position() {
+                game.sup.mouse.pos = (f64::from(p.x), f64::from(p.y));
+            }
+            game.other.jip9.window = Some((f64::from(window.width()), f64::from(window.height())));
+            game.other.jip9.cursor_px = window.cursor_position().map(|p| (f64::from(p.x), f64::from(p.y)));
+        }
+    }
+
     pub(crate) fn load(&self, game: &mut fnv_game::Game<'_>, world: &fnv_sim::World<'_>) {
+        self.sync_window_and_cursor(game);
         let Some(data) = self.data.as_ref() else { return };
         let files = UiFiles::new(data.vfs.clone(), world);
         let paths = files.menu_paths();

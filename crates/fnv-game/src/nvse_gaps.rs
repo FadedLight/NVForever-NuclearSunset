@@ -70,6 +70,9 @@ pub struct GapsState {
     /// Actors whose special idle scripts stopped (StopIdle, ForceStopIdle), for the
     /// engine to take.
     pub idle_stops: Vec<FormId>,
+    /// POV-scoped `ForceStopIdle` requests (`1` third-person, `2` first-person), for the
+    /// engine to take without stopping the other player rig [documented: ForceStopIdle].
+    pub idle_stop_pov: Vec<(FormId, crate::idles::IdlePov)>,
     /// The placed radio stations, from the engine; `None` until the engine sets them.
     pub radio_sites: Option<Vec<RadioSite>>,
     /// The armed mines of the loaded cells that someone other than the player put down,
@@ -219,10 +222,6 @@ fn parse_json_form(v: Option<&Json>) -> Option<FormId> {
     let s = v?.as_str()?.strip_prefix("0x")?;
     let id = u32::from_str_radix(s, 16).ok()?;
     (id != 0).then_some(FormId(id))
-}
-
-fn json_form(v: Option<&Json>) -> XVal {
-    XVal::Ref(parse_json_form(v).map_or(0, |f| f.0))
 }
 
 fn parse_weapon_sound_slot(args: &[XVal], k: usize) -> Option<u8> {
@@ -941,21 +940,19 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
             zero
         }
-        // EITM; SetObjectEffect takes only an enchantment of the item's kind, a weapon's
-        // on a weapon [observed: gaps6, an apparel enchantment on the pistol is refused;
-        // hypothesis: the kinds].
-        "getobjecteffect" => {
-            let f = form(args, 0).or_else(|| subject.map(|r| base(g, r))).unwrap_or(FormId(0));
-            match g.field_overrides.get(&(f, "EITM/".to_string())) {
-                Some(v) => v.clone(),
-                None => json_form(g.data.record_field(f, "EITM", "")),
-            }
-        }
+        // EITM; SetObjectEffect takes only an enchantment of the item's kind: Apparel (3) on
+        // ARMO, Weapon (2) on WEAP or EXPL [documented: GECK wiki SetObjectEffect; observed:
+        // gaps6, an apparel enchantment on the pistol is refused].
         "setobjecteffect" => {
-            let (Some(f), e) = (form(args, 0), form(args, 1)) else { return Some(Ok(zero)) };
-            let want = if g.data.sig(f) == Some(*b"WEAP") { 2 } else { 3 };
-            if e.is_none_or(|e| g.data.enchantment_types.get(&e) == Some(&want)) {
-                g.field_overrides.insert((f, "EITM/".into()), XVal::Ref(e.map_or(0, |e| e.0)));
+            if let Some(f) = form(args, 0) {
+                let effect = match args.get(1) {
+                    None | Some(XVal::Ref(0)) => Some(None),
+                    Some(XVal::Num(x)) if *x == 0.0 => Some(None),
+                    Some(_) => form(args, 1).map(Some),
+                };
+                if let Some(effect) = effect {
+                    g.set_object_effect(f, effect);
+                }
             }
             zero
         }
@@ -1562,7 +1559,11 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         "setworldspaceimagespace" => {
             if let (Some(w), Some(i)) = (form(args, 0), form(args, 1)) {
                 if g.data.sig(g.unclone(w)) == Some(*b"WRLD") && g.data.sig(g.unclone(i)) == Some(*b"IMGS") {
-                    g.field_overrides.insert((w, "INAM/".into()), XVal::Ref(i.0));
+                    let next = XVal::Ref(i.0);
+                    let prev = g.field_overrides.insert((w, "INAM/".into()), next.clone());
+                    if prev != Some(next) {
+                        g.traits.note_image_space_change();
+                    }
                 }
             }
             zero
@@ -1684,6 +1685,9 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let (text, icon, sound) = split_styled(&text(args, 1));
             if let Some(s) = sound.and_then(|s| g.data.by_edid(&s)) {
                 g.ask_sound(crate::sound::SoundRequest { sound: s, at: None, system: true, id: 0, point: None });
+            }
+            if !text.trim().is_empty() {
+                g.count_corner_message();
             }
             g.emit(crate::trace::EventKind::NoteShown { text, icon, seconds });
             zero

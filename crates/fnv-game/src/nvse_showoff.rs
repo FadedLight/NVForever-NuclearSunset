@@ -13,6 +13,16 @@ use fnv_sim::FormId;
 /// The events' names as SetEventHandler takes them, lower case.
 pub const ON_ADD: &str = "showoff:onadd";
 pub const ON_EXPLOSION_HIT: &str = "showoff:onexplosionhit";
+pub const ON_PRE_SCRIPTED_ACTIVATE: &str = "showoff:onprescriptedactivate";
+pub const ON_PRE_ACTIVATE_INVENTORY_ITEM: &str = "showoff:onpreactivateinventoryitem";
+pub const ON_PRE_ACTIVATE_INVENTORY_ITEM_ALT: &str = "showoff:onpreactivateinventoryitemalt";
+pub const ON_POV_CHANGE: &str = "showoff:onpovchange";
+pub const ON_COMPLETE_OBJECTIVE: &str = "showoff:oncompleteobjective";
+pub const ON_DISPLAY_OBJECTIVE: &str = "showoff:ondisplayobjective";
+pub const ON_WEAPON_UNHOLSTER: &str = "showoff:onweaponunholster";
+
+/// The Fists weapon base form [observed: FalloutNV.esm WEAP 000001F4, EDID Fists].
+const FISTS: FormId = FormId(0x1F4);
 
 #[derive(Debug, Default)]
 pub struct ShowOffState {
@@ -62,6 +72,9 @@ pub struct ShowOffState {
     /// a save writes that one (`Game::snapshot`); SetOwnership or SetCellOwnership on the
     /// target drops the entry [documented: SetOwnershipTemp, session persistent].
     pub temp_owners: std::collections::HashMap<FormId, Option<FormId>>,
+    /// Re-entrancy guard while `ShowOff:OnPreActivateInventoryItem[Alt]` handlers run,
+    /// so a handler calling `EquipItem` / `UseAidItem` does not recurse infinitely [design].
+    pub in_pre_activate_item: bool,
 }
 
 fn num(args: &[XVal], k: usize, dflt: f64) -> f64 {
@@ -108,6 +121,199 @@ impl Game<'_> {
     pub fn explosion_hit_damage(&mut self, explosion: FormId, target: FormId) -> Option<f64> {
         let damage = f64::from(self.explosion_traits(explosion)?.damage);
         Some(self.explosion_hit(target, damage))
+    }
+
+    /// Whether any `ShowOff:OnPreActivateInventoryItem` or
+    /// `ShowOff:OnPreActivateInventoryItemAlt` handler is registered.
+    pub fn has_pre_activate_inventory_handlers(&self) -> bool {
+        self.handled(ON_PRE_ACTIVATE_INVENTORY_ITEM)
+            || self.handled(ON_PRE_ACTIVATE_INVENTORY_ITEM_ALT)
+    }
+
+    /// `ShowOff:OnPreActivateInventoryItem` followed by
+    /// `ShowOff:OnPreActivateInventoryItemAlt` before a player inventory, hotkey,
+    /// quick-use, or stats-page item activation. An explicit numeric `SetFunctionValue 0`
+    /// prevents vanilla activation (sticky across handlers). Free when no handlers are
+    /// registered. See `docs/spec-notes/preactivation-events.md`.
+    pub fn pre_activate_inventory_item(
+        &mut self,
+        actor: FormId,
+        item: FormId,
+        key: i32,
+        equipping: bool,
+    ) -> bool {
+        if self.showoff.in_pre_activate_item || !self.has_pre_activate_inventory_handlers() {
+            return true;
+        }
+        self.showoff.in_pre_activate_item = true;
+        let inv_ref = self.temp_ref(actor, item);
+        let mut allowed = true;
+        if self.handled(ON_PRE_ACTIVATE_INVENTORY_ITEM) {
+            allowed = self.dispatch_pre_event(
+                "ShowOff:OnPreActivateInventoryItem",
+                Some(actor),
+                Some(actor),
+                allowed,
+                |allowed| {
+                    vec![
+                        XVal::Ref(item.0),
+                        XVal::Ref(inv_ref.0),
+                        XVal::Num(if allowed { 1.0 } else { 0.0 }),
+                        XVal::Num(f64::from(key)),
+                    ]
+                },
+            );
+        }
+        if self.handled(ON_PRE_ACTIVATE_INVENTORY_ITEM_ALT) {
+            allowed = self.dispatch_pre_event(
+                "ShowOff:OnPreActivateInventoryItemAlt",
+                Some(actor),
+                Some(actor),
+                allowed,
+                |allowed| {
+                    vec![
+                        XVal::Ref(item.0),
+                        XVal::Ref(inv_ref.0),
+                        XVal::Num(if allowed { 1.0 } else { 0.0 }),
+                        XVal::Num(f64::from(key)),
+                        XVal::Num(if equipping { 1.0 } else { 0.0 }),
+                    ]
+                },
+            );
+        }
+        self.showoff.in_pre_activate_item = false;
+        allowed
+    }
+
+    /// `ShowOff:OnPreActivateInventoryItemAlt` for scripted `EquipItem` / `UseAidItem`.
+    /// Free when no `ShowOff:OnPreActivateInventoryItemAlt` handler is registered.
+    pub(crate) fn pre_activate_inventory_item_alt(
+        &mut self,
+        actor: FormId,
+        item: FormId,
+        key: i32,
+        equipping: bool,
+    ) -> bool {
+        if self.showoff.in_pre_activate_item || !self.handled(ON_PRE_ACTIVATE_INVENTORY_ITEM_ALT) {
+            return true;
+        }
+        self.showoff.in_pre_activate_item = true;
+        let inv_ref = self.temp_ref(actor, item);
+        let allowed = self.dispatch_pre_event(
+            "ShowOff:OnPreActivateInventoryItemAlt",
+            Some(actor),
+            Some(actor),
+            true,
+            |allowed| {
+                vec![
+                    XVal::Ref(item.0),
+                    XVal::Ref(inv_ref.0),
+                    XVal::Num(if allowed { 1.0 } else { 0.0 }),
+                    XVal::Num(f64::from(key)),
+                    XVal::Num(if equipping { 1.0 } else { 0.0 }),
+                ]
+            },
+        );
+        self.showoff.in_pre_activate_item = false;
+        allowed
+    }
+
+    /// `ShowOff:OnPreScriptedActivate` before a scripted `Activate` runs its block or
+    /// default action. Calling reference is `target`; arguments are `(actor,
+    /// run_on_activate_block, allowed)` [observed 2026-11-23: Fallout: New Vegas
+    /// 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, 10 official base masters,
+    /// `so_31_pre_scripted_activate_args_veto` / `so_31b_pre_scripted_activate_noveto`:
+    /// `Activate Player 0` passes `(0, 1)`, `Activate Player 1` passes `(1, 1)`, and
+    /// `SetFunctionValue 0` vetoes pickup; no DLL or source consulted].
+    /// See `docs/spec-notes/preactivation-events.md`.
+    pub(crate) fn pre_scripted_activation_allows(
+        &mut self,
+        actor: FormId,
+        target: FormId,
+        run_block: bool,
+    ) -> bool {
+        if !self.handled(ON_PRE_SCRIPTED_ACTIVATE) {
+            return true;
+        }
+        self.dispatch_pre_event(
+            "ShowOff:OnPreScriptedActivate",
+            Some(target),
+            Some(actor),
+            true,
+            |allowed| {
+                vec![
+                    XVal::Ref(actor.0),
+                    XVal::Num(if run_block { 1.0 } else { 0.0 }),
+                    XVal::Num(if allowed { 1.0 } else { 0.0 }),
+                ]
+            },
+        )
+    }
+
+    /// `ShowOff:OnPOVChange`, fired when the player's camera perspective transitions
+    /// between first-person (`1`) and third-person (`0`) [documented: GECK wiki
+    /// ShowOff:OnPOVChange].
+    pub(crate) fn showoff_on_pov_change(&mut self, first_person: bool) {
+        if !self.handled(ON_POV_CHANGE) {
+            return;
+        }
+        self.dispatch_event(
+            "ShowOff:OnPOVChange",
+            vec![XVal::Num(if first_person { 1.0 } else { 0.0 })],
+            None,
+        );
+    }
+
+    /// `ShowOff:OnDisplayObjective`, fired when a quest objective transitions from
+    /// hidden to displayed [documented: GECK wiki ShowOff:OnDisplayObjective].
+    /// Arguments are `(quest, objective_index)`; calling reference is `None`
+    /// [hypothesis: transition-only dispatch, no calling reference, and post-update
+    /// getter visibility]. Free when no handler is registered.
+    pub(crate) fn showoff_on_display_objective(&mut self, quest: FormId, index: i32) {
+        if !self.handled(ON_DISPLAY_OBJECTIVE) {
+            return;
+        }
+        self.dispatch_event(
+            "ShowOff:OnDisplayObjective",
+            vec![XVal::Ref(quest.0), XVal::Num(f64::from(index))],
+            None,
+        );
+    }
+
+    /// `ShowOff:OnCompleteObjective`, fired when a quest objective transitions from
+    /// incomplete to completed [documented: GECK wiki ShowOff:OnCompleteObjective].
+    /// Arguments are `(quest, objective_index)`; calling reference is `None`
+    /// [hypothesis: transition-only dispatch including `CompleteAllObjectives`, no
+    /// calling reference, and post-update getter visibility]. Free when no handler is
+    /// registered.
+    pub(crate) fn showoff_on_complete_objective(&mut self, quest: FormId, index: i32) {
+        if !self.handled(ON_COMPLETE_OBJECTIVE) {
+            return;
+        }
+        self.dispatch_event(
+            "ShowOff:OnCompleteObjective",
+            vec![XVal::Ref(quest.0), XVal::Num(f64::from(index))],
+            None,
+        );
+    }
+
+    /// `ShowOff:OnWeaponUnholster`, fired when an actor's weapon state transitions from
+    /// holstered (`weapon_out == false`) to drawn (`weapon_out == true`) [documented:
+    /// GECK wiki ShowOff:OnWeaponUnholster]. Calling reference (`GetSelf` / `GetSelfAlt`
+    /// / `0::`) is `actor`; single argument (`"first"` / `1::`) is the actor's equipped
+    /// or engine-held weapon base form, falling back to `Fists` (`0x000001F4`) when
+    /// defined as a `WEAP` in game data else null form `0` [hypothesis: firing at
+    /// weapon-out transition, unarmed fallback form, and `IsWeaponOut` already reading
+    /// `1` during callback]. Free when no handler is registered.
+    pub(crate) fn showoff_on_weapon_unholster(&mut self, actor: FormId) {
+        if !self.handled(ON_WEAPON_UNHOLSTER) {
+            return;
+        }
+        let weapon = crate::functions::items::equipped_weapon(self, actor)
+            .or_else(|| self.extra.get(&actor).and_then(|e| e.held_weapon))
+            .or_else(|| (self.data.sig(FISTS) == Some(*b"WEAP")).then_some(FISTS))
+            .unwrap_or(FormId(0));
+        self.dispatch_event("ShowOff:OnWeaponUnholster", vec![XVal::Ref(weapon.0)], Some(actor));
     }
 
     /// The stop handlers of an aux timer that ran out or was stopped with its event: each

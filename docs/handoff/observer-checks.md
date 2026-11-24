@@ -121,7 +121,9 @@ engine if needed, and delete the item here.
    or it starts alerted. Answers #1341's question.
 3. **Damage numbers.** Ours:
    - Power attacks do 3× standing and 2× moving.
-   - A damage type uses its resistance in place of DR (capped at 85 %, after DT).
+   - A damage type uses its resistance (capped at 85 %, after DT) as well as DR. That DR
+     cuts laser and plasma hits is answered [observed 2026-11-21: damage-armour.md §4,
+     #3218]; whether the resistance itself cuts them is still open.
    - Rippers, Chainsaw and Thermic Lance ignore DT/DR.
    - `fCombatPlayerLimbDamageMult` halves damage to the player's limbs.
    - Difficulty multipliers are 2/1.5/1/0.75/0.5 dealt and the inverse taken, including
@@ -3599,6 +3601,50 @@ already talking takes over at once, same topic or another; nothing is queued or 
      stands sizes it. Not in the list: the original's way is the theft (or a speech or
      barter line not in our list).
 
+## Added 2026-11-23 (two navmeshes of one cell with no link, #3473)
+
+279. **Do actors walk up the stairs to the Sunset Sarsaparilla HQ's prize room?** (P2:
+     #3473, the quest pilot cannot reach Allen Marks' terminal in Legend of the Star;
+     navmesh.md §1.2.) The stairs and the two rooms are a navmesh of their own with no
+     link to the rest of the cell [observed: records]. In the original, with VMS09a at
+     stage 10 or later (the door unlocked) and a follower (Boone, or ED-E), walk from the
+     lobby up the stairs into the prize room and wait there 30 s: does the follower come
+     up after the player, wait at the foot of the stairs, or appear in the room some other
+     way (a jump to the player)? Then wait outside the room and `prid` the follower,
+     `MoveTo` it into the prize room, and see whether it walks back down to the player.
+     If it climbs, the original joins such navmeshes by a rule the records do not hold
+     (say how near the two edges are: 17 to 31 units across, a step of 31 or more); if
+     it does not, the rooms are the player's alone in the original too.
+
+## Added 2026-11-23 (Harland's greeting as the player leaves, #3464)
+
+280. **Does Harland greet a player who leaves his room in the REPCONN basement?** (P2:
+     #3464, a player could not leave; packages.md §3.) His Dialogue package has an
+     activate distance of 1200 and the doorway trigger as its trigger location; a second
+     trigger 370 units out on the way to the stairs calls `ResetAI` on him. In the
+     original, with VMS01 at stage 30 (the ghouls' friend not found yet): talk to Harland
+     and say goodbye, then walk out of his room towards the stairs and on past the reset
+     trigger. Say whether he greets again on the way out (where: in the doorway, past the
+     reset trigger, not at all), whether the player is walked back towards the doorway
+     or held, and whether coming back into the doorway greets again. If he greets past
+     the reset trigger without walking the player back, NVForever's 30 s rule matches;
+     if he never greets on the way out, the activate distance or sight is read
+     differently by the original.
+
+## Added 2026-11-22 (ammo the equipped weapon cannot fire, #3442)
+
+288. **Does the Pip-Boy's Ammo tab dim the ammo the equipped weapon cannot fire?** (P3:
+     #3442, a player expected it; with check 193, the mark on the loaded ammo.) Ours
+     [design]: every row at full strength; the loaded ammo's row carries the equipped
+     square. In the original, carry four kinds of ammo (12 gauge, 20 gauge, 9mm, .357)
+     and equip a 12 gauge shotgun, then open ITEMS, Ammo and take a frame; equip the 9mm
+     pistol and take another; holster the weapon and take a third; equip nothing (fists)
+     and take a fourth. For each frame say which rows are dimmer than the others (sample
+     the text's colour of a full-strength row and of a dim one), which row carries the
+     square, and whether a dim row can still be selected, dropped or put on a hotkey.
+     With a weapon that takes several kinds (12 gauge and its slugs, or the .357 with
+     .38 Special), say whether the other kinds it can fire are at full strength.
+
 ## Added 2026-11-21 (the compass's actor ticks against the strip, #3310)
 
 261. **Where does an actor's tick on the compass end against the strip's line?** (P3;
@@ -3704,6 +3750,33 @@ already talking takes over at once, same topic or another; nothing is queued or 
        world shows through the fill while it flashes and from what condition it starts.
      And what is the slider's default?
 
+## Added 2026-11-21 (the game's own parallax height maps, #2979)
+
+265. **How deep is the original's parallax on shapes with a slot-3 height map, and is it one
+     offset or stepped?** (P2; #2979, nif.md §6 "Parallax height maps", pbr-materials.md
+     "The game's own height maps".) What NVForever implements since #2979 [design]: a lit
+     shape with BSShaderFlags bit 11 and a slot-3 texture draws it as parallax, on by
+     default, at 0.015 UV units, with relief mapping (at most 8 layers, then 4 refinement
+     steps), the step's divisor held at a view steepness of at least 0.15 (about 81 degrees
+     from the normal; the grazing clamp), no fade with distance, and only on opaque,
+     single-sided, non-decal, lit shapes; cut-outs (alpha-tested shapes) stay flat unless
+     the development switch `NVF_PBR_PARALLAX_MASK=1` is set. Whether the original draws
+     them anything like this is the [hypothesis] this check settles; the GECK wiki calls bit
+     11 alone "pretty weak" [documented: GECK wiki "NIF Shader Properties"]. In the
+     original, take frames of (a) a McCarran flagstone floor and (b) a rubble pile (one of
+     the seven `_p` texture sets nif.md §6 "Normal maps" lists), each at a steep view
+     (looking almost straight down), a shallow one (eye height, the surface running away
+     from the camera) and a grazing one (the eye a few centimetres above the floor, looking
+     along it), close (under 2 m) and far (about 15 m). Compare with NVForever at the same
+     views, once at the default and once with `NVF_GAME_PARALLAX_DEPTH=0` (flat). Read: how
+     far a stone's edge moves between the steep and shallow frames (in texels of the floor
+     texture), whether stones hide the grout behind them at the shallow view (stepped or
+     occlusion mapping) or only slide (a single offset), what the grazing view does (the
+     texture smeared, the relief flattened, or nothing odd), whether the relief is gone in
+     the far frames (a distance fade), whether a cut-out with a height map shows relief, and
+     whether the concrete impact decal shows any. The depth switch (0 to 0.08) and
+     `NVF_PBR_PARALLAX_METHOD=occlusion|relief:<n>` let the default be fitted to the frames.
+
 ## Added 2026-11-21 (the music under the Pip-Boy radio, #3311)
 
 266. **What does the Pip-Boy radio do to the music?** (P2; #3311, audio.md §13.2 item 9,
@@ -3726,6 +3799,37 @@ already talking takes over at once, same topic or another; nothing is queued or 
      altogether, the Pip-Boy still on, does the music come back (ours: yes)? Last, with
      the Radio volume at 0 and a station playing: is the music still turned down (ours:
      no)?
+
+## Added 2026-11-21 (a suitcase lying on a bed, #3323)
+
+267. **Is a suitcase lying on a bed the crosshair's target, from every aim at it?** (P3;
+     #3323, simulation.md §5 crosshair activation.) A player reports the Suitcase
+     0x000AFA24 lying on BedQueenRight 0x000D72C7 in BisonSteve02 can be looted in the
+     original [reported: the player's issue, not captured]. Ours since #3323: a bed's
+     boxes are set aside when one of them wholly holds, along the ray, the box of
+     something the player can activate, entered before the first collision hit; otherwise
+     the nearest box or collision hit wins [design]. Stand beside that bed and sweep the
+     crosshair over the suitcase's lid, its side, its edge against the mattress, a corner
+     hanging over the bed's edge if there is one, and the bare mattress beside it. At each
+     aim write down the HUD prompt (Open Suitcase or the bed's) and what E does (the
+     suitcase's container menu or the bed's sleep/wait menu); log `GetCrosshairRef`
+     separately, as it may name another reference than the prompt. Record which aims give
+     the suitcase and which the bed, without reading a rule into them yet; compare with
+     ours afterwards (aim for aim in the same spot in NVForever).
+
+## Added 2026-11-21 (relief on the landscape's texture layers, #3322)
+
+268. **Does the original draw any parallax or relief on the landscape's texture layers?**
+     (P3; #3322, pbr-materials.md "Terrain layers: parallax".) NVForever's terrain
+     parallax is an addition of its own until this is answered; ours assumes the original
+     draws none, as no landscape texture set is known to name a height texture
+     [hypothesis]. Outside Goodsprings at noon, stand on a stony layer (gravel or rocks
+     painted over the dirt base), look down at about 30 degrees and strafe slowly sideways
+     for a few seconds, then crouch and repeat closer: stones whose painted bumps slide
+     against each other as the view moves say the original draws relief; texels that move
+     rigidly with the ground say it draws none. The data offers none: no LTEX texture set
+     of FalloutNV.esm names a `TX04` map [documented: counted with fnvtool, 2026-11-21;
+     pbr-materials.md "Terrain layers: parallax"].
 
 ## Added 2026-11-21 (a lakelurk standing on a deep lake bed, #2980)
 
@@ -3769,6 +3873,45 @@ already talking takes over at once, same topic or another; nothing is queued or 
        observed: the placed lakelurk again landed on the deep bed.
      Still open: the pose at rest on the bed (standing idle or swim idle) and the
      T-pose question, which need someone at the controls.
+
+## Added 2026-11-21 (Dead Money's hologram colours, #3017)
+
+270. **How does a Dead Money hologram look in each threat state, and does its membrane
+     fade with its flicker?** (P2; #3017, effect-shaders.md §4, §5, §9.) The three shaders
+     (`NVDLC01HologramNeutral` blue, `NVDLC01HologramAttention` yellow,
+     `NVDLC01HologramAggressive` red) are additive membranes with "Edge Effect Inverse"
+     [observed: the maintainer's decode in #3017]. Ours since #3017: the edge darkens the
+     rim instead of adding a pale one, the membrane stays on through SetActorAlpha and
+     fades with the actor's alpha (gone at 0), a threat colour played on a hologram ends
+     its other colour, and a neutral play over a threat colour is not played [hypothesis,
+     each]. In the Sierra Madre casino (or the Villa),
+     take one 1280 x 720 frame of one hostile hologram calm (blue, the player beyond 600
+     units), noticing (yellow, within 600) and attacking (red); then (a) whether the rim
+     of each is darker or brighter than the middle; (b) during a flicker (the hologram
+     blinks out), whether the coloured glow stays visible while the body is gone; (c) after
+     a save loaded with the hologram in combat (its ability script plays the red shader
+     without stopping the blue one), whether one colour shows or a blue-red mix. Ours
+     shows red alone [hypothesis]; (d) after a save loaded with the hologram alerted but
+     not fighting, whether it stays yellow or turns blue about a second later (ours: stays
+     yellow) [hypothesis].
+     **Partly answered 2026-11-22** [observed: the maintainer's run in #3423, base game + all
+     DLC + xNVSE + JIP LN, save `nvfdoc`, `coc NVDLC01Vault`, 1280 x 720; job
+     `o270_holograms`]. No Dead Money save: a hologram (CREA `NVDLC01CrHologramVaultMale`)
+     was placed with `PlaceAtMe` in the Sierra Madre vault and never turned hostile.
+     - **Calm look:** at 200 units pale cyan, about (167, 233, 241) over its pixels; by eye
+       its edges read brighter than its middle, which carries horizontal scan lines.
+       Whether the blue membrane or the model's own texture makes the bright edge was not
+       separated, so it neither confirms nor rules out ours (a darkening edge).
+     - **Yellow and red: not seen.** With `pms` of `NVDLC01HologramAttention` and then
+       `NVDLC01HologramAggressive` (after `sms` of the others) it stayed pale cyan, only
+       dimmer or brighter between frames.
+     - **SetActorAlpha:** at 0.5 unchanged by eye, at 0.1 still plainly visible (about 0.7
+       of its brightness), at 0 nothing drawn and no glow left without the body, also
+       after `sms`. Ours agrees at 0; ours fades the membrane in step with the alpha
+       between, which the 0.1 frame does not show.
+     Still open: (b) the colours during its own flicker, (c) and (d) after a save loaded
+     in combat or alert, and the threat colours; they need a hostile security hologram
+     with its emitter, in the casino or the Villa, from a Dead Money save.
 
 ## Added 2026-11-16 (environment maps on other shapes, #2841)
 
@@ -3996,3 +4139,114 @@ capture setup, so every part of a check that needs an interior is still open.
        neither plant's reading changed. Whether a bullet struck the plant itself was not
        confirmed: the crosshair read no reference at 150 units. These positions are
        meaningful because the same reading followed the grabbed nettles above.
+
+## Added 2026-11-23 (the GOODBYE topic without the Goodbye flag, #3477)
+
+283. **Does a GOODBYE line without the Goodbye flag end the conversation?** (P2; #3477,
+     dialogue.md §5.) Ours since #3477 [hypothesis]: yes, when the line is over, if
+     nothing it links to can be said (none in the data links anywhere). Talk to Keith (NPC
+     1EKeith 000F839C, reference 000F83A5, Aerotech Suite 200, cell
+     AerotechOfficeInterior02) and pick the generic Goodbye at the end of his topic list
+     (INFO 0014E019): does the dialogue menu close after the line, or does his topic list
+     come back? Note also whether the generic Goodbye is offered at all, as his only
+     flagged entry is the game of Caravan. Jerry the Punk (reference 001413BF) has the
+     other line, 0014C483; in Fallout 3, Pronto (Paradise Falls) has 000384CF.
+
+## Added 2026-11-23 (fast travel from an interior, #3434)
+
+285. **Does an interior refuse fast travel, and does CELL DATA bit 2 turn that round?**
+     (P2: #3434; fast-travel.md §2.) Ours: every interior refuses with the map's box and
+     `sNoFastTravelCell`'s text [documented: GECK wiki EnableFastTravel]; with bit 2 set
+     an interior allows travel and an exterior refuses it [hypothesis: "Invert Fast
+     Travel Behavior" on the wiki's GetCellFlag page, against the editor's "Can't Travel
+     From Here"]. No cell of the masters sets the bit, so set it by script.
+     - Needs xNVSE, JIP LN and ShowOff; a save in Goodsprings with no hostile near, the
+       player not over-encumbered. First `EnableFastTravel 1` and `ShowMap` with
+       canTravel 1 on Primm's marker (000CDF46), then `coc GSGeneralStore` (001057F1).
+     - (a) **Unflagged interior**: read `GetCellFlag` 2 and 7 of the cell (expect 0, 0)
+       and `GetPCCanFastTravel`; then open the Pip-Boy's World Map, click Primm, and take
+       a screenshot: the question, or a refusal? If a refusal, its text, whether it is a
+       box with a button or a corner message, and whether the map stays up; compare with
+       `GetGameSetting sNoFastTravelCell`. Expect 0 and that text.
+     - (b) **Flagged interior**: `SetCellFlag GSGeneralStore 2 1`, read both again and
+       click Primm again. Expect 1 and the question; 0 and the refusal mean the bit does
+       not invert. Answer No. If (b) reads as (a), leave by the door, come back with the
+       flag still set and read once more (it may be read only on entry). Clear the flag.
+     - (c) **Flagged exterior**: in Goodsprings read `GetPCCanFastTravel` (expect 1), set
+       the bit on the player's parent cell, read again, click Primm and take a
+       screenshot; clear it. Expect 0 and the same text.
+     - (d) **Fake exterior**: in GSGeneralStore with bit 2 clear, `SetCellFlag
+       GSGeneralStore 7 1` (leave and re-enter if nothing changes) and read
+       `GetPCCanFastTravel`. Ours: 1 [hypothesis]. With Dead Money loaded,
+       `coc NVDLC01stealthTest` (bit 7 in its record) reads the same with no script.
+
+## Added 2026-11-23 (unlit shapes faded by vertex alpha alone, #3443)
+
+286. **Is an unlit shape with a fading vertex alpha, no texture and no NiAlphaProperty
+     see-through?** (P3: #3443; nif.md §6 "Unlit shapes faded by vertex alpha alone".)
+     Ours [hypothesis]: yes, blended by its vertex alpha. Two places in the original:
+     - base game: a bare gurney in the Camp McCarran Concourse (`CampMCTermInt01`,
+       `gurney01.nif`, 000FBA8F at 4032, -616, 18240), from standing height beside it. Its
+       shape `Gurney01:2` is a black sheet of 144 × 64 units lying under it, alpha 0.6 to 0
+       towards the edges. Say whether the floor under the gurney shows a soft dark patch, a
+       hard-edged black rectangle or nothing.
+     - Lonesome Road: the end of the silo lift (`NVDLC04Silo2Elevator`), from -87, 3502,
+       2069 facing 167°. Ride the lift, or play `Right` on
+       `NVDLC04SiloElevatorShaft01Ref` to `06Ref` and enable
+       `NVDLC04SiloElevatorLightsEndREF`. Say whether the cone of light (350 units wide,
+       500 high, from 0, 3126, 2575 down) lets the hall behind it through, how bright it
+       is, and whether it lightens the floor under it.
+
+## Added 2026-11-23 (a thrown Lobber with gravity 0, #3441)
+
+289. **Does a thrown Nuka-grenade arc like a frag grenade?** (P2; #3441, combat-rules.md
+     "A Lobber whose gravity is 0".) Its PROJ (`NVDLC05GrenadeNukaProjectile`, GRA) is a
+     Lobber with gravity 0.0; the frag grenade's (`GrenadeFragProjectile` 000043F9) has
+     1.0. Ours [hypothesis]: a Lobber of 0 falls under the full gravity, so both arcs
+     match at the same speed. On flat open ground (the Goodsprings playground), aim level
+     and throw one of each: does the Nuka-grenade drop and land at about the frag's
+     distance, or fly straight on? Throw a plasma mine (`MinePlasmaProjectile`, also 0)
+     and a frag mine (1.0) the same way and say whether they land at the same distance.
+
+## Added 2026-11-23 (the meal on the table eating idles, #3610)
+
+290. **Where is the plate of a table eating idle?** (P3; #3610, idles.md §10 "Objects
+     hung from the accumulation root".) Ours [hypothesis]: `aogenericmeal.nif` hangs from
+     `Bip01` in its bind pose, so the plate sits about 70 units in front of the seated
+     actor and 71 above the floor. In Primm's NCR tent (cell PrimmTentsHayes), when Lt.
+     Hayes (PrimmHayesREF) sits at the table and plays `SitTableChairEatB` (or
+     `PrimmHayesREF.PlayIdle SitTableChairEatB` once he is seated), say whether a plate
+     of food appears on the table in front of him, and roughly where it sits relative to
+     his chest and to the table top. A student's `aostudenttestpaper.nif` hangs the same
+     way, if one is easier to find.
+
+## Added 2026-11-23 (how long the quest lines stay, #3436)
+
+291. **How long do "Quest added", "Quest completed" and "Location discovered" stay on
+     screen, and how do they come and go?** (P2; #3436, quest-messages.md §5–§6, hud.md
+     "Location discovered".) Ours [design]: each banner 4 s, an objective list 4 s and
+     1.5 s more for each objective after the first, each fading in and out over 0.25 s,
+     the name's letters coming in over 0.6 s; a player found them too fast against the
+     original (#3436). The data does not say: `hud_main_menu.xml` gives the HUD's
+     `menufade` 0.25 and no times for `QuestReminder`, and `fDefaultNoticeTextDisplayTime`
+     (0.5) is not known to apply. Record at 60 fps, from the first frame a line shows to
+     the last: (a) the first "Quest added" of a new game (Ain't That a Kick in the Head, at
+     Doc Mitchell's); (b) its
+     objective line after the banner, and a list of two or more objectives; (c) "Quest
+     completed"; (d) "Location discovered" with its name and "+10 XP" (walk into
+     Goodsprings Source from the town). For each: when the words appear, when the name
+     has fully come in (and whether it comes letter by letter or fades), when it starts
+     to go and how long the fade lasts, and the gap before the next line.
+
+## Added 2026-11-23 (HasFriendDisposition's friend level, #3615)
+
+292. **At what disposition does HasFriendDisposition turn 1, and towards whom?** (P3;
+     #3615, `crates/fnv-game/src/functions/actor.rs` `FRIEND_DISPOSITION`.) Ours
+     [hypothesis]: 1 when the actor's disposition towards the player is 70 or more. The
+     GECK wiki speaks of a "friend disposition game setting" without naming it, and no
+     GMST in FalloutNV.esm is one. In the console, select an NPC (Sunny Smiles in the
+     Prospector Saloon), `SetDisposition player 100`, then `GetDisposition player` and
+     `HasFriendDisposition`; lower it in steps (`SetDisposition player 80`, 70, 60, 50 ...)
+     and note the lowest value at which it still reads 1. Then `SetDisposition` towards
+     another actor at 100 with the player's at 0: does it read 1 (not towards the player
+     only)?

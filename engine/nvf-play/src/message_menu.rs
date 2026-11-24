@@ -566,4 +566,27 @@ People like you.", &["Ok"]);
             assert!(l.height * px_per_u <= view_px.y - safe.top - safe.bottom, "buttons fit @ {scale}");
         }
     }
+
+    /// `bPopupMenusDontMoveCursor`: opening a popup message box leaves the OS window cursor
+    /// position untouched (NVForever never warps the cursor on popup open).
+    #[test]
+    fn opening_a_popup_leaves_the_window_cursor_position_unchanged() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>().add_plugins(MessageMenuPlugin);
+        let mut window = Window::default();
+        let initial = Vec2::new(123.0, 456.0);
+        window.set_cursor_position(Some(initial));
+        let win_entity = app.world_mut().spawn(window).id();
+
+        app.world_mut().resource_mut::<MessagePanel>().set(Some(view(Some("Confirm"), "Proceed?", &["No", "Yes"])));
+        app.update();
+
+        let spawned = app.world_mut().query_filtered::<Entity, With<BoxRoot>>().iter(app.world()).count();
+        assert_eq!(spawned, 1, "popup box spawned");
+        assert_eq!(
+            app.world().get::<Window>(win_entity).unwrap().cursor_position(),
+            Some(initial),
+            "popup open must not warp the cursor"
+        );
+    }
 }

@@ -3372,6 +3372,7 @@ forbid = [
   { text = "failed and will not be tried again", label = "a pipeline that failed for good (a patched lighting or shadow shader that does not compile)" },
   { text = "still being retried after", label = "a pipeline still retried at the cap" },
 ]
+
 [[scenario]]
 name = "light-shadows-switch"
 source = "[design, #3077 review] docs/design/graphics-enhanced.md §3.17 'With the row Off', engine/nvforever/src/light_shadows.rs (`live`, the wind-down) and engine/vendor/bevy_pbr (`HoldLightShadowMaps::active`): the ALC shadows row switched Off and back to Quality while the game runs in Novac at 22:00. Off, the lamps stop casting ('light shadows: off') and the renderer drops the hold (every light's shadow views made again, no static-cache attachment kept); on again, the lamps cast and the static cache composites without a miss, with no rendering or pipeline error either way. Whether the shadows look as before is checked in pictures by hand"
@@ -3417,6 +3418,7 @@ forbid = [
   { text = "failed and will not be tried again", label = "a shadow pipeline that failed for good" },
   { text = "still being retried after", label = "a shadow pipeline still retried at the cap" },
 ]
+
 [[scenario]]
 name = "light-shadows-dlss"
 source = "[design] docs/design/graphics-enhanced.md §3.17 'Soft edges and contact shadows': with --light-shadows=quality and DLSS the lamps take soft edges and contact shadows, and the vendored contact march reads the main pass's viewport (bevy_pbr raymarch.wesl depth_uv_scale): before that, drawn below the output size, it threw hard-edged false shadows that changed as the camera moved (playtest videos 2026-11-18, the Prospector Saloon's porch). The walk along the porch compiles the patched march and draws it without a rendering or pipeline error; the picture is checked by hand"
@@ -6196,6 +6198,7 @@ forbid = [
   { re = 'quick loot: drawn .*overlaps: ', label = "something overlaps" },
   { re = 'quick loot: drawn "Refrigerator" .*keys "E\) Take', label = "the keys stayed English after the language changed" },
 ]
+
 [[scenario]]
 name = "tag-reset-clears"
 source = "[observed 2026-11-06] docs/spec-notes/chargen.md §3: Reset clears the tags the menu opened with, and Done is refused until three are tagged again"
@@ -14270,6 +14273,7 @@ order = [[
   "pause menu: tab Tweaks; selected category",
 ]]
 forbid = [{ re = 'NVF_PLAY_TEST_(SETTINGS|PAUSE_MENU): ("|no switch|\S+ is a (list|slider):)', label = "every aid step is understood" }]
+
 [[scenario]]
 name = "settings-layout-ultrawide"
 source = "#2377: at 3440x1440 (a view 2293 units wide) the settings list is as wide as it may be (1300 units), centred in the room left of the rail, the window twelve lines"
@@ -30533,6 +30537,7 @@ expect = [
   { text = "frame generation: DLSS Frame Generation (NVIDIA, through Streamline;", label = "the row's choice running" },
   { re = 'latency reduction: NVIDIA Reflex through Streamline \(sl\.reflex, eLowLatency\) on the window', label = "latency calls through Streamline's Reflex" },
   { re = 'DLSS-G: options: mode On, 1 generated frame\(s\) per real frame \(at most \d+\), 1280x720, depth and motion 853x480, back buffers left to DLSS-G, user interface recomposition on: eOk', label = "frame generation on in play at 2x" },
+  { re = 'DLSS-G: queue parallelism eBlockNoClientQueues: each frame.s first submit waits on DLSS-G.s inputs fence \(first value [1-9]\d*\)', label = "DLSS-G leaves the game's queue free, the next frame waiting on its inputs fence (docs/design/dlss-frame-generation.md \"Queue parallelism\")" },
   { re = 'DLSS-G: 1\d\.\d s: \d+ real frames, \d+ presented \((1\.[89]|2\.[0-2])\d* per real frame\), status eOk', label = "about two presented per real frame over ten seconds" },
   { re = 'fps counter: FPS \d+ +\(\d+ rendered\) +[\d.]+ ms ', label = "the overlay's FPS row reads the frames shown and the rendered ones apart" },
   { re = 'DLSS: evaluates: ([1-9]\d*) ok, 0 failed', label = "DLSS's evaluates with the shared frame numbers, none failed" },
@@ -36495,4 +36500,67 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error with the row" },
   { text = "failed to process shader", label = "a shader of the light that does not build with the row" },
   { text = "panicked", label = "a panic" },
+]
+
+[[scenario]]
+name = "gpu-occlusion-culling"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; nvforever gpu_occlusion.rs, engine/vendor/README.md bevy#26239): with the experiment NVF_OCCLUSION_CULLING=1 the main camera gets Bevy's two-phase GPU occlusion culling at Novac noon, the depth pyramid is built from the main pass's region and the culling passes compile, without a rendering error. Whether anything visible is culled is checked in screenshots against a run without it (§13)"
+areas = ["renderer", "graphics"]
+paths = [
+  "engine/nvforever/src/gpu_occlusion.rs", "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/depth.rs",
+  "engine/vendor/bevy_core_pipeline/src/mip_generation/experimental/downsample_depth.wesl", "engine/vendor/bevy_pbr/src/render/mesh_preprocess.wesl",
+  "engine/vendor/bevy_render/src/view/mod.rs",
+]
+env = { NVF_OCCLUSION_CULLING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Novac", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 20
+expect = [
+  { text = "occlusion culling: on for the main camera", count = 1, label = "the test aid turns it on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the culling or depth pyramid passes" },
+]
+
+[[scenario]]
+name = "occlusion-culling-row-pick"
+source = "#3783, docs/settings-reference.md occlusion-culling: the Graphics row Occlusion culling is off by default and is read once at the start; turning it on in the page keeps this run as it was (off) and writes the next start's choice. occlusion-culling-row starts in the same home"
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+note = "The home's INI may hold the row from an earlier run: the test aid keeps this run off, Defaults puts the row back to Off, then a click turns it on (as settings-switch-write does)."
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_OCCLUSION_CULLING = "0", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:16", NVF_PLAY_TEST_SETTINGS = "11:page,13:occlusion-culling", NVF_PLAY_TEST_PAUSE_MENU = "12:defaults" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 18
+expect = [
+  { text = "occlusion culling: off", count = 1, label = "the test aid keeps this run off" },
+  { text = "pause menu: settings back to their defaults", label = "Defaults puts the row back to Off" },
+  { text = "settings: occlusion-culling on", label = "the row turned on in the page" },
+]
+order = [["pause menu: settings back to their defaults", "settings: occlusion-culling on"]]
+forbid = [{ text = "occlusion culling: on for the main camera", label = "the run's state changed before the next start" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "occlusion-culling-row"
+source = "#3783, docs/settings-reference.md occlusion-culling: a start in occlusion-culling-row-pick's home reads the saved row and turns the culling on for the main camera"
+note = "runs after occlusion-culling-row-pick in the same home."
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 14
+expect = [{ text = "occlusion culling: on for the main camera", count = 1, label = "the saved row turns it on at the next start" }]
+forbid = [{ text = "occlusion culling: off", label = "the saved row not read" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "gpu-light-clustering"
+source = "docs/design/frame-rate-audit.md §13 (graphics pass 2026-11-24; main.rs, engine/vendor/README.md bevy#25869, bevy#26588): NVF_GPU_CLUSTERING=1 keeps Bevy's GPU light clustering, with its per-view buffers kept from frame to frame, at Goodsprings at night with the town's lamps, without a rendering error (the default stays CPU clustering)"
+areas = ["renderer", "graphics"]
+paths = ["engine/vendor/bevy_pbr/src/cluster/gpu.rs", "engine/vendor/bevy_pbr/src/cluster/mod.rs"]
+env = { NVF_GPU_CLUSTERING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "23"]
+run_seconds = 20
+expect = [
+  { text = "lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)", count = 1, label = "GPU clustering is on" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error in the clustering passes" },
 ]

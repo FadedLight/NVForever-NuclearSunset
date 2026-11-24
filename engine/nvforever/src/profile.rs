@@ -1083,6 +1083,25 @@ pub(crate) fn process_cpu_secs() -> Option<f64> {
     None
 }
 
+/// The processor time the calling thread has used so far, user and kernel, seconds (the
+/// frame-time log's main-thread figure, graphics.rs).
+#[cfg(windows)]
+pub(crate) fn thread_cpu_secs() -> Option<f64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+    let mut t = [FILETIME::default(); 4];
+    // SAFETY: the pseudo handle of the current thread needs no closing; the four out
+    // pointers are to live FILETIMEs.
+    let ok = unsafe { GetThreadTimes(GetCurrentThread(), &mut t[0], &mut t[1], &mut t[2], &mut t[3]) };
+    let secs = |f: &FILETIME| ((u64::from(f.dwHighDateTime) << 32) | u64::from(f.dwLowDateTime)) as f64 * 1e-7;
+    (ok != 0).then(|| secs(&t[2]) + secs(&t[3]))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn thread_cpu_secs() -> Option<f64> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

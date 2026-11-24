@@ -378,7 +378,7 @@ impl<'a> Game<'a> {
             if *id != r {
                 break;
             }
-            if key.eq_ignore_ascii_case(sequence) {
+            if crate::nvse_anim::same(key, sequence) {
                 if let Some(clean) = sanitize_anim_frequency(freq) {
                     return Some(clean);
                 }
@@ -627,8 +627,15 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // only [design]).
         // [decision: only drawn objects' sequences are told by the engine; an actor's
         // animation files are not, so an actor's unset sequence is -1]
+        // "*" is a setter-only wildcard and is not a queryable sequence name: querying "*"
+        // returns -1.0 even after `SetAnimSequenceFrequency "*" 1.5` [observed: Fallout: New
+        // Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse`
+        // (`0x00103DF9`), 10 official base masters, `w4c_b1_22_sound3d_anim_freq`].
         "getanimsequencefrequency" | "getanimseqfreq" => {
             let (Some(r), Some(s)) = (subject, text(args, 0)) else { return Some(Ok(zero)) };
+            if s == "*" {
+                return Some(Ok(XVal::Num(-1.0)));
+            }
             let lower = s.to_ascii_lowercase();
             let has = g.other.jip14.sequences.get(&r).is_some_and(|n| n.contains(&lower));
             XVal::Num(match g.anim_frequency(r, &s) {
@@ -642,6 +649,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "setanimsequencefrequency" | "setanimseqfreq" => {
             let (Some(r), Some(s), Some(f)) = (subject, text(args, 0), num(args, 1)) else { return Some(Ok(zero)) };
             let Some(freq) = sanitize_anim_frequency(f.max(0.0) as f32) else { return Some(Ok(zero)) };
+            g.flush_script_sequence_clocks(r);
             g.other.jip14.anim_freq.insert((r, s.to_ascii_lowercase()), freq);
             zero
         }

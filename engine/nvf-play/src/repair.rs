@@ -240,6 +240,8 @@ pub(crate) struct RowView {
     pub(crate) icon: Option<String>,
     /// ("DAM", now, after) or ("DT", now, after).
     pub(crate) stat: Option<(&'static str, i32, i32)>,
+    /// Resolved ySI tag/icon/template when ySI is active (`None` otherwise).
+    pub(crate) ysi: Option<fnv_game::ui_ysi::YsiItemDisplay>,
 }
 
 /// Everything the menu shows: drawn again when it changes.
@@ -273,6 +275,7 @@ fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, combat: Option<&cra
             settings.cost_mult *= fnv_game::tweaks::barter_repair_factor(off, barter);
         }
         let caps = rt.game.world.item_count(FormId::PLAYER_REF, CAPS).unwrap_or(0);
+        let ysi_on = rt.game.ysi_active();
         let groups: Vec<(FormId, Extra, i32)> = rt.game.world.inventory_mut(FormId::PLAYER_REF).map(|i| i.groups().collect()).unwrap_or_default();
         let mut rows = Vec::new();
         for (item, extra, count) in groups {
@@ -306,7 +309,8 @@ fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, combat: Option<&cra
             });
             let name = crate::menu::model::display_name(forms, item);
             let label = if count > 1 { format!("{name} ({count})") } else { name.clone() };
-            rows.push(RowView { item, extra, count, name, label, condition, quote, ready, icon: it.icon.clone(), stat });
+            let ysi = ysi_on.then(|| rt.game.ysi_item_display(item)).flatten();
+            rows.push(RowView { item, extra, count, name, label, condition, quote, ready, icon: it.icon.clone(), stat, ysi });
         }
         // Those that can be repaired first [observed], by name within each part [design].
         rows.sort_by(|a, b| b.ready.cmp(&a.ready).then_with(|| a.label.cmp(&b.label)).then(a.condition.total_cmp(&b.condition)));
@@ -539,9 +543,12 @@ fn wrapped(p: &mut ChildSpawnerCommands, f: &Face, s: &str, x: f32, top: f32, wi
     }
 }
 
+/// Width reserved for a ySI row icon when ySI is active (0 in vanilla).
+const YSI_ICON_ADVANCE: f32 = 30.0;
+
 /// A row's height: its name's lines and the padding (the barter menu's rule).
-fn row_height(f: &Face, label: &str) -> f32 {
-    crate::menu::look::row_height(f.font.lines(label, Some(NAME_WRAP)).len().max(1))
+fn row_height(f: &Face, label: &str, wrap: f32) -> f32 {
+    crate::menu::look::row_height(f.font.lines(label, Some(wrap)).len().max(1))
 }
 
 fn at(x: f32, y: f32, w: f32, h: f32) -> Node {
@@ -571,8 +578,8 @@ fn card(p: &mut ChildSpawnerCommands, f: &Face, x: f32, y: f32, title: &str, val
 
 /// Which rows show: from the first shown, moved as little as keeps the chosen one in
 /// view, as many as fit the list's height.
-fn window(look: &RepairLook, v: &View) -> std::ops::Range<usize> {
-    let heights: Vec<f32> = v.rows.iter().map(|r| row_height(&look.row, &r.label)).collect();
+fn window(look: &RepairLook, v: &View, wrap: f32) -> std::ops::Range<usize> {
+    let heights: Vec<f32> = v.rows.iter().map(|r| row_height(&look.row, &r.label, wrap)).collect();
     let mut first = v.first.min(v.selected);
     loop {
         let mut used = 0.0;
@@ -596,6 +603,21 @@ fn spawn(commands: &mut Commands, look: &mut RepairLook, v: &View, data: Option<
     let arrow = look.pictures.picture("interface\\shared\\arrow\\repair_arrow_down.dds", data, images, bc);
     let chosen = v.rows.get(v.selected);
     let icon = chosen.and_then(|r| r.icon.as_deref()).and_then(|i| look.pictures.picture(i, data, images, bc));
+    let has_ysi = v.rows.iter().any(|r| r.ysi.is_some());
+    let icon_advance = if has_ysi { YSI_ICON_ADVANCE } else { 0.0 };
+    let name_x = NAME_X + icon_advance;
+    let name_wrap = NAME_WRAP - icon_advance;
+    let visible = window(look, v, name_wrap);
+    let row_icons: Vec<Option<crate::interface::Picture>> = visible
+        .clone()
+        .map(|i| {
+            v.rows[i]
+                .ysi
+                .as_ref()
+                .and_then(|d| d.icon.as_deref())
+                .and_then(|p| look.pictures.picture(p, data, images, bc))
+        })
+        .collect();
     commands.spawn((RepairRoot, Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, GlobalZIndex(crate::interface::TOP_MENU_Z), crate::interface::top_menu_backing())).with_children(|root| {
         root.spawn(node).with_children(|m| {
             // The headline: "Repair Services", the vendor's skill and the player's caps,
@@ -615,15 +637,19 @@ fn spawn(commands: &mut Commands, look: &mut RepairLook, v: &View, data: Option<
             right(m, &look.row, &caps, 1005.0, 20.0, bright);
             // The list.
             let mut y = LIST_TOP;
-            for i in window(look, v) {
+            for (slot, i) in visible.enumerate() {
                 let r = &v.rows[i];
-                let h = row_height(&look.row, &r.label);
+                let h = row_height(&look.row, &r.label, name_wrap);
                 let (line, fill) = highlight_colors();
                 let on = i == v.selected;
                 let c = if r.ready { bright } else { dim };
+                let ysi_pic = &row_icons[slot];
                 let n = Node { border: UiRect::all(u(LINE)), ..at(ROW_X, y, ROW_WIDTH + 30.0, h) };
                 m.spawn((Button, RepairButton::Row(i), n, BorderColor::all(if on { line } else { Color::NONE }), BackgroundColor(if on { fill } else { Color::NONE }))).with_children(|row| {
-                    wrapped(row, &look.row, &r.label, NAME_X, NAME_Y, NAME_WRAP, c);
+                    if let Some((img, rect)) = ysi_pic {
+                        row.spawn((at(NAME_X, 15.0, 24.0, 24.0), ImageNode { rect: *rect, color: c, image_mode: NodeImageMode::Stretch, ..ImageNode::new(img.clone()) }));
+                    }
+                    wrapped(row, &look.row, &r.label, name_x, NAME_Y, name_wrap, c);
                     bar(row, BAR, r.condition, c);
                     if r.extra.equipped {
                         let node = at(MARKER.min.x, MARKER.min.y, MARKER.width(), MARKER.height());
@@ -753,7 +779,8 @@ fn draw(
     // Back from the tiles (the file gone, its tree dropped): the hand-built menu is drawn anew.
     let back = std::mem::take(&mut *was_tiled);
     let mut v = view(rt, &mut sim, combat.as_deref(), open);
-    v.first = window(&look, &v).start;
+    let wrap = NAME_WRAP - if v.rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    v.first = window(&look, &v, wrap).start;
     open.first = v.first;
     if open.drawn.as_ref() == Some(&v) && !roots.is_empty() && !back {
         return;
@@ -819,6 +846,7 @@ pub fn report_progress_fixture(step: usize) -> RepairServices {
                 ready: true,
                 icon: None,
                 stat: None,
+                ysi: None,
             })
             .collect(),
         selected: o.selected,

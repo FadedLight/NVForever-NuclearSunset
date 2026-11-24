@@ -127,6 +127,8 @@ pub struct RowShown {
     pub text: String,
     /// Can be made now; there is enough of the ingredient.
     pub ready: bool,
+    /// Resolved ySI tag/icon/template for this row when ySI is active (`None` otherwise).
+    pub ysi: Option<fnv_game::ui_ysi::YsiItemDisplay>,
 }
 
 /// One whole state of the model, as the menu shows it. A plain snapshot, so tests need no world.
@@ -164,14 +166,25 @@ impl Snapshot {
         // The hand-built WG and VAL, and its effects' text; the other cards stay hidden.
         let card = selected.map(|_| Info { weight: v.weight.map(crate::crafting::weight_text), value: v.value.map(|x| x.to_string()), effects: v.effects.clone(), ..Default::default() });
         Snapshot {
-            rows: v.rows.iter().map(|r| RowShown { key: r.recipe, name: r.label.clone(), text: r.label.clone(), ready: r.ready }).collect(),
+            rows: v.rows.iter().map(|r| RowShown { key: r.recipe, name: r.label.clone(), text: r.label.clone(), ready: r.ready, ysi: r.ysi.clone() }).collect(),
             selected,
             filtered: v.filtered,
             filter: open.filter as u32,
             subcategory: v.subcategory.clone(),
             made_at: v.made_at.clone(),
             skill: v.skill.as_ref().zip(v.skill_record.as_ref()).map(|((_, have, need), name)| (format!("{name} ({have}/{need})"), have >= need)),
-            ingredients: v.ingredients.iter().map(|(key, name, have, need)| RowShown { key: *key, name: name.clone(), text: format!("{name} ({have}/{need})"), ready: have >= need }).collect(),
+            ingredients: v
+                .ingredients
+                .iter()
+                .enumerate()
+                .map(|(idx, (key, name, have, need))| RowShown {
+                    key: *key,
+                    name: name.clone(),
+                    text: format!("{name} ({have}/{need})"),
+                    ready: have >= need,
+                    ysi: v.ingredient_ysi.get(idx).cloned().flatten(),
+                })
+                .collect(),
             card,
             icon: v.icon.clone(),
             hints,
@@ -341,6 +354,7 @@ fn write_rows(ui: &mut Ui, path: &str, rows: &mut Vec<RowTile<FormId>>, shown: &
         if let Some(t) = list::child(ui, row.tile, ROW_MARK) {
             ui.set_trait(t, "visible", on(false));
         }
+        fnv_game::ui_ysi::apply_row_icon(ui, &fnv_ui::MemSource::default(), row.tile, r.ysi.as_ref());
     }
 }
 
@@ -545,7 +559,7 @@ mod tests {
     }
 
     fn row(id: u32, ready: bool) -> RowShown {
-        RowShown { key: FormId(id), name: format!("Thing {id}"), text: format!("Thing {id}"), ready }
+        RowShown { key: FormId(id), name: format!("Thing {id}"), text: format!("Thing {id}"), ready, ysi: None }
     }
 
     fn snapshot() -> Snapshot {
@@ -801,5 +815,68 @@ mod tests {
         assert!(!st.built_now(&game.ui_tree).yes());
         game.menu = Some(crate::script::MENU_BARTER);
         assert!(!up(game));
+    }
+
+    #[test]
+    fn ysi_row_icons_attach_to_recipes_and_ingredients_and_noop_without_ysi() {
+        let tagged = fnv_game::ui_ysi::YsiItemDisplay {
+            tag: Some("(d01)".into()),
+            icon: Some("icons\\stimpak.dds".into()),
+            template: fnv_game::ui_ysi::YSI_DEFAULT_TEMPLATE.into(),
+        };
+        let ing_tagged = fnv_game::ui_ysi::YsiItemDisplay {
+            tag: Some("(j01)".into()),
+            icon: Some("icons\\broc.dds".into()),
+            template: fnv_game::ui_ysi::YSI_DEFAULT_TEMPLATE.into(),
+        };
+        let mut s = snapshot();
+        s.rows[0].ysi = Some(tagged);
+        s.ingredients[0].ysi = Some(ing_tagged);
+
+        // Without ySI.xml: complete no-op, zero ySIImage tiles created.
+        let (mut plain_ui, mut plain_st) = (fixture(|x| x), RecipeTiles::default());
+        frame(&mut plain_ui, &s, &mut plain_st);
+        assert!(list::child(&plain_ui, plain_st.rows[RECIPES][0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).is_none());
+        assert!(list::child(&plain_ui, plain_st.rows[INGREDIENTS][0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).is_none());
+
+        // With ySI.xml injected: recipe and ingredient rows both get ySIImage tiles.
+        let ysi_xml = r#"
+<rect name="ySI">
+  <_ySI> 1 </_ySI>
+  <_ySIBlanks> 1 </_ySIBlanks>
+  <_ySIWidth> 24 </_ySIWidth>
+  <_ySIHeight> 24 </_ySIHeight>
+</rect>
+<template name="ySIDefault">
+  <image name="ySIImage">
+    <filename> icons\default.dds </filename>
+    <width> <copy src="ySI" trait="_ySIWidth"/> </width>
+    <height> <copy src="ySI" trait="_ySIHeight"/> </height>
+    <visible> 1 </visible>
+  </image>
+</template>
+<template name="ySINoTag">
+  <image name="ySIImage">
+    <filename> icons\blank.dds </filename>
+    <width> <copy src="ySI" trait="_ySIWidth"/> <onlyif src="ySI" trait="_ySIBlanks"/> </width>
+    <height> <copy src="ySI" trait="_ySIHeight"/> </height>
+    <visible> 1 </visible>
+  </image>
+</template>
+"#;
+        let (mut ui, mut st) = (fixture(|x| x), RecipeTiles::default());
+        let src = MemSource::default().with(fnv_game::ui_ysi::YSI_XML_PATH, ysi_xml);
+        let root = ui.menu(RECIPE_MENU).unwrap();
+        assert!(fnv_game::ui_ysi::publish_for_menu(&mut ui, &src, root, Some(fnv_game::crafting::RECIPE_MENU)));
+        ui.update();
+        frame(&mut ui, &s, &mut st);
+
+        let r0_img = list::child(&ui, st.rows[RECIPES][0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).expect("recipe icon");
+        let r1_img = list::child(&ui, st.rows[RECIPES][1].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).expect("untagged recipe icon");
+        let i0_img = list::child(&ui, st.rows[INGREDIENTS][0].tile, fnv_game::ui_ysi::YSI_IMAGE_TILE).expect("ingredient icon");
+        assert_eq!(ui.tile(r0_img).get("filename").map(Value::text).as_deref(), Some("icons\\stimpak.dds"));
+        assert_eq!(ui.tile(r1_img).get("filename").map(Value::text).as_deref(), Some("icons\\blank.dds"));
+        assert_eq!(ui.tile(i0_img).get("filename").map(Value::text).as_deref(), Some("icons\\broc.dds"));
+        assert_eq!(st.clicked(&ui, r0_img), Some(RecipeTile::Row(0)));
     }
 }

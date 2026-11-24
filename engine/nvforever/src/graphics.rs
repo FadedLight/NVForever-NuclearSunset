@@ -754,7 +754,7 @@ impl Plugin for GraphicsPlugin {
             app.init_resource::<nvf_play::phys_load::PhysLoad>();
             // (time in this period, time counted, slowest, frames counted, cycle index)
             #[allow(clippy::type_complexity)]
-            app.add_systems(Update, move |mut commands: Commands, time: Res<Time<Real>>, mut g: ResMut<Graphics>, sky: Res<SkyState>, store: Res<bevy::diagnostic::DiagnosticsStore>, lights: Query<(Option<&Name>, &DirectionalLight, &bevy::camera::visibility::CascadesVisibleEntities)>, views: Query<Option<&Name>, With<Camera>>, mut acc: Local<(f32, f32, f32, u32, usize)>, mut start_shadows: Local<Option<(bool, f32, crate::sky::CascadeLayout, f32)>>, thin: Res<crate::shadow_thin::ShadowThin>, refs: Query<&nvf_play::RefVisual>, mut phys_load: ResMut<nvf_play::phys_load::PhysLoad>| {
+            app.add_systems(Update, move |mut commands: Commands, time: Res<Time<Real>>, mut g: ResMut<Graphics>, sky: Res<SkyState>, store: Res<bevy::diagnostic::DiagnosticsStore>, lights: Query<(Option<&Name>, &DirectionalLight, &bevy::camera::visibility::CascadesVisibleEntities)>, views: Query<Option<&Name>, With<Camera>>, mut acc: Local<(f32, f32, f32, u32, usize)>, mut cpu_at: Local<Option<(f64, f64)>>, mut start_shadows: Local<Option<(bool, f32, crate::sky::CascadeLayout, f32)>>, thin: Res<crate::shadow_thin::ShadowThin>, refs: Query<&nvf_play::RefVisual>, mut phys_load: ResMut<nvf_play::phys_load::PhysLoad>| {
                 let first = start_shadows.is_none();
                 let start = *start_shadows.get_or_insert((sky.shadows, sky.shadow_distance, sky.shadow_layout, thin.ratio));
                 if first {
@@ -771,6 +771,15 @@ impl Plugin for GraphicsPlugin {
                 }
                 if acc.0 >= ft.every {
                     info!("frame time: {:.2} ms mean, {:.1} ms slowest over {} frames; graphics: {}; sun shadows {}; sun at heading {:.0}, elevation {:.0}", acc.1 * 1e3 / acc.3.max(1) as f32, acc.2 * 1e3, acc.3, g.describe(), if sky.shadows { format!("to {:.0} in {} cascades", sky.shadow_distance, sky.shadow_layout.count()) } else { "off".into() }, sky.sun_heading(), sky.sun_elevation());
+                    // Processor time a frame over the period: this (the main) thread's and the
+                    // whole process's, which a display's frame cap does not hide as it does
+                    // the frame time.
+                    if let (Some(main), Some(all)) = (crate::profile::thread_cpu_secs(), crate::profile::process_cpu_secs()) {
+                        if let Some((m0, a0)) = cpu_at.replace((main, all)) {
+                            let n = f64::from(acc.3.max(1));
+                            info!("cpu time: main thread {:.2} ms a frame, process {:.2} ms a frame", (main - m0) * 1e3 / n, (all - a0) * 1e3 / n);
+                        }
+                    }
                     // The GPU's time in the passes that cost the most (ms, about the last
                     // second's average).
                     let mut passes: Vec<(String, f64)> = store

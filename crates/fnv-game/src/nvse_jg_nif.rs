@@ -169,20 +169,26 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             crate::nif_blocks::node_world(g, r, &text(args, 0)).map_or(zero, |p| XVal::Num(dist(p, hit)))
         }
         // `[block] [pc]`: the bounding sphere in the world, [x, y, z, radius]; the
-        // reference's root without a block [documented]. A block the reference does not
-        // have gives four values too [observed: jgnif.bound on the player], taken as the
-        // root's [hypothesis]. The engine tells it with the tree; an empty array before
-        // [hypothesis].
+        // reference's root without a block [documented]. A missing block name returns a
+        // 4-element array with radius 0.0 [observed: Fallout: New Vegas 1.4.0.525 + xNVSE
+        // 6.4.9 + JohnnyGuitarNVSE 528, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`),
+        // 10 official base masters, `w4c_b3_11b_jgnif_nodes_bounds`: `bndRoot=4(r=72.1),bndMiss=4(r=0.0)`;
+        // hypothesis: center elements are `[0.0, 0.0, 0.0]`, and empty array before 3D tree].
         "getnibound" => {
             let Some(r) = on else { return Some(Ok(XVal::Array(0))) };
             let block = text(args, 0);
             fn bound(g: &mut Game, r: FormId, n: &str) -> Option<[f32; 4]> {
                 crate::nif_blocks::node_and_children(g, r, n).and_then(|(n, _)| n.info.and_then(|i| i.bound))
             }
-            let mut b = if block.is_empty() { None } else { bound(g, r, &block) };
-            if b.is_none() {
-                b = crate::nif_blocks::root_name(g, r).and_then(|n| bound(g, r, &n));
-            }
+            let b = if block.is_empty() {
+                crate::nif_blocks::root_name(g, r).and_then(|n| bound(g, r, &n))
+            } else if let Some(b) = bound(g, r, &block) {
+                Some(b)
+            } else if crate::nif_blocks::root_name(g, r).is_some() {
+                Some([0.0; 4])
+            } else {
+                None
+            };
             match b {
                 Some(b) => list(g, b.iter().map(|x| XVal::Num(f64::from(*x))).collect()),
                 None => list(g, Vec::new()),

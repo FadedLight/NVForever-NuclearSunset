@@ -24,6 +24,7 @@ macro_rules! eprintln {
 }
 
 mod activators;
+mod gpu_occlusion;
 mod fos_start;
 mod reports;
 mod native_crash;
@@ -1967,13 +1968,22 @@ fn main() -> AppExit {
     // Defaults snapshots this command-line/default choice before apply_stored reads the INI.
     .add_plugins(frame_gen::FrameGenPlugin(args.frame_generation.unwrap_or_default()))
     .add_plugins(blit_warm::BlitWarmPlugin)
+    // Bevy's GPU occlusion culling: the Graphics row Occlusion culling, read at the start
+    // (the test aid NVF_OCCLUSION_CULLING overrides it).
+    .add_plugins(gpu_occlusion::GpuOcclusionPlugin { read_ini: play.is_some() })
     // The driver's pipeline cache kept on disk (pipeline_disk_cache.rs).
     .add_plugins(pipeline_disk_cache::PipelineDiskCachePlugin)
     // Lights clustered on the CPU, Bevy's own fallback: its GPU clustering made about six
     // new GPU buffers a frame (10,235 in 30 s at night against 4,060 on the CPU), GPU
     // memory made and freed every frame behind the night stalls (#897; wgpu trace,
     // 2026-10-29).
+    // NVF_GPU_CLUSTERING=1: Bevy's GPU clustering, with its per-view buffers kept from frame
+    // to frame (bevy#25869 and bevy#26588 backported, engine/vendor/README.md).
     .add_systems(Startup, |mut clusters: ResMut<bevy::light::cluster::GlobalClusterSettings>| {
+        if std::env::var("NVF_GPU_CLUSTERING").is_ok_and(|v| v == "1") && clusters.gpu_clustering.is_some() {
+            info!("lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)");
+            return;
+        }
         clusters.gpu_clustering = None;
         info!("lights: clustered on the CPU (GPU clustering made new buffers every frame)");
     })

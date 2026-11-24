@@ -262,10 +262,14 @@ mod tests {
 
     /// [`connect`], with `extra` added to the host's candidates.
     fn connect_with(sim: &mut Sim, host: SocketAddr, guest: SocketAddr, extra: &[Candidate]) -> Option<(SocketAddr, SocketAddr)> {
+        connect_cfg(sim, host, guest, extra, Config::default())
+    }
+
+    fn connect_cfg(sim: &mut Sim, host: SocketAddr, guest: SocketAddr, extra: &[Candidate], cfg: Config) -> Option<(SocketAddr, SocketAddr)> {
         let t0 = Instant::now();
         let mut cands = gather(sim, &[host, guest], t0);
         cands[0].extend_from_slice(extra);
-        let mut agents = [Agent::new(Role::Host, &[host], Config::default()), Agent::new(Role::Guest, &[guest], Config::default())];
+        let mut agents = [Agent::new(Role::Host, &[host], cfg), Agent::new(Role::Guest, &[guest], cfg)];
         for c in &cands[1] {
             agents[0].add_remote(*c);
         }
@@ -492,5 +496,30 @@ mod tests {
         let relay: SocketAddr = "198.51.100.9:47961".parse().unwrap();
         let (h, g) = connect_with(&mut sim, host, guest, &[Candidate::new(Kind::Relayed, relay)]).unwrap();
         assert!(h != relay && g != relay, "{h} {g}");
+    }
+
+    /// Port prediction (phase 5, off by default) reaches a symmetric NAT from a
+    /// port-restricted one, both ways round; symmetric against symmetric still fails.
+    #[test]
+    fn port_prediction_reaches_a_symmetric_nat() {
+        use NatKind::*;
+        let cfg = Config { predict: 8, ..Config::default() };
+        for (h, g, want) in [
+            (Symmetric, PortRestricted, true),
+            (PortRestricted, Symmetric, true),
+            (Symmetric, Restricted, true),
+            (FullCone, Symmetric, true),
+            (Symmetric, Symmetric, false),
+        ] {
+            let mut sim = Sim::new();
+            let (hl, gl) = (sim.add_lan(h), sim.add_lan(g));
+            let (hs, gs) = (sim.add_socket(hl, PORT), sim.add_socket(gl, PORT));
+            assert_eq!(connect_cfg(&mut sim, hs, gs, &[], cfg).is_some(), want, "{h:?} host, {g:?} guest");
+        }
+        // Off, the default: the matrix's answer.
+        let mut sim = Sim::new();
+        let (hl, gl) = (sim.add_lan(Symmetric), sim.add_lan(PortRestricted));
+        let (hs, gs) = (sim.add_socket(hl, PORT), sim.add_socket(gl, PORT));
+        assert!(connect(&mut sim, hs, gs).is_none());
     }
 }

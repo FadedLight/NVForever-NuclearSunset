@@ -94,6 +94,20 @@ pair to connect except these [design: the textbook result]:
 
 Two machines on one LAN connect over the LAN behind any kind.
 
+## Port prediction (off by default)
+
+[design: #3795 section 7.2's phase 5; the idea is the common one of guessing a symmetric NAT's
+next port, our own rule for when and how far]
+
+- A symmetric NAT gives every new destination a new public port, often the next free one.
+- When a side's two STUN servers saw two different ports on one address, it is such a NAT.
+  The other side then also probes the N ports above the highest one seen (`Config::predict`;
+  0 turns it off and is the default, because it looks like a port scan to some firewalls).
+- In `natsim`, whose symmetric NAT hands out ports in order, N = 8 connects symmetric
+  against port-restricted (both ways round). Symmetric against symmetric still fails: each
+  probe to a new guessed port opens yet another mapping on the prober's own NAT. That case is
+  left to the peer relay and `nvf-relay`.
+
 ## Hosted relay (`nvf-relay`)
 
 [design: #3795 section 9, option 2; issue #3880. Our own format, not any standard's]

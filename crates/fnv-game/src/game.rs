@@ -1463,6 +1463,9 @@ pub struct Game<'a> {
     pub showoff: crate::nvse_showoff::ShowOffState,
     /// Mods' INI and other files (`crate::mod_files`).
     pub mod_files: crate::mod_files::ModFiles,
+    /// Runtime settings loaded from `Data\NVSE\Plugins\kNVSE.ini` (`crate::knvse_ini`,
+    /// not saved in snapshots).
+    pub knvse_ini: crate::knvse_ini::KnvseIni,
     pub(crate) ysi_filename: crate::ysi_filename::State,
     /// SUP batch 6's state: the mouse, the cursor, the debug texts, the lockpick menu …
     /// (`crate::nvse_sup6`; the engine fills and takes it).
@@ -2696,6 +2699,7 @@ impl<'a> Game<'a> {
             hud: Default::default(),
             showoff: Default::default(),
             mod_files: Default::default(),
+            knvse_ini: crate::knvse_ini::KnvseIni::load(),
             ysi_filename: Default::default(),
             sup: Default::default(),
             lu3: Default::default(),
@@ -4659,6 +4663,7 @@ impl<'a> Game<'a> {
     /// ran, each after the previous one was closed, layer5-captures.md §10.1–10.2].
     pub fn tick(&mut self) {
         self.frame += 1;
+        self.sync_knvse_ini();
         self.temp_refs.clear();
         self.sync_player_level();
         // JIP's SetGameMainLoopCallback functions due this frame (task J6), then xNVSE's

@@ -42,16 +42,17 @@ pub struct Roots {
 static ROOTS: Mutex<Option<Roots>> = Mutex::new(None);
 static ROOTS_GEN: AtomicU64 = AtomicU64::new(0);
 
-/// Monotonic revision bumped whenever process-wide file roots change.
-pub(crate) fn roots_generation() -> u64 {
-    ROOTS_GEN.load(Ordering::Relaxed)
+/// Monotonic revision bumped whenever process-wide file roots change (`set_roots` /
+/// `update_roots`).
+pub fn roots_generation() -> u64 {
+    ROOTS_GEN.load(Ordering::Acquire)
 }
 
 /// Set the roots for the games made after this (the engine, `fnvtool --config`).
 pub fn set_roots(r: Roots) {
     if let Ok(mut g) = ROOTS.lock() {
         *g = Some(r);
-        ROOTS_GEN.fetch_add(1, Ordering::Relaxed);
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -60,7 +61,7 @@ pub fn set_roots(r: Roots) {
 pub fn update_roots(f: impl FnOnce(&mut Roots)) {
     if let Ok(mut g) = ROOTS.lock() {
         f(g.get_or_insert_with(Roots::default));
-        ROOTS_GEN.fetch_add(1, Ordering::Relaxed);
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 

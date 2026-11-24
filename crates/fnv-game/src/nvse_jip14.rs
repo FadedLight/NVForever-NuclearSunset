@@ -378,7 +378,7 @@ impl<'a> Game<'a> {
             if *id != r {
                 break;
             }
-            if key.eq_ignore_ascii_case(sequence) {
+            if crate::nvse_anim::same(key, sequence) {
                 if let Some(clean) = sanitize_anim_frequency(freq) {
                     return Some(clean);
                 }
@@ -649,6 +649,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "setanimsequencefrequency" | "setanimseqfreq" => {
             let (Some(r), Some(s), Some(f)) = (subject, text(args, 0), num(args, 1)) else { return Some(Ok(zero)) };
             let Some(freq) = sanitize_anim_frequency(f.max(0.0) as f32) else { return Some(Ok(zero)) };
+            g.flush_script_sequence_clocks(r);
             g.other.jip14.anim_freq.insert((r, s.to_ascii_lowercase()), freq);
             zero
         }

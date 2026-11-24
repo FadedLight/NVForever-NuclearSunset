@@ -4714,6 +4714,8 @@ impl<'a> Game<'a> {
         self.world.set_power_armor_training(self.player.power_armor || self.tweaks.power_armor_needs_no_training);
         // The player's Equip Broken Items tweak [design: docs/design/tweaks.md].
         self.world.set_player_equips_broken(self.tweaks.equip_broken_items);
+        // The player's No Encounter Zone Level Lock tweak [design: docs/design/tweaks.md].
+        self.world.set_no_lock_encounter_zone_levels(self.tweaks.no_lock_encounter_zone_levels);
         // Cannibal's and Mister Sandman's acts that are over (`crate::activate_choices`).
         if !self.perk_acts.is_empty() {
             self.finish_perk_acts();

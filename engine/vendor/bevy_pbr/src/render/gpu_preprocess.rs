@@ -36,20 +36,19 @@ use bevy_math::Vec4;
 use bevy_platform::collections::HashMap;
 use bevy_render::{
     batching::gpu_preprocessing::{
-        clear_scene_unpacking_buffers, BatchedInstanceBuffers, BinUnpackingMetadataIndex,
-        BuildIndirectParametersMetadata, GpuBinMetadata, GpuBinUnpackingMetadata,
-        GpuOcclusionCullingWorkItemBuffers, GpuPreprocessingMode, GpuPreprocessingSupport,
-        GpuUniformAllocationMetadata, IndirectBatchSet, IndirectParametersBuffers,
+        clear_scene_unpacking_buffers, BatchedInstanceBuffers, BuildIndirectParametersMetadata,
+        GpuBinMetadata, GpuOcclusionCullingWorkItemBuffers, GpuPreprocessingMode,
+        GpuPreprocessingSupport, GpuSceneUnpackingJob, IndirectBatchSet, IndirectParametersBuffers,
         IndirectParametersBuildJob, IndirectParametersBuildJobs, IndirectParametersIndexed,
         IndirectParametersMetadata, IndirectParametersNonIndexed,
         LatePreprocessWorkItemIndirectParameters, PreprocessWorkItem, PreprocessWorkItemBuffers,
-        SceneUnpackingBuffers, SceneUnpackingBuffersKey, SceneUnpackingJob,
-        UniformAllocationMetadataIndex, UntypedPhaseBatchedInstanceBuffers,
+        SceneUnpackingBuffers, SceneUnpackingBuffersKey, SceneUnpackingClassBuffers,
+        UntypedPhaseBatchedInstanceBuffers,
         UntypedPhaseIndirectParametersBuffers,
     },
     diagnostic::RecordDiagnostics as _,
     occlusion_culling::OcclusionCulling,
-    render_phase::{GpuRenderBinnedMeshInstance, UNIFORM_ALLOCATION_WORKGROUP_SIZE},
+    render_phase::GpuRenderBinnedMeshInstance,
     render_resource::{
         binding_types::{storage_buffer, storage_buffer_read_only, texture_2d, uniform_buffer},
         BindGroup, BindGroupEntries, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
@@ -425,28 +424,26 @@ pub struct BinUnpackingBindGroups(
 /// combination.
 #[derive(Clone, Default)]
 pub struct ViewPhaseBinUnpackingBindGroups {
-    /// The bind groups for the indexed meshes, one for each batch set.
+    /// The bind group for the indexed meshes (NVForever merged scene
+    /// unpacking: one for all batch sets, or none).
     indexed: Vec<ViewPhaseBinUnpackingBindGroup>,
-    /// The bind groups for the non-indexed meshes, one for each batch set.
+    /// The bind group for the non-indexed meshes (one for all batch sets, or
+    /// none).
     non_indexed: Vec<ViewPhaseBinUnpackingBindGroup>,
     /// The cached bind groups for the indexed meshes, keyed by bound buffers.
-    indexed_cache: SceneUnpackingBindGroupCache<5>,
+    indexed_cache: SceneUnpackingBindGroupCache<6>,
     /// The cached bind groups for the non-indexed meshes, keyed by bound buffers.
-    non_indexed_cache: SceneUnpackingBindGroupCache<5>,
+    non_indexed_cache: SceneUnpackingBindGroupCache<6>,
 }
 
 /// The bind group for the `unpack_bins` shader for a single combination of
 /// view, phase, and mesh indexed-ness.
 #[derive(Clone)]
 pub struct ViewPhaseBinUnpackingBindGroup {
-    /// The index of the metadata in the
-    /// [`SceneUnpackingBuffers::bin_unpacking_metadata`] buffer.
-    pub metadata_index: BinUnpackingMetadataIndex,
     /// The actual shader bind group.
     pub bind_group: BindGroup,
-    /// The number of mesh instances of the appropriate type (indexed or
-    /// non-indexed) for this batch set.
-    pub mesh_instance_count: u32,
+    /// The number of workgroups to dispatch, for all the batch sets.
+    pub workgroup_count: u32,
 }
 
 /// A resource, part of the render world, that stores all the bind groups for
@@ -463,31 +460,33 @@ pub struct UniformAllocationBindGroups(
 /// phase) combination.
 #[derive(Clone, Default)]
 pub struct ViewPhaseUniformAllocationBindGroups {
-    /// The bind groups for the indexed meshes, one for each batch set.
+    /// The bind group for the indexed meshes (NVForever merged scene
+    /// unpacking: one for all batch sets, or none).
     indexed: Vec<ViewPhaseUniformAllocationBindGroup>,
-    /// The bind groups for the non-indexed meshes, one for each batch set.
+    /// The bind group for the non-indexed meshes (one for all batch sets, or
+    /// none).
     non_indexed: Vec<ViewPhaseUniformAllocationBindGroup>,
     /// The cached bind groups for the indexed meshes, keyed by bound buffers.
-    indexed_cache: SceneUnpackingBindGroupCache<4>,
+    indexed_cache: SceneUnpackingBindGroupCache<5>,
     /// The cached bind groups for the non-indexed meshes, keyed by bound buffers.
-    non_indexed_cache: SceneUnpackingBindGroupCache<4>,
+    non_indexed_cache: SceneUnpackingBindGroupCache<5>,
 }
 
 /// The bind group for the `allocate_uniforms` shader for a single combination
 /// of view, phase, and mesh indexed-ness.
 #[derive(Clone)]
 pub struct ViewPhaseUniformAllocationBindGroup {
-    /// The index of the metadata in the
-    /// [`SceneUnpackingBuffers::uniform_allocation_metadata`] buffer.
-    pub metadata_index: UniformAllocationMetadataIndex,
     /// The actual shader bind group.
     pub bind_group: BindGroup,
-    /// The total number of bins in this batch set.
-    pub bin_count: u32,
+    /// The number of workgroups each step dispatches, for all the batch sets.
+    pub workgroup_count: u32,
+    /// Whether some batch set has more than one 256-bin chunk, so that the
+    /// global scan and fan steps run.
+    pub multi_chunk: bool,
 }
 
-/// Bind groups are keyed by every bound buffer. Metadata offsets and dispatch
-/// counts are deliberately not cached: both can change without reallocating a buffer.
+/// Bind groups are keyed by every bound buffer. Dispatch counts are
+/// deliberately not cached: they can change without reallocating a buffer.
 #[derive(Clone)]
 struct SceneUnpackingBindGroupCache<const N: usize> {
     entries: HashMap<[BufferId; N], (BindGroup, u8)>,
@@ -612,12 +611,12 @@ mod scene_unpacking_cache_tests {
 
     #[test]
     fn bin_unpacking_cache_reuses_invalidates_and_evicts() {
-        exercise_cache::<5>();
+        exercise_cache::<6>();
     }
 
     #[test]
     fn uniform_allocation_cache_reuses_invalidates_and_evicts() {
-        exercise_cache::<4>();
+        exercise_cache::<5>();
     }
 
     #[test]
@@ -747,21 +746,23 @@ mod scene_unpacking_cache_tests {
     }
 
     #[test]
-    fn metadata_bindings_use_dynamic_offsets() {
-        for entry in [
-            bin_unpacking_bind_group_layout_entries()[0],
-            uniform_allocation_bind_group_layout_entries()[0],
-        ] {
+    fn merged_scene_unpacking_bindings_have_no_dynamic_offsets() {
+        // NVForever merged scene unpacking: one bind group per (view, phase,
+        // mesh indexed-ness), dispatched once, so no binding is offset per batch
+        // set any more.
+        for entry in bin_unpacking_bind_group_layout_entries()
+            .iter()
+            .chain(uniform_allocation_bind_group_layout_entries().iter())
+        {
             assert!(matches!(
                 entry.ty,
                 bevy_render::render_resource::BindingType::Buffer {
-                    has_dynamic_offset: true,
+                    has_dynamic_offset: false,
                     ..
                 }
             ));
         }
-        assert_eq!(size_of::<GpuBinUnpackingMetadata>() % 256, 0);
-        assert_eq!(size_of::<GpuUniformAllocationMetadata>() % 256, 0);
+        assert_eq!(size_of::<GpuSceneUnpackingJob>(), 48);
     }
 }
 
@@ -959,38 +960,34 @@ pub fn allocate_uniforms(
             // Invoke the shader for all batch sets corresponding to indexed
             // meshes and then for all batch sets corresponding to
             // non-indexed meshes.
+            // NVForever merged scene unpacking: one bind group (and one
+            // dispatch per step) for all the batch sets of each mesh
+            // indexed-ness.
             for uniform_allocation_bind_group in phase_uniform_allocation_bind_groups
                 .indexed
                 .iter()
                 .chain(phase_uniform_allocation_bind_groups.non_indexed.iter())
             {
-                // Invoke the local scan (step 1).
-                compute_pass.set_pipeline(uniform_allocation_local_scan_pipeline);
-                compute_pass.set_bind_group(
-                    0,
-                    &uniform_allocation_bind_group.bind_group,
-                    &[uniform_allocation_bind_group
-                        .metadata_index
-                        .uniform_offset()],
-                );
-                let local_scan_workgroup_count = uniform_allocation_bind_group
-                    .bin_count
-                    .div_ceil(UNIFORM_ALLOCATION_WORKGROUP_SIZE);
-                if local_scan_workgroup_count > 0 {
-                    compute_pass.dispatch_workgroups(local_scan_workgroup_count, 1, 1);
+                let workgroup_count = uniform_allocation_bind_group.workgroup_count;
+                if workgroup_count == 0 {
+                    continue;
                 }
 
-                // If there are 256 or fewer draws in this batch, we're
-                // done. Otherwise, perform the other two steps.
-                if local_scan_workgroup_count > 1 {
+                // Invoke the local scan (step 1).
+                compute_pass.set_pipeline(uniform_allocation_local_scan_pipeline);
+                compute_pass.set_bind_group(0, &uniform_allocation_bind_group.bind_group, &[]);
+                compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
+
+                // If every batch set has 256 or fewer draws, we're done.
+                // Otherwise, perform the other two steps.
+                if uniform_allocation_bind_group.multi_chunk {
                     // Invoke the global scan (step 2).
                     compute_pass.set_pipeline(uniform_allocation_global_scan_pipeline);
-                    compute_pass.dispatch_workgroups(1, 1, 1);
+                    compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
 
                     // Perform the fan operation (step 3).
                     compute_pass.set_pipeline(uniform_allocation_fan_pipeline);
-                    let fan_workgroup_count = local_scan_workgroup_count - 1;
-                    compute_pass.dispatch_workgroups(fan_workgroup_count, 1, 1);
+                    compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
                 }
             }
         }
@@ -1070,15 +1067,12 @@ pub fn unpack_bins(
                     .iter()
                     .chain(phase_bin_unpacking_bind_groups.non_indexed.iter())
                 {
-                    compute_pass.set_bind_group(
-                        0,
-                        &bin_unpacking_bind_group.bind_group,
-                        &[bin_unpacking_bind_group.metadata_index.uniform_offset()],
-                    );
-                    let workgroup_count = (bin_unpacking_bind_group.mesh_instance_count as usize)
-                        .div_ceil(WORKGROUP_SIZE);
+                    // NVForever merged scene unpacking: one dispatch for all
+                    // the batch sets of this mesh indexed-ness.
+                    let workgroup_count = bin_unpacking_bind_group.workgroup_count;
                     if workgroup_count > 0 {
-                        compute_pass.dispatch_workgroups(workgroup_count as u32, 1, 1);
+                        compute_pass.set_bind_group(0, &bin_unpacking_bind_group.bind_group, &[]);
+                        compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
                     }
                 }
             }
@@ -2063,23 +2057,28 @@ fn gpu_occlusion_culling_bind_group_layout_entries() -> DynamicBindGroupLayoutEn
 
 /// Creates and returns bind group layout entries for the GPU bin unpacking
 /// shader (`unpack_bins`).
-fn bin_unpacking_bind_group_layout_entries() -> BindGroupLayoutEntries<5> {
+fn bin_unpacking_bind_group_layout_entries() -> BindGroupLayoutEntries<6> {
+    // NVForever merged scene unpacking: the batch sets are read from a storage
+    // array of jobs and a workgroup-to-job table instead of a uniform with a
+    // dynamic offset per batch set.
     BindGroupLayoutEntries::sequential(
         ShaderStages::COMPUTE,
         (
-            // @group(0) @binding(0) var<uniform> bin_unpacking_metadata:
-            // BinUnpackingMetadata;
-            uniform_buffer::<GpuBinUnpackingMetadata>(true),
-            // @group(0) @binding(1) var<storage> binned_mesh_instances:
+            // @group(0) @binding(0) var<storage> jobs:
+            // array<SceneUnpackingJob>;
+            storage_buffer_read_only::<GpuSceneUnpackingJob>(false),
+            // @group(0) @binding(1) var<storage> workgroup_jobs: array<u32>;
+            storage_buffer_read_only::<u32>(false),
+            // @group(0) @binding(2) var<storage> binned_mesh_instances:
             // array<BinnedMeshInstance>;
             storage_buffer_read_only::<GpuRenderBinnedMeshInstance>(false),
-            // @group(0) @binding(2) var<storage, read_write>
+            // @group(0) @binding(3) var<storage, read_write>
             // preprocess_work_items: array<PreprocessWorkItem>;
             storage_buffer::<PreprocessWorkItem>(false),
-            // @group(0) @binding(3) var<storage> bin_metadata:
+            // @group(0) @binding(4) var<storage> bin_metadata:
             // array<GpuBinMetadata>;
             storage_buffer_read_only::<GpuBinMetadata>(false),
-            // @group(0) @binding(4) var<storage>
+            // @group(0) @binding(5) var<storage>
             // bin_index_to_bin_metadata_index: array<u32>;
             storage_buffer_read_only::<u32>(false),
         ),
@@ -2088,19 +2087,21 @@ fn bin_unpacking_bind_group_layout_entries() -> BindGroupLayoutEntries<5> {
 
 /// Creates and returns bind group layout entries for the GPU uniform allocation
 /// shader (`allocate_uniforms`).
-fn uniform_allocation_bind_group_layout_entries() -> BindGroupLayoutEntries<4> {
+fn uniform_allocation_bind_group_layout_entries() -> BindGroupLayoutEntries<5> {
     BindGroupLayoutEntries::sequential(
         ShaderStages::COMPUTE,
         (
-            // @group(0) @binding(0) var<uniform> allocate_uniforms_metadata:
-            // AllocateUniformsMetadata;
-            uniform_buffer::<GpuUniformAllocationMetadata>(true),
-            // @group(0) @binding(1) var<storage> bin_metadata: array<BinMetadata>;
+            // @group(0) @binding(0) var<storage> jobs:
+            // array<SceneUnpackingJob>;
+            storage_buffer_read_only::<GpuSceneUnpackingJob>(false),
+            // @group(0) @binding(1) var<storage> workgroup_jobs: array<u32>;
+            storage_buffer_read_only::<u32>(false),
+            // @group(0) @binding(2) var<storage> bin_metadata: array<BinMetadata>;
             storage_buffer_read_only::<GpuBinMetadata>(false),
-            // @group(0) @binding(2) var<storage, read_write>
+            // @group(0) @binding(3) var<storage, read_write>
             // indirect_parameters_metadata: array<IndirectParametersMetadata>;
             storage_buffer::<IndirectParametersMetadata>(false),
-            // @group(0) @binding(3) var<storage, read_write> fan_buffer:
+            // @group(0) @binding(4) var<storage, read_write> fan_buffer:
             // array<u32>;
             storage_buffer::<u32>(false),
         ),
@@ -3877,6 +3878,9 @@ fn create_build_indirect_parameters_bind_groups(
 
 /// Creates all bind groups needed to run the `unpack_bins` shader for all the
 /// phases for a single view.
+///
+/// NVForever merged scene unpacking: one bind group per (view, phase, mesh
+/// indexed-ness), over the packed buffers of all its batch sets.
 fn create_bin_unpacking_bind_groups(
     bin_unpacking_bind_groups: &mut BinUnpackingBindGroups,
     render_device: &RenderDevice,
@@ -3887,12 +3891,6 @@ fn create_bin_unpacking_bind_groups(
     scene_unpacking_buffers: &SceneUnpackingBuffers,
     view_entity: &RetainedViewEntity,
 ) {
-    let Some(bin_unpacking_metadata_buffer) =
-        scene_unpacking_buffers.bin_unpacking_metadata.buffer()
-    else {
-        return;
-    };
-
     // We run the bin unpacking shader once per phase, so loop over all phases.
     for phase_type_id in indirect_parameters_buffers.keys() {
         // Fetch the buffers we need.
@@ -3933,58 +3931,76 @@ fn create_bin_unpacking_bind_groups(
                 view: *view_entity,
             })
             .or_default();
-        for (work_items, jobs, output, cache, indexed) in [
+        for (work_items, class, output, cache, indexed) in [
             (
                 maybe_indexed_work_item_buffer,
-                &view_phase_bin_unpacking_buffers.indexed_unpacking_jobs,
+                &view_phase_bin_unpacking_buffers.indexed,
                 &mut groups.indexed,
                 &mut groups.indexed_cache,
                 true,
             ),
             (
                 maybe_non_indexed_work_item_buffer,
-                &view_phase_bin_unpacking_buffers.non_indexed_unpacking_jobs,
+                &view_phase_bin_unpacking_buffers.non_indexed,
                 &mut groups.non_indexed,
                 &mut groups.non_indexed_cache,
                 false,
             ),
         ] {
-            if let Some(work_items) = work_items {
-                output.extend(jobs.iter().map(|job| {
-                    create_bin_unpacking_bind_group(
-                        render_device,
-                        preprocess_pipelines,
-                        pipeline_cache,
-                        job,
-                        bin_unpacking_metadata_buffer,
-                        work_items,
-                        indexed,
-                        cache,
-                    )
-                }));
+            if let Some(work_items) = work_items
+                && let Some(bind_group) = create_bin_unpacking_bind_group(
+                    render_device,
+                    preprocess_pipelines,
+                    pipeline_cache,
+                    class,
+                    work_items,
+                    indexed,
+                    cache,
+                )
+            {
+                output.push(bind_group);
             }
         }
     }
 }
 
-/// Creates a bind group for the bin unpacking shader for a single (view, phase,
-/// mesh indexed-ness) combination.
+/// Creates a bind group for the bin unpacking shader for a single (view,
+/// phase, mesh indexed-ness) combination, or none when it has no batch sets.
 fn create_bin_unpacking_bind_group(
     render_device: &RenderDevice,
     preprocess_pipelines: &PreprocessPipelines,
     pipeline_cache: &PipelineCache,
-    job: &SceneUnpackingJob,
-    bin_unpacking_metadata_buffer: &Buffer,
+    class: &SceneUnpackingClassBuffers,
     work_item_buffer: &Buffer,
     indexed: bool,
-    cache: &mut SceneUnpackingBindGroupCache<5>,
-) -> ViewPhaseBinUnpackingBindGroup {
+    cache: &mut SceneUnpackingBindGroupCache<6>,
+) -> Option<ViewPhaseBinUnpackingBindGroup> {
+    if class.is_empty() {
+        return None;
+    }
+    let (
+        Some(jobs),
+        Some(workgroup_jobs),
+        Some(instances),
+        Some(bin_metadata),
+        Some(bin_indices),
+    ) = (
+        class.jobs.buffer(),
+        class.unpacking_workgroup_jobs.buffer(),
+        class.instances.buffer(),
+        class.bin_metadata.buffer(),
+        class.bin_indices.buffer(),
+    )
+    else {
+        return None;
+    };
     let buffers = [
-        bin_unpacking_metadata_buffer.id(),
-        job.render_binned_mesh_instance_buffer.id(),
+        jobs.id(),
+        workgroup_jobs.id(),
+        instances.id(),
         work_item_buffer.id(),
-        job.bin_metadata_buffer.id(),
-        job.bin_index_to_bin_metadata_index_buffer.id(),
+        bin_metadata.id(),
+        bin_indices.id(),
     ];
     let bind_group = cache.get_or_create(buffers, || {
         render_device.create_bind_group(
@@ -3996,37 +4012,31 @@ fn create_bin_unpacking_bind_group(
             &pipeline_cache
                 .get_bind_group_layout(&preprocess_pipelines.bin_unpacking.bind_group_layout),
             &BindGroupEntries::sequential((
-                // @group(0) @binding(0) var<uniform>
-                // bin_unpacking_metadata:
-                // BinUnpackingMetadata;
-                BindingResource::Buffer(BufferBinding {
-                    buffer: bin_unpacking_metadata_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(size_of::<GpuBinUnpackingMetadata>() as u64),
-                }),
-                // @group(0) @binding(1) var<storage>
+                // @group(0) @binding(0) var<storage> jobs: array<SceneUnpackingJob>;
+                jobs.as_entire_binding(),
+                // @group(0) @binding(1) var<storage> workgroup_jobs: array<u32>;
+                workgroup_jobs.as_entire_binding(),
+                // @group(0) @binding(2) var<storage>
                 // binned_mesh_instances:
                 // array<BinnedMeshInstance>;
-                job.render_binned_mesh_instance_buffer.as_entire_binding(),
-                // @group(0) @binding(2) var<storage,
+                instances.as_entire_binding(),
+                // @group(0) @binding(3) var<storage,
                 // read_write> preprocess_work_items:
                 // array<PreprocessWorkItem>;
                 work_item_buffer.as_entire_binding(),
-                // @group(0) @binding(3) var<storage> bin_metadata:
+                // @group(0) @binding(4) var<storage> bin_metadata:
                 // array<BinMetadata>;
-                job.bin_metadata_buffer.as_entire_binding(),
-                // @group(0) @binding(4) var<storage>
+                bin_metadata.as_entire_binding(),
+                // @group(0) @binding(5) var<storage>
                 // bin_index_to_bin_metadata_index: array<u32>;
-                job.bin_index_to_bin_metadata_index_buffer
-                    .as_entire_binding(),
+                bin_indices.as_entire_binding(),
             )),
         )
     });
-    ViewPhaseBinUnpackingBindGroup {
-        metadata_index: job.bin_unpacking_metadata_index,
+    Some(ViewPhaseBinUnpackingBindGroup {
         bind_group,
-        mesh_instance_count: job.mesh_instance_count,
-    }
+        workgroup_count: class.unpacking_workgroup_count(),
+    })
 }
 
 /// Creates all bind groups needed to run the `allocate_uniforms` shader for all
@@ -4040,12 +4050,6 @@ fn create_uniform_allocation_bind_groups(
     scene_unpacking_buffers: &SceneUnpackingBuffers,
     view_entity: &RetainedViewEntity,
 ) {
-    let Some(uniform_allocation_metadata_buffer) =
-        scene_unpacking_buffers.uniform_allocation_metadata.buffer()
-    else {
-        return;
-    };
-
     for (phase_type_id, phase_indirect_parameters_buffers) in indirect_parameters_buffers.iter() {
         let Some(view_phase_bin_unpacking_buffers) = scene_unpacking_buffers
             .view_phase_buffers
@@ -4063,10 +4067,10 @@ fn create_uniform_allocation_bind_groups(
                 view: *view_entity,
             })
             .or_default();
-        for (metadata, jobs, output, cache, indexed) in [
+        for (metadata, class, output, cache, indexed) in [
             (
                 phase_indirect_parameters_buffers.indexed.metadata_buffer(),
-                &view_phase_bin_unpacking_buffers.indexed_unpacking_jobs,
+                &view_phase_bin_unpacking_buffers.indexed,
                 &mut groups.indexed,
                 &mut groups.indexed_cache,
                 true,
@@ -4075,47 +4079,57 @@ fn create_uniform_allocation_bind_groups(
                 phase_indirect_parameters_buffers
                     .non_indexed
                     .metadata_buffer(),
-                &view_phase_bin_unpacking_buffers.non_indexed_unpacking_jobs,
+                &view_phase_bin_unpacking_buffers.non_indexed,
                 &mut groups.non_indexed,
                 &mut groups.non_indexed_cache,
                 false,
             ),
         ] {
-            if let Some(metadata) = metadata {
-                output.extend(jobs.iter().map(|job| {
-                    create_uniform_allocation_bind_group(
-                        render_device,
-                        preprocess_pipelines,
-                        pipeline_cache,
-                        job,
-                        uniform_allocation_metadata_buffer,
-                        metadata,
-                        indexed,
-                        cache,
-                    )
-                }));
+            if let Some(metadata) = metadata
+                && let Some(bind_group) = create_uniform_allocation_bind_group(
+                    render_device,
+                    preprocess_pipelines,
+                    pipeline_cache,
+                    class,
+                    metadata,
+                    indexed,
+                    cache,
+                )
+            {
+                output.push(bind_group);
             }
         }
     }
 }
 
 /// Creates a bind group for the uniform allocation shader for a single (view,
-/// phase, mesh indexed-ness) combination.
+/// phase, mesh indexed-ness) combination, or none when it has no batch sets.
 fn create_uniform_allocation_bind_group(
     render_device: &RenderDevice,
     preprocess_pipelines: &PreprocessPipelines,
     pipeline_cache: &PipelineCache,
-    job: &SceneUnpackingJob,
-    uniform_allocation_metadata_buffer: &Buffer,
+    class: &SceneUnpackingClassBuffers,
     indirect_parameters_metadata_buffer: &Buffer,
     indexed: bool,
-    cache: &mut SceneUnpackingBindGroupCache<4>,
-) -> ViewPhaseUniformAllocationBindGroup {
+    cache: &mut SceneUnpackingBindGroupCache<5>,
+) -> Option<ViewPhaseUniformAllocationBindGroup> {
+    if class.is_empty() {
+        return None;
+    }
+    let (Some(jobs), Some(workgroup_jobs), Some(bin_metadata), Some(fan)) = (
+        class.jobs.buffer(),
+        class.allocation_workgroup_jobs.buffer(),
+        class.bin_metadata.buffer(),
+        class.fan.buffer(),
+    ) else {
+        return None;
+    };
     let buffers = [
-        uniform_allocation_metadata_buffer.id(),
-        job.bin_metadata_buffer.id(),
+        jobs.id(),
+        workgroup_jobs.id(),
+        bin_metadata.id(),
         indirect_parameters_metadata_buffer.id(),
-        job.fan_buffer.id(),
+        fan.id(),
     ];
     let bind_group = cache.get_or_create(buffers, || {
         render_device.create_bind_group(
@@ -4132,30 +4146,27 @@ fn create_uniform_allocation_bind_group(
                     .bind_group_layout,
             ),
             &BindGroupEntries::sequential((
-                // @group(0) @binding(0) var<uniform> allocate_uniforms_metadata:
-                // AllocateUniformsMetadata;
-                BindingResource::Buffer(BufferBinding {
-                    buffer: uniform_allocation_metadata_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(size_of::<GpuUniformAllocationMetadata>() as u64),
-                }),
-                // @group(0) @binding(1) var<storage> bin_metadata:
+                // @group(0) @binding(0) var<storage> jobs: array<SceneUnpackingJob>;
+                jobs.as_entire_binding(),
+                // @group(0) @binding(1) var<storage> workgroup_jobs: array<u32>;
+                workgroup_jobs.as_entire_binding(),
+                // @group(0) @binding(2) var<storage> bin_metadata:
                 // array<BinMetadata>;
-                job.bin_metadata_buffer.as_entire_binding(),
-                // @group(0) @binding(2) var<storage, read_write>
+                bin_metadata.as_entire_binding(),
+                // @group(0) @binding(3) var<storage, read_write>
                 // indirect_parameters_metadata: array<IndirectParametersMetadata>;
                 indirect_parameters_metadata_buffer.as_entire_binding(),
-                // @group(0) @binding(3) var<storage, read_write> fan_buffer:
+                // @group(0) @binding(4) var<storage, read_write> fan_buffer:
                 // array<u32>;
-                job.fan_buffer.as_entire_binding(),
+                fan.as_entire_binding(),
             )),
         )
     });
-    ViewPhaseUniformAllocationBindGroup {
-        metadata_index: job.uniform_allocation_metadata_index,
+    Some(ViewPhaseUniformAllocationBindGroup {
         bind_group,
-        bin_count: job.bin_count,
-    }
+        workgroup_count: class.allocation_workgroup_count(),
+        multi_chunk: class.multi_chunk,
+    })
 }
 
 /// Writes the information needed to do GPU mesh culling to the GPU.

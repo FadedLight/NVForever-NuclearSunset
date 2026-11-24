@@ -533,6 +533,18 @@ Graphics pass 2026-11-23, four more changes:
   dropped after two unused frames, instead of being made again for every view, phase and
   batch set each frame on the render thread. Its tests need upstream's `wgpu` `noop`
   dev-dependency and are not built here.
+- Merged scene unpacking (`src/render/unpack_bins.wesl`, `src/render/allocate_uniforms.wesl`
+  and the bind groups and dispatches in `src/render/gpu_preprocess.rs`, with bevy_render's
+  `SceneUnpackingClassBuffers` below; comments start `NVForever merged scene unpacking`):
+  `unpack_bins` and each step of `allocate_uniforms` run as one dispatch for all the batch
+  sets of a view, phase and mesh indexed-ness instead of one dispatch per batch set, each
+  dispatch in a compute pass with a barrier after it. Every batch set is a job in a storage
+  array; each workgroup looks its job up in a workgroup-to-job table and adds the job's
+  offsets to the batch-local indices the shaders used before. The fan buffer has one entry
+  per workgroup; steps 2 and 3 run only when some batch set has more than 256 bins, and
+  then only each batch set's own workgroups do work. [observed 2026-11-24, Novac 12:00,
+  4K DLSS Quality, maxed settings] `uniform_allocation` 0.21 and `bin_unpacking` 0.20 ms
+  a frame → both under 0.05; process CPU time 27.3 → 23.6 ms a frame.
 
 ## bevy_light 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
@@ -705,6 +717,18 @@ only the CPU writes (`render_binned_mesh_instance_buffer`, `bin_metadata_buffer`
 `unpack_bins.wesl`). Upstream writes all three every frame: about 300 of a Goodsprings
 frame's 400 `queue.write_buffer` calls, each a copy with its own barrier before the frame's
 first pass. Test aid `NVF_PLAY_TEST_SAME_WRITES=1` writes every frame again.
+
+Merged scene unpacking (with bevy_pbr's of that name above), in
+`batching/gpu_preprocessing.rs`: each view and phase keeps one `SceneUnpackingClassBuffers`
+for indexed and one for non-indexed meshes. `write_binned_instance_buffers` packs every
+multi-drawn batch set's three CPU-written buffers into them each frame (the idea of
+bevy#26580, open upstream, which packs them into shared buffers bound per batch set; that
+PR does not apply over #2064 and binds ranges, where the merged dispatches need one
+binding), with a `GpuSceneUnpackingJob` per batch set and the workgroup-to-job tables, and
+writes each packed buffer with `write_buffer_if_changed`. The batch sets' own buffers are
+CPU staging only and no longer uploaded (no GPU buffer, no write per batch set), and their
+fan buffers are not allocated. The uniform metadata buffers with a dynamic offset per batch
+set stay empty.
 
 Gated render assets (#2661), in `src/erased_render_asset.rs`, marked `NVForever gated
 materials`: `ErasedRenderAssetPlugin::gated(Arc<AtomicBool>)` runs the asset type's

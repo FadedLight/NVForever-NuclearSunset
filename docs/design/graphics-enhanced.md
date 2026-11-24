@@ -915,7 +915,7 @@ prior art, nothing of either was used.
 
 - **Height source.** Height is `clamp(gain * (luma(raw_texel) - luma(reference)),
   -0.25, 0.25)`, Rec. 709 luma on linear, sRGB-decoded colour before material or vertex
-  tint. Diffuse alpha keeps its existing role of multiplying painted opacity. `global`
+  tint. Diffuse alpha has no part in the blend (#3789). `global`
   (default) reads the existing coarsest mip at UV (0.5, 0.5), a near texture mean for a
   full mip chain. A bright texture does not win just for being bright; broad shading in
   the texture still contributes. A short mip chain gives an imperfect reference.
@@ -926,7 +926,7 @@ prior art, nothing of either was used.
   both binding forms. This local reference removes some broader spatial shading too.
   A base without a diffuse texture has height zero. The base diffuse is read again for
   raw colour, at the standard material's coordinate and bias.
-- **Weights.** For painted opacity * diffuse alpha `a[k]`, ordered shares are
+- **Weights.** For painted opacity `a[k]`, ordered shares are
   `w[k+1] = a[k] * product(1 - a[j], j > k)` and `w[0] = product(1 - a[j])`.
   They sum to one. Compute `score[i] = w[i] + clamp(height[i], -w[i], w[i])`,
   `highest = max(score)`, and `q[i] = w[i] * max(0, depth - (highest - score[i]))`;
@@ -1050,8 +1050,7 @@ LOD noise are prior art only; no code was taken from any of them.
   cut); at least one read always stays.
 - **Skipping.** The folded layers are walked last to first with the ordered blend's own
   products (`terrain_ordered_shares`): a layer of opacity 0 is not read, and a fully
-  covering later layer leaves everything under it, the base too, unread. A diffuse read can
-  still be needed to find an alpha of 0. Normal maps are read only for textures whose
+  covering later layer leaves everything under it, the base too, unread. Normal maps are read only for textures whose
   final weight is above 0; height references only for textures whose ordered share is
   above 0. Exact zeros, no epsilon: faint painted layers count.
 - **Height blending together.** With §3.12 on as well, the heights come from the very
@@ -1367,7 +1366,7 @@ removed the effect or striped the road's lip. Rocks stay subtle with it; that wa
   square and diagonal (below the diagonal `(1-u) SW + (u-v) SE + v NE`, above it
   `(1-v) SW + u NE + (v-u) NW`); the colour starts as the base diffuse x interpolated vertex
   colour x base material colour, and each overlay in drawing order mixes in by
-  `saturate(opacity) x` its diffuse alpha (ordered opacities, not normalized weights), its
+  `saturate(opacity)` (ordered opacities, not normalized weights; #3789: not its diffuse alpha), its
   colour the texel x vertex colour x the base material colour for folded overlays (as
   terrain.wesl) and x white for overflow ones (their own material's colour:
   `layer_material` draws only a layer with a texture, white). With full shading the

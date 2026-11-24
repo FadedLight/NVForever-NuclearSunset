@@ -117,4 +117,7 @@ impl Bridge<'_, '_> {
     }
 }
 
-pub(super) fn install(app: &mut App) { app.init_resource::<Routing>(); }
+pub(super) fn install(app: &mut App) {
+    app.init_resource::<Routing>();
+    nvf_play::vats_mode::touch::register_settings(app);
+}

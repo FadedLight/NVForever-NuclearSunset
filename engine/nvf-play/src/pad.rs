@@ -1457,7 +1457,9 @@ pub struct PadPlugin;
 impl Plugin for PadPlugin {
     fn build(&self, app: &mut App) {
         use bevy::input::InputSystems;
-        app.add_plugins((InputSwitchPlugin, crate::controller_aim::ControllerAimPlugin)).init_resource::<StickButtons>()
+        #[cfg(target_os = "android")]
+        app.add_plugins(crate::controller_aim::ControllerAimPlugin);
+        app.add_plugins(InputSwitchPlugin).init_resource::<StickButtons>()
             .init_resource::<MenuKeys>()
             .init_resource::<ButtonStyle>()
             .init_resource::<PadInUse>()

@@ -60,27 +60,39 @@ updater (`crates/nvf-launcher/src/update.rs`):
     `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, or
     `github-releases.githubusercontent.com`.
 - **How it verifies what it downloads:**
-  - Asset selection (`select_android_apk` in `mobile.rs`) admits only signed ARM64 `.apk`
-    files, explicitly refusing names containing `unsigned`, `x86`, or `armeabi`, and
-    refusing off-repository URLs.
-  - **Fail-closed SHA-256 checksums:** direct in-app download always requires a published
-    `SHA256SUMS.txt` asset on the same release with a valid 64-hex-char SHA-256 entry for
-    the selected APK (matching desktop `update.rs`). If `SHA256SUMS.txt` is absent, fails
-    to fetch, or omits the APK, `check_update` omits `asset` so the launcher offers only
-    `"Open release page"` in the system browser instead of an unverified download.
+  - Asset selection (`select_android_apk` in `mobile.rs`) filters release assets by filename
+    and repository URL — selecting ARM64 `.apk` candidates under the official release URL
+    while excluding names containing `unsigned`, `x86`, or `armeabi` (a filename/URL filter,
+    not by itself cryptographic signature verification).
+  - **Fail-closed SHA-256 integrity check:** direct in-app download always requires a
+    published `SHA256SUMS.txt` asset on the same release with a valid 64-hex-char SHA-256
+    entry for the selected APK (matching desktop `update.rs`) to catch download corruption
+    or truncation. If `SHA256SUMS.txt` is absent, fails to fetch, or omits the APK,
+    `check_update` omits `asset` so the launcher offers only `"Open release page"` in the
+    system browser instead of an unverified download.
   - `MobileLauncher.downloadAndInstallUpdate` re-checks the URL and 64-hex SHA-256 before
     opening a socket, enforces a 512 MiB cap (`UpdatePolicy.MAX_APK_BYTES`) and non-empty
     download check, computes SHA-256 while streaming into `cache/updates/<name>.part`,
     fsyncs, verifies the digest in constant time (`UpdatePolicy.checksumMatches`), deletes
     `.part` on any error or cancellation, and only then atomically renames to
     `cache/updates/<name>`.
-  - **System installer & Android signing-key enforcement:** the verified APK is exposed
-    read-only (`mode == "r"`) via the non-exported `ApkUpdateProvider`
-    (`android:exported="false"`, `FLAG_GRANT_READ_URI_PERMISSION`, canonical path check
-    inside `cache/updates/`) to Android's system PackageInstaller (`Intent.ACTION_VIEW`
-    with `application/vnd.android.package-archive`). Android itself requires user
-    confirmation (and `"Allow from this source"` permission on first install) and rejects
-    any upgrade APK whose signing certificate does not match the currently installed app.
+  - **Pre-install package, signing-certificate, and versionCode authenticity check:**
+    before handing the downloaded APK to Android's package installer, `MobileLauncher`
+    inspects the archive with `PackageManager.getPackageArchiveInfo(..., GET_SIGNING_CERTIFICATES)`
+    (API 29+) and fails closed via `UpdatePolicy.verifyApkMetadata` — deleting the APK —
+    unless (a) `archiveInfo.packageName` equals the installed app's `packageName`,
+    (b) the archive's signing certificate SHA-256 digest set matches the currently installed
+    app's signing certificate set, and (c) `archiveInfo.getLongVersionCode()` is strictly
+    greater than the installed app's `longVersionCode` (`android/app/build.gradle` derives
+    a monotonic `versionCode` from the release version/revision or `NVF_ANDROID_VERSION_CODE`
+    so downgrade protection applies on every release).
+  - **System installer handoff:** the verified APK is exposed read-only (`mode == "r"`) via
+    the non-exported `ApkUpdateProvider` (`android:exported="false"`,
+    `FLAG_GRANT_READ_URI_PERMISSION`, canonical path check inside `cache/updates/`) to
+    Android's system PackageInstaller (`Intent.ACTION_VIEW` with
+    `application/vnd.android.package-archive`), which requires user confirmation (and
+    `"Allow from this source"` permission on first install) and enforces Android's own
+    upgrade signature and downgrade checks.
 - **User control & opt-in:**
   - Startup update checks run only when project news fetching is enabled
     (`[Launcher] News != 0`, which the user can turn off in the launcher); users can also

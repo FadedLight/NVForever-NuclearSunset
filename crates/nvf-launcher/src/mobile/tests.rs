@@ -142,7 +142,7 @@ fn mobile_catalog_disables_and_restores_the_same_saved_dialogue_choice() {
         ["data"]["rows"].as_array().unwrap().iter().find(|r| r["key"] == "dialogue-theme-v1").unwrap().clone();
     let disabled = theme("0");
     assert_eq!(disabled["value"], "Classic");
-    assert_eq!(disabled["reason"], "Enable Touch dialogue.");
+    assert_eq!(disabled["reason"], "Needs Touch dialogue.");
     let enabled = theme("1");
     assert_eq!(enabled["value"], "Classic");
     assert!(enabled["reason"].is_null());
@@ -364,4 +364,23 @@ fn state_exposes_last_save_preview_with_metadata_and_png_thumbnail() {
     assert_eq!(preview["detail"], "Level 12 · Goodsprings · 2h 15m");
     assert_eq!(preview["shotBase64"], base64_encode(&png));
     assert_eq!(with_save["data"]["continue"], "Courier Six");
+}
+
+#[test]
+fn android_revision_version_ordering_and_update_check() {
+    use std::cmp::Ordering;
+    assert_eq!(cmp_versions("0.7.0-android-r10", "v0.7.0"), Ordering::Greater);
+    assert_eq!(cmp_versions("v0.7.0", "0.7.0-android-r10"), Ordering::Less);
+    assert_eq!(cmp_versions("0.7.0-android-r10", "0.7.0-android-r9"), Ordering::Greater);
+    assert_eq!(cmp_versions("0.7.0-android-r10", "v0.7.0-android-r10"), Ordering::Equal);
+    assert_eq!(cmp_versions("v0.7.1", "0.7.0-android-r10"), Ordering::Greater);
+    assert_eq!(cmp_versions("v0.8.0", "0.7.0-android-r10"), Ordering::Greater);
+    // Ordinary SemVer pre-releases keep their standard ordering below final releases.
+    assert_eq!(cmp_versions("0.9.0-rc.1", "0.9.0"), Ordering::Less);
+    assert_eq!(cmp_versions("0.9.0-rc.10", "0.9.0-rc.9"), Ordering::Greater);
+
+    // Installed 0.7.0-android-r10 must NOT treat v0.7.0 as an available upgrade.
+    let releases_json = r#"[{"tag_name":"v0.7.0","name":"v0.7.0","draft":false,"prerelease":false,"html_url":"https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.7.0","body":"","assets":[]}]"#;
+    let res = check_update("0.7.0-android-r10", &mut |_| Ok(releases_json.into())).unwrap();
+    assert_eq!(res["available"], false);
 }

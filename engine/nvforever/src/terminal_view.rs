@@ -91,6 +91,7 @@ impl Plugin for TerminalViewPlugin {
 struct Drawn {
     entities: Vec<Entity>,
     warned: bool,
+    failed: bool,
 }
 
 #[derive(Resource)]
@@ -121,7 +122,7 @@ fn show(
     mut drawn: Local<Drawn>,
 ) {
     let Some(picture) = picture.filter(|_| screen.0.is_some()) else {
-        if !drawn.entities.is_empty() || view.is_some() {
+        if !drawn.entities.is_empty() || view.is_some() || drawn.failed {
             for e in drawn.entities.drain(..) {
                 commands.entity(e).despawn();
             }
@@ -131,7 +132,7 @@ fn show(
         }
         return;
     };
-    if !drawn.entities.is_empty() {
+    if !drawn.entities.is_empty() || drawn.failed {
         return;
     }
     let Some(model) = models.model_with_cpu(MONITOR_MODEL) else {
@@ -144,8 +145,11 @@ fn show(
     let size = window.single().map(|w| Extent3d { width: w.physical_width().max(1), height: w.physical_height().max(1), depth_or_array_layers: 1 }).unwrap_or(Extent3d { width: 1280, height: 720, depth_or_array_layers: 1 });
     let Some(view) = spawn_monitor(&mut commands, &mut models, &mut plain, &model,
         &picture.image, TARGET, size, MONITOR_LAYER, "Terminal", false, -4, false, true, PLACE) else {
-        warn!("terminal view: {MONITOR_MODEL} has no screen:0 shape; the screen is drawn flat");
-        drawn.warned = true;
+        if !drawn.warned {
+            warn!("terminal view: {MONITOR_MODEL} has no usable screen:0 shape; the screen is drawn flat");
+            drawn.warned = true;
+        }
+        drawn.failed = true;
         return;
     };
     info!("terminal view: the monitor drawn ({} shapes, power button {}), the camera {DISTANCE} in front", view.shapes, if view.button.is_some() { "found" } else { "missing" });
@@ -238,15 +242,42 @@ fn spawn_monitor(
     with_glare: bool,
     placement: Vec3,
 ) -> Option<RenderedMonitor> {
+    let model_bounds = if fit_model { Some(model.bounds?) } else { None };
+    // Game space (Z up) into Bevy's (Y up), as the world root does.
+    let place = Affine3A::from_translation(placement) * Affine3A::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+    // Validate glass, power button, blockers, and camera fit BEFORE allocating any
+    // render-target image or spawning shape entities, so failures leak nothing.
     let mut glass = None;
     let mut button = None;
     let mut blockers = Vec::new();
+    for s in &model.shapes {
+        let name = s.name.as_deref().unwrap_or("");
+        if !with_glare && name.eq_ignore_ascii_case("glare:0") {
+            continue;
+        }
+        let world = place * model.root * s.transform;
+        if is_glass(name) {
+            glass = s.cpu.as_deref().and_then(|m| Posed::new(m, None, Mat4::from(world)));
+        } else if is_button(name) {
+            button = s.cpu.as_deref().and_then(|m| Posed::new(m, None, Mat4::from(world)));
+        }
+        if block_housing && !is_glass(name) && !name.eq_ignore_ascii_case("glare:0") {
+            if let Some(posed) = s.cpu.as_deref().and_then(|m| Posed::new(m, None, Mat4::from(world))) {
+                blockers.push(std::sync::Arc::new(posed));
+            }
+        }
+    }
+    let glass = glass?;
+    let (eye, aim, far) = if let Some(bounds) = model_bounds {
+        fitted_dialogue_camera(&glass, button.as_ref(), bounds, place.inverse(), size.width as f32 / size.height as f32)?
+    } else {
+        (Vec3::new(0.0, -DISTANCE, -DROP), Vec3::new(0.0, 0.0, -DROP), 200.0)
+    };
+
     let mut image = Image::new_fill(size, TextureDimension::D2, &[0, 0, 0, 0], TextureFormat::Bgra8UnormSrgb, RenderAssetUsages::default());
     image.texture_descriptor.usage = TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::RENDER_ATTACHMENT;
     let image = models.images.add(image);
     let layer = RenderLayers::layer(layer_index);
-    // Game space (Z up) into Bevy's (Y up), as the world root does.
-    let place = Affine3A::from_translation(placement) * Affine3A::from_rotation_x(-std::f32::consts::FRAC_PI_2);
     let mut entities = Vec::new();
     for s in &model.shapes {
         let name = s.name.as_deref().unwrap_or("");
@@ -271,19 +302,11 @@ fn spawn_monitor(
             // An unlit copy carries nothing of an authored set (#2981), as the Pip-Boy's.
             nvf_assets::authored::clear_for_unlit_copy(&mut m);
             material = models.materials.add(m);
-            glass = s.cpu.as_deref().and_then(|m| Posed::new(m, None, Mat4::from(world)));
         } else if name.eq_ignore_ascii_case("glare:0") {
             // [design] The model's texture on Bevy's own additive material: its colour,
             // texel × GLARE_LINEAR_SCALE, is added in linear light (GLARE_LINEAR_SCALE).
             let m = models.materials.get(&s.material).map(glare_material).unwrap_or_else(|| glare_material(&NifMaterial::default()));
             glare = Some(plain.add(m));
-        } else if is_button(name) {
-            button = s.cpu.as_deref().and_then(|m| Posed::new(m, None, Mat4::from(world)));
-        }
-        if block_housing && !is_glass(name) && !name.eq_ignore_ascii_case("glare:0") {
-            if let Some(posed) = s.cpu.as_deref().and_then(|m| Posed::new(m,None,Mat4::from(world))) {
-                blockers.push(std::sync::Arc::new(posed));
-            }
         }
         let mut shape = commands.spawn((Name::new(format!("{label} monitor {name}")), Mesh3d(s.mesh.clone()), Transform::from_matrix(Mat4::from(world)), layer.clone()));
         match glare {
@@ -292,21 +315,6 @@ fn spawn_monitor(
         };
         entities.push(shape.id());
     }
-    let Some(glass) = glass.take() else {
-        for e in entities {
-            commands.entity(e).despawn();
-        }
-        return None;
-    };
-    let (eye, aim, far) = if fit_model {
-        let Some(cam) = fitted_dialogue_camera(&glass, button.as_ref(), model.bounds?, place.inverse(), size.width as f32 / size.height as f32) else {
-            for e in entities { commands.entity(e).despawn(); }
-            return None;
-        };
-        cam
-    } else {
-        (Vec3::new(0.0, -DISTANCE, -DROP), Vec3::new(0.0, 0.0, -DROP), 200.0)
-    };
     let shapes = entities.len();
     let to = |p: Vec3| place.transform_point3(p);
     let camera = commands
@@ -462,6 +470,91 @@ mod tests {
         assert!(app.world().resource::<TerminalPointer>().canvas.is_none());
         assert!(!app.world().resource::<PowerAid>().0);
         assert_eq!(app.world().resource::<Messages<TerminalInput>>().len(), 0);
+    }
+
+    #[test]
+    fn spawn_monitor_missing_bounds_or_glass_leaks_zero_entities_and_images() {
+        use nvf_assets::model::{ModelCtx, PreparedModel, PreparedShape};
+        use nvf_assets::NifMaterial;
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<NifMaterial>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<nvf_assets::model::ModelCache>();
+        let mesh_handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        ));
+        let mat_handle = app.world_mut().resource_mut::<Assets<NifMaterial>>().add(NifMaterial::default());
+        let picture = app.world_mut().resource_mut::<Assets<Image>>().add(Image::default());
+        let initial_images = app.world().resource::<Assets<Image>>().len();
+        let initial_entities = app.world().entities().len();
+
+        let model_without_bounds = PreparedModel {
+            root: Affine3A::IDENTITY,
+            shapes: vec![PreparedShape {
+                name: Some("screen:0".into()),
+                mesh: mesh_handle,
+                material: mat_handle,
+                transform: Affine3A::IDENTITY,
+                cpu: None,
+                skin: None,
+                morph: None,
+                hidden: false,
+                alpha_blend: false,
+                refraction: false,
+            }],
+            bounds: None,
+            ..Default::default()
+        };
+
+        let mut system_state = bevy::ecs::system::SystemState::<(
+            Commands,
+            ModelCtx,
+            ResMut<Assets<StandardMaterial>>,
+        )>::new(app.world_mut());
+        let (mut commands, mut models, mut plain) = system_state.get_mut(app.world_mut());
+        // fit_model=true with bounds=None must bail out BEFORE spawning any shape or allocating any image.
+        let res = spawn_monitor(
+            &mut commands,
+            &mut models,
+            &mut plain,
+            &model_without_bounds,
+            &picture,
+            TARGET,
+            Extent3d { width: 640, height: 480, depth_or_array_layers: 1 },
+            MONITOR_LAYER,
+            "Dialogue terminal",
+            true,
+            -3,
+            true,
+            false,
+            Vec3::ZERO,
+        );
+        assert!(res.is_none());
+        // fit_model=false with missing cpu glass must also bail out with zero leaks.
+        let res_no_glass = spawn_monitor(
+            &mut commands,
+            &mut models,
+            &mut plain,
+            &model_without_bounds,
+            &picture,
+            TARGET,
+            Extent3d { width: 640, height: 480, depth_or_array_layers: 1 },
+            MONITOR_LAYER,
+            "Terminal",
+            false,
+            -4,
+            false,
+            true,
+            PLACE,
+        );
+        assert!(res_no_glass.is_none());
+        system_state.apply(app.world_mut());
+
+        assert_eq!(app.world().entities().len(), initial_entities, "no leaked monitor entities");
+        assert_eq!(app.world().resource::<Assets<Image>>().len(), initial_images, "no leaked full-display images");
     }
 
 }

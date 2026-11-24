@@ -333,6 +333,27 @@ fn pose_controls(commands: &mut Commands, r: Readings, dt: f32, angles: &mut Con
 fn list_row(pip: &PipBoy, stats: Option<&StatsView>, data: Option<&DataState>, active: &ActiveMenu,
     inventory: Option<&nvf_play::tiles::inventory_menu::InventoryTiles>, map: Option<&nvf_play::tiles::map_menu::MapTiles>,
     items: Option<&nvf_play::pipboy::scrollbar::ItemsScroll>) -> Option<usize> {
+    #[cfg(target_os = "android")]
+    {
+        list_row_scroll(pip, stats, data, active, inventory, map, items)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (inventory, map, items);
+        let tab = pip.tab();
+        match pip.page {
+            Page::Stats => stats?.selected.get(tab).copied(),
+            Page::Items => active.0.as_ref().map(|m| m.selected[Side::Player as usize]),
+            Page::Data if tab >= 2 => Some(data?.selection(tab).0),
+            Page::Data => None,
+        }
+    }
+}
+
+#[cfg(any(target_os = "android", test))]
+fn list_row_scroll(pip: &PipBoy, stats: Option<&StatsView>, data: Option<&DataState>, active: &ActiveMenu,
+    inventory: Option<&nvf_play::tiles::inventory_menu::InventoryTiles>, map: Option<&nvf_play::tiles::map_menu::MapTiles>,
+    items: Option<&nvf_play::pipboy::scrollbar::ItemsScroll>) -> Option<usize> {
     let tab = pip.tab();
     match pip.page {
         Page::Stats => stats?.top.get(tab).copied(),
@@ -517,8 +538,10 @@ mod tests {
         let mut pip=PipBoy::default();pip.page=Page::Stats;pip.tabs[0]=2;
         // These are distinct authoritative view fields: the selection can remain offscreen.
         let mut stats=StatsView::default();stats.top[2]=3;stats.selected[2]=11;
-        let row=list_row(&pip,Some(&stats),None,&ActiveMenu::default(),None,None,None);
+        let row=list_row_scroll(&pip,Some(&stats),None,&ActiveMenu::default(),None,None,None);
         assert_eq!(row,Some(3));
+        #[cfg(not(target_os = "android"))]
+        assert_eq!(list_row(&pip,Some(&stats),None,&ActiveMenu::default(),None,None,None),Some(11));
         let mut app=app();
         let wheel=app.world_mut().spawn((PipBoyPart::ScrollKnob,bind(),known(PipBoyPart::ScrollKnob))).id();
         app.world_mut().resource_mut::<Now>().0=Readings{row,..default()};

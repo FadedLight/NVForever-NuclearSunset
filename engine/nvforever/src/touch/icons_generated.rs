@@ -1,5 +1,5 @@
 // Generated from original owned SVG families. Do not edit.
-const SVG_SOURCE_SHA256: &str = "9c9176ff88bd146f60683c5b633cebd9a84a6cd1db26a08620df088eb6bfe4d7";
+const SVG_SOURCE_SHA256: &str = "0ce345267eb55de7b9fc39d8914aae4a5214dfe5d50a0b2e41bda75642f49574";
 const FAMILIES: &[IconFamily] = &[
     IconFamily { id: "precise-line", label: "Precise line", stroke_width: 1.6, line_cap: LineCap::Round, line_join: LineJoin::Round, icons: &[
         IconSource { id: "pause", label: "Pause", primitives: &[
@@ -8,7 +8,7 @@ const FAMILIES: &[IconFamily] = &[
         IconSource { id: "pip-boy", label: "Pip-Boy", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(11.0, 9.0), Verb::L(11.0, 4.0), Verb::L(21.0, 4.0), Verb::L(21.0, 9.0), Verb::M(11.0, 23.0), Verb::L(11.0, 28.0), Verb::L(21.0, 28.0), Verb::L(21.0, 23.0), Verb::M(8.0, 9.0), Verb::L(24.0, 9.0), Verb::Q(26.0, 9.0, 26.0, 11.0), Verb::L(26.0, 21.0), Verb::Q(26.0, 23.0, 24.0, 23.0), Verb::L(8.0, 23.0), Verb::Q(6.0, 23.0, 6.0, 21.0), Verb::L(6.0, 11.0), Verb::Q(6.0, 9.0, 8.0, 9.0), Verb::Z, Verb::M(10.0, 13.0), Verb::L(21.0, 13.0), Verb::M(10.0, 17.0), Verb::L(17.0, 17.0), Verb::M(10.0, 20.0), Verb::L(20.0, 20.0)]), fill: false, stroke: true },
         ] },
-        IconSource { id: "vats", label: "VATS", primitives: &[
+        IconSource { id: "vats", label: "V.A.T.S.", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(10.0, 4.0), Verb::L(4.0, 4.0), Verb::L(4.0, 10.0), Verb::M(22.0, 4.0), Verb::L(28.0, 4.0), Verb::L(28.0, 10.0), Verb::M(28.0, 22.0), Verb::L(28.0, 28.0), Verb::L(22.0, 28.0), Verb::M(10.0, 28.0), Verb::L(4.0, 28.0), Verb::L(4.0, 22.0), Verb::M(10.0, 23.0), Verb::L(10.0, 21.0), Verb::Q(10.0, 17.0, 16.0, 17.0), Verb::Q(22.0, 17.0, 22.0, 21.0), Verb::L(22.0, 23.0)]), fill: false, stroke: true },
             Primitive { geometry: Geometry::Circle(16.0, 11.0, 3.0), fill: false, stroke: true },
         ] },
@@ -101,7 +101,7 @@ const FAMILIES: &[IconFamily] = &[
         IconSource { id: "pip-boy", label: "Pip-Boy", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(8.0, 8.0), Verb::L(24.0, 8.0), Verb::Q(27.0, 8.0, 27.0, 11.0), Verb::L(27.0, 21.0), Verb::Q(27.0, 24.0, 24.0, 24.0), Verb::L(8.0, 24.0), Verb::Q(5.0, 24.0, 5.0, 21.0), Verb::L(5.0, 11.0), Verb::Q(5.0, 8.0, 8.0, 8.0), Verb::Z, Verb::M(10.0, 12.0), Verb::L(22.0, 12.0), Verb::L(22.0, 20.0), Verb::L(10.0, 20.0), Verb::Z, Verb::M(11.0, 3.0), Verb::L(21.0, 3.0), Verb::L(21.0, 8.0), Verb::L(11.0, 8.0), Verb::Z, Verb::M(11.0, 24.0), Verb::L(21.0, 24.0), Verb::L(21.0, 29.0), Verb::L(11.0, 29.0), Verb::Z]), fill: true, stroke: false },
         ] },
-        IconSource { id: "vats", label: "VATS", primitives: &[
+        IconSource { id: "vats", label: "V.A.T.S.", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(3.0, 11.0), Verb::L(3.0, 3.0), Verb::L(11.0, 3.0), Verb::L(11.0, 6.0), Verb::L(6.0, 6.0), Verb::L(6.0, 11.0), Verb::Z, Verb::M(21.0, 3.0), Verb::L(29.0, 3.0), Verb::L(29.0, 11.0), Verb::L(26.0, 11.0), Verb::L(26.0, 6.0), Verb::L(21.0, 6.0), Verb::Z, Verb::M(29.0, 21.0), Verb::L(29.0, 29.0), Verb::L(21.0, 29.0), Verb::L(21.0, 26.0), Verb::L(26.0, 26.0), Verb::L(26.0, 21.0), Verb::Z, Verb::M(11.0, 29.0), Verb::L(3.0, 29.0), Verb::L(3.0, 21.0), Verb::L(6.0, 21.0), Verb::L(6.0, 26.0), Verb::L(11.0, 26.0), Verb::Z, Verb::M(10.0, 24.0), Verb::L(10.0, 21.0), Verb::Q(10.0, 17.0, 16.0, 17.0), Verb::Q(22.0, 17.0, 22.0, 21.0), Verb::L(22.0, 24.0), Verb::Z]), fill: true, stroke: false },
             Primitive { geometry: Geometry::Circle(16.0, 11.0, 3.5), fill: true, stroke: false },
         ] },
@@ -194,7 +194,7 @@ const FAMILIES: &[IconFamily] = &[
             Primitive { geometry: Geometry::Path(&[Verb::M(9.0, 13.0), Verb::L(19.0, 13.0), Verb::L(19.0, 19.0), Verb::L(9.0, 19.0), Verb::Z]), fill: true, stroke: false },
             Primitive { geometry: Geometry::Circle(23.0, 16.0, 1.1), fill: true, stroke: false },
         ] },
-        IconSource { id: "vats", label: "VATS", primitives: &[
+        IconSource { id: "vats", label: "V.A.T.S.", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(9.0, 5.0), Verb::Q(4.0, 5.0, 4.0, 10.0), Verb::L(4.0, 22.0), Verb::Q(4.0, 27.0, 9.0, 27.0), Verb::M(23.0, 5.0), Verb::Q(28.0, 5.0, 28.0, 10.0), Verb::L(28.0, 22.0), Verb::Q(28.0, 27.0, 23.0, 27.0)]), fill: false, stroke: true },
             Primitive { geometry: Geometry::Circle(16.0, 11.0, 3.2), fill: true, stroke: false },
             Primitive { geometry: Geometry::Path(&[Verb::M(10.0, 23.0), Verb::Q(10.0, 17.0, 16.0, 17.0), Verb::Q(22.0, 17.0, 22.0, 23.0), Verb::Z]), fill: true, stroke: false },
@@ -287,7 +287,7 @@ const FAMILIES: &[IconFamily] = &[
         IconSource { id: "pip-boy", label: "Pip-Boy", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(8.0, 9.0), Verb::L(24.0, 9.0), Verb::L(28.0, 13.0), Verb::L(28.0, 20.0), Verb::L(24.0, 24.0), Verb::L(8.0, 24.0), Verb::L(4.0, 20.0), Verb::L(4.0, 13.0), Verb::Z, Verb::M(11.0, 9.0), Verb::L(11.0, 4.0), Verb::L(21.0, 4.0), Verb::L(21.0, 9.0), Verb::M(11.0, 24.0), Verb::L(11.0, 28.0), Verb::L(21.0, 28.0), Verb::L(21.0, 24.0), Verb::M(9.0, 14.0), Verb::L(23.0, 14.0), Verb::L(23.0, 19.0), Verb::L(9.0, 19.0), Verb::Z]), fill: false, stroke: true },
         ] },
-        IconSource { id: "vats", label: "VATS", primitives: &[
+        IconSource { id: "vats", label: "V.A.T.S.", primitives: &[
             Primitive { geometry: Geometry::Path(&[Verb::M(11.0, 3.0), Verb::L(3.0, 3.0), Verb::L(3.0, 11.0), Verb::M(21.0, 3.0), Verb::L(29.0, 3.0), Verb::L(29.0, 11.0), Verb::M(29.0, 21.0), Verb::L(29.0, 29.0), Verb::L(21.0, 29.0), Verb::M(11.0, 29.0), Verb::L(3.0, 29.0), Verb::L(3.0, 21.0), Verb::M(13.0, 8.0), Verb::L(19.0, 8.0), Verb::L(21.0, 11.0), Verb::L(19.0, 14.0), Verb::L(13.0, 14.0), Verb::L(11.0, 11.0), Verb::Z, Verb::M(10.0, 24.0), Verb::L(10.0, 19.0), Verb::L(13.0, 17.0), Verb::L(19.0, 17.0), Verb::L(22.0, 19.0), Verb::L(22.0, 24.0), Verb::Z]), fill: false, stroke: true },
         ] },
         IconSource { id: "reload", label: "Reload", primitives: &[

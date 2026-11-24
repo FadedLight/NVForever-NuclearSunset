@@ -1094,7 +1094,11 @@ pub(crate) fn mouse_look(
         let dz = pads.dead_zone(false);
         let curve = |x: f32| if linear { x.signum() * ((x.abs() - dz) / (1.0 - dz).max(0.01)).max(0.0) } else { x * x.abs() };
         // The Controls tab's Stick Sensitivity scales the stick's look speeds.
-        let ads_scale = controller_aim.as_deref().map_or(1.0, |o|o.look_scale(ads.as_deref().is_some_and(|a|a.aimed)));
+        let ads_scale = if cfg!(any(target_os = "android", test)) {
+            controller_aim.as_deref().map_or(1.0, |o| o.look_scale(ads.as_deref().is_some_and(|a| a.aimed)))
+        } else {
+            1.0
+        };
         let dt = time.delta_secs() * assist.map_or(1.0, |a| a.look_scale) * bindings.stick_sensitivity * ads_scale;
         (Vec2::new(curve(v.x) * bindings.look_speed[0] * dt, -curve(v.y) * bindings.look_speed[1] * dt), STICK_LOOK_RADIANS)
     } else {

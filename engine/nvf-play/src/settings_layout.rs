@@ -133,19 +133,23 @@ pub struct ResolvedLayout {
 /// missing optional row left out, a section left with none dropped), then each tab's
 /// unnamed rows, then the unnamed groups' tabs. Every registered row is in it once.
 pub fn resolve_layout(list: &[Setting]) -> ResolvedLayout {
-    resolve_layout_with(list, &TAB_ORDER, if cfg!(target_os = "android") { MOBILE_SECTIONS } else { &[] })
+    if cfg!(target_os = "android") {
+        resolve_layout_with(list, &TAB_ORDER, MOBILE_SECTIONS, ANDROID_SECTIONS)
+    } else {
+        resolve_layout_with(list, &TAB_ORDER, &[], &[])
+    }
 }
 
 #[cfg(test)]
 pub(crate) fn resolve_desktop_layout(list: &[Setting]) -> ResolvedLayout {
-    resolve_layout_with(list, &nvf_settings_layout::TAB_ORDER, &[])
+    resolve_layout_with(list, &nvf_settings_layout::TAB_ORDER, &[], &[])
 }
 
-fn resolve_layout_with(list: &[Setting], tab_order: &[&'static str], overrides: &[Section]) -> ResolvedLayout {
+fn resolve_layout_with(list: &[Setting], tab_order: &[&'static str], overrides: &[Section], extra: &[Section]) -> ResolvedLayout {
     let index: std::collections::HashMap<&str, usize> = list.iter().enumerate().map(|(i, s)| (s.key, i)).collect();
     let mut placements: Vec<Option<Placement>> = vec![None; list.len()];
     let mut tabs: Vec<ResolvedTab> = tab_order.iter().map(|&name| ResolvedTab { name, sections: Vec::new() }).collect();
-    for s in overrides.iter().chain(SECTIONS).chain(ANDROID_SECTIONS) {
+    for s in overrides.iter().chain(SECTIONS).chain(extra) {
         let mut items = Vec::new();
         for k in s.keys {
             if let Some(c) = k.strip_prefix(CONTROL_PREFIX) {
@@ -645,41 +649,62 @@ mod shared_table_tests {
     /// table places it in, and no row the game does not have [design: owner 2026-11-16].
     #[test]
     fn the_reference_has_every_row_where_the_page_shows_it() {
-        // Read Android rows before the shared reference's Controls terminator.
-        let text = [
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference-android.md")).unwrap(),
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference.md")).unwrap(),
-        ].join("\n");
-        let mut listed: Vec<(String, String, Option<String>)> = Vec::new();
-        let (mut tab, mut heading) = (String::new(), None);
-        for line in text.lines() {
-            if let Some(h) = line.strip_prefix("## ") {
-                if h.contains("the tab's own rows") {
-                    break;
+        fn parse_ref(text: &str) -> Vec<(String, String, Option<String>)> {
+            let mut listed = Vec::new();
+            let (mut tab, mut heading) = (String::new(), None);
+            for line in text.lines() {
+                if let Some(h) = line.strip_prefix("## ") {
+                    if h.contains("the tab's own rows") {
+                        break;
+                    }
+                    let mut parts = h.split('›').map(str::trim);
+                    tab = parts.next().unwrap_or_default().to_string();
+                    heading = parts.next().map(str::to_string);
+                } else if let Some((key, _)) = line.strip_prefix("### `").and_then(|h| h.split_once('`')) {
+                    listed.push((key.to_string(), tab.clone(), heading.clone()));
                 }
-                let mut parts = h.split('›').map(str::trim);
-                tab = parts.next().unwrap_or_default().to_string();
-                heading = parts.next().map(str::to_string);
-            } else if let Some((key, _)) = line.strip_prefix("### `").and_then(|h| h.split_once('`')) {
-                listed.push((key.to_string(), tab.clone(), heading.clone()));
             }
+            listed
         }
-        // The selected reference also names Android rows, whose metadata belongs to
-        // the complete registry fixture below. Explicit Mobile headings describe the
-        // Android profile; the remaining headings describe the desktop profile.
-        let list = registry(super::android_profile_tests::registered_rows());
-        let l = super::resolve_desktop_layout(&list);
-        let mobile = super::resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
-        for (key, tab, heading) in &listed {
-            let i = list.iter().position(|s| s.key == key).unwrap_or_else(|| panic!("{key}: in the reference, but the game has no such row"));
-            let layout = if tab.as_str() == MOBILE_TAB { &mobile } else { &l };
-            let p = layout.placement_of(i).unwrap();
+        // Desktop reference strictly matches the desktop layout (no ANDROID_SECTIONS).
+        let desktop_ref = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference.md")).unwrap();
+        let desktop_listed = parse_ref(&desktop_ref);
+        let desktop_list = registry(&KNOWN);
+        let desktop_layout = super::resolve_desktop_layout(&desktop_list);
+        for (key, tab, heading) in &desktop_listed {
+            let i = desktop_list.iter().position(|s| s.key == key).unwrap_or_else(|| panic!("{key}: in docs/settings-reference.md, but desktop KNOWN has no such row"));
+            let p = desktop_layout.placement_of(i).unwrap();
             assert_eq!((p.tab, p.heading), (tab.as_str(), heading.as_deref()), "{key}: the reference places it under {tab} › {heading:?}, the page under {}", p.path());
         }
         for (k, _) in KNOWN {
-            let p = l.placement_of(list.iter().position(|s| s.key == k).unwrap()).unwrap();
-            assert!(p.tab == TWEAKS_TAB || listed.iter().any(|(n, _, _)| n == k), "{k} ({}) is not in docs/settings-reference.md", p.path());
+            let p = desktop_layout.placement_of(desktop_list.iter().position(|s| s.key == k).unwrap()).unwrap();
+            assert!(p.tab == TWEAKS_TAB || desktop_listed.iter().any(|(n, _, _)| n == k), "{k} ({}) is not in docs/settings-reference.md", p.path());
         }
+        // Android supplement rows match the Android layout (MOBILE_SECTIONS + ANDROID_SECTIONS).
+        let android_ref = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/settings-reference-android.md")).unwrap();
+        let android_listed = parse_ref(&android_ref);
+        let full_list = registry(super::android_profile_tests::registered_rows());
+        let mobile_layout = super::resolve_layout_with(&full_list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS, ANDROID_SECTIONS);
+        let android_fallback = super::resolve_layout_with(&full_list, &DESKTOP_TAB_ORDER, &[], ANDROID_SECTIONS);
+        for (key, tab, heading) in &android_listed {
+            let i = full_list.iter().position(|s| s.key == key).unwrap_or_else(|| panic!("{key}: in the Android reference, but the game has no such row"));
+            let layout = if tab.as_str() == MOBILE_TAB { &mobile_layout } else { &android_fallback };
+            let p = layout.placement_of(i).unwrap();
+            assert_eq!((p.tab, p.heading), (tab.as_str(), heading.as_deref()), "{key}: the reference places it under {tab} › {heading:?}, the page under {}", p.path());
+        }
+    }
+
+    #[test]
+    fn desktop_layout_excludes_android_sections_and_stamp() {
+        let list = registry(&[("difficulty", "Gameplay"), ("hud-scale-v2", "Display"), ("touch-dialogue", "Gameplay"), ("controller-ads-v1", "Controller")]);
+        let l = super::resolve_desktop_layout(&list);
+        assert_eq!(l.tab_names()[..8], DESKTOP_TAB_ORDER);
+        // None of the Android-only keys are named by desktop SECTIONS; they remain unnamed.
+        assert_eq!(l.unnamed(), 3);
+        assert_eq!(l.placement_of(1), Some(Placement::tab("Display")));
+        assert_eq!(l.placement_of(2), Some(Placement::tab("Gameplay")));
+        assert_eq!(l.placement_of(3), Some(Placement::tab("Controller")));
+        assert_ne!(layout_stamp(), mobile_layout_stamp());
     }
 
     #[test]
@@ -875,7 +900,15 @@ mod shared_table_tests {
 mod android_profile_tests {
     use super::*;
     use crate::settings::Settings;
-    use super::{resolve_desktop_layout as resolve_layout, DESKTOP_TAB_ORDER as TAB_ORDER};
+    use super::DESKTOP_TAB_ORDER as TAB_ORDER;
+
+    fn resolve_layout(list: &[Setting]) -> ResolvedLayout {
+        resolve_layout_with(list, &DESKTOP_TAB_ORDER, &[], ANDROID_SECTIONS)
+    }
+
+    fn resolve_mobile_layout(list: &[Setting]) -> ResolvedLayout {
+        resolve_layout_with(list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS, ANDROID_SECTIONS)
+    }
 
     // Test metadata only: the shared-reference case must check the selected file
     // against every registered key, including its explicit Android rows.
@@ -923,7 +956,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 223] = [
+    const KNOWN: [(&str, &str); 224] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -988,6 +1021,7 @@ mod android_profile_tests {
         ("sky-clock", "World"),
         ("resolution", "Display"),
         ("borderless", "Display"),
+        ("hdr-output", "Display"),
         ("monitor", "Display"),
         ("first-person-body", "Display"),
         ("weapon-inertia", "Display"),
@@ -1163,6 +1197,7 @@ mod android_profile_tests {
         deselect-hotkeys map-remembers terminal-number-keys faster-hacking dialogue-music dialogue-radio \
         console-skips-player holster-real-time power-armor-no-screen-blood no-red-crosshair-cloaked \
         god-mode-quiet-landing console-compress-repeats console-timestamps living-anatomy-dr sync-categories \
+        sync-categories-keep-empty \
         perks-per-level special-points pick-without-skill hack-without-skill no-terminal-lockout no-casino-bans \
         loot-unconscious revive-companions revive-down-seconds pickpocket-worn no-sneak-criticals reload-when-empty \
         no-travel-time power-armor-fall weightless-armor weightless-aid weightless-ammo weightless-weapons \
@@ -1171,7 +1206,7 @@ mod android_profile_tests {
         map-door-kinds hostiles-prefer-player prefer-player-start prefer-player-mid prefer-player-detection \
         equip-broken-items keep-broken-equipped hardcore-tweaks hardcore-ammo-weight hardcore-essential-companions \
         hardcore-sleep-heals weightless-worn-power-armor no-travel-crippled-leg wait-only-seated kill-reward-ap \
-        jump-ap-cost run-ap-cost no-selling custom-skill-points skill-point-base skill-points-per-int \
+        jump-ap-cost jump-ap-danger-only jump-without-enough-ap run-ap-cost no-selling custom-skill-points skill-point-base skill-points-per-int \
         no-unconscious-message no-voice-filter no-skip-dialogue lockpick-mouse no-max-casino-bet no-aiming-slowdown \
         repeat-jumping hold-to-sneak vats-entry-ap power-attack-ap quest-marker-reach scope-zoom-time drop-key \
         no-container-after-pick no-door-after-pick mark-unvisited-doors no-exit-hacking no-grab-owned agility-speed \
@@ -1245,7 +1280,7 @@ mod android_profile_tests {
         hack-no-repeat-words hack-dud-when-full hack-spare-guessed hack-mark-guesses-as-duds \
         hack-keep-matching-chars hack-compact-guesses hack-replenish-bonus run-overencumbered over-run-ap over-jump-ap \
         npc-melee-part-damage disarm-needs-skill disarm-mult disarm-explode-mult cap-skills-by-special skill-cap-base \
-        skill-cap-per-special skill-cap-per-luck skill-cap-most cap-skills-spare-tagged hold-breath breath-sway \
+        skill-cap-per-special skill-cap-per-luck skill-cap-most cap-skills-spare-tagged hold-breath breath-activate breath-sway \
         breath-ap scope-wheel-zoom wheel-cycles-hotkeys dpad-cycles-hotkeys keys-with-pad double-tap-ammo \
         improved-weather vats-stop-following-dead night-vision-toggle night-vision-off-first night-vision-by-day \
         kill-cam-outside-vats kill-cam-hit-location weather-trip-distance compass-pips-fade compass-places-fade \
@@ -1407,8 +1442,8 @@ mod android_profile_tests {
         let tweaks = tweak_rows();
         // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
         // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
-        // and Running Costs AP sneak options (#3183).
-        assert_eq!(tweaks.len(), 569);
+        // and Running Costs AP sneak options (#3183), and Stewie 9.65-9.70 sub-options (#3184).
+        assert_eq!(tweaks.len(), 573);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);
@@ -1472,7 +1507,7 @@ mod android_profile_tests {
     fn android_groups_the_same_registered_rows_once_without_changing_the_registry() {
         let list = registry(&KNOWN);
         let before: Vec<_> = list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect();
-        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        let mobile = resolve_mobile_layout(&list);
         assert_eq!(mobile.tab_names(), MOBILE_TAB_ORDER);
         assert_eq!(mobile.unnamed(), 0);
         let mut indices: Vec<_> = mobile.ordered_settings().collect();
@@ -1492,14 +1527,14 @@ mod android_profile_tests {
         let grass_fire = list.iter().position(|row| row.key == "grass-fire").unwrap();
         assert_eq!(mobile.placement_of(grass_fire).unwrap().path(), "NVF Features > World Interaction");
         assert!(!mobile_keys.contains("grass-fire"), "upstream world setting is shared, not mobile-only");
-        let desktop = resolve_desktop_layout(&list);
+        let fallback = resolve_layout(&list);
         for (index, row) in list.iter().enumerate() {
             if !mobile_keys.contains(row.key) {
-                assert_eq!(mobile.placement_of(index), desktop.placement_of(index));
+                assert_eq!(mobile.placement_of(index), fallback.placement_of(index));
             }
         }
         assert_eq!(before, list.iter().map(|s| (s.key, s.group, s.label, s.note)).collect::<Vec<_>>());
-        assert_eq!(resolve_desktop_layout(&list).tab_names(), DESKTOP_TAB_ORDER);
+        assert_eq!(resolve_desktop_layout(&list).tab_names()[..8], DESKTOP_TAB_ORDER);
     }
 
     #[test]
@@ -1507,7 +1542,7 @@ mod android_profile_tests {
         use crate::bindings::{Control, InputDevice};
         use crate::settings_view::{self as view, ControlRow, Found, RowId, SettingsScope, ViewEntry, Visibility};
         let list = registry(&KNOWN);
-        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        let mobile = resolve_mobile_layout(&list);
         let at = |key| list.iter().position(|s| s.key == key).unwrap();
         let empty = Found::default();
         let touch = view::project(&mobile, &list, SettingsScope::Tab(MOBILE_TAB), &mobile_visibility(&list), &empty, &view::Folding::default());
@@ -1575,7 +1610,7 @@ mod android_profile_tests {
         }
         let list = app.world().resource::<Settings>().list().to_vec();
         let baseline = app.world().resource::<Settings>().values(app.world());
-        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        let mobile = resolve_mobile_layout(&list);
         assert_eq!(app.world().resource::<Settings>().values(app.world()), baseline);
         let original_index = app.world().resource::<Settings>().index("mobile-thermal-auto").unwrap();
         let id = RowId::Setting(original_index);
@@ -1598,10 +1633,13 @@ mod android_profile_tests {
     #[test]
     fn platform_profile_and_missing_optional_mobile_rows_keep_the_shared_page() {
         let list = registry(&[("difficulty", "Gameplay"), ("touch-gyro-v1", "Controller"), ("odd", "Mods")]);
-        let expected = resolve_layout_with(&list, &super::TAB_ORDER,
-            if cfg!(target_os = "android") { MOBILE_SECTIONS } else { &[] });
+        let expected = if cfg!(target_os = "android") {
+            resolve_mobile_layout(&list)
+        } else {
+            resolve_desktop_layout(&list)
+        };
         assert_eq!(super::resolve_layout(&list), expected);
-        let mobile = resolve_layout_with(&list, &MOBILE_TAB_ORDER, MOBILE_SECTIONS);
+        let mobile = resolve_mobile_layout(&list);
         assert_eq!(keys(&list, &mobile, MOBILE_TAB), ["[Gyroscope]", "touch-gyro-v1"]);
         assert_eq!(mobile.tab_names().last(), Some(&"Mods"));
         assert_eq!(mobile.unnamed(), 1);

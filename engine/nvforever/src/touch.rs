@@ -237,7 +237,7 @@ const BUTTONS: &[ButtonSpec] = &[
         playing: true,
     },
     ButtonSpec {
-        text: "VATS",
+        text: "V.A.T.S.",
         x: 0.64,
         y: 0.03,
         control: Some(Control::Vats),

@@ -15,6 +15,7 @@ pub(super) fn install(app:&mut App) {
     app.init_resource::<Swipe>().init_resource::<Options>()
         .add_systems(Update,dispatch.in_set(crate::PlaySet::Ui).in_set(Systems::Dispatch).before(super::apply_input))
         .add_systems(Update,restore_history.in_set(crate::PlaySet::Ui).in_set(Systems::Restore).after(super::apply_input).before(super::items::keys));
+    #[cfg(any(target_os = "android", test))]
     crate::settings::add_setting(app,crate::settings::Setting {
         key:KEY,group:crate::pause::GROUP_MENUS,label:"Pip-Boy title/tab swipes",
         note:"Swipe the title to change sections; swipe the tab names to change subtabs. Body swipes scroll or drag items.",

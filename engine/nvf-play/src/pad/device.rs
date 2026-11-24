@@ -433,9 +433,12 @@ pub(crate) fn automatic(world: &mut World) {
         activity.trigger |= (2..4).any(|i| now[i] && !before[i]);
         previous.insert(e, now);
     }
-    // Stewie's explicit A/left-click choice uses this same selector and consumes
-    // its edge. Touch/controller aggregate mouse synthesis is never physical intent.
-    let tweak = world.get_resource::<crate::tweaks::TweakSettings>().is_some_and(|t|t.toggle_device);
+    // On Android (or when touch/platform gating is installed), Stewie's explicit A/left-click
+    // choice uses this selector and consumes its edge. Desktop keeps tweaks.rs::toggle_device.
+    let selector_tweak = cfg!(target_os = "android")
+        || world.contains_resource::<TouchDeviceSwitch>()
+        || world.contains_resource::<PlatformInputGate>();
+    let tweak = selector_tweak && world.get_resource::<crate::tweaks::TweakSettings>().is_some_and(|t| t.toggle_device);
     let gate = world.get_resource::<PlatformInputGate>();
     let tweak_switch = tweak && !held.platform_blocked && gate.is_none_or(|g|!g.active) && match current {
         InputDevice::KeyboardMouse => pads.iter(world).any(|(e,g)|g.just_pressed(GamepadButton::South)

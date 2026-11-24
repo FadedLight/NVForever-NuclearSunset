@@ -1461,7 +1461,8 @@ pub fn refraction_material(material: &mut NifMaterial, strength: f32, fire_perio
     crate::authored::recheck_height(material);
 }
 
-/// Numeric mesh admission is an engine policy; see nif-numeric-admission.md.
+/// Numeric mesh admission is an Android-only engine policy; see nif-numeric-admission.md.
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NumericStream {
     Position,
@@ -1474,12 +1475,14 @@ pub(crate) enum NumericStream {
     InverseBind,
 }
 
+#[cfg(any(target_os = "android", test))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NumericError {
     stream: NumericStream,
     element: usize,
 }
 
+#[cfg(any(target_os = "android", test))]
 fn finite_stream<const N: usize>(values: &[[f32; N]], stream: NumericStream) -> Result<(), NumericError> {
     match values.iter().position(|v| v.iter().any(|x| !x.is_finite())) {
         Some(element) => Err(NumericError { stream, element }),
@@ -1489,6 +1492,7 @@ fn finite_stream<const N: usize>(values: &[[f32; N]], stream: NumericStream) -> 
 
 /// Check the actual streams after material preparation, including repaired colours
 /// and generated tangents. Does not rewrite values or discard individual vertices.
+#[cfg(any(target_os = "android", test))]
 fn finite_mesh(mesh: &Mesh) -> Result<(), NumericError> {
     for (attribute, stream) in [
         (Mesh::ATTRIBUTE_POSITION, NumericStream::Position),
@@ -1517,19 +1521,30 @@ pub(crate) struct AdmittedShape {
 
 /// Numeric errors are separate from absent/unusable optional skin data. A numeric
 /// failure must not become an ordinary unskinned shape in any of the three loaders.
+#[cfg(any(target_os = "android", test))]
 fn admit_shape(dec: &Decoded, shape: &Struct, data: &Struct) -> Result<Option<AdmittedShape>, NumericError> {
     let Some((mesh, triangles, stored)) = build_mesh(data)? else { return Ok(None) };
     let skin = shape_skin(dec, shape, mesh.count_vertices())?;
     Ok(Some(AdmittedShape { mesh, triangles, skin, stored }))
 }
 
+#[cfg(not(target_os = "android"))]
+fn admit_shape_desktop(dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+    let (mesh, triangles, stored) = build_mesh_desktop(data)?;
+    let skin = shape_skin_desktop(dec, shape, mesh.count_vertices());
+    Some(AdmittedShape { mesh, triangles, skin, stored })
+}
+
 #[derive(Default)]
 pub(crate) struct NumericRejections {
+    #[cfg(any(target_os = "android", test))]
     total: usize,
+    #[cfg(any(target_os = "android", test))]
     first: Vec<(usize, NumericError)>,
 }
 
 impl NumericRejections {
+    #[cfg(any(target_os = "android", test))]
     fn record(&mut self, block: usize, error: NumericError) {
         self.total = self.total.saturating_add(1);
         if self.first.len() < 8 {
@@ -1537,7 +1552,8 @@ impl NumericRejections {
         }
     }
 
-    pub fn admit(&mut self, block: usize, dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn admit_android(&mut self, block: usize, dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
         match admit_shape(dec, shape, data) {
             Ok(shape) => shape,
             Err(error) => {
@@ -1547,7 +1563,20 @@ impl NumericRejections {
         }
     }
 
-    pub fn accept_mesh(&mut self, block: usize, mesh: &Mesh) -> bool {
+    pub fn admit(&mut self, block: usize, dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+        #[cfg(target_os = "android")]
+        {
+            self.admit_android(block, dec, shape, data)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = block;
+            admit_shape_desktop(dec, shape, data)
+        }
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn accept_mesh_android(&mut self, block: usize, mesh: &Mesh) -> bool {
         match finite_mesh(mesh) {
             Ok(()) => true,
             Err(error) => {
@@ -1557,16 +1586,62 @@ impl NumericRejections {
         }
     }
 
+    pub fn accept_mesh(&mut self, block: usize, mesh: &Mesh) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.accept_mesh_android(block, mesh)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (block, mesh);
+            true
+        }
+    }
+
     pub fn report(&self, source: &str) {
+        #[cfg(any(target_os = "android", test))]
         if self.total > 0 {
             let source: String = source.chars().take(240).collect();
             warn!("NIF numeric admission: {source}: {} shape(s) rejected; first block/reasons: {:?}", self.total, self.first);
         }
+        #[cfg(not(any(target_os = "android", test)))]
+        let _ = source;
     }
 }
 
 /// The mesh of a shape-data block, its triangle count, and the tangent arrays it stores
-/// (for [`Tangents::Stored`]; empty when it stores none).
+/// (for [`Tangents::Stored`]; empty when it stores none) — desktop path matching `main`.
+#[cfg(not(target_os = "android"))]
+fn build_mesh_desktop(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
+    let md = mesh_data(data);
+    if md.positions.is_empty() || md.triangles.is_empty() {
+        return None;
+    }
+    let n = md.positions.len();
+    let tris = md.triangles.len();
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, md.positions);
+    let has_normals = md.normals.len() == n;
+    if has_normals {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, md.normals);
+    }
+    if let Some(uv) = md.uv_sets.first().filter(|u| u.len() == n) {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.clone());
+    }
+    if md.colors.len() == n {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, md.colors);
+    }
+    let idx: Vec<u32> = md.triangles.into_iter().filter(|&[a, b, c]| (a as usize) < n && (b as usize) < n && (c as usize) < n).flat_map(|[a, b, c]| [a as u32, b as u32, c as u32]).collect();
+    mesh.insert_indices(Indices::U32(idx));
+    if !has_normals {
+        mesh.compute_normals();
+    }
+    Some((mesh, tris, StoredArrays { tangents: md.tangents, bitangents: md.bitangents }))
+}
+
+/// The mesh of a shape-data block, its triangle count, and the tangent arrays it stores
+/// (for [`Tangents::Stored`]; empty when it stores none) — Android finite-admission path.
+#[cfg(any(target_os = "android", test))]
 pub(crate) fn build_mesh(data: &Struct) -> Result<Option<(Mesh, usize, StoredArrays)>, NumericError> {
     let md = mesh_data(data);
     if md.positions.is_empty() || md.triangles.is_empty() {
@@ -1601,7 +1676,47 @@ pub(crate) fn build_mesh(data: &Struct) -> Result<Option<(Mesh, usize, StoredArr
 /// Per-vertex joint indices and normalised weights (four influences per vertex).
 type SkinWeights = (Vec<[u16; 4]>, Vec<[f32; 4]>);
 
-/// Joint indices and weights per vertex from NiSkinData (top four influences).
+/// Joint indices and weights per vertex from NiSkinData (top four influences) — desktop path.
+#[cfg(not(target_os = "android"))]
+fn skin_weights_desktop(skin_data: &Struct, vertices: usize) -> Option<SkinWeights> {
+    let bones = skin_data.list("bone_list")?;
+    let mut infl: Vec<Vec<(u16, f32)>> = vec![Vec::new(); vertices];
+    for (b, bone) in bones.iter().enumerate() {
+        let Value::Struct(bone) = bone else { continue };
+        for w in bone.list("vertex_weights").unwrap_or_default() {
+            let Value::Struct(w) = w else { continue };
+            let (Some(i), Some(wt)) = (w.int("index"), w.float("weight")) else { continue };
+            if let Some(v) = infl.get_mut(i as usize) {
+                v.push((b as u16, wt));
+            }
+        }
+    }
+    if infl.iter().all(|v| v.is_empty()) {
+        return None;
+    }
+    let mut joints = Vec::with_capacity(vertices);
+    let mut weights = Vec::with_capacity(vertices);
+    for mut v in infl {
+        v.sort_by(|a, b| b.1.total_cmp(&a.1));
+        v.truncate(4);
+        let sum: f32 = v.iter().map(|x| x.1).sum();
+        let mut j = [0u16; 4];
+        let mut w = [0f32; 4];
+        for (k, (b, wt)) in v.iter().enumerate() {
+            j[k] = *b;
+            w[k] = if sum > 0.0 { wt / sum } else { 0.0 };
+        }
+        if sum <= 0.0 {
+            w[0] = 1.0;
+        }
+        joints.push(j);
+        weights.push(w);
+    }
+    Some((joints, weights))
+}
+
+/// Joint indices and weights per vertex from NiSkinData (top four influences) — Android path.
+#[cfg(any(target_os = "android", test))]
 fn skin_weights(skin_data: &Struct, vertices: usize) -> Result<Option<SkinWeights>, NumericError> {
     let Some(bones) = skin_data.list("bone_list") else { return Ok(None) };
     let mut infl: Vec<Vec<(u16, f32)>> = vec![Vec::new(); vertices];
@@ -1673,7 +1788,29 @@ impl Skin {
     }
 }
 
-/// The skin of `shape` (with `vertices` vertices), if it has a usable one.
+/// The skin of `shape` (with `vertices` vertices), if it has a usable one — desktop path.
+#[cfg(not(target_os = "android"))]
+fn shape_skin_desktop(dec: &Decoded, shape: &Struct, vertices: usize) -> Option<Skin> {
+    let si = shape.block_ref("skin_instance").and_then(|r| dec.get(r))?;
+    let bones: Vec<usize> = si.refs("bones").unwrap_or_default().iter().map(|&b| usize::try_from(b).ok()).collect::<Option<_>>()?;
+    let sd = si.block_ref("data").and_then(|r| dec.get(r))?;
+    let inverse_binds: Vec<Mat4> = sd
+        .list("bone_list")
+        .unwrap_or_default()
+        .iter()
+        .map(|b| match b {
+            Value::Struct(b) => Some(Mat4::from(affine(&NifTransform::from_struct(b.strukt("skin_transform")?)?))),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    if inverse_binds.len() != bones.len() {
+        return None;
+    }
+    Some(Skin { bones, inverse_binds, weights: skin_weights_desktop(sd, vertices)? })
+}
+
+/// The skin of `shape` (with `vertices` vertices), if it has a usable one — Android path.
+#[cfg(any(target_os = "android", test))]
 fn shape_skin(dec: &Decoded, shape: &Struct, vertices: usize) -> Result<Option<Skin>, NumericError> {
     let Some(si) = shape.block_ref("skin_instance").and_then(|r| dec.get(r)) else { return Ok(None) };
     let Some(sd) = si.block_ref("data").and_then(|r| dec.get(r)) else { return Ok(None) };

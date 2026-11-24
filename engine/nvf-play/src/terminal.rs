@@ -526,6 +526,7 @@ impl Plugin for TerminalPlugin {
             .add_systems(OnExit(PlayState::Menu), close)
             .add_systems(Update, fade_out.in_set(PlaySet::Ui))
             .add_systems(Last, report);
+        #[cfg(any(target_os = "android", test))]
         touch::register(app);
     }
 }

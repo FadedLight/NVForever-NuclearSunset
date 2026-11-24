@@ -489,9 +489,9 @@ mod tests {
         game.extra.entry(companion).or_default().teammate = true;
         assert!(game.open_companion_wheel(companion));
         let buttons = game.wheel_buttons(companion);
-        let unavailable = Command::ALL
+        let unavailable = buttons
             .iter()
-            .map(|&c| game.wheel_unavailable_reason(c))
+            .map(|b| game.wheel_unavailable_reason_for(companion, b))
             .collect();
         let mut app = App::new();
         app.add_plugins((

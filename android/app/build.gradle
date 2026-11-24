@@ -1,4 +1,32 @@
 plugins { id 'com.android.application' }
+
+// Monotonic Android versionCode for downgrade protection: explicit NVF_ANDROID_VERSION_CODE
+// or -PnvfAndroidVersionCode wins; otherwise derive from versionName
+// (major*10_000_000 + minor*100_000 + patch*1_000 + androidRevision).
+def resolvedVersionName = providers.environmentVariable('NVF_ANDROID_VERSION_NAME')
+    .orElse(providers.gradleProperty('nvfAndroidVersionName'))
+    .getOrElse('0.7.0-android-r10')
+def explicitVersionCode = providers.environmentVariable('NVF_ANDROID_VERSION_CODE')
+    .orElse(providers.gradleProperty('nvfAndroidVersionCode'))
+    .orNull
+def deriveVersionCode = { String name ->
+    def m = (name =~ /^v?(\d+)\.(\d+)\.(\d+)(?:-android-r(\d+))?/)
+    if (!m.find()) {
+        throw new GradleException("Cannot derive monotonic versionCode from versionName '${name}'; set NVF_ANDROID_VERSION_CODE")
+    }
+    int major = m.group(1) as int
+    int minor = m.group(2) as int
+    int patch = m.group(3) as int
+    int rev = m.group(4) ? (m.group(4) as int) : 0
+    return major * 10000000 + minor * 100000 + patch * 1000 + rev
+}
+def resolvedVersionCode = explicitVersionCode != null
+    ? (explicitVersionCode as int)
+    : deriveVersionCode(resolvedVersionName)
+if (resolvedVersionCode <= 1) {
+    throw new GradleException("Android versionCode must be > 1 (got ${resolvedVersionCode})")
+}
+
 android {
     namespace 'org.nvforever.android'
     compileSdk 35
@@ -6,8 +34,8 @@ android {
         applicationId 'org.nvforever.android'
         minSdk 29
         targetSdk 35
-        versionCode 1
-        versionName '0.7.0-android-r10'
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
         ndk { abiFilters 'arm64-v8a' }
     }
     // Only this repository's runtime data and Classic casing artwork. No game data.

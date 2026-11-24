@@ -73,7 +73,7 @@ fn enhanced_dialogue_registered_positive_then_off_greys_all_children_without_mut
     let bytes = std::fs::read(&file.0).unwrap();
     for key in availability_children() {
         let settings = app.world().resource::<crate::settings::Settings>();
-        assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), Some("Enable Touch dialogue."), "{key}");
+        assert_eq!(settings.disabled_status(app.world(), settings.index(key).unwrap()), Some("Needs Touch dialogue."), "{key}");
     }
     for (key, name) in [("dialogue-theme-v1", "Classic"),
         ("dialogue-background-tint-v1", "Warm amber"), ("dialogue-touch-choice", "Direct tap"),

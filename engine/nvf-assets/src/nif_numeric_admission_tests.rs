@@ -216,14 +216,28 @@ fn nonfinite_inverse_bind_and_finite_matrix_overflow_are_rejected() {
 #[test]
 fn absent_skin_is_distinct_from_numeric_rejection_and_neighbors_survive() {
     let mut rejected = NumericRejections::default();
-    let plain = rejected.admit(7, &empty_decoded(), &Struct::default(), &geometry()).unwrap();
+    let plain = rejected.admit_android(7, &empty_decoded(), &Struct::default(), &geometry()).unwrap();
     assert!(plain.skin.is_none());
     let (dec, bad) = skin_fixture(skin_data(&[f32::NAN]), 1);
-    assert!(rejected.admit(8, &dec, &bad, &geometry()).is_none(), "malformed skin must not yield Some(unskinned shape)");
+    assert!(rejected.admit_android(8, &dec, &bad, &geometry()).is_none(), "malformed skin must not yield Some(unskinned shape)");
     let (dec, good) = skin_fixture(skin_data(&[1.0]), 1);
-    assert!(rejected.admit(9, &dec, &good, &geometry()).unwrap().skin.is_some());
+    assert!(rejected.admit_android(9, &dec, &good, &geometry()).unwrap().skin.is_some());
     assert_eq!(rejected.total, 1);
     assert_eq!(rejected.first, [(8, NumericError { stream: NumericStream::Weight, element: 0 })]);
+}
+
+#[cfg(not(target_os = "android"))]
+#[test]
+fn desktop_admission_keeps_main_behavior_without_dropping_shapes() {
+    let mut rejected = NumericRejections::default();
+    let mut data = geometry();
+    let mut positions = data.floats("vertices").unwrap().to_vec();
+    positions[4] = f32::NAN;
+    replace(&mut data, "vertices", Value::FloatList { dim: 3, data: positions });
+    let admitted = rejected.admit(1, &empty_decoded(), &Struct::default(), &data);
+    assert!(admitted.is_some(), "desktop admission does not reject nonfinite shapes");
+    assert!(rejected.accept_mesh(1, &admitted.unwrap().mesh));
+    assert_eq!(rejected.total, 0);
 }
 
 #[test]

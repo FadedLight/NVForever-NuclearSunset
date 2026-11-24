@@ -32,6 +32,15 @@ public final class UpdatePolicyTest {
         check(!UpdatePolicy.isAllowedDownloadUrl("http://objects.githubusercontent.com/asset"), "reject http redirect");
         check(!UpdatePolicy.isAllowedDownloadUrl("https://untrusted.example.com/app.apk"), "reject arbitrary redirect host");
 
+        // Metadata redirects (getHttps): nv-forever.com, api.github.com, and pinned GitHub download hosts.
+        check(UpdatePolicy.isAllowedMetadataRedirectUrl("https://nv-forever.com/news.json"), "allow nv-forever.com");
+        check(UpdatePolicy.isAllowedMetadataRedirectUrl("https://www.nv-forever.com/news.json"), "allow www.nv-forever.com");
+        check(UpdatePolicy.isAllowedMetadataRedirectUrl("https://api.github.com/repos/LootJunkieAzza/NVForever/releases"), "allow api.github.com");
+        check(UpdatePolicy.isAllowedMetadataRedirectUrl("https://objects.githubusercontent.com/release/SHA256SUMS.txt"), "allow objects.githubusercontent.com for metadata");
+        check(!UpdatePolicy.isAllowedMetadataRedirectUrl("http://nv-forever.com/news.json"), "reject http nv-forever.com");
+        check(!UpdatePolicy.isAllowedMetadataRedirectUrl("https://raw.githubusercontent.com/user/repo/main/x"), "reject raw.githubusercontent.com");
+        check(!UpdatePolicy.isAllowedMetadataRedirectUrl("https://evil.example/news.json"), "reject unknown metadata redirect host");
+
         byte[] digest = new byte[32];
         for (int i = 0; i < 32; i++) digest[i] = (byte) i;
         String hex = UpdatePolicy.hexSha256(digest);
@@ -45,6 +54,19 @@ public final class UpdatePolicyTest {
         check(UpdatePolicy.checksumMatches(hex.toUpperCase(), digest), "case-insensitive checksum match");
         check(!UpdatePolicy.checksumMatches("0".repeat(64), digest), "mismatch detected");
         check(!UpdatePolicy.checksumMatches("short", digest), "short hex rejected");
+
+        // APK authenticity verification (package name, signing certificate SHA-256, monotonic versionCode).
+        java.util.List<String> signer = java.util.List.of(hex);
+        java.util.List<String> signerUpper = java.util.List.of(hex.toUpperCase());
+        java.util.List<String> otherSigner = java.util.List.of("a".repeat(64));
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700011L, signer, signerUpper) == null, "accept matching package, signer, and newer versionCode");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "com.evil.fake", 700010L, 700011L, signer, signer) != null, "reject mismatched package name");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", null, 700010L, 700011L, signer, signer) != null, "reject null archive package");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700010L, signer, signer) != null, "reject equal versionCode");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700009L, signer, signer) != null, "reject downgrade versionCode");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700011L, signer, otherSigner) != null, "reject mismatched signer");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700011L, signer, java.util.List.of()) != null, "reject missing archive signers");
+        check(UpdatePolicy.verifyApkMetadata("org.nvforever.android", "org.nvforever.android", 700010L, 700011L, signer, java.util.List.of(hex, "a".repeat(64))) != null, "reject extra untrusted signer");
 
         check(UpdatePolicy.progressText(5L * 1024 * 1024, 20L * 1024 * 1024).contains("25%"), "progress percent");
         check(UpdatePolicy.progressText(1024 * 1024, -1).contains("1.0 MB"), "unknown total progress");

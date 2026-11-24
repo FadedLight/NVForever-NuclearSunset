@@ -761,7 +761,7 @@ mod tests {
     fn gyro_layout_key_and_existing_action_ids_survive_legacy_layout_import() {
         let mut config = super::super::layout::Config::default();
         let names: [&str; 18] = [
-            "Pause", "Pip-Boy", "VATS", "Reload", "Jump", "Use", "Aim", "Fire", "Sneak", "Up",
+            "Pause", "Pip-Boy", "V.A.T.S.", "Reload", "Jump", "Use", "Aim", "Fire", "Sneak", "Up",
             "Down", "Left", "Right", "OK", "Back", "Tab", "Page +", "Page -",
         ];
         assert_eq!(

@@ -202,8 +202,47 @@ fn checksum_for(sums: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Select the signed ARM64 Android APK from a release's assets, refusing unsigned packages,
-/// non-ARM64 ABIs, or off-repository download URLs.
+/// Compare Android launcher version strings, treating `-android-r<N>` as a
+/// post-release Android revision above the base release (`0.7.0-android-r10` > `v0.7.0`,
+/// and `0.7.0-android-r10` > `0.7.0-android-r9`), while preserving SemVer ordering for
+/// ordinary pre-releases (`0.9.0-rc.1` < `0.9.0`) and core version numbers (`0.7.1` > `0.7.0-android-r10`).
+pub(crate) fn cmp_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    fn split_android_rev(v: &str) -> (&str, Option<u64>) {
+        let trimmed = v.trim();
+        let no_build = trimmed.split('+').next().unwrap_or(trimmed);
+        if let Some((base, rev_str)) = no_build.rsplit_once("-android-r") {
+            if let Ok(rev) = rev_str.parse::<u64>() {
+                return (base, Some(rev));
+            }
+        }
+        (no_build, None)
+    }
+    let (a_base, a_rev) = split_android_rev(a);
+    let (b_base, b_rev) = split_android_rev(b);
+    let base_ord = news::cmp_versions(a_base, b_base);
+    if base_ord.is_ne() {
+        return base_ord;
+    }
+    match (a_rev, b_rev) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(x), Some(y)) => x.cmp(&y),
+    }
+}
+
+fn is_newer(a: &str, b: &str) -> bool {
+    cmp_versions(a, b) == std::cmp::Ordering::Greater
+}
+
+fn newest(list: Vec<news::Latest>) -> Option<news::Latest> {
+    list.into_iter().max_by(|a, b| cmp_versions(&a.version, &b.version))
+}
+
+/// Select the ARM64 Android `.apk` candidate from a release's assets by filename and
+/// repository URL, refusing names containing `unsigned`, `x86`, or `armeabi` and
+/// off-repository download URLs. Cryptographic signing-certificate verification runs
+/// in Android (`MobileLauncher` + `UpdatePolicy.verifyApkMetadata`) before installer handoff.
 fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a news::Asset> {
     let candidates: Vec<&news::Asset> = assets.iter().filter(|a| {
         let lower = a.name.to_ascii_lowercase();
@@ -224,10 +263,10 @@ fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a ne
 fn check_update(current: &str, get: &mut impl FnMut(&str) -> Result<String, String>) -> Result<Value, String> {
     let text = get(news::RELEASES)?;
     let releases = news::parse_release_list(&text)?;
-    let Some(latest) = news::newest(releases) else {
+    let Some(latest) = newest(releases) else {
         return Ok(json!({"available": false, "current": current}));
     };
-    if !news::is_newer(&latest.version, current) {
+    if !is_newer(&latest.version, current) {
         return Ok(json!({
             "available": false,
             "current": current,

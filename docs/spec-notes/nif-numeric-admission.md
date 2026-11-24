@@ -1,6 +1,6 @@
-# Finite NIF mesh and skin input admission
+# Finite NIF mesh and skin input admission (Android-only)
 
-[documented: `fnv-nif` codec/scene views and the asset consumers in `nif_spawn.rs`, `actor.rs`, and `model.rs`] The decoder retains floating-point data from the file. This note defines an engineering admission rule for mesh streams sent to Bevy and the GPU. It does not describe how the original game handles malformed files, and does not change the raw format decoder.
+[documented: `fnv-nif` codec/scene views and the asset consumers in `nif_spawn.rs`, `actor.rs`, and `model.rs`] The decoder retains floating-point data from the file. This note defines an **Android-only** (`#[cfg(target_os = "android")]`) engineering admission rule for mesh streams sent to Bevy and the GPU. Desktop builds (`#[cfg(not(target_os = "android"))]`) keep the existing `main` mesh/skin admission path unchanged without rejecting shapes for non-finite values. This note does not describe how the original game handles malformed files, and does not change the raw format decoder.
 
 [documented: the earlier public [skin-weight path at 26e5fc780](https://github.com/LootJunkieAzza/NVForever/blob/26e5fc7805a9dc563ba740401aecef7479a6604c/engine/nvf-assets/src/nif_spawn.rs)] The previous path selected four weights, summed them as `f32`, and normalized them without a finite-input check. A missing or unusable skin returned `None`, which callers could draw as an unskinned mesh. Numeric refusal needs a separate error result so malformed declared skin cannot silently take that fallback.
 

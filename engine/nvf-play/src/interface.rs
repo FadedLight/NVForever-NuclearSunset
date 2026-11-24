@@ -226,6 +226,18 @@ fn hud_scale_of_part(part: f32) -> f32 {
 }
 
 pub fn register_hud_scale(app: &mut App, group: &'static str) {
+    #[cfg(target_os = "android")]
+    register_android_hud_scale(app, group);
+    #[cfg(not(target_os = "android"))]
+    {
+        let (legacy, choices) = ui_scale_row(group);
+        crate::settings::add_choice_list(app, legacy, choices);
+        crate::settings::set_older_split(app, "ui-scale", crate::menu_scale::legacy_menu);
+    }
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn register_android_hud_scale(app: &mut App, group: &'static str) {
     use crate::settings::{self, Setting, Slider};
     let (legacy, choices) = ui_scale_row(group);
     settings::add_choice_list(app, legacy, choices);

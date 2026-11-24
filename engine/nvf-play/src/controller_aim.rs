@@ -697,5 +697,41 @@ mod tests {
             assert_eq!(sneak(&app), requested);
         }
     }
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn desktop_pad_plugin_omits_android_controller_rows_and_keeps_immediate_aim_after_menu_and_unfocused() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, InputPlugin, bevy::state::app::StatesPlugin))
+            .insert_state(PlayState::Menu)
+            .init_resource::<Bindings>()
+            .init_resource::<PlayerControl>()
+            .init_resource::<ControlLocks>()
+            .init_resource::<crate::furniture::PlayerSeat>()
+            .insert_resource(crate::pause::Paused(false))
+            .insert_resource(settings::SettingsFile(None))
+            .add_plugins(crate::pad::PadPlugin)
+            .add_systems(Update, crate::control::read_controls);
+        // Desktop PadPlugin must NOT install ControllerAimPlugin or register its 4 rows.
+        assert!(!app.world().contains_resource::<Options>());
+        assert!(!app.world().contains_resource::<Gestures>());
+        if let Some(s) = app.world().get_resource::<settings::Settings>() {
+            for key in KEYS {
+                assert_eq!(s.index(key), None, "desktop must not register {key}");
+            }
+        }
+        app.world_mut().resource_mut::<Bindings>().device = InputDevice::Controller;
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        // Unfocused primary window on desktop still allows aiming (matches main).
+        app.world_mut().spawn((Window { focused: false, ..default() }, PrimaryWindow));
+        app.update();
+        raw_button(&mut app, pad, Control::Block, true);
+        app.update();
+        assert!(!aiming(&app), "menu state does not aim");
+        // Closing menu while LT is still held aims immediately on desktop (no release hold-off).
+        app.world_mut().resource_mut::<NextState<PlayState>>().set(PlayState::Playing);
+        app.update();
+        app.update();
+        assert!(aiming(&app), "desktop aims immediately on menu close even when unfocused");
+    }
     include!("controller_aim/main_aim_union_tests.rs");
 }

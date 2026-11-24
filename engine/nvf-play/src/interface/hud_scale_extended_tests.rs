@@ -14,9 +14,21 @@ fn expanded_hud_choices_keep_five_percent_steps_and_finite_default() {
 }
 
 #[test]
-fn actual_registered_hud_slider_migrates_legacy_sizes_without_changing_menu_values() {
+fn desktop_register_hud_scale_keeps_ui_scale_visible_and_omits_hud_scale_v2() {
     let mut app = App::new();
     register_hud_scale(&mut app, "Display");
+    let settings = app.world().resource::<settings::Settings>();
+    let legacy = settings.index("ui-scale").expect("desktop keeps ui-scale");
+    assert_eq!(settings.index(HUD_SCALE_KEY), None, "desktop must not register hud-scale-v2");
+    assert!(settings.list()[legacy].slider.is_none());
+    assert_eq!((settings.choices(legacy).unwrap().names)(app.world()).len(), 6);
+    assert!(settings.hidden(app.world()).is_empty(), "desktop ui-scale must remain visible");
+}
+
+#[test]
+fn actual_registered_hud_slider_migrates_legacy_sizes_without_changing_menu_values() {
+    let mut app = App::new();
+    register_android_hud_scale(&mut app, "Display");
     crate::menu_scale::register(&mut app, "Display");
     let settings = app.world().resource::<settings::Settings>();
     let row = settings.list().iter().find(|row| row.key == HUD_SCALE_KEY).unwrap();
@@ -81,7 +93,7 @@ fn actual_hud_ini_migration_edit_restart_and_wide_drawing_are_process_isolated()
         assert_eq!(ui_scale_setting(), 1.0, "cold startup default cannot retain the prior process setting");
         let mut app = App::new();
         app.insert_resource(settings::SettingsFile(Some(path.clone())));
-        register_hud_scale(&mut app, "Display");
+        register_android_hud_scale(&mut app, "Display");
         crate::menu_scale::register(&mut app, "Display");
         app.add_systems(PostStartup, settings::apply_stored);
         app.add_systems(PostStartup, settings::fix_ui_scale.after(settings::apply_stored));
@@ -107,7 +119,7 @@ fn actual_hud_ini_migration_edit_restart_and_wide_drawing_are_process_isolated()
 #[test]
 fn actual_registered_hud_retains_main_legacy_list_and_migrates_its_named_values() {
     let mut app = App::new();
-    register_hud_scale(&mut app, "Display");
+    register_android_hud_scale(&mut app, "Display");
     crate::menu_scale::register(&mut app, "Display");
     let settings = app.world().resource::<settings::Settings>();
     let legacy = settings.index("ui-scale").unwrap();

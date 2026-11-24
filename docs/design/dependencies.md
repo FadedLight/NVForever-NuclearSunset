@@ -128,9 +128,10 @@ All four vendored crates touched or added by `#2436` are wired through `[patch.c
   [`vendor/rapier3d/README.nvforever.md`](../../vendor/rapier3d/README.nvforever.md)).
   Only two Rust files differ from upstream `0.36.1`: joining a deferred broad-phase BVH
   optimization before `dt <= 0.0` returns (`src/pipeline/physics_pipeline/substep.rs`,
-  same fix as Rapier PR #1067) and invoking `IslandManager::commit_sleeping_chunks`
-  (defined in `src/dynamics/island_manager/sleep.rs`) for sleeping bodies remaining in the
-  awake island after persistent sleep bootstrap (`src/dynamics/island_manager/manager.rs`).
+  same fix as Rapier PR #1067) and invoking the already-upstream
+  `IslandManager::commit_sleeping_chunks` (present unchanged in upstream `0.36.1`'s
+  `src/dynamics/island_manager/sleep.rs`) for sleeping bodies remaining in the awake
+  island after persistent sleep bootstrap (`src/dynamics/island_manager/manager.rs`).
   Both files are active on all targets (desktop and Android).
 - **`winit` 0.30.13 (Apache-2.0)** — `engine/vendor/winit/` (introduced by `#2436`),
   patched in `engine/Cargo.toml` (details in

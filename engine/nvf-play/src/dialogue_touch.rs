@@ -170,26 +170,29 @@ pub(crate) fn install(app: &mut App) {
                 .in_set(crate::PlaySet::Ui)
                 .after(crate::dialogue_menu::DrawMenu),
         );
-    use crate::settings::{add_choice_list, add_setting, ChoiceList, Setting, Slider};
-    add_setting(app, Setting { key: "touch-dialogue", group: crate::pause::GROUP_MENUS, label: "Touch dialogue",
-        note: "Wide wrapped dialogue choices, large targets and swipe scrolling. Uses the same offered choices and game actions. On by default on Android.",
-        switches: "",
-        get: |w| w.resource::<TouchDialogue>().enabled, set: set_enabled, slider: None });
-    add_setting(app, Setting { key: "dialogue-choice-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue choice text",
-        note: "Choice text size in every dialogue style (75-200%), independent of subtitles. Phones use a smaller 100% and start at 85% to fit more choices; your saved size is kept. Rows stay at least 48 units tall.",
-        switches: "",
-        get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().choice_scale),
-            set: |w,v| w.resource_mut::<TouchDialogue>().choice_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
-    add_setting(app, Setting { key: "dialogue-subtitle-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue subtitle text",
-        note: "Speaking-line text size in every dialogue style (75-200%; phones use a smaller 100%). Does not change choices or world HUD subtitles.",
-        switches: "",
-        get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().subtitle_scale),
-            set: |w,v| w.resource_mut::<TouchDialogue>().subtitle_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
-    add_choice_list(app, Setting { key:"dialogue-touch-choice",group:crate::pause::GROUP_MENUS,label:"Touch dialogue choices",
-        note:"Select then confirm: tap a choice, then Confirm selection. Direct tap: a released tap answers. A swipe never answers. Keyboard/controller and real mouse keep their usual actions.",
-        switches: "",
-        get: |_|false,set:|_,_|{},slider:None }, ChoiceList { names: |_|vec!["Select then confirm".into(),"Direct tap".into()],
-            chosen:mode,pick:set_mode,save:mode,load:set_mode,ask_keep:false });
+    #[cfg(any(target_os = "android", test))]
+    {
+        use crate::settings::{add_choice_list, add_setting, ChoiceList, Setting, Slider};
+        add_setting(app, Setting { key: "touch-dialogue", group: crate::pause::GROUP_MENUS, label: "Touch dialogue",
+            note: "Wide wrapped dialogue choices, large targets and swipe scrolling. Uses the same offered choices and game actions. On by default on Android.",
+            switches: "",
+            get: |w| w.resource::<TouchDialogue>().enabled, set: set_enabled, slider: None });
+        add_setting(app, Setting { key: "dialogue-choice-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue choice text",
+            note: "Choice text size in every dialogue style (75-200%), independent of subtitles. Phones use a smaller 100% and start at 85% to fit more choices; your saved size is kept. Rows stay at least 48 units tall.",
+            switches: "",
+            get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().choice_scale),
+                set: |w,v| w.resource_mut::<TouchDialogue>().choice_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
+        add_setting(app, Setting { key: "dialogue-subtitle-text-size", group: crate::pause::GROUP_MENUS, label: "Dialogue subtitle text",
+            note: "Speaking-line text size in every dialogue style (75-200%; phones use a smaller 100%). Does not change choices or world HUD subtitles.",
+            switches: "",
+            get: |_| false, set: |_,_| {}, slider: Some(Slider { get: |w| part(w.resource::<TouchDialogue>().subtitle_scale),
+                set: |w,v| w.resource_mut::<TouchDialogue>().subtitle_scale=from_part(v), min:0.0,step:0.04,shown:Some(shown) }) });
+        add_choice_list(app, Setting { key:"dialogue-touch-choice",group:crate::pause::GROUP_MENUS,label:"Touch dialogue choices",
+            note:"Select then confirm: tap a choice, then Confirm selection. Direct tap: a released tap answers. A swipe never answers. Keyboard/controller and real mouse keep their usual actions.",
+            switches: "",
+            get: |_|false,set:|_,_|{},slider:None }, ChoiceList { names: |_|vec!["Select then confirm".into(),"Direct tap".into()],
+                chosen:mode,pick:set_mode,save:mode,load:set_mode,ask_keep:false });
+    }
 }
 
 #[derive(Resource, Default)]

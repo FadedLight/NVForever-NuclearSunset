@@ -263,6 +263,7 @@ impl Plugin for CompanionWheelPlugin {
             .add_systems(Update, touch::draw.after(draw).in_set(PlaySet::Ui))
             .add_systems(OnExit(PlayState::Menu), close)
             .add_systems(Last, report);
+        #[cfg(any(target_os = "android", test))]
         touch::register(app);
     }
 }
@@ -321,12 +322,15 @@ fn open(
     if screen.0.as_ref().is_some_and(|s| s.companion == c) {
         return;
     }
-    let buttons = with_world(rt, &mut sim, |rt| rt.game.wheel_buttons(c));
+    let (buttons, unavailable) = with_world(rt, &mut sim, |rt| {
+        let buttons = rt.game.wheel_buttons(c);
+        let unavailable = buttons.iter().map(|b| rt.game.wheel_unavailable_reason_for(c, b)).collect();
+        (buttons, unavailable)
+    });
     let base = sim.base_of(c.0).unwrap_or(c);
     let name = sim.name(base).map(str::to_string).unwrap_or_else(|| rt.game.data.name(c));
     info!("companion wheel: open on {} ({}) (MenuMode {}): {}", rt.game.data.name(c), name, fnv_game::companion_wheel::MENU_CODE, describe(&buttons));
     stats.opened += 1;
-    let unavailable = with_world(rt, &mut sim, |rt| Command::ALL.iter().map(|&command| rt.game.wheel_unavailable_reason(command)).collect());
     screen.0 = Some(Session { companion: c, name, buttons, unavailable, selected: None, exit_hover: false, fresh: true, refreshed: time.elapsed_secs() });
     if *state.get() != PlayState::Menu {
         next.set(PlayState::Menu);
@@ -441,8 +445,13 @@ fn apply(
                     next.set(PlayState::Playing);
                     return;
                 }
-                s.buttons = with_world(rt, &mut sim, |rt| rt.game.wheel_buttons(c));
-                s.unavailable = with_world(rt, &mut sim, |rt| Command::ALL.iter().map(|&command| rt.game.wheel_unavailable_reason(command)).collect());
+                let (buttons, unavailable) = with_world(rt, &mut sim, |rt| {
+                    let buttons = rt.game.wheel_buttons(c);
+                    let unavailable = buttons.iter().map(|b| rt.game.wheel_unavailable_reason_for(c, b)).collect();
+                    (buttons, unavailable)
+                });
+                s.buttons = buttons;
+                s.unavailable = unavailable;
                 s.refreshed = time.elapsed_secs();
                 // The command took effect as the reply started (`Game::wheel_command`).
                 if let Some(b) = s.buttons.iter().find(|b| b.command == command) {
@@ -474,11 +483,15 @@ fn follow_game(mut screen: ResMut<WheelScreen>, mut script: Option<ResMut<Script
     if now - s.refreshed >= REFRESH {
         s.refreshed = now;
         let c = s.companion;
-        let b = with_world(rt, &mut sim, |rt| rt.game.wheel_buttons(c));
+        let (b, unavailable) = with_world(rt, &mut sim, |rt| {
+            let b = rt.game.wheel_buttons(c);
+            let u = b.iter().map(|btn| rt.game.wheel_unavailable_reason_for(c, btn)).collect();
+            (b, u)
+        });
         if b != s.buttons {
             s.buttons = b;
         }
-        s.unavailable = with_world(rt, &mut sim, |rt| Command::ALL.iter().map(|&command| rt.game.wheel_unavailable_reason(command)).collect());
+        s.unavailable = unavailable;
     }
 }
 

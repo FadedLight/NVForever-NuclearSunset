@@ -349,6 +349,7 @@ pub struct LockpickPlugin;
 
 impl Plugin for LockpickPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(target_os = "android")]
         touch::install(app);
         let steps = match std::env::var("NVF_PLAY_TEST_LOCKPICK").map(|v| parse_aid(&v)) {
             Ok(Ok(a)) => a,
@@ -370,17 +371,28 @@ impl Plugin for LockpickPlugin {
             .insert_resource(LockpickAid { steps, skill: None })
             .add_message::<OpenLockpick>()
             .add_message::<LockpickInput>()
-            .add_message::<LockOpened>()
-            .add_systems(
-                Update,
-                (run_aid, open, (touch::input, keys, buttons, apply, step).chain().run_if(in_state(PlayState::Menu)), pointer, screen::draw, screen::draw_debug, screen::fade)
-                    .chain()
-                    .after(crate::menu::open_menus)
-                    .in_set(PlaySet::Ui),
-            )
+            .add_message::<LockOpened>();
+        #[cfg(target_os = "android")]
+        app.add_systems(
+            Update,
+            (run_aid, open, (touch::input, keys, buttons, apply, step).chain().run_if(in_state(PlayState::Menu)), pointer, screen::draw, screen::draw_debug, screen::fade)
+                .chain()
+                .after(crate::menu::open_menus)
+                .in_set(PlaySet::Ui),
+        )
+        .add_systems(OnExit(PlayState::Menu), (close, touch::clear));
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(
+            Update,
+            (run_aid, open, (keys, buttons, apply, step).chain().run_if(in_state(PlayState::Menu)), pointer, screen::draw, screen::draw_debug, screen::fade)
+                .chain()
+                .after(crate::menu::open_menus)
+                .in_set(PlaySet::Ui),
+        )
+        .add_systems(OnExit(PlayState::Menu), close);
+        app
             // The help box's scrolling, for every menu that shows it.
             .add_systems(Update, help::scroll.in_set(PlaySet::Ui))
-            .add_systems(OnExit(PlayState::Menu), (close, touch::clear))
             .add_systems(Last, report);
     }
 }
@@ -786,7 +798,7 @@ fn crime_hook(out: &mut MessageWriter<LockOpened>, reference: FormId, owner: Opt
 #[allow(clippy::too_many_arguments)]
 fn step(
     input: ControlInput,
-    held: Res<touch::HeldTorque>,
+    held: Option<Res<touch::HeldTorque>>,
     time: AidTime,
     mut screen: ResMut<LockpickScreen>,
     mut next: ResMut<NextState<PlayState>>,
@@ -837,9 +849,13 @@ fn step(
     let mouse_turns = script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.lockpick_mouse_turn);
     let moving = moving_keys(script.as_deref());
     let physical = torque_held(&input, moving) || (mouse_turns && input.mouse.pressed(MouseButton::Left));
-    let keyboard_with_pad = input.controller() && crate::bindings::keys_with_pad()
-        && (physical_torque_held(&input, moving) || (mouse_turns && input.physical_mouse_pressed(MouseButton::Left)));
-    let torque = touch::torque(physical, input.controller(), &held, aid) || keyboard_with_pad;
+    let torque = if let Some(held) = held.as_deref() {
+        let keyboard_with_pad = input.controller() && crate::bindings::keys_with_pad()
+            && (physical_torque_held(&input, moving) || (mouse_turns && input.physical_mouse_pressed(MouseButton::Left)));
+        touch::torque(physical, input.controller(), held, aid) || keyboard_with_pad
+    } else {
+        physical || aid
+    };
     let strained = s.game.stopped;
     let reference = s.reference;
     let events = s.game.step(dt, torque);

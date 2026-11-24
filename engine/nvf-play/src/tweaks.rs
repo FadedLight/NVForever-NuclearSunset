@@ -1210,8 +1210,11 @@ impl Plugin for TweaksPlugin {
             .add_systems(Update, sync.in_set(crate::PlaySet::Input)
                 .before(crate::player::read_input).before(crate::control::read_controls))
             .add_systems(Update, (keys, drop_weapon, radio_volume_keys, last_weapon, hold_breath, repeat_activate, toggle_sight, place_marker_here, clear_near_marker, hide_hud_key, skip_radio_song).in_set(crate::PlaySet::Input))
-            .add_systems(Update, (objectives_on_arrival, revive_companions_on_arrival).in_set(crate::PlaySet::Ui))
-            // Switch Device by Pressing is admitted by pad::device::automatic,
+            .add_systems(Update, (objectives_on_arrival, revive_companions_on_arrival).in_set(crate::PlaySet::Ui));
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(Update, toggle_device.in_set(crate::PlaySet::Input));
+        app
+            // On Android, Switch Device by Pressing is admitted by pad::device::automatic,
             // through the same consumed edge/cancellation/save path as the selector.
             .add_systems(PreUpdate, trigger_dead_zones.before(bevy::input::InputSystems))
             .add_systems(Update, ap_costs.after(crate::PlaySet::Input).after(crate::player::encumbered_walks).before(crate::PlaySet::Physics));
@@ -2553,6 +2556,27 @@ fn place_marker_here(
 /// The Hide HUD key (`crate::bindings::Control::HideHud`) hides the parts of the HUD its
 /// switches choose, or shows them again (`crate::hud::HudHidden`); at the start, under
 /// Hidden After Loading, they start hidden [design: docs/design/tweaks.md].
+/// The player's Toggle Controller If Attack Pressed tweak: with the keyboard and mouse
+/// working the controls, a controller's A switches them to the controller; with the
+/// controller, a left click switches them back. Written to the INI only with the controls'
+/// next save (`crate::bindings::with_controls`) [design: docs/design/tweaks.md].
+#[cfg(not(target_os = "android"))]
+fn toggle_device(tweaks: Res<TweakSettings>, mouse: Res<ButtonInput<MouseButton>>, pads: Query<&Gamepad>, bindings: Option<ResMut<crate::bindings::Bindings>>, listening: Option<Res<crate::pause::Listening>>) {
+    use crate::bindings::InputDevice;
+    let Some(mut b) = bindings else { return };
+    // Not while the Controls tab waits for a new key or button: that is a binding.
+    if !tweaks.toggle_device || listening.is_some_and(|l| l.0.is_some()) {
+        return;
+    }
+    let want = match b.device {
+        InputDevice::KeyboardMouse if pads.iter().any(|g| g.just_pressed(GamepadButton::South)) => InputDevice::Controller,
+        InputDevice::Controller if mouse.just_pressed(MouseButton::Left) => InputDevice::KeyboardMouse,
+        _ => return,
+    };
+    info!("controls: {} now works the controls (Toggle Controller If Attack Pressed)", want.name());
+    b.device = want;
+}
+
 fn hide_hud_key(input: crate::bindings::ControlInput, state: Res<State<crate::PlayState>>, tweaks: Res<TweakSettings>, hidden: Option<ResMut<crate::hud::HudHidden>>, mut started: Local<bool>) {
     let Some(mut hidden) = hidden else { return };
     if !std::mem::replace(&mut *started, true) {

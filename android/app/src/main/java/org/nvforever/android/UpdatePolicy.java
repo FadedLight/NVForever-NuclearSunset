@@ -1,7 +1,10 @@
 package org.nvforever.android;
 
 import java.net.URI;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /** Pure-Java policy checks for in-app GitHub Release APK downloads. */
 final class UpdatePolicy {
@@ -55,6 +58,68 @@ final class UpdatePolicy {
         } catch (IllegalArgumentException e) {
             return false;
         }
+    }
+
+    /**
+     * Allowed HTTPS redirect hosts for launcher metadata requests (`getHttps`):
+     * nv-forever.com (project news/site config), api.github.com (releases API),
+     * and the pinned GitHub Release download hosts (for SHA256SUMS.txt redirects).
+     */
+    static boolean isAllowedMetadataRedirectUrl(String url) {
+        if (isAllowedDownloadUrl(url)) return true;
+        if (!MarkdownParser.isSafeHttpsUrl(url)) return false;
+        try {
+            URI uri = URI.create(url);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) return false;
+            String host = uri.getHost();
+            if (host == null || host.isEmpty() || uri.getUserInfo() != null) return false;
+            String lower = host.toLowerCase(Locale.ROOT);
+            return lower.equals("nv-forever.com")
+                || lower.equals("www.nv-forever.com")
+                || lower.equals("api.github.com");
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Verify a downloaded APK's package identity, signing certificates, and monotonic
+     * version code against the currently installed app before handing it to Android's
+     * package installer. Returns {@code null} when valid, or an error description.
+     */
+    static String verifyApkMetadata(
+            String expectedPackage,
+            String archivePackage,
+            long installedVersionCode,
+            long archiveVersionCode,
+            List<String> installedSignersSha256,
+            List<String> archiveSignersSha256) {
+        if (expectedPackage == null || expectedPackage.isEmpty()
+                || archivePackage == null || !expectedPackage.equals(archivePackage)) {
+            return "Downloaded APK package name does not match this app";
+        }
+        if (installedVersionCode <= 0 || archiveVersionCode <= installedVersionCode) {
+            return "Downloaded APK version code (" + archiveVersionCode
+                + ") is not newer than installed (" + installedVersionCode + ")";
+        }
+        if (installedSignersSha256 == null || installedSignersSha256.isEmpty()
+                || archiveSignersSha256 == null || archiveSignersSha256.isEmpty()) {
+            return "Downloaded APK has missing signing certificate information";
+        }
+        Set<String> installedSet = new HashSet<>();
+        for (String s : installedSignersSha256) {
+            if (!isValidSha256Hex(s)) return "Invalid installed signing certificate digest";
+            installedSet.add(s.toLowerCase(Locale.ROOT));
+        }
+        Set<String> archiveSet = new HashSet<>();
+        for (String s : archiveSignersSha256) {
+            if (!isValidSha256Hex(s)) return "Downloaded APK has invalid signing certificate digest";
+            archiveSet.add(s.toLowerCase(Locale.ROOT));
+        }
+        if (!installedSet.equals(archiveSet)) {
+            return "Downloaded APK signing certificate does not match this app";
+        }
+        return null;
     }
 
     static boolean isValidSha256Hex(String value) {

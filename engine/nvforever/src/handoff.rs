@@ -333,14 +333,12 @@ pub fn leave(
             let _ = std::fs::remove_file(&file);
             let _ = std::fs::remove_file(started_marker(&file));
             let keep = crate::restart_args(&crate::command_line());
-            let mut args = new_run_args(&keep, r.as_ref(), window.single().ok().map(|(e, w)| placement(w, e)), &file);
-            args.extend(handoff.1.iter().map(|why| format!("--load-refused={why}")));
             #[cfg(target_os = "android")]
             {
                 // Android has no executable to spawn. The private launcher kills only
                 // this app's :game process before starting a fresh NativeActivity.
                 // The successor is shown normally, without the desktop overlap protocol.
-                args = new_run_args(&keep, r.as_ref(), None, &file);
+                let mut args = new_run_args(&keep, r.as_ref(), None, &file);
                 args.truncate(args.len() - 2);
                 args.extend(handoff.1.iter().map(|why| format!("--load-refused={why}")));
                 match crate::android::restart(&args) {
@@ -349,16 +347,20 @@ pub fn leave(
                 }
             }
             #[cfg(not(target_os = "android"))]
-            let started = std::env::current_exe()
-                .map_err(|e| format!("cannot find this program to start it again: {e}"))
-                .and_then(|exe| {
-                    let mut cmd = std::process::Command::new(&exe);
-                    cmd.args(&args);
-                    // The whole line, so a report shows what the new run was given (#1903).
-                    info!("load: the new run's command line: {} {}", exe.display(), args.join(" "));
-                    remove_driving_aids(&mut cmd, std::env::vars_os().map(|(key, _)| key));
-                    cmd.spawn().map_err(|e| format!("could not start {}: {e}", exe.display()))
-                });
+            let started = {
+                let mut args = new_run_args(&keep, r.as_ref(), window.single().ok().map(|(e, w)| placement(w, e)), &file);
+                args.extend(handoff.1.iter().map(|why| format!("--load-refused={why}")));
+                std::env::current_exe()
+                    .map_err(|e| format!("cannot find this program to start it again: {e}"))
+                    .and_then(|exe| {
+                        let mut cmd = std::process::Command::new(&exe);
+                        cmd.args(&args);
+                        // The whole line, so a report shows what the new run was given (#1903).
+                        info!("load: the new run's command line: {} {}", exe.display(), args.join(" "));
+                        remove_driving_aids(&mut cmd, std::env::vars_os().map(|(key, _)| key));
+                        cmd.spawn().map_err(|e| format!("could not start {}: {e}", exe.display()))
+                    })
+            };
             #[cfg(not(target_os = "android"))]
             match started {
                 Ok(child) => {

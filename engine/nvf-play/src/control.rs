@@ -658,7 +658,9 @@ pub fn read_controls(
         control.sneak = held.base(control.sneak);
     }
     if *state.get() != PlayState::Playing {
-        if std::mem::take(&mut *native_sneak_hold) { control.sneak = false; }
+        if cfg!(target_os = "android") || held_sneak.is_some() {
+            if std::mem::take(&mut *native_sneak_hold) { control.sneak = false; }
+        }
         if let Some(held) = held_sneak.as_deref_mut() {
             held.controller_active = false;
             control.sneak = held.apply(control.sneak, false);
@@ -675,20 +677,19 @@ pub fn read_controls(
     let mut message: Option<String> = None;
     let c = &mut *control;
     let was_out = c.weapon_out;
-    let controller_hold = input.controller() && controller_options.as_deref().is_some_and(|o|o.hold_sneak);
+    let android_sneak_hold = cfg!(target_os = "android") || held_sneak.is_some();
+    let controller_hold = android_sneak_hold && input.controller() && controller_options.as_deref().is_some_and(|o|o.hold_sneak);
     let sneak_pressed = if controller_hold { crate::bindings::keys_with_pad() && input.physical_pressed(Control::CrouchSneak) } else { input.pressed(Control::CrouchSneak) };
     let sneak_start = if controller_hold { crate::bindings::keys_with_pad() && input.physical_just_pressed(Control::CrouchSneak) } else { input.just_pressed(Control::CrouchSneak) };
     let sneak_end = if controller_hold { crate::bindings::keys_with_pad() && input.physical_just_released(Control::CrouchSneak) } else { input.just_released(Control::CrouchSneak) };
-    // Only a hold actually started by this reader is retired on suppression or a
-    // device/mode change; an unrelated native/script base is never globally reset.
-    let native_hold_mode = tweaks.as_ref().is_some_and(|t|t.hold_to_sneak);
-    if *native_sneak_hold && (!native_hold_mode || !sneak_pressed) {
+    let native_hold_mode = tweaks.as_ref().is_some_and(|t| t.hold_to_sneak);
+    if android_sneak_hold && *native_sneak_hold && (!native_hold_mode || !sneak_pressed) {
         c.sneak = false;
         *native_sneak_hold = false;
     }
     // Native hold affects only the restored base; virtual/controller holds apply below.
     if native_hold_mode {
-        if sneak_start { *native_sneak_hold = true; }
+        if android_sneak_hold && sneak_start { *native_sneak_hold = true; }
         if sneak_pressed != c.sneak && (sneak_start || sneak_end) {
             c.sneak = sneak_pressed;
             info!("Crouch/Sneak held: sneaking {} asked", if c.sneak { "on" } else { "off" });
@@ -1307,6 +1308,19 @@ mod tests {
         app.world_mut().resource_mut::<HeldSneakInput>().active=true;app.update();assert!(control(&app).sneak);
         app.world_mut().resource_mut::<PlayerControl>().sneak=false;
         app.world_mut().resource_mut::<HeldSneakInput>().active=false;app.update();assert!(!control(&app).sneak);
+    }
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn desktop_hold_to_sneak_is_not_dropped_on_menu_entry() {
+        let mut app = app();
+        app.insert_resource(crate::tweaks::TweakSettings { hold_to_sneak: true, ..default() });
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ControlLeft);
+        app.update();
+        assert!(control(&app).sneak, "hold to sneak starts sneaking while held");
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.insert_state(PlayState::Menu);
+        app.update();
+        assert!(control(&app).sneak, "desktop does not clear hold-to-sneak on entering a menu");
     }
     #[test]
     fn game_keys_toggle() {

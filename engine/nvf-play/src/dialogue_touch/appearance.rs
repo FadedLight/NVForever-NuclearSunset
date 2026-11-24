@@ -66,22 +66,25 @@ pub(crate) fn register_theme_note(app: &mut App, note: &'static str) {
 }
 pub(super) fn install(app: &mut App) {
     app.init_resource::<Appearance>().add_systems(Update, (paint, markers, instrument, preview_visibility).chain().after(crate::PlaySet::Ui).after(crate::ui_colour::Recolour).before(crate::PlaySet::Sync));
-    add_choice_list(app, theme_setting(THEME_NOTE), theme_choices());
-    add_choice_list(app, Setting {key:TINT_KEY,group:crate::pause::GROUP_MENUS,label:"Dialogue background tint",
-        note:"Tint the translucent choice backing. Text and selection still use your preferred HUD colour.",switches:"",get:|_|false,set:|_,_|{},slider:None},
-        ChoiceList {names:|_|["HUD colour","Neutral","Warm amber"].map(str::to_owned).to_vec(),chosen:tint_name,pick:pick_tint,save:tint_name,load:pick_tint,ask_keep:false});
-    for (key,label,frame) in [(BACKGROUND_KEY,"Dialogue background opacity",false),(FRAME_KEY,"Dialogue accent opacity",true)] {
-        let slider = if frame {
-            Slider { get: |w|w.resource::<Appearance>().frame, set: |w,v|w.resource_mut::<Appearance>().frame=opacity(v), min:0.0, step:0.01, shown:Some(shown) }
-        } else {
-            Slider { get: |w|w.resource::<Appearance>().background/0.80, set: |w,v|w.resource_mut::<Appearance>().background=backing(opacity(v)*0.80), min:0.0, step:0.01, shown:Some(shown_backing) }
-        };
-        add_setting(app, Setting { key, group:crate::pause::GROUP_MENUS,label,
-            note:"Live appearance only. Backing is capped at 80% so the scene remains visible. Text and selection cues keep their contrast; targets and input stay unchanged.",switches:"",get:|_|false,set:|_,_|{},slider:Some(slider) });
+    #[cfg(any(target_os = "android", test))]
+    {
+        add_choice_list(app, theme_setting(THEME_NOTE), theme_choices());
+        add_choice_list(app, Setting {key:TINT_KEY,group:crate::pause::GROUP_MENUS,label:"Dialogue background tint",
+            note:"Tint the translucent choice backing. Text and selection still use your preferred HUD colour.",switches:"",get:|_|false,set:|_,_|{},slider:None},
+            ChoiceList {names:|_|["HUD colour","Neutral","Warm amber"].map(str::to_owned).to_vec(),chosen:tint_name,pick:pick_tint,save:tint_name,load:pick_tint,ask_keep:false});
+        for (key,label,frame) in [(BACKGROUND_KEY,"Dialogue background opacity",false),(FRAME_KEY,"Dialogue accent opacity",true)] {
+            let slider = if frame {
+                Slider { get: |w|w.resource::<Appearance>().frame, set: |w,v|w.resource_mut::<Appearance>().frame=opacity(v), min:0.0, step:0.01, shown:Some(shown) }
+            } else {
+                Slider { get: |w|w.resource::<Appearance>().background/0.80, set: |w,v|w.resource_mut::<Appearance>().background=backing(opacity(v)*0.80), min:0.0, step:0.01, shown:Some(shown_backing) }
+            };
+            add_setting(app, Setting { key, group:crate::pause::GROUP_MENUS,label,
+                note:"Live appearance only. Backing is capped at 80% so the scene remains visible. Text and selection cues keep their contrast; targets and input stay unchanged.",switches:"",get:|_|false,set:|_,_|{},slider:Some(slider) });
+        }
+        add_setting(app, Setting {key:HINTS_KEY,group:crate::pause::GROUP_MENUS,label:"Show dialogue hints",
+            note:"Show gesture and tutorial captions in enhanced dialogue. NPC speech, choices, requirements and selected-action labels always remain visible.",switches:"",
+            get:|w|w.resource::<Appearance>().hints,set:|w,v|w.resource_mut::<Appearance>().hints=v,slider:None});
     }
-    add_setting(app, Setting {key:HINTS_KEY,group:crate::pause::GROUP_MENUS,label:"Show dialogue hints",
-        note:"Show gesture and tutorial captions in enhanced dialogue. NPC speech, choices, requirements and selected-action labels always remain visible.",switches:"",
-        get:|w|w.resource::<Appearance>().hints,set:|w,v|w.resource_mut::<Appearance>().hints=v,slider:None});
 }
 
 /// All theme decoration is paint-only: never Button, Action or an input owner.

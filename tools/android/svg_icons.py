@@ -30,7 +30,7 @@ def identity(value: object) -> bool:
 
 
 def label_valid(value: object) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]{0,47}", value) is not None
+    return isinstance(value, str) and ".." not in value and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .-]{0,47}", value) is not None
 
 
 def root_attributes(style: dict) -> dict[str, str]:

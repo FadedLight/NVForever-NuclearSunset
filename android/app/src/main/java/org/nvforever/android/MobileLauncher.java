@@ -3,6 +3,10 @@ package org.nvforever.android;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -33,6 +37,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -499,6 +504,11 @@ final class MobileLauncher {
                 }
                 if (target.exists() && !target.delete()) throw new IOException("Cannot replace previous cached APK");
                 if (!part.renameTo(target)) throw new IOException("Cannot finalize downloaded APK");
+                String authError = verifyDownloadedApk(activity, target);
+                if (authError != null) {
+                    target.delete();
+                    throw new IOException(authError);
+                }
                 activity.runOnUiThread(() -> {
                     updateDownloading = false;
                     updateProgress = "";
@@ -584,6 +594,51 @@ final class MobileLauncher {
             activeDownload = null;
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private static List<String> signingCertDigests(SigningInfo signingInfo) throws IOException {
+        if (signingInfo == null) return List.of();
+        Signature[] signatures = signingInfo.hasMultipleSigners()
+            ? signingInfo.getApkContentsSigners()
+            : signingInfo.getSigningCertificateHistory();
+        if (signatures == null || signatures.length == 0) return List.of();
+        try {
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            List<String> out = new ArrayList<>(signatures.length);
+            for (Signature sig : signatures) {
+                if (sig == null) return List.of();
+                sha.reset();
+                out.add(UpdatePolicy.hexSha256(sha.digest(sig.toByteArray())));
+            }
+            return out;
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static String verifyDownloadedApk(LauncherActivity activity, File apk) throws IOException {
+        PackageManager pm = activity.getPackageManager();
+        String expectedPkg = activity.getPackageName();
+        PackageInfo installed;
+        try {
+            installed = pm.getPackageInfo(expectedPkg, PackageManager.GET_SIGNING_CERTIFICATES);
+        } catch (PackageManager.NameNotFoundException e) {
+            return "Cannot inspect installed package metadata";
+        }
+        PackageInfo archive = pm.getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_SIGNING_CERTIFICATES);
+        if (archive == null) {
+            return "Downloaded file is not a valid Android APK package";
+        }
+        List<String> installedSigners = signingCertDigests(installed.signingInfo);
+        List<String> archiveSigners = signingCertDigests(archive.signingInfo);
+        return UpdatePolicy.verifyApkMetadata(
+            expectedPkg,
+            archive.packageName,
+            installed.getLongVersionCode(),
+            archive.getLongVersionCode(),
+            installedSigners,
+            archiveSigners
+        );
     }
 
     private void fetchNews() {
@@ -673,8 +728,9 @@ final class MobileLauncher {
     }
 
     // JNI calls this on the worker. Android supplies DNS, HTTPS and the device trust store.
-    // Follows up to UpdatePolicy.MAX_REDIRECTS HTTPS redirects only to pinned GitHub release hosts
-    // (required for GitHub Releases SHA256SUMS.txt 302 redirects) while preserving size/deadline caps.
+    // Follows up to UpdatePolicy.MAX_REDIRECTS HTTPS redirects to pinned metadata/download hosts
+    // (nv-forever.com, api.github.com, and GitHub Releases asset hosts for SHA256SUMS.txt 302s)
+    // while preserving size/deadline caps.
     private static String getHttps(String address) {
         String currentUrl = address;
         long deadline = android.os.SystemClock.elapsedRealtime() + 15000;
@@ -695,7 +751,7 @@ final class MobileLauncher {
                     connection = null;
                     if (location == null || location.isEmpty()) return null;
                     String next = new URL(url, location).toString();
-                    if (!UpdatePolicy.isAllowedDownloadUrl(next)) return null;
+                    if (!UpdatePolicy.isAllowedMetadataRedirectUrl(next)) return null;
                     currentUrl = next;
                     continue;
                 }

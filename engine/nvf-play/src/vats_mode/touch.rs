@@ -98,6 +98,16 @@ impl State {
 
 pub(super) fn install(app: &mut App) {
     app.init_resource::<State>();
+    #[cfg(any(target_os = "android", test))]
+    register_settings(app);
+    app.add_systems(PostUpdate, feedback.after(VatsUpdate).before(bevy::ui::UiSystems::Layout));
+}
+
+pub fn register_settings(app: &mut App) {
+    app.init_resource::<State>();
+    if app.world().get_resource::<crate::settings::Settings>().is_some_and(|s| s.index(SETTING_KEY).is_some()) {
+        return;
+    }
     crate::settings::add_choice_list(app, crate::settings::Setting {
         key: SETTING_KEY, group: "Touch", label: "V.A.T.S. body selection",
         note: "Classic and Mark and Fire: tap or hold a body part to queue once; hold takes 0.45 seconds. Off uses existing controls. Touch Fire confirms queued attacks.",
@@ -107,7 +117,6 @@ pub(super) fn install(app: &mut App) {
         chosen: |w| w.resource::<State>().mode.name().to_owned(), pick,
         save: |w| w.resource::<State>().mode.name().to_owned(), load: pick, ask_keep: false,
     });
-    app.add_systems(PostUpdate, feedback.after(VatsUpdate).before(bevy::ui::UiSystems::Layout));
 }
 fn pick(w: &mut World, name: &str) -> bool {
     let Some(mode) = Mode::parse(name) else { return false };

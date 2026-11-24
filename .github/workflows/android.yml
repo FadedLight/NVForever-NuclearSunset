@@ -5,12 +5,7 @@ on:
   pull_request:
     paths:
       - 'android/**'
-      - 'engine/**'
-      - 'crates/**'
-      - 'schemas/**'
-      - 'lang/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - 'engine/nvf-android/**'
       - 'tools/android/**'
       - '.github/workflows/android.yml'
 

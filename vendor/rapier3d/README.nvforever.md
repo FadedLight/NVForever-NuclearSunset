@@ -19,11 +19,13 @@ repair the lifecycle of this supported step:
   production change proposed by [Rapier PR #1067](https://github.com/dimforge/rapier/pull/1067);
   it is not claimed as part of the published 0.36.1 release.
 - `src/dynamics/island_manager/manager.rs`: after rebuilding persistent sleep
-  components during bootstrap, use the existing `commit_sleeping_chunks` route
-  for sleeping bodies still present in the awake island. Mixed components were
-  already woken by the original bootstrap and remain awake. This keeps the
-  persistent graph and active chunks coherent after query registration followed
-  by an explicit sleep request. It does not suppress island assertions.
+  components during bootstrap, call upstream `0.36.1`'s already-existing
+  `IslandManager::commit_sleeping_chunks` (unchanged in upstream
+  `src/dynamics/island_manager/sleep.rs`) for sleeping bodies still present in
+  the awake island. Mixed components were already woken by the original bootstrap
+  and remain awake. This keeps the persistent graph and active chunks coherent
+  after query registration followed by an explicit sleep request. It does not
+  suppress island assertions.
 
 [implementation evidence] Compared with the exact official 0.36.0 package,
 0.36.1 changes only published VCS/package-version metadata, its internal lock's

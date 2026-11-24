@@ -746,15 +746,29 @@ fn follow_pointer(
         .iter()
         .filter(|(_, p, ..)| matches!(p, PipBoyPart::Screen | PipBoyPart::Button(_)) || (cfg!(any(target_os = "android", test)) && matches!(p, PipBoyPart::ScrollKnob)))
         .filter_map(|(entity, p, mesh, gt, skin, visible, inherited)| {
-            // A present skin without a complete pose is unavailable, not rigid.
-            let joints = if let Some(s) = skin {
-                let inv = binds.get(&s.inverse_bindposes)?;
-                if inv.len() != s.joints.len() || inv.is_empty() { return None; }
-                let pose: Vec<Mat4> = s.joints.iter().zip(inv.iter()).map(|(j, ib)| globals.get(*j).ok().map(|g| g.to_matrix() * *ib)).collect::<Option<_>>()?;
-                if !pose.iter().all(|m| m.is_finite()) { return None; }
-                Some(pose)
-            } else { None };
-            let shape = pointer_pose(&mesh.0, joints.as_deref(), gt.to_matrix())?;
+            #[cfg(target_os = "android")]
+            let (joints, shape) = {
+                // On Android, a present skin without a complete pose is unavailable, not rigid.
+                let joints = if let Some(s) = skin {
+                    let inv = binds.get(&s.inverse_bindposes)?;
+                    if inv.len() != s.joints.len() || inv.is_empty() { return None; }
+                    let pose: Vec<Mat4> = s.joints.iter().zip(inv.iter()).map(|(j, ib)| globals.get(*j).ok().map(|g| g.to_matrix() * *ib)).collect::<Option<_>>()?;
+                    if !pose.iter().all(|m| m.is_finite()) { return None; }
+                    Some(pose)
+                } else { None };
+                let shape = pointer_pose(&mesh.0, joints.as_deref(), gt.to_matrix())?;
+                (joints, shape)
+            };
+            #[cfg(not(target_os = "android"))]
+            let shape = {
+                let joints: Option<Vec<Mat4>> = skin.and_then(|s| {
+                    let inv = binds.get(&s.inverse_bindposes)?;
+                    s.joints.iter().zip(inv.iter()).map(|(j, ib)| globals.get(*j).ok().map(|g| g.to_matrix() * *ib)).collect()
+                });
+                Posed::new(&mesh.0, joints.as_deref(), gt.to_matrix())?
+            };
+            #[cfg(target_os = "android")]
+            let _ = joints;
             let touch_visible = cam.is_active && visible.is_some_and(|v| *v != Visibility::Hidden) && inherited.is_some_and(|v| v.get());
             #[cfg(any(target_os = "android", test))]
             if touch_visible && model_presented {

@@ -1054,31 +1054,31 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("tweak-revive-on-cell-change", "tweak-revive-companions", "Needs Revive Unconscious Companions."),
     ("tweak-no-self-explosion-non-hostiles", "tweak-no-self-explosion-damage", "Needs Own Blasts Spare the Player."),
     ("tweak-grabbing-is-theft-min-value", "tweak-grabbing-is-theft", "Needs Grabbing Is Stealing."),
-    ("dialogue-choice-text-size", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-subtitle-text-size", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-touch-choice", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-theme-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-speaker-side", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-device-side-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-background-opacity-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-background-tint-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-frame-opacity-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("dialogue-hints-v1", "touch-dialogue", "Enable Touch dialogue."),
-    ("touch-gyro-toggle-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-ads-only-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-recenter-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-invert-x-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-invert-y-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-sensitivity-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-gyro-ads-v1", "touch-gyro-v1", "Enable Gyroscope."),
-    ("touch-hotbar-slots", "touch-hotbar", "Enable Touch hotbar."),
-    ("touch-hotbar-size", "touch-hotbar", "Enable Touch hotbar."),
-    ("touch-hotbar-tray", "touch-hotbar", "Enable Touch hotbar."),
-    ("touch-pipboy-distance-v1", "touch-pipboy-swipe-v1", "Enable Bottom swipe handle."),
-    ("touch-direct-pipboy-v1", "touch-pipboy-swipe-v1", "Enable Bottom swipe handle."),
-    ("touch-pipboy-dismiss-travel-v1", "touch-pipboy-dismiss-side-v2", "Choose a Pip-Boy dismissal side."),
-    ("lockpick-touch-hints", "lockpick-touch", "Enable Touch lockpicking."),
-    ("lockpick-touch-size", "lockpick-touch", "Enable Touch lockpicking."),
+    ("dialogue-choice-text-size", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-subtitle-text-size", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-touch-choice", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-theme-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-speaker-side", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-device-side-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-background-opacity-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-background-tint-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-frame-opacity-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("dialogue-hints-v1", "touch-dialogue", "Needs Touch dialogue."),
+    ("touch-gyro-toggle-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-ads-only-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-recenter-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-invert-x-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-invert-y-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-sensitivity-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-gyro-ads-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    ("touch-hotbar-slots", "touch-hotbar", "Needs Touch hotbar."),
+    ("touch-hotbar-size", "touch-hotbar", "Needs Touch hotbar."),
+    ("touch-hotbar-tray", "touch-hotbar", "Needs Touch hotbar."),
+    ("touch-pipboy-distance-v1", "touch-pipboy-swipe-v1", "Needs Bottom swipe handle."),
+    ("touch-direct-pipboy-v1", "touch-pipboy-swipe-v1", "Needs Bottom swipe handle."),
+    ("touch-pipboy-dismiss-travel-v1", "touch-pipboy-dismiss-side-v2", "Needs Pip-Boy downward dismissal."),
+    ("lockpick-touch-hints", "lockpick-touch", "Needs Touch lockpicking."),
+    ("lockpick-touch-size", "lockpick-touch", "Needs Touch lockpicking."),
 ];
 
 /// The Controls tab's rows that are shown only while the input device is a controller
@@ -1175,7 +1175,7 @@ pub fn mobile_layout_stamp() -> String {
 
 /// [`layout_stamp`] with `sections` for [`SECTIONS`].
 pub(crate) fn stamp_of(sections: &[Section]) -> String {
-    stamp(&TAB_ORDER, sections.iter().chain(ANDROID_SECTIONS))
+    stamp(&TAB_ORDER, sections.iter())
 }
 
 fn stamp<'a>(tabs: &[&str], sections: impl Iterator<Item = &'a Section>) -> String {

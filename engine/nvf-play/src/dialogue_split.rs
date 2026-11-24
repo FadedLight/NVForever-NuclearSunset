@@ -141,18 +141,21 @@ pub(crate) fn install(app: &mut App) {
         .add_systems(Update, resolve.in_set(Resolve).after(crate::PlaySet::Scripts).before(crate::PlaySet::Ui))
         .add_systems(Update, apply_classic.in_set(Admit).after(Resolve).before(crate::PlaySet::Ui))
         .add_systems(Update, apply.in_set(crate::PlaySet::Sync).after(crate::control::place_camera).after(crate::dialogue_zoom::apply));
-    crate::settings::add_choice_list(app, crate::settings::Setting {
-        key:KEY, group:crate::pause::GROUP_MENUS, label:"Dialogue speaker side",
-        note:"With touch dialogue, Field Notes, Retro Console and Wrist Terminal sit on one side and frame the speaker on the other. Standard keeps the speaker centered; Classic keeps its own framing.",
-        switches:"", get:|_|false,set:|_,_|{},slider:None,
-    },crate::settings::ChoiceList { names:|_|[Side::Standard,Side::Left,Side::Right].map(|s|s.name().into()).to_vec(),
-        chosen,pick:choose,save:chosen,load:choose,ask_keep:false });
-    crate::settings::add_choice_list(app, crate::settings::Setting {
-        key:DEVICE_SIDE_KEY, group:crate::pause::GROUP_MENUS, label:"Device dialogue side",
-        note:"Place the Wrist Terminal or Retro Console on the Right (default) or Left side of the screen, framing the speaker on the opposite side.",
-        switches:"", get:|_|false,set:|_,_|{},slider:None,
-    },crate::settings::ChoiceList { names:|_|[DeviceSide::Right,DeviceSide::Left].map(|s|s.name().into()).to_vec(),
-        chosen:chosen_device_side,pick:choose_device_side,save:chosen_device_side,load:choose_device_side,ask_keep:false });
+    #[cfg(any(target_os = "android", test))]
+    {
+        crate::settings::add_choice_list(app, crate::settings::Setting {
+            key:KEY, group:crate::pause::GROUP_MENUS, label:"Dialogue speaker side",
+            note:"With touch dialogue, Field Notes, Retro Console and Wrist Terminal sit on one side and frame the speaker on the other. Standard keeps the speaker centered; Classic keeps its own framing.",
+            switches:"", get:|_|false,set:|_,_|{},slider:None,
+        },crate::settings::ChoiceList { names:|_|[Side::Standard,Side::Left,Side::Right].map(|s|s.name().into()).to_vec(),
+            chosen,pick:choose,save:chosen,load:choose,ask_keep:false });
+        crate::settings::add_choice_list(app, crate::settings::Setting {
+            key:DEVICE_SIDE_KEY, group:crate::pause::GROUP_MENUS, label:"Device dialogue side",
+            note:"Place the Wrist Terminal or Retro Console on the Right (default) or Left side of the screen, framing the speaker on the opposite side.",
+            switches:"", get:|_|false,set:|_,_|{},slider:None,
+        },crate::settings::ChoiceList { names:|_|[DeviceSide::Right,DeviceSide::Left].map(|s|s.name().into()).to_vec(),
+            chosen:chosen_device_side,pick:choose_device_side,save:chosen_device_side,load:choose_device_side,ask_keep:false });
+    }
 }
 
 fn rectangles(size: Vec2, safe: SafeInsets, side: Side) -> Option<(Rect,Rect)> {

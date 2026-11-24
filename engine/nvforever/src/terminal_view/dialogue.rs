@@ -41,7 +41,10 @@ struct Instance {
 }
 
 #[derive(Resource, Default)]
-struct DialogueMonitor(Option<Instance>);
+struct DialogueMonitor {
+    active: Option<Instance>,
+    failed: Option<Request>,
+}
 
 fn same_request(a: &Request, b: &Request) -> bool {
     a.stamp == b.stamp && a.image == b.image && a.camera == b.camera
@@ -73,14 +76,17 @@ fn manage(
                     && r.stamp.display.max.cmple(Vec2::new(w.physical_width() as f32,w.physical_height() as f32)).all()
             })
     });
-    let keep = state.0.as_ref().zip(wanted).is_some_and(|(old,new)| same_request(&old.request,new));
+    let keep = state.active.as_ref().zip(wanted).is_some_and(|(old,new)| same_request(&old.request,new));
     if !keep {
-        if let Some(old) = state.0.take() {
+        if let Some(old) = state.active.take() {
             remove_view(&mut commands, view.as_deref(), &old.request);
             for entity in old.entities { commands.entity(entity).despawn(); }
         }
     }
-    if state.0.is_some() { return; }
+    if state.failed.as_ref().zip(wanted).is_none_or(|(f, w)| !same_request(f, w)) {
+        state.failed = None;
+    }
+    if state.active.is_some() || state.failed.is_some() { return; }
     let Some(request) = wanted else { return; };
     let Some(model) = models.model_with_cpu(MONITOR_MODEL) else { return; };
     // The image has integer texels; the mapping keeps the actual fractional
@@ -90,8 +96,11 @@ fn manage(
         &mut commands, &mut models, &mut plain, &model, &request.image, request.target,
         Extent3d {width:size.x.ceil() as u32,height:size.y.ceil() as u32,depth_or_array_layers:1},
         DIALOGUE_MONITOR_LAYER, "Dialogue terminal", true, -3, true, false, Vec3::ZERO,
-    ) else { return; };
-    state.0 = Some(Instance {request:request.clone(),entities,camera,image,
+    ) else {
+        state.failed = Some(request.clone());
+        return;
+    };
+    state.active = Some(Instance {request:request.clone(),entities,camera,image,
         glass:Arc::new(glass),button:button.map(Arc::new),blockers,published:None});
 }
 
@@ -102,7 +111,7 @@ fn publish(
     cameras: Query<(&Camera,&GlobalTransform)>,
     mut state: ResMut<DialogueMonitor>,
 ) {
-    let Some(instance) = state.0.as_mut() else { return; };
+    let Some(instance) = state.active.as_mut() else { return; };
     if !request.as_deref().is_some_and(|r| same_request(&instance.request,r)) {
         remove_view(&mut commands,view.as_deref(),&instance.request);
         instance.published = None;

@@ -167,8 +167,8 @@ pub(super) fn install(app: &mut App) {
         note: "Show an arrow above the stick: drag the movement finger onto it and release to engage native Auto Move; tap to toggle it. Uses your binding and normal walk/run rules; no sprint or AP change.",
         switches: "",
         get: |w| w.resource::<Options>().run_lock, set: |w,v| w.resource_mut::<Options>().run_lock=v, slider: None });
-    settings::add_setting(app, Setting { key: "touch-vats-double-tap-v1", group: "Touch", label: "Double-tap look space for VATS",
-        note: "Two short stationary taps on empty look space, with no other fingers down, pulse your VATS binding. Drags/cancellation do not. Native weapon, target and AP rules decide the result.",
+    settings::add_setting(app, Setting { key: "touch-vats-double-tap-v1", group: "Touch", label: "Double-tap look space for V.A.T.S.",
+        note: "Two short stationary taps on empty look space, with no other fingers down, pulse your V.A.T.S. binding. Drags/cancellation do not. Native weapon, target and AP rules decide the result.",
         switches: "",
         get: |w| w.resource::<Options>().vats_taps, set: |w,v| w.resource_mut::<Options>().vats_taps=v, slider: None });
 }

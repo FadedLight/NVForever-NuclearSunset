@@ -425,6 +425,7 @@ pub fn install(app: &mut App) {
         .add_message::<MenuInput>()
         .add_systems(Update, dispatch.in_set(Dispatch).before(super::MenuSystems).run_if(resource_exists::<crate::sim::SimState>))
         .add_systems(Update, view::draw.after(super::MenuSystems));
+    #[cfg(any(target_os = "android", test))]
     crate::settings::add_setting(app, crate::settings::Setting {
         key: KEY, group: crate::pause::GROUP_MENUS, label: "Touch in barter menus",
         note: "Use finger taps and list dragging in the ordinary buying and selling menus. Dragging browses without choosing an item. Mouse, keyboard and controller controls stay available.",

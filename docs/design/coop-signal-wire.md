@@ -131,6 +131,20 @@ guest to guest and the host takes no part in it.
 - No database rows, no stored objects, invocation logs off.
 - The client's IP is used only for the rate limit.
 
+## Self-hosting
+
+[design: #3795 section 6, "Self-hosting", and goal G8]
+
+`crates/nvf-signal-server` runs the stand-in (`crates/nvf-signal`, the same rules as the
+Worker) as a server on one TCP port: `nvf-signal-server --listen 0.0.0.0:8787`. Players set
+`NVF_COOP_SIGNAL=http://that-machine:8787`.
+- It speaks plain HTTP and `ws://`, with no TLS. On the internet, put a TLS proxy in front.
+- Codes and secrets come from the operating system's random source. The stand-in's seeded
+  generator is for tests only: its outputs give its state away.
+- It has no rate limit and keeps nothing on disk.
+- It also serves section 12's offline smoke test: two games and the server on one PC, no
+  internet.
+
 ## Example
 
 ```

@@ -110,6 +110,18 @@ off by default, saved in `NVForever.ini` `[Settings]` [design: #3305]).
   bright square. Off: detection is the original's. Not in the original (#2688).
 - Registered in `engine/nvf-play/src/sound_cover.rs`
 
+### `sneak-bounding-box`: Crouch height collision
+
+- On the page: On: crouching shrinks collision height for you and crouching human companions
+  to fit under low spaces, holding sneak if headroom is blocked. Off: fixed standing height.
+- In full: Default Off (vanilla keeps the standing character collider height while sneaking).
+  When On, crouching scales the collision capsule height for the player and crouching human
+  companions so they can move under low clearances, and keeps sneak active if overhead
+  geometry blocks standing back up. Optional NVForever setting following the public
+  `bSneakBoundingBoxFix` behaviour in JIP LN NVSE Plugin v57.30
+  (`docs/spec-notes/sneak-bounding-box.md`, #3845).
+- Registered in `engine/nvf-play/src/player.rs`
+
 ## Gameplay › V.A.T.S.
 
 ### `vats-style`: V.A.T.S. style

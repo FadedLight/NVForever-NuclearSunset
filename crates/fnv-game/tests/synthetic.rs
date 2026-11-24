@@ -5290,7 +5290,7 @@ fn built_in_plugins_report_installed() {
     let f = udf_fixture();
     let mut g = game(&f);
     let q = |g: &mut fnv_game::Game, body: &str| g.run_query(&format!("Begin Function {{ }}\nSetFunctionValue ({body})\nEnd\n"), Default::default());
-    for name in ["JIP NVSE Plugin", "JohnnyGuitarNVSE", "ShowOffNVSE Plugin", "SUP NVSE Plugin", "JIP PP LN", "CUI", "AnhNVSE", "Extensions for NVSE", "UI Organizer Plugin", "hNVSE", "sup nvse plugin"] {
+    for name in ["JIP NVSE Plugin", "JohnnyGuitarNVSE", "ShowOffNVSE Plugin", "SUP NVSE Plugin", "JIP PP LN", "CUI", "AnhNVSE", "Extensions for NVSE", "UI Organizer Plugin", "hNVSE", "Improved Console", "sup nvse plugin"] {
         assert_eq!(q(&mut g, &format!("IsPluginInstalled \"{name}\"")), Ok(XVal::Num(1.0)), "{name}");
         let Ok(XVal::Num(v)) = q(&mut g, &format!("GetPluginVersion \"{name}\"")) else { panic!("{name}") };
         assert!(v > 0.0, "{name}: {v}");
@@ -5298,6 +5298,7 @@ fn built_in_plugins_report_installed() {
     // A version a mod asks for "at least" is met where none was read in the original.
     assert_eq!(q(&mut g, "GetPluginVersion \"SUP NVSE Plugin\" >= 250"), Ok(XVal::Num(1.0)));
     assert_eq!(q(&mut g, "GetPluginVersion \"CUI\""), Ok(XVal::Num(120.0)));
+    assert_eq!(q(&mut g, "GetPluginVersion \"Improved Console\""), Ok(XVal::Num(3.0)));
     for name in ["yUI", "NVTF", "No Such Plugin"] {
         assert_eq!(q(&mut g, &format!("IsPluginInstalled \"{name}\"")), Ok(XVal::Num(0.0)), "{name}");
         assert_eq!(q(&mut g, &format!("GetPluginVersion \"{name}\"")), Ok(XVal::Num(-1.0)), "{name}");

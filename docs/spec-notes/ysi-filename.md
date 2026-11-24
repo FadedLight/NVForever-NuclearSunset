@@ -44,42 +44,91 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
   including an explicit clear of an authored flag. [engine design choice] Rules are
   cached, while this predicate reads current World state on each query; native
   classification timing after a flag edit is unobserved.
-- Record-backed `WEAP`, `ALCH`, and `ARMO` predicates are evaluated against existing
-  `Game` record/override views (`schemas/fnv/objects.json`, `nvse.rs`, `nvse_jip7.rs`,
-  `nvse_jip8.rs`). Every supported key name below appears verbatim in the public
-  **Sorting Icons 1.4b** (`ySI - Sorting Ycons`, Nexus mod 74358) `menus/ySI/ySI.json`
-  configuration file; no ySI/yUI DLL or source code was consulted. Any key not found in
-  a cited public source (including shorthand typos such as `weaponAutomatic` or
-  `weaponScope`) remains `Match::Unknown`:
+- Record-backed `WEAP`, `ALCH`, `ARMO`, and `RCPE` predicates are evaluated against
+  existing `Game` record/override views (`schemas/fnv/objects.json`,
+  `schemas/fnv/gameplay.json`, `nvse.rs`, `nvse_jip7.rs`, `nvse_jip8.rs`, `aid.rs`).
+  Every supported key name below appears verbatim in the public **Sorting Icons 1.4b**
+  (`ySI - Sorting Ycons`, Nexus mod 74358) `menus/ySI/ySI.json` configuration file; no
+  ySI/yUI DLL or source code was consulted. Any key not found in a cited public source
+  (including shorthand typos such as `weaponAutomatic` or `weaponScope`, and keys such as
+  `bookSkill`, `isSkillBook`, `noteType`, `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`,
+  and `edidPrefix` which were also `[observed]` to be ignored by `yUI 1.4d`) remains
+  `Match::Unknown`:
   - `WEAP` (`Match::No` for non-weapons [hypothesis]):
     - `weaponSkill` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`;
       `schemas/fnv/objects.json` `WEAP.DNAM.skill`, actor-value skill IDs `34`/`35`/`38`/`41`/`45`;
-      array support via `number_set`: hypothesis].
+      observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d, `bSortingIcons=1`)
+      with the 10 official base masters, isolated ySI JSON + `ySIGetTrait "tag"` + `yUI.log`
+      probes (no DLL or source consulted): scalar integer only — array values abort JSON loading
+      with `json.exception.type_error.302` and stay `Match::Unknown`].
     - `weaponType` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`, scalar and
       integer arrays such as `[3, 4]`, `[5, 6, 7]`, `[8, 9]`, `[11, 12]`;
-      `schemas/fnv/objects.json` `WEAP.DNAM.animation_type`].
+      `schemas/fnv/objects.json` `WEAP.DNAM.animation_type`;
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): accepts scalar and array].
     - `weaponIsAutomatic` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used
-      with `1`); `schemas/fnv/objects.json` `WEAP.DNAM.flags1` bit 1 `"Is Automatic"`].
+      with `1`); `schemas/fnv/objects.json` `WEAP.DNAM.flags1` bit 1 `"Is Automatic"`;
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d)].
     - `weaponHasScope` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with
-      `1`); `schemas/fnv/objects.json` `WEAP.DNAM.flags1` bit 2 `"Has Scope"`].
+      `1`); `schemas/fnv/objects.json` `WEAP.DNAM.flags1` bit 2 `"Has Scope"`;
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1` matches scoped, `0`
+      matches unscoped, `-1` does not match unscoped].
     - `weaponIgnoresDTDR` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used
       with `1`); `schemas/fnv/objects.json` `WEAP.DNAM.flags1` bit 0 `"Ignores Normal
-      Weapon Resistance"`].
+      Weapon Resistance"`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d)].
+    - `weaponClipRounds` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (values `3`,
+      `7`); `schemas/fnv/objects.json` `WEAP.DATA.clip_size`; observed: FNV 1.4.0.525 +
+      xNVSE 6.4.9 + yUI 140 (v1.4d): scalar `>= N` threshold — `7` matched clip sizes
+      `12`/`13`/`20`/`24`/`30` and rejected `5`/`6`].
+    - `weaponNumProjectiles` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (value
+      `4`); `schemas/fnv/objects.json` `WEAP.DNAM.projectile_count`; observed: FNV 1.4.0.525
+      + xNVSE 6.4.9 + yUI 140 (v1.4d): scalar `>= N` threshold — `4` matched 7-pellet
+      `WeapNVCaravanShotgun` and rejected 1-projectile weapons].
+    - `weaponAttackAnim` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (values `10`,
+      `11`); `schemas/fnv/objects.json` `WEAP.DNAM.attack_animation`; array support via
+      `number_set`: hypothesis].
+    - `weaponHandgrip` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (value `3`);
+      `schemas/fnv/objects.json` `WEAP.DNAM.grip_animation`; array support via `number_set`:
+      hypothesis].
+    - `weaponSoundLevel` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (value `2`);
+      `schemas/fnv/objects.json` `WEAP.VNAM`; array support via `number_set`: hypothesis].
+    - `ammoMod` + `ammoForm` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`
+      (`"ammoMod": "FalloutNV.esm", "ammoForm": "166F63"`); `schemas/fnv/objects.json`
+      `WEAP.NAM0` via `Game::weapon_ammo`; hypothesis: hex local FormID and array support,
+      dangling `ammoMod` without `ammoForm` stays `Match::Unknown`].
   - `ALCH` (`Match::No` for non-ingestibles [hypothesis]):
     - `aidIsFood` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
-      `schemas/fnv/objects.json` `ALCH.ENIT.flags` bit 1 (`0x02`) `"Food Item"`].
+      `schemas/fnv/objects.json` `ALCH.ENIT.flags` bit 1 (`0x02`) `"Food Item"`;
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1` matches food, `-1` does
+      not match non-food].
     - `aidIsMedicine` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with
-      `1`); `schemas/fnv/objects.json` `ALCH.ENIT.flags` bit 2 (`0x04`) `"Medicine"`].
+      `1`); `schemas/fnv/objects.json` `ALCH.ENIT.flags` bit 2 (`0x04`) `"Medicine"`;
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d)].
     - `aidIsAddictive` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with
       `1`); `schemas/fnv/objects.json` `ALCH.ENIT.withdrawal_effect`; hypothesis:
       evaluated as non-null withdrawal form].
+    - `aidRestoresAV` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (values `54`,
+      `20`, `16`); `schemas/fnv/objects.json` `ALCH`/`MGEF`; hypothesis: non-detrimental
+      positive `aid::value_change` for the given AV code].
+    - `aidDamagesAV` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (value `54`);
+      `schemas/fnv/objects.json` `ALCH`/`MGEF`; hypothesis: detrimental or negative
+      `aid::value_change` for the given AV code].
+    - `aidIsWater` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
+      observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1` matches `WaterPurified`
+      and rejects `SalisburySteak`/`NukaCola`; hypothesis: evaluated as non-detrimental
+      Dehydration AV 73 restore].
+    - `aidIsPoisonous` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with
+      `1`); observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1` matches
+      `BleakVenom`; hypothesis: evaluated via `Game::is_poison`].
   - `ARMO` (`Match::No` for non-armor [hypothesis]):
     - `armorClass` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`,
       `2`, `3`); GECK wiki `GetArmorClass` (`1` Light, `2` Medium, `3` Heavy) via
-      `Game::armor_class`; array support via `number_set`: hypothesis].
+      `Game::armor_class`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `2`
+      matched `ArmorCombat` and rejected light/heavy; array support via `number_set`:
+      hypothesis].
     - `armorPower` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
       `schemas/fnv/objects.json` `ARMO.BMDT.general_flags` bit 5 `"Power Armor"` / GECK
-      wiki `IsPowerArmor`].
+      wiki `IsPowerArmor`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1`
+      matches `ArmorPowerT51b`, `-1` does not match non-power armor].
     - The 11 `BMDT/biped_flags` slot booleans, each individually [documented: Sorting
       Icons 1.4b `menus/ySI/ySI.json`; `schemas/fnv/objects.json` `ARMO.BMDT.biped_flags`]:
       `armorHead` (bit 0 `"Head"`), `armorHair` (bit 1 `"Hair"`), `armorUpperBody`
@@ -88,15 +137,23 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
       (bit 10 `"Hat"`), `armorEyeglasses` (bit 11 `"Eye Glasses"`), `armorMask`
       (bit 14 `"Mask"`), `armorChoker` (bit 15 `"Choker"`), and `armorMouthObject`
       (bit 16 `"Mouth Object"`).
-  - Boolean value encoding: `1` matches true and `-1` matches false [documented: Sorting
-    Icons 1.4b `menus/ySI/ySI.json` uses `1` and `-1` on armor-slot rules]; accepting `0`
-    as false and `-1` on weapon/aid/power flags is [hypothesis]. Any other JSON value
+  - `RCPE` recipe membership (`Match::No` for non-items [hypothesis]):
+    - `miscComponent` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
+      `schemas/fnv/gameplay.json` `RCPE.RCIL` (including live `other.lutana.recipes`
+      overrides); hypothesis: membership in any loaded recipe's ingredient list].
+    - `miscProduct` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
+      `schemas/fnv/gameplay.json` `RCPE.RCOD` (including live `other.lutana.recipes`
+      overrides); hypothesis: membership in any loaded recipe's output list].
+  - Boolean value encoding: `1` matches true and `0` matches false [observed: FNV 1.4.0.525
+    + xNVSE 6.4.9 + yUI 140 (v1.4d) on `weaponHasScope`]; `-1` matches false only on the 11
+    armor biped-slot keys [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` uses `1` and
+    `-1` on armor-slot rules], while `-1` on weapon/aid/power/recipe flags was `[observed]`
+    not to match false in `yUI 1.4d` and stays `Match::Unknown`. Any other JSON value
     remains `Match::Unknown`.
-- [engine design choice] Other predicates, including `formlist: 2`, threshold/ammo/misc
-  predicates (`armorDT`, `weaponClipRounds`, `weaponNumProjectiles`, `weaponAttackAnim`,
-  `weaponHandgrip`, `weaponSoundLevel`, `aidRestoresAV`, `aidDamagesAV`, `aidIsWater`,
-  `aidIsPoisonous`, `miscComponent`, `miscProduct`, `ammoMod`, `ammoForm`), remain
-  **unknown**, rather than false.
+- [engine design choice] Other predicates, including `formlist: 2`, `armorDT`, and any
+  uncited or unmapped property conditions (including `bookSkill`, `isSkillBook`, `noteType`,
+  `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`, `edidPrefix`), remain **unknown**, rather
+  than false.
   A certainly false supported predicate rejects a rule even if it also has unknown
   predicates. A possible unknown rule at or above the winning priority refuses the
   query; an unknown lower rule cannot win.
@@ -155,7 +212,7 @@ authored paths and values. Compiler, VM and UI string-argument behavior are unch
 
 ## Authored controls
 
-Sixteen source controls live in the dedicated `ysi_filename_source` test target
+Seventeen source controls live in the dedicated `ysi_filename_source` test target
 (`crates/fnv-game/tests/ysi_filename_source.rs`), isolated because the existing
 file-reader roots are process-wide. They use independently authored configuration,
 items, and menu XML to cover:
@@ -189,11 +246,58 @@ items, and menu XML to cover:
     conservative `Match::Unknown` refusal for `"formlist": 2` and non-`FLST` targets.
 15. Empty/comment-only auxiliary `.json` stub files ignored cleanly while empty
     `ySI.json` and unterminated auxiliary comments continue to refuse explicitly.
-16. Record-backed `WEAP`, `ALCH`, and `ARMO` predicates (`weaponSkill`, `weaponType`,
-    `weaponIsAutomatic`, `weaponHasScope`, `weaponIgnoresDTDR`, `aidIsFood`,
-    `aidIsMedicine`, `aidIsAddictive`, `armorClass`, `armorPower`, and `BMDT/biped_flags`
-    slot booleans with `1` / `0` / `-1`), cross-type `Match::No` disqualification, and
-    conservative `Match::Unknown` refusal for malformed boolean values.
+16. Record-backed `WEAP`, `ALCH`, and `ARMO` predicates (`weaponSkill` scalar-only,
+    `weaponType` scalar/array, `weaponIsAutomatic`, `weaponHasScope`, `weaponIgnoresDTDR`,
+    `aidIsFood`, `aidIsMedicine`, `aidIsAddictive`, `armorClass`, `armorPower`, and
+    `BMDT/biped_flags` slot booleans with `1`/`0`/`-1`), cross-type `Match::No`
+    disqualification, and conservative `Match::Unknown` refusal for malformed booleans,
+    `-1` on non-slot flags, array `weaponSkill`, and uncited shorthand keys.
+17. Orthogonal Sorting Icons 1.4b record and recipe predicates (`weaponClipRounds >= N`,
+    `weaponNumProjectiles >= N`, `weaponAttackAnim`, `weaponHandgrip`, `weaponSoundLevel`,
+    `ammoMod` + `ammoForm`, `aidRestoresAV`, `aidDamagesAV`, `aidIsWater`,
+    `aidIsPoisonous`, `miscComponent`, `miscProduct`), icon `"template"` resolution through
+    `Game::ysi_item_display`, cross-type disqualification, dangling `ammoMod` refusal, and
+    conservative `Match::Unknown` refusal for unrecognized keys (`bookSkill`,
+    `isSkillBook`, `noteType`, `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`,
+    `edidPrefix`).
 
-These are source and UI-trait consumer checks, not texture decoding, GPU rendering,
-multi-rule native parity, or complete installed ySI/JAM acceptance.
+## Engine list-row sorting and tile icons (`nvf-play`)
+
+- **Display resolution** `[design]`: `Game::ysi_active` and `Game::ysi_item_display`
+  resolve each item's effective sorting tag, icon texture path, and XML template name
+  (`template` from the winning icon rule, defaulting to `ySIDefault` when tagged/icon-bearing
+  or `ySINoTag` otherwise) using the same `ySISetTrait` > JSON precedence as `ySIGetTrait`.
+  When no ySI configuration, session overrides, or injected `ySI` UI tiles are present,
+  `ysi_active` returns `false` and vanilla menus pay zero cost and keep identical order.
+- **Sorting** `[hypothesis]`: When ySI is active, `MenuModel::apply_ysi` attaches resolved
+  `YsiItemDisplay` metadata to non-folder rows in Pip-Boy Inventory, Container, and Barter
+  lists and sorts item rows by `(bartered first, tagged before untagged, tag byte order,
+  display name byte order, FormID, condition, mods)`, keeping Misc folder rows (`Keyring`,
+  `Caravan Cards`, `Back`) pinned at the top, preserving `usable_ammo` and `SortBy`
+  (`Value`/`Weight`) stable re-sorts, and tracking the selected row across re-sorts.
+- **Tile-row icons** `[design]`: `ui_ysi::apply_row_icon` is wired into the shared
+  `tiles::item_menu::write_lists` (covering `InventoryMenu`, `ContainerMenu`, and
+  `BarterMenu`) as well as `tiles::repair_menu` (`RepairMenu`) and `tiles::item_mod_menu`
+  (`ItemModMenu`). When `menus/ySI/ySI.xml` is present on the menu, each row instantiates
+  or updates a `ySIImage` child tile using the resolved template (`ySIDefault` fallback for
+  unknown custom templates, `ySINoTag` for untagged rows) and writes its `filename`. When
+  `menus/ySI/ySI.xml` is absent, `apply_row_icon` is a strict no-op.
+
+## `yUI` version gate evaluation (`GetPluginVersion "yUI"`)
+
+Per `docs/design/extender-compat.md` §5.7 and `docs/spec-notes/ext-version.md` §5,
+`IsPluginInstalled "yUI"` remains `0` and `GetPluginVersion "yUI"` remains `-1.0`
+(unregistered in `fnv_script::vm::jip::PLUGINS`). Remaining `yUI 140` gaps before
+advertising `yUI`:
+- `ySIGetTrait "string"` formatted output and native default/fallback icon + equal-priority
+  file-order tie policies (unprobed in original FNV).
+- Remaining unmapped ySI JSON predicates (`formlist: 2`, threshold comparisons such as
+  `armorDT`, and any additional unprobed schema keys).
+- Row icon wiring for `RecipeMenu`, `RepairServicesMenu`, and hand-built (non-tiled)
+  fallback views.
+- Non-ySI `yUI` plugin modules (`yUI.ini` features outside ySI) and end-to-end installed
+  mod acceptance (`ln_ySIContextualPrompts.txt:25` `yUI < 140` gate and `JustAssortedMods`
+  `HUDMainMenu/ySI/_ySI` flow).
+
+These are source, model, and tile-tree consumer checks, not GPU rendering, multi-rule
+native parity, or complete installed ySI/JAM acceptance.

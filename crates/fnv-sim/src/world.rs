@@ -2065,6 +2065,13 @@ impl<'a> World<'a> {
         Ok(())
     }
 
+    /// Record a saved cell detach timestamp (`GameDaysPassed`, offline save import).
+    pub fn set_cell_detached_at(&mut self, cell: FormId, days_passed: f32) {
+        if days_passed.is_finite() && days_passed >= 0.0 {
+            self.detached_cells.insert(cell, days_passed);
+        }
+    }
+
     /// GameDaysPassed when `cell` was last unloaded ([`World::detach_cell`]), while it
     /// is still unloaded.
     pub fn detached_since(&self, cell: FormId) -> Option<f32> {

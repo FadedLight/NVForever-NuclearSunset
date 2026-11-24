@@ -23,8 +23,8 @@
 //! ([`shafts_skip`]), so the two never add rays to the same picture, and the shafts stay
 //! whenever the light did not draw (a refused view, a pipeline still compiling, the gate
 //! shut). The shafts' own uniform is left as it is. One log line when a view's shafts start
-//! yielding and one when they resume. The settings page greys the Sun shafts row while the
-//! Volumetric light row is on (the shared rule `settings_layout::NEEDS_CHOICE`).
+//! yielding and one when they resume. The game's settings page greys the Sun shafts row while
+//! the light is wanted at a strength above 0 (settings.rs `shafts_status`).
 
 use crate::fly::FlyCam;
 use crate::sky::SkyState;

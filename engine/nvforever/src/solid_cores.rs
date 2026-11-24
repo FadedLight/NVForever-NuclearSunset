@@ -1,7 +1,8 @@
 //! Solid cores of blended shapes under the light in the air (#3032): an engineering choice of
 //! NVForever's own for the enhanced look [design], never a parity item and never used to
 //! explain a difference from the original; nothing of it runs while the light in the air is
-//! not wanted.
+//! not drawn ([`AirDraws`]: the row or the aid asks for it and its gate is open; at night, indoors,
+//! under water and at a strength of 0 there are none).
 //!
 //! **Why.** The light's composite (medium_air_compose.rs) is a fullscreen pass over the
 //! finished picture that tells each pixel's distance from the depth prepass. Bevy draws no
@@ -10,7 +11,7 @@
 //! tank by Goodsprings, `nv_watertank.nif`, flags 4333, reference 00106B5E:
 //! docs/design/volumetric-medium.md, "Solid cores of blended shapes").
 //!
-//! **What.** While [`AirWanted`] is true, a placed shape whose material can have one
+//! **What.** While [`AirDraws`] is true, a placed shape whose material can have one
 //! (`nif_spawn::solid_core_rules` at the material's build, `nif_spawn::solid_core` of the
 //! material as it stands now, and a base texture with a solid texel,
 //! `texture::alpha_solidity`) gets a second draw, its solid core: a loose entity (nobody's
@@ -54,7 +55,9 @@
 //! follow a frame late (its write is an asset event of the next frame), so:
 //! - an edit of what sets the alpha outline ([`Outline`]: texture transform, base texture,
 //!   alpha, cut, holes) takes the core away at once, and the material has none again for as
-//!   long as it is in the store (it is animated);
+//!   long as it is in the store (it is animated; while the light is off nothing is watched:
+//!   the material itself is marked, so one put in anew under its id is told apart when the light
+//!   comes back);
 //! - any other edit (emissive, gloss) is written to the core's material, a frame late, which the
 //!   blended draw over it covers.
 //!
@@ -63,14 +66,13 @@
 //! the same alpha: its core is the plain material's, under the clone's draw, and it has none while
 //! the clone is another source's ([`drawn_source`]).
 //!
-//! **Cost.** Off: three run conditions; once something was followed and a material is known as
-//! animated, the materials' removals are read too. On: a pass over the placed meshes' change ticks, one lookup
+//! **Cost.** Off: two run conditions. On: a pass over the placed meshes' change ticks, one lookup
 //! and comparison a core ([`place`]), the frame's material events and removals; the textures' alpha is read once per file on a
 //! background task, only for materials that pass the other rules.
 
 use crate::door_fade::DoorFade;
 use crate::limbs::ActorRig;
-use crate::medium_air_demand::AirWanted;
+use crate::medium_air_demand::AirDraws;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers, VisibilityRange, VisibilitySystems};
 use bevy::ecs::entity::{EntityHashMap, EntityHashSet};
@@ -256,7 +258,6 @@ impl Plugin for SolidCoresPlugin {
                 .before(bevy::pbr::check_entities_needing_specialization::<NifMaterial>)
                 .run_if(needed),
         );
-        app.add_systems(PostUpdate, forget_animated.after(bevy::asset::AssetEventSystems).run_if(animated_kept));
         // After the visibility check, whose answer it reports.
         app.add_systems(Last, report_reference.run_if(reference_asked));
     }
@@ -292,19 +293,8 @@ fn report_reference(mut state: ResMut<SolidCores>, whose: Query<Whose>, cores: Q
 }
 
 /// Cores are wanted, or some are still followed and have to go.
-fn needed(wanted: Option<Res<AirWanted>>, state: Res<SolidCores>) -> bool {
+fn needed(wanted: Option<Res<AirDraws>>, state: Res<SolidCores>) -> bool {
     state.on || wanted.is_some_and(|w| w.0)
-}
-
-/// Nothing is followed, and materials are known as animated from when something was.
-fn animated_kept(state: Res<SolidCores>) -> bool {
-    !state.on && !state.animated.is_empty()
-}
-
-/// With the light off all that is left to do: a material known as animated is forgotten with its
-/// asset.
-fn forget_animated(mut state: ResMut<SolidCores>, mut events: MessageReader<AssetEvent<NifMaterial>>) {
-    state.bypass_change_detection().forget_removed(events.read());
 }
 
 /// A mesh of a placed reference.
@@ -406,7 +396,7 @@ type Whose = (Option<&'static RefVisual>, Option<&'static crate::destroyed::Stag
 fn follow(
     mut commands: Commands,
     time: Res<Time<Real>>,
-    wanted: Option<Res<AirWanted>>,
+    wanted: Option<Res<AirDraws>>,
     mut state: ResMut<SolidCores>,
     (mut materials, blends): (ResMut<Assets<NifMaterial>>, Option<Res<Assets<NifBlendMaterial>>>),
     (textures, data): (Option<Res<TextureCache>>, Option<Res<GameData>>),
@@ -435,7 +425,13 @@ fn follow(
                 commands.entity(e).try_despawn();
             }
             if st.log.said.is_some() || n > 0 {
-                info!("solid cores: removed ({n} draws; the light in the air is not wanted)");
+                info!("solid cores: removed ({n} draws; the light in the air is not drawn)");
+            }
+            // Known as such when the light comes back: no edit, so no event of one.
+            for &id in &st.animated {
+                if let Some(source) = materials.get_mut_untracked(id).and_then(|m| m.extension.solid_core.as_mut()) {
+                    source.animated = true;
+                }
             }
             st.forget();
         }
@@ -449,8 +445,8 @@ fn follow(
         st.on = true;
         st.log.since = time.elapsed_secs();
         st.forget_removed(events.read());
-        // Removals no event told of.
-        st.animated.retain(|id| materials.contains(*id));
+        // Those gone since, or put in anew under their id (without the mark), are forgotten.
+        st.animated.retain(|id| materials.get(*id).and_then(|m| m.extension.solid_core.as_ref()).is_some_and(|s| s.animated));
         look.extend(all.iter());
     }
     // The materials and the meshes whose cores have to be settled.
@@ -738,7 +734,7 @@ pub(crate) mod tests {
     pub(crate) fn tank() -> NifMaterial {
         let image = Handle::<Image>::default();
         let mut m = nif_material(StandardMaterial { alpha_mode: AlphaMode::Blend, base_color_texture: Some(image.clone()), ..default() });
-        m.extension.solid_core = Some(SolidCoreSource { texture: TEXTURE.into(), image: image.id() });
+        m.extension.solid_core = Some(SolidCoreSource { texture: TEXTURE.into(), image: image.id(), animated: false });
         m
     }
 
@@ -748,7 +744,7 @@ pub(crate) mod tests {
         let mut app = App::new();
         app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()));
         app.init_asset::<NifMaterial>().init_asset::<Mesh>().init_asset::<Image>().init_resource::<Time<Real>>();
-        app.add_plugins(SolidCoresPlugin).insert_resource(SolidCores::default()).insert_resource(AirWanted(true));
+        app.add_plugins(SolidCoresPlugin).insert_resource(SolidCores::default()).insert_resource(AirDraws(true));
         if let Some(solid) = solid {
             app.world_mut().resource_mut::<SolidCores>().verdicts.insert(TEXTURE.into(), if solid { SolidTexels::Mostly } else { SolidTexels::None });
         }
@@ -835,7 +831,7 @@ pub(crate) mod tests {
     #[test]
     fn nothing_is_made_while_the_light_is_not_wanted_and_all_goes_with_the_row() {
         let mut app = app(Some(true));
-        app.insert_resource(AirWanted(false));
+        app.insert_resource(AirDraws(false));
         let m = add(&mut app, tank());
         place(&mut app, &m);
         app.update();
@@ -845,17 +841,17 @@ pub(crate) mod tests {
         assert_eq!(app.world().resource::<Assets<NifMaterial>>().len(), 1);
         // On in play: what was drawn before gets its core; off again: none, and back.
         for _ in 0..2 {
-            app.insert_resource(AirWanted(true));
+            app.insert_resource(AirDraws(true));
             app.update();
             assert_eq!(count(&mut app), 1);
-            app.insert_resource(AirWanted(false));
+            app.insert_resource(AirDraws(false));
             app.update();
             assert_eq!(count(&mut app), 0);
             assert!(app.world().resource::<SolidCores>().sources.is_empty());
         }
         // The aid keeps them off.
         app.world_mut().resource_mut::<SolidCores>().aid = Aid::Off;
-        app.insert_resource(AirWanted(true));
+        app.insert_resource(AirDraws(true));
         app.update();
         assert_eq!(count(&mut app), 0);
     }
@@ -947,38 +943,34 @@ pub(crate) mod tests {
             assert_eq!(count(&mut app), 0, "{what}: its last wearer gone");
             // The light off and on.
             for on in [false, true] {
-                app.insert_resource(AirWanted(on));
+                app.insert_resource(AirDraws(on));
                 app.update();
             }
             assert_eq!(count(&mut app), 0, "{what}: the light switched");
             // Forgotten with the asset, followed or not.
             assert_eq!(app.world().resource::<SolidCores>().animated.len(), 1);
             if what == "alpha" {
-                app.insert_resource(AirWanted(false));
+                app.insert_resource(AirDraws(false));
                 app.update();
             }
             app.world_mut().resource_mut::<Assets<NifMaterial>>().remove(&m);
             app.update();
-            app.insert_resource(AirWanted(true));
+            app.insert_resource(AirDraws(true));
             app.update();
             assert!(app.world().resource::<SolidCores>().animated.is_empty(), "{what}");
         }
-        // With the light off and nothing known as animated no system runs.
+        // With the light off nothing runs, whatever is known as animated.
         {
+            use bevy::ecs::system::RunSystemOnce;
             let mut app = app(Some(true));
             let m = add(&mut app, tank());
             place(&mut app, &m);
             app.update();
-            app.insert_resource(AirWanted(false));
+            edit(&mut app, &m, |m| m.base.base_color.set_alpha(0.9));
+            app.insert_resource(AirDraws(false));
             app.update();
-            let runs = |app: &mut App| {
-                use bevy::ecs::system::RunSystemOnce;
-                let w = app.world_mut();
-                (w.run_system_once(needed).unwrap(), w.run_system_once(animated_kept).unwrap())
-            };
-            assert_eq!(runs(&mut app), (false, false));
-            app.world_mut().resource_mut::<SolidCores>().animated.insert(m.id());
-            assert_eq!(runs(&mut app), (false, true), "an animated one: its removal alone is watched for");
+            assert_eq!(app.world().resource::<SolidCores>().animated.len(), 1);
+            assert!(!app.world_mut().run_system_once(needed).unwrap());
         }
         // A material put in again under the id while the light is off is another one.
         {
@@ -990,13 +982,13 @@ pub(crate) mod tests {
             edit(&mut app, &m, |m| m.base.base_color.set_alpha(1.0));
             app.update();
             assert_eq!(count(&mut app), 0);
-            app.insert_resource(AirWanted(false));
+            app.insert_resource(AirDraws(false));
             app.update();
             app.world_mut().resource_mut::<Assets<NifMaterial>>().remove(&m);
             app.update();
             app.world_mut().resource_mut::<Assets<NifMaterial>>().insert(m.id(), tank()).unwrap();
             app.update();
-            app.insert_resource(AirWanted(true));
+            app.insert_resource(AirDraws(true));
             app.update();
             assert_eq!(count(&mut app), 1);
         }

@@ -697,7 +697,7 @@ mod tests {
             e
         });
         let mut resolve = |on: bool| {
-            app.insert_resource(crate::medium_air_demand::AirWanted(on));
+            app.insert_resource(crate::medium_air_demand::AirDraws(on));
             app.update();
             assert_eq!(cores::cores(&mut app).len(), usize::from(on));
             let w = app.world_mut();

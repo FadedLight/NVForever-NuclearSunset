@@ -697,9 +697,9 @@ mod tests {
         assert_eq!(at("volumetric-light-strength"), "Graphics > Lighting and Effects", "right after its switch");
         // The strength is greyed while its switch is off.
         assert_eq!(needs("volumetric-light-strength"), vec![Rule { parent: "volumetric-light", choices: &[], why: "Needs Volumetric Light." }]);
-        // Sun shafts are greyed while Volumetric light is on: a rule on the switch's Off,
-        // shared with the launcher.
-        assert_eq!(needs("light-shafts"), vec![Rule { parent: "volumetric-light", choices: &[SWITCH_OFF], why: "Replaced by Volumetric Light." }]);
+        // Sun shafts have no shared rule: whether Volumetric light replaces them depends on its
+        // strength (nvforever settings.rs `shafts_status`, the game's page alone).
+        assert_eq!(needs("light-shafts"), vec![]);
         assert_eq!(l.control_placement("bind:Jump").unwrap().path(), "Controls > Movement");
         assert_eq!(l.control_placement("bind:Sprint").unwrap().path(), "Controls > Movement", "beside the movement controls (#3000)");
         // Sprint is not greyed under the Global Toggle, as its Advanced Movement neighbours

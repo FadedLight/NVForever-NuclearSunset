@@ -1415,7 +1415,7 @@ fn shape_material_inner(props: &Props, mesh: &mut Mesh, textures: &mut impl Text
     if solid_core_rules(props, cut, alpha_mode) {
         material.extension.solid_core = diffuse
             .zip(material.base.base_color_texture.as_ref())
-            .map(|(t, image)| crate::nif_material::SolidCoreSource { texture: t.clone(), image: image.id() });
+            .map(|(t, image)| crate::nif_material::SolidCoreSource { texture: t.clone(), image: image.id(), animated: false });
     }
     if props.hair && cut.is_none() && matches!(alpha_mode, AlphaMode::Blend) {
         material.extension.alpha_cut = HAIR_DEPTH_CUT;

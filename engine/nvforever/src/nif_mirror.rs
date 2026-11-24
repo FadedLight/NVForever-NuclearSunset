@@ -1140,7 +1140,7 @@ mod tests {
         });
         app.world_mut().spawn((Transform::IDENTITY, Visibility::Inherited, Name::new("Below"), ChildOf(shapes[2])));
         let mut told = |on: bool| {
-            app.insert_resource(crate::medium_air_demand::AirWanted(on));
+            app.insert_resource(crate::medium_air_demand::AirDraws(on));
             app.update();
             assert_eq!(cores::cores(&mut app).len(), if on { 3 } else { 0 });
             let w = app.world_mut();

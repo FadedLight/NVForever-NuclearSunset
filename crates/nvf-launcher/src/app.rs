@@ -813,11 +813,6 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
 /// of kind `kind` (`None`: built in, by the value).
 fn rule_holds(rule: &menu::Rule, kind: Option<&menu::Kind>, value: &str, name: &str) -> bool {
     if !rule.choices.is_empty() {
-        // A switch's choices are On and Off (nvf_settings_layout::switch_choice), as the game
-        // reads them: a switch, or a built-in row kept as `1`/`0` under a rule on On or Off.
-        let on_off = |c: &String| c.eq_ignore_ascii_case(nvf_settings_layout::SWITCH_ON) || c.eq_ignore_ascii_case(nvf_settings_layout::SWITCH_OFF);
-        let switch = matches!(kind, Some(menu::Kind::Switch)) || (kind.is_none() && matches!(value, "0" | "1") && rule.choices.iter().all(on_off));
-        let name = if switch { nvf_settings_layout::switch_choice(value == "1") } else { name };
         return rule.choices.iter().any(|c| c.eq_ignore_ascii_case(name));
     }
     match kind {
@@ -2292,14 +2287,6 @@ mod tests {
         assert!(rule_holds(&rule("frame-generation", &["DLSS"]), None, "dlss", "DLSS"));
         assert!(!rule_holds(&rule("upscaler", &["FSR 3.1", "DLSS"]), None, "Off", "Off"));
         assert!(rule_holds(&rule(nvf_settings_layout::DEVICE_ROW, &["Controller"]), None, "controller", "controller"));
-        // A rule on a switch's Off (Sun shafts greyed while Volumetric light is on), with the
-        // game's menu and built in, as the game holds it.
-        let shafts = rule("volumetric-light", &[nvf_settings_layout::SWITCH_OFF]);
-        assert!(rule_holds(&shafts, Some(&menu::Kind::Switch), "0", "0"), "the light off: the shafts apply");
-        assert!(!rule_holds(&shafts, Some(&menu::Kind::Switch), "1", "1"), "the light on: greyed");
-        assert!(rule_holds(&shafts, None, "0", "0") && !rule_holds(&shafts, None, "1", "1"));
-        let shared = nvf_settings_layout::needs("light-shafts");
-        assert_eq!((shared[0].parent, shared[0].choices), ("volumetric-light", &[nvf_settings_layout::SWITCH_OFF][..]));
         // Typed into a slider of words: the word's part, else a number.
         let words: Vec<String> = ["Low", "Medium", "High"].map(String::from).to_vec();
         assert_eq!((word_part(&words, " high "), word_part(&words, "medium"), word_part(&words, "0.25")), (Some(1.0), Some(0.5), Some(0.25)));

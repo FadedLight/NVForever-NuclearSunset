@@ -1416,10 +1416,21 @@ fn register_graphics(app: &mut App) {
     }
     nvf_play::settings::set_needs_in_game(app, "terrain-parallax", |w| parallax_status(nvf_assets::authored::enabled(), w.get_resource::<Graphics>().is_some_and(|g| g.authored_materials)));
     // #3032 stage 3: the light in the air's strength, 0 to 200 % in steps of 10 (greyed while
-    // its switch is off: `settings_layout::NEEDS`); Sun shafts are greyed while that switch is
-    // on by the shared rule `settings_layout::NEEDS_CHOICE`, which the launcher follows too
-    // (they yield to the light where it draws, shafts.rs).
+    // its switch is off: `settings_layout::NEEDS`); Sun shafts are greyed while the light is
+    // wanted at a strength above 0 (they yield to it where it draws, shafts.rs): the game's page
+    // alone, for the launcher's shared rules know no slider's value.
+    nvf_play::settings::set_needs_in_game(app, "light-shafts", |w| {
+        use crate::medium_air_demand::{AirAid, AirStrengthSetting, AirWanted};
+        let aid = w.get_resource::<AirAid>().is_some_and(|a| a.0);
+        shafts_status(w.get_resource::<AirWanted>().is_some_and(|a| a.0), aid, w.get_resource::<AirStrengthSetting>().copied().unwrap_or_default().0)
+    });
     add_setting(app, Setting::slider(VOLUMETRIC_LIGHT_STRENGTH_KEY, GROUP_GRAPHICS, "Volumetric light strength", VOLUMETRIC_LIGHT_STRENGTH_NOTE, air_strength_slider()));
+}
+
+/// Why the Sun shafts row cannot apply: the light in the air is wanted (so drawn on this device)
+/// at a strength above 0 (the debug aid's always is); at 0 the shafts draw.
+fn shafts_status(wanted: bool, aid: bool, strength: f32) -> Option<&'static str> {
+    (wanted && (aid || strength > 0.0)).then_some("Replaced by Volumetric Light.")
 }
 
 /// The Volumetric light row's key (#3032 stage 3; graphics.rs `Graphics::volumetric_light`).
@@ -3173,7 +3184,7 @@ dlss-model=Preset K
     /// #3032 stage 3: the Volumetric light switch is off in a vanilla start and switches
     /// `Graphics::volumetric_light`; its strength slider runs 0 to 200 % in steps of 10 from
     /// 100 % and is greyed while the switch is off (`settings_layout::NEEDS`); Sun shafts are
-    /// greyed while the switch is on.
+    /// greyed while the light is wanted at a strength above 0.
     #[test]
     fn the_volumetric_light_rows_switch_scale_and_grey() {
         use crate::medium_air_demand::AirStrengthSetting;
@@ -3197,11 +3208,19 @@ dlss-model=Preset K
         assert_eq!(nvf_play::settings::flip(app.world_mut(), on_row), Some(true));
         assert!(app.world().resource::<Graphics>().volumetric_light);
         assert_eq!(status(&app, strength_row), None);
-        assert_eq!(status(&app, shafts), Some("Replaced by Volumetric Light."), "the shared rule (settings_layout::NEEDS_CHOICE)");
+        // The demand follows in the next frame (medium_air_demand.rs; not on a device that cannot).
+        assert_eq!(status(&app, shafts), None, "not wanted yet");
+        app.insert_resource(crate::medium_air_demand::AirWanted(true));
+        assert_eq!(status(&app, shafts), Some("Replaced by Volumetric Light."));
+        // At 0 % the shafts draw, and the row says nothing.
+        assert_eq!(nvf_play::settings::set_slider(app.world_mut(), strength_row, 0.0), Some(0.0));
+        assert_eq!(status(&app, shafts), None, "0 %");
+        assert_eq!((shafts_status(true, true, 0.0), shafts_status(false, true, 1.0)), (Some("Replaced by Volumetric Light."), None), "the aid has a strength of its own");
         // The slider sets the strength: 150 % is the part 0.75, strength 1.5.
         assert_eq!(nvf_play::settings::set_slider(app.world_mut(), strength_row, 0.75), Some(0.75));
         assert_eq!(*app.world().resource::<AirStrengthSetting>(), AirStrengthSetting(1.5));
         assert_eq!(nvf_play::settings::flip(app.world_mut(), on_row), Some(false));
+        app.insert_resource(crate::medium_air_demand::AirWanted(false));
         assert_eq!(status(&app, shafts), None);
         assert_eq!(nvf_play::settings::set_slider(app.world_mut(), strength_row, 0.25), None, "greyed: not moved");
     }

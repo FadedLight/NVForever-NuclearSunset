@@ -34,11 +34,15 @@
 //!   there (medium_air_compose.rs `AirComposedViews`, shafts.rs `shafts_skip`), not from
 //!   this main-world gate.
 //!
+//! - **what is drawn for the light alone** (`AirDraws`, solid_cores.rs) follows the gate as its
+//!   lines have it: from the "on" line to the "off" line, so it does not flicker with a reason
+//!   that comes and goes.
+//!
 //! With the light not wanted nothing runs but the check of the demand, and nothing is logged.
 
 use crate::fly::FlyCam;
 use crate::medium_air::{self, AirGateInput, AirGrid, AirPhase, AirTune, GateLog, NormedPhase, TuneFollower, ViewBounds};
-use crate::medium_air_demand::{AirStrengthSetting, AirWanted};
+use crate::medium_air_demand::{AirDraws, AirStrengthSetting, AirWanted};
 use crate::medium_air_grid::AirCamera;
 use bevy::prelude::*;
 use std::f32::consts::PI;
@@ -144,17 +148,23 @@ fn light_share(sun: Option<&DirectionalLight>, ambient: Option<&GlobalAmbientLig
 /// tune file, the share, the gate and the grid onto the main camera's `AirCamera`.
 #[allow(clippy::type_complexity)]
 fn follow_light(
-    (wanted, strength_row): (Option<Res<AirWanted>>, Option<Res<AirStrengthSetting>>),
+    (wanted, strength_row, draws): (Option<Res<AirWanted>>, Option<Res<AirStrengthSetting>>, Option<ResMut<AirDraws>>),
     time: Res<Time<Real>>,
     (sky, submerged, ambient): (Option<Res<crate::sky::SkyState>>, Option<Res<crate::underwater::CameraSubmerged>>, Option<Res<GlobalAmbientLight>>),
     suns: Query<&DirectionalLight, With<crate::sky::Sun>>,
     mut cams: Query<(&mut AirCamera, &Projection), With<FlyCam>>,
     mut state: Local<LightState>,
 ) {
+    let settled = |draws: Option<ResMut<AirDraws>>, on: bool| {
+        if let Some(mut draws) = draws {
+            draws.set_if_neq(AirDraws(on));
+        }
+    };
     if !wanted.is_some_and(|w| w.0) {
         if state.active {
             *state = LightState::default();
         }
+        settled(draws, false);
         return;
     }
     let Some((mut cam, projection)) = cams.iter_mut().next() else { return };
@@ -240,6 +250,8 @@ fn follow_light(
     if *cam != next {
         *cam = next;
     }
+    // As the gate's lines have it: open at once, closed once a reason held.
+    settled(draws, state.told.is_some());
 }
 
 #[cfg(test)]
@@ -303,6 +315,73 @@ mod tests {
         assert!(aimed_day(&normal));
         normal.hour = 23.0;
         assert!(!aimed_day(&normal));
+    }
+
+    /// What is drawn for the light alone follows the gate as it settled: on with the gate, kept
+    /// while a reason has not held its half second (and through one that comes and goes), gone
+    /// once it has (the strength at 0; the same for night, indoors, under water), back at once,
+    /// and gone when the light is not wanted.
+    #[test]
+    fn what_is_drawn_for_the_light_follows_the_settled_gate() {
+        let mut sky = crate::sky::SkyState::default();
+        sky.climate.sunrise = (6.0, 7.0);
+        sky.climate.sunset = (18.0, 19.0);
+        sky.hour = 13.0;
+        sky.interior = None;
+        let mut app = App::new();
+        app.insert_resource(AirWanted(true))
+            .insert_resource(AirStrengthSetting(1.0))
+            .init_resource::<AirDraws>()
+            .init_resource::<Time<Real>>()
+            .insert_resource(sky)
+            .insert_resource(crate::underwater::CameraSubmerged(false))
+            .add_systems(Last, follow_light);
+        app.world_mut().spawn((crate::sky::Sun, DirectionalLight { illuminance: 10_000.0, ..default() }));
+        let cam = AirCamera {
+            grid: AirGrid::for_view(16.0 / 9.0, None, None),
+            tune: AirTune::default(),
+            fog: medium_air::AirFog { near: -10.0, far: 200_000.0, power: 0.6, strength: 1.0 },
+            fog_colour: Vec3::splat(0.5),
+            display_blend: true,
+            to_light: Vec3::Y,
+            has_light: true,
+            outdoors: true,
+            share: 0.0,
+            draws: false,
+        };
+        app.world_mut().spawn((FlyCam { yaw: 0.0, pitch: 0.0, speed: 0.0 }, Projection::default(), cam));
+        let step = |app: &mut App, secs: f32| {
+            app.world_mut().resource_mut::<Time<Real>>().advance_by(std::time::Duration::from_secs_f32(secs));
+            app.update();
+            app.world().resource::<AirDraws>().0
+        };
+        let strength = |app: &mut App, v: f32| {
+            app.insert_resource(AirStrengthSetting(v));
+        };
+        assert!(step(&mut app, 0.1), "the gate open: at once");
+        strength(&mut app, 0.0);
+        assert!(step(&mut app, 0.1) && step(&mut app, 0.2), "a reason that has not held");
+        strength(&mut app, 1.0);
+        assert!(step(&mut app, 0.1));
+        strength(&mut app, 0.0);
+        assert!(step(&mut app, 0.1) && step(&mut app, 0.4), "its hold starts anew");
+        assert!(!step(&mut app, 0.2), "held: gone with the gate");
+        assert!(!step(&mut app, 5.0));
+        strength(&mut app, 1.0);
+        assert!(step(&mut app, 0.1), "back at once");
+        for (what, close) in [
+            ("under water", (|app: &mut App, on: bool| app.world_mut().resource_mut::<crate::underwater::CameraSubmerged>().0 = on) as fn(&mut App, bool)),
+            ("indoors", |app, on| app.world_mut().resource_mut::<crate::sky::SkyState>().interior = on.then(Default::default)),
+            ("night", |app, on| app.world_mut().resource_mut::<crate::sky::SkyState>().hour = if on { 1.0 } else { 13.0 }),
+        ] {
+            close(&mut app, true);
+            step(&mut app, 0.1);
+            assert!(!step(&mut app, 0.6), "{what}");
+            close(&mut app, false);
+            assert!(step(&mut app, 0.1), "{what}: over");
+        }
+        app.insert_resource(AirWanted(false));
+        assert!(!step(&mut app, 0.1), "not wanted: at once");
     }
 
     /// The start strength is the aid's value when the aid asks for the light, else the row's.

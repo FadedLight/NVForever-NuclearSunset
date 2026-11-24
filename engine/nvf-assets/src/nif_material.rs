@@ -607,6 +607,9 @@ pub struct NifSurface {
 pub struct SolidCoreSource {
     pub texture: String,
     pub image: AssetId<Image>,
+    /// The material's alpha outline was seen changing (nvforever solid_cores.rs, which marks it when
+    /// it stops following).
+    pub animated: bool,
 }
 
 /// The values of a [`NifSurface`] the shaders read (`nif_surface_bindings.wesl`, shared

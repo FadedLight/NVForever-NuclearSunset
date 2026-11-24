@@ -4,7 +4,7 @@
 //!
 //! [`AirWanted`] is the one main-world switch every part of stage 3 reads: the grid and the
 //! composite (medium_air_grid.rs, medium_air_compose.rs), and the three narrow consumers
-//! outside them:
+//! outside them (the solid cores follow [`AirDraws`], what the light's gate settled on):
 //! - graphics.rs `apply`: the main view stays HDR while it is true (the light is composed in
 //!   the linear HDR picture before tonemapping);
 //! - terrain_shadows.rs `follow_graphics`: the terrain map's producer runs while it is true
@@ -20,13 +20,16 @@
 //! graphics.rs `Graphics::volumetric_light`, also `--graphics-only volumetric-light`) or the
 //! debug aid [`AID`] (`NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`, read once at the start: it asks
 //! when the value is a finite number above 0). One system, [`follow_demand`], is the only
-//! writer of [`AirWanted`]: `row || aid`, recomputed when the aid is read or the graphics
-//! settings change (so a test that sets [`AirWanted`] itself, with no graphics settings, keeps
+//! writer of [`AirWanted`]: `row || aid`, on a device that can hold the volume
+//! (medium_air_grid.rs `format_supported`, asked once; on another nothing of the light is
+//! started, the terrain map's producer included, and one line says why), recomputed when the
+//! aid is read or the graphics settings change (so a test that sets [`AirWanted`] itself, with no graphics settings, keeps
 //! its value). The strength the light starts from is the aid's value when the aid asks, else
 //! the row's slider ([`AirStrengthSetting`], Volumetric light strength, 0 to 200 %); both
 //! rows take effect while the game runs (medium_air_light.rs).
 
 use bevy::prelude::*;
+use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
 /// The debug aid that asks for the light in the air (its value is the strength).
 pub const AID: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT";
@@ -34,6 +37,13 @@ pub const AID: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT";
 /// Whether the light in the air is wanted (main world; false by default).
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub struct AirWanted(pub bool);
+
+/// Whether the light is drawn as far as its gate goes (main world; false by default):
+/// medium_air_light.rs `follow_light` keeps it as its gate has settled (open at once, closed once
+/// a reason held 0.5 s), so a closed gate (night, indoors, under water, a strength of 0) takes
+/// with it what is drawn for the light alone (solid_cores.rs).
+#[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
+pub struct AirDraws(pub bool);
 
 /// Whether the debug aid [`AID`] asks for the light (read once at the start).
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
@@ -86,6 +96,12 @@ pub fn wanted(row: bool, aid: bool) -> bool {
     row || aid
 }
 
+/// The demand a device allows: `asked`, unless the device cannot hold the volume (`supported`,
+/// asked only for an asked light; `None`: no device to ask, as in tests).
+pub fn granted(asked: bool, supported: impl FnOnce() -> Option<bool>) -> bool {
+    asked && supported().unwrap_or(true)
+}
+
 /// Registers [`AirWanted`], [`AirAid`] and [`AirStrengthSetting`], reads the aid once at the
 /// start and follows the row (added by `MediumAirPlugin`).
 pub struct AirDemandPlugin;
@@ -93,6 +109,7 @@ pub struct AirDemandPlugin;
 impl Plugin for AirDemandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AirWanted>()
+            .init_resource::<AirDraws>()
             .init_resource::<AirAid>()
             .init_resource::<AirStrengthSetting>()
             .add_systems(Startup, read_aid)
@@ -112,8 +129,15 @@ fn read_aid(mut aid: ResMut<AirAid>) {
 
 /// The one writer of [`AirWanted`]: `row || aid` whenever the aid was read or the graphics
 /// settings changed since this system last ran (absent graphics settings count as the row
-/// off); nothing otherwise. One log line when the row asks for the light or stops asking.
-pub(crate) fn follow_demand(aid: Res<AirAid>, graphics: Option<Res<crate::graphics::Graphics>>, mut wanted_now: ResMut<AirWanted>, mut row_was: Local<Option<bool>>) {
+/// off), as far as the device allows ([`granted`]); nothing otherwise. One log line when the row
+/// asks for the light or stops asking, and one when the device cannot draw it.
+pub(crate) fn follow_demand(
+    aid: Res<AirAid>,
+    graphics: Option<Res<crate::graphics::Graphics>>,
+    (device, adapter): (Option<Res<RenderDevice>>, Option<Res<RenderAdapter>>),
+    mut wanted_now: ResMut<AirWanted>,
+    (mut row_was, mut support): (Local<Option<bool>>, Local<Option<bool>>),
+) {
     let graphics_changed = graphics.as_ref().is_some_and(|g| g.is_changed());
     if !aid.is_changed() && !graphics_changed {
         return;
@@ -123,7 +147,17 @@ pub(crate) fn follow_demand(aid: Res<AirAid>, graphics: Option<Res<crate::graphi
         info!("volumetric medium: light in the air {} (the Volumetric light row)", if row { "wanted" } else { "no longer wanted by the row" });
     }
     *row_was = Some(row);
-    let next = AirWanted(wanted(row, aid.0));
+    let next = AirWanted(granted(wanted(row, aid.0), || {
+        if support.is_none() {
+            let (Some(device), Some(adapter)) = (device, adapter) else { return None };
+            let answer = crate::medium_air_grid::format_supported(&adapter, &device.limits());
+            if let Err(reason) = &answer {
+                warn!("volumetric medium: light in the air not drawn: {reason}");
+            }
+            *support = Some(answer.is_ok());
+        }
+        *support
+    }));
     wanted_now.set_if_neq(next);
 }
 
@@ -172,6 +206,22 @@ mod tests {
             app.update();
             assert_eq!(app.world().resource::<AirWanted>().0, aid, "aid {aid}, row off again");
         }
+    }
+
+    /// A device that cannot hold the volume is not asked for the light, so nothing that follows
+    /// the demand starts (the HDR view, the terrain map's producer, the sun's mark, the grid); it is
+    /// not asked while the light is not.
+    #[test]
+    fn a_device_without_the_volume_gets_no_demand() {
+        assert!(!granted(false, || panic!("no light asked for: the device is not either")));
+        assert!(granted(true, || Some(true)) && granted(true, || None) && !granted(true, || Some(false)));
+        let here = include_str!("medium_air_demand.rs").replace("\r\n", "\n");
+        assert!(here.contains("AirWanted(granted(wanted(row, aid.0), || {"), "the demand goes through it");
+        use crate::medium_air_grid::{volume_format, AIR_USAGES};
+        use bevy::render::render_resource::TextureUsages;
+        assert!(volume_format(AIR_USAGES, true, 1).is_ok());
+        assert!(volume_format(AIR_USAGES, true, 0).unwrap_err().contains("no storage textures"));
+        assert!(volume_format(AIR_USAGES, false, 4).is_err() && volume_format(TextureUsages::TEXTURE_BINDING, true, 4).is_err());
     }
 
     /// With no graphics settings and an aid already decided, the system leaves a value set by

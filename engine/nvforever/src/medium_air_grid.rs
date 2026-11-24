@@ -970,15 +970,24 @@ pub(crate) struct ComposeId {
 /// storage and sampled usage and filterable (all core in WebGPU, so a formality) and one
 /// storage texture in the compute stage [documented: WebGPU, the texel format capability
 /// table; wgpu `Limits`].
-fn format_supported(adapter: &RenderAdapter, limits: &bevy::render::render_resource::WgpuLimits) -> Result<(), String> {
+pub(crate) fn format_supported(adapter: &RenderAdapter, limits: &bevy::render::render_resource::WgpuLimits) -> Result<(), String> {
     let features = adapter.get_texture_format_features(AIR_FORMAT);
-    if !features.allowed_usages.contains(TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING) {
+    volume_format(features.allowed_usages, features.flags.contains(TextureFormatFeatureFlags::FILTERABLE), limits.max_storage_textures_per_shader_stage)
+}
+
+/// The volume's usages.
+pub(crate) const AIR_USAGES: TextureUsages = TextureUsages::STORAGE_BINDING.union(TextureUsages::TEXTURE_BINDING);
+
+/// [`format_supported`] of what the device says: the format's `usages`, whether it filters, the
+/// storage textures of a stage.
+pub(crate) fn volume_format(usages: TextureUsages, filterable: bool, storage_textures: u32) -> Result<(), String> {
+    if !usages.contains(AIR_USAGES) {
         return Err("the adapter cannot store and sample rgba16float".into());
     }
-    if !features.flags.contains(TextureFormatFeatureFlags::FILTERABLE) {
+    if !filterable {
         return Err("the adapter cannot filter rgba16float".into());
     }
-    if limits.max_storage_textures_per_shader_stage < 1 {
+    if storage_textures < 1 {
         return Err("the adapter has no storage textures in compute".into());
     }
     Ok(())
@@ -1112,7 +1121,7 @@ fn make_volume(device: &RenderDevice, grid: &AirGrid, label: &'static str) -> (T
         sample_count: 1,
         dimension: TextureDimension::D3,
         format: AIR_FORMAT,
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+        usage: AIR_USAGES,
         view_formats: &[],
     });
     let view = texture.create_view(&TextureViewDescriptor::default());
@@ -1354,7 +1363,10 @@ fn prepare_air(
     }
 }
 
-/// Each frame while on, after the surfaces' cloud shadow is decided (sun_visibility.rs
+/// A view [`prepare_air`] prepared this frame (its volume made, the device able to hold it).
+type PreparedView = (With<ExtractedView>, With<AirViewGpu>);
+
+/// Each frame while on with a prepared view, after the surfaces' cloud shadow is decided (sun_visibility.rs
 /// `prepare_sun_visibility`) and before the bind groups: the light volume for the grid's K, with the
 /// surfaces' own window, strength and levels, in the frames whose surfaces read it
 /// ([`air_cloud_source`]). The variant's two pipelines (the grid's for this frame's [`GridWalk`],
@@ -1366,12 +1378,12 @@ fn prepare_air(
 fn prepare_air_volume(
     mut state: ResMut<AirState>,
     frame: Option<Res<CloudVolumeFrame>>,
-    cams: Query<&AirCamera, With<ExtractedView>>,
+    cams: Query<&AirCamera, PreparedView>,
     (cache, assets): (Res<PipelineCache>, Res<AssetServer>),
     (device, queue): (Res<RenderDevice>, Res<RenderQueue>),
 ) {
     state.volume.levels = None;
-    if !state.held {
+    if cams.is_empty() {
         return;
     }
     let Some(frame) = frame else { return };

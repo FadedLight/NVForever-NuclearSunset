@@ -379,10 +379,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             XVal::Num(1.0)
         }
         // `interface r g b`: 1 HUD, 2 HUD alt, 3 terminal, 4 Pip-Boy, 5 main menu
-        // [documented]; each channel wraps modulo 256 (u8 conversion) [observed: Fallout:
+        // [documented]; integer channels wrap modulo 256 (u8 conversion) [observed: Fallout:
         // New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse`
         // (`0x00103DF9`), 10 official base masters, `w4c_b1_15b_syscolor_cursor`:
-        // `SetSystemColor 1 300 -10 128` read back `2946688` (`0x2CF680` = R:44, G:246, B:128)].
+        // `SetSystemColor 1 300 -10 128` read back `2946688` (`0x2CF680` = R:44, G:246, B:128)];
+        // fractional parts are truncated before wrapping [hypothesis: fractional inputs
+        // (truncate vs round) are not probed].
         "setsystemcolor" => {
             let Some(id) = num(args, 0).map(|t| t as i64).filter(|t| (1..=5).contains(t)) else { return Some(Ok(zero)) };
             let part = |k: usize| (num(args, k).unwrap_or(0.0).trunc() as i64) as u8;

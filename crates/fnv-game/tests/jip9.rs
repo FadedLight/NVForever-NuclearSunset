@@ -225,7 +225,8 @@ fn radio_volumes_fonts_colours_and_the_health_bar() {
     // Fonts: only types 1-8 and 10-89, and a file that is there.
     assert_eq!(n(&mut g, "SetFontFile 9 \"textures\\fonts\\x.fnt\""), 0.0);
     assert_eq!(n(&mut g, "SetFontFile 2 \"textures\\fonts\\no such file.fnt\""), 0.0);
-    // Colours wrap each channel modulo 256 (u8 conversion) [observed: w4c_b1_15b_syscolor_cursor].
+    // Integer channels wrap modulo 256 (u8 conversion) [observed: w4c_b1_15b_syscolor_cursor];
+    // fractional channel truncation is [hypothesis].
     q(&mut g, "SetSystemColor 1 300 -5 12.4\nSetSystemColor 6 1 1 1");
     assert_eq!(g.other.jip9.colours.get(&1), Some(&[44, 251, 12]));
     assert_eq!(g.other.jip9.colour_sets.len(), 1);

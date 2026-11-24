@@ -872,7 +872,8 @@ fn json_backed_tag_and_icon_traits_honor_overrides_tag_sharing_and_clearing() {
         XVal::Str("Owned/alt.dds".into())
     );
 
-    // Explicitly clearing a tag to "" suppresses the JSON tag/icon without affecting other forms.
+    // Explicitly clearing a tag to "" suppresses the JSON tag without affecting other forms;
+    // with ySI.json loaded, untagged "icon" falls back to Misc_Unknown.dds (w4e_03).
     success(&mut g, "ySISetTrait \"tag\" \"\" OwnYsiItem");
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiItem)"),
@@ -880,7 +881,7 @@ fn json_backed_tag_and_icon_traits_honor_overrides_tag_sharing_and_clearing() {
     );
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiItem)"),
-        XVal::Str(String::new())
+        XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
     );
     success(&mut g, "ySISetTrait \"icon\" \"Owned/solo.dds\" OwnYsiItem");
     assert_eq!(
@@ -1673,8 +1674,41 @@ fn formlist_mode2_and_armordt_predicates_evaluate_repair_lists_nested_flsts_and_
 }
 
 #[test]
-fn ysi_get_and_set_trait_support_string_template_systemcolor_and_category_metadata() {
+fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worldref() {
     let files = Files::new();
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": "00000873", "tag": "(w01)"},
+                {"priority": 20, "mod": "OwnedYsi.esm", "form": "00000874", "tag": "(w01)"},
+                {"priority": 25, "formType": 40, "weaponIsAutomatic": false, "tag": "(nonauto)"}
+            ]),
+            serde_json::json!([
+                {
+                    "priority": 10,
+                    "tag": "(w01)",
+                    "filename": "Owned/carbine.dds",
+                    "template": "ySICustom",
+                    "systemcolor": -1,
+                    "category": "(catW)",
+                    "name": "Weapons",
+                    "tab": 0,
+                    "count": 2
+                }
+            ]),
+        ),
+    );
+    let f = armor_and_mode2_fixture();
+    let mut g = game(&f);
+
+    // w4e_01_ysi_string_alias: "string" returns only the raw sorting tag (not "{tag} {name}").
+    // Priority-25 weaponIsAutomatic=false (JSON bool) beats priority-20 (w01) for non-auto weapons;
+    // verify JSON bool matching first, then restore clean (w01) config for trait checks.
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiDirectGun)"),
+        XVal::Str("(nonauto)".into())
+    );
     files.write(
         "ySI.json",
         &config(
@@ -1697,50 +1731,140 @@ fn ysi_get_and_set_trait_support_string_template_systemcolor_and_category_metada
             ]),
         ),
     );
-    let f = armor_and_mode2_fixture();
     let mut g = game(&f);
 
-    // Formatted "string" combines effective tag + item name; untagged returns display name only.
+    // w4e_01: "string" is an exact alias for "tag" on both get and set (leaving siblings unchanged).
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiReplGun)"),
+        XVal::Str("(w01)".into())
+    );
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiReplGun)"),
-        XVal::Str("(w01) Scoped Carbine".into())
+        XVal::Str("(w01)".into())
     );
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiDirectGun)"),
-        XVal::Str("Direct Rifle".into())
+        XVal::Str(String::new())
     );
 
-    // JSON icon metadata traits resolve unambiguously and honor tag-shared ySISetTrait overrides.
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"template\" OwnYsiReplGun)"), XVal::Str("ySICustom".into()));
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"systemcolor\" OwnYsiReplGun)"), XVal::Str("-1".into()));
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"category\" OwnYsiReplGun)"), XVal::Str("(catW)".into()));
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"name\" OwnYsiReplGun)"), XVal::Str("Weapons".into()));
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"tab\" OwnYsiReplGun)"), XVal::Str("0".into()));
-    assert_eq!(success(&mut g, "SetFunctionValue (ySIGetTrait \"count\" OwnYsiReplGun)"), XVal::Str("2".into()));
+    // w4e_02_ysi_metadata_traits: all 6 metadata names return "" on get and 0 (no-op) on set.
+    for meta in ["template", "systemcolor", "category", "name", "tab", "count"] {
+        assert_eq!(
+            success(&mut g, &format!("SetFunctionValue (ySIGetTrait \"{meta}\" OwnYsiReplGun)")),
+            XVal::Str(String::new()),
+            "ySIGetTrait \"{meta}\" must return empty string"
+        );
+        assert_eq!(
+            success(&mut g, &format!("SetFunctionValue (ySISetTrait \"{meta}\" \"ignored\" OwnYsiReplGun)")),
+            XVal::Num(0.0),
+            "ySISetTrait \"{meta}\" must return 0 (rejected no-op)"
+        );
+        assert_eq!(
+            success(&mut g, &format!("SetFunctionValue (ySIGetTrait \"{meta}\" OwnYsiReplGun)")),
+            XVal::Str(String::new())
+        );
+    }
+    // JSON icon rule's template still flows to Game::ysi_item_display (untouched by rejected set).
+    assert_eq!(g.ysi_item_display(FormId(0x874)).unwrap().template, "ySICustom");
 
-    // Setting template/systemcolor on one tagged form shares with sibling forms of the same tag
-    // and flows into Game::ysi_item_display.
-    success(&mut g, "ySISetTrait \"template\" \"ySIOverrideTpl\" OwnYsiReplGun");
-    success(&mut g, "ySISetTrait \"systemcolor\" \"0\" OwnYsiReplGun");
+    // w4e_03_ysi_unmatched_icon_fallback: unmatched/untagged forms return Misc_Unknown.dds when
+    // ySI.json is loaded.
     assert_eq!(
-        success(&mut g, "SetFunctionValue (ySIGetTrait \"template\" OwnYsiNestedGun)"),
-        XVal::Str("ySIOverrideTpl".into())
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiDirectGun)"),
+        XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
     );
     assert_eq!(
-        success(&mut g, "SetFunctionValue (ySIGetTrait \"systemcolor\" OwnYsiNestedGun)"),
-        XVal::Str("0".into())
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" Player)"),
+        XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
     );
-    assert_eq!(g.ysi_item_display(FormId(0x874)).unwrap().template, "ySIOverrideTpl");
 
-    // Per-form "string" override does not leak to sibling forms sharing the tag.
-    success(&mut g, "ySISetTrait \"string\" \"(custom) Override Name\" OwnYsiReplGun");
+    // w4e_c01: ySISetTrait "icon" and "filename" share the tag-scoped store and return 1.
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySISetTrait \"icon\" \"Owned/sib_icon.dds\" OwnYsiReplGun)"),
+        XVal::Num(1.0)
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiNestedGun)"),
+        XVal::Str("Owned/sib_icon.dds".into())
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySISetTrait \"filename\" \"Owned/sib_file.dds\" OwnYsiReplGun)"),
+        XVal::Num(1.0)
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiNestedGun)"),
+        XVal::Str("Owned/sib_file.dds".into())
+    );
+
+    // w4e_01: ySISetTrait "string" mutates both "tag" and "string" per-form (leaving siblings),
+    // and ySISetTrait "tag" likewise updates "string".
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySISetTrait \"string\" \"(zstr)\" OwnYsiReplGun)"),
+        XVal::Num(1.0)
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiReplGun)"),
+        XVal::Str("(zstr)".into())
+    );
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiReplGun)"),
-        XVal::Str("(custom) Override Name".into())
+        XVal::Str("(zstr)".into())
     );
     assert_eq!(
-        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiNestedGun)"),
-        XVal::Str("(w01) Nested Rifle".into())
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiNestedGun)"),
+        XVal::Str("(w01)".into())
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySISetTrait \"tag\" \"(w4et)\" OwnYsiReplGun)"),
+        XVal::Num(1.0)
+    );
+    assert_eq!(
+        success(&mut g, "SetFunctionValue (ySIGetTrait \"string\" OwnYsiReplGun)"),
+        XVal::Str("(w4et)".into())
+    );
+
+    // w4e_04_ysi_worldref_arg_vs_dot: dot-receiver unwraps placed world ref to base form,
+    // whereas explicit 2nd-arg world ref does NOT unwrap.
+    let ext = extended_fixture();
+    files.write(
+        "ySI.json",
+        &config(
+            serde_json::json!([{"priority": 20, "mod": "OwnedYsi.esm", "form": "00000820", "tag": "(fba1)"}]),
+            serde_json::json!([{"priority": 10, "tag": "(fba1)", "filename": "Owned/pistol.dds"}]),
+        ),
+    );
+    let mut g_ref = game(&ext);
+    assert_eq!(
+        success(&mut g_ref, "SetFunctionValue (OwnYsiPlaced.ySIGetTrait \"tag\")"),
+        XVal::Str("(fba1)".into())
+    );
+    assert_eq!(
+        success(&mut g_ref, "SetFunctionValue (OwnYsiPlaced.ySIGetTrait \"icon\")"),
+        XVal::Str("Owned/pistol.dds".into())
+    );
+    assert_eq!(
+        success(&mut g_ref, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiPlaced)"),
+        XVal::Str(String::new())
+    );
+    assert_eq!(
+        success(&mut g_ref, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiPlaced)"),
+        XVal::Str("interface\\icons\\Misc_Unknown.dds".into())
+    );
+
+    // w4c_b4_15b_ysi_no_json_fallback: when NO ySI JSON packs exist, unmatched "icon" stays "".
+    std::fs::remove_file(files.root.join("Data/menus/ySI/ySI.json")).unwrap();
+    let mut g_no_json = game(&ext);
+    assert_eq!(
+        success(&mut g_no_json, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiItem)"),
+        XVal::Str(String::new())
+    );
+    assert_eq!(
+        success(&mut g_no_json, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiItem)"),
+        XVal::Str(String::new())
+    );
+    assert_eq!(
+        success(&mut g_no_json, "SetFunctionValue (ySIGetTrait \"icon\" OwnYsiPlaced)"),
+        XVal::Str(String::new())
     );
 
     // Honest yUI version gate remains unadvertised until full yUI 140 parity.

@@ -30,19 +30,23 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
 - Explicit `mod` + hexadecimal local `form`, including a list of form strings,
   `formlist` (`0` direct form match, `1` `FLST` membership, `2` repair-list /
   nested-`FLST` membership), and `formType` scalar/list predicates are evaluated
-  [documented: field names, package author documentation above]. [hypothesis]
-  `form` is the hexadecimal local FormID in the named plugin, `formlist: 1`
-  tests membership in the referenced `FLST` (reading live `FLST` contents
-  including runtime `AddFormToFormList` changes; non-`FLST` targets on mode `1`
-  and modes outside `0..=2` remain unknown), `formlist: 2` matches an item whose
-  effective repair list (`REPL`, honoring live `SetRepairList` overrides) equals
-  the referenced `FLST`, or that is recursively reachable through nested `FLST`
-  entries (bounded at 256 visited `FLST` nodes with cycle protection [design]),
-  or directly equals a resolved live non-`FLST` form in a mixed `formlist: 2`
-  selector, and `formType` uses the full engine form-type code table
-  (`fnv_script::vm::form_type_code`). Placed references resolve to their base,
-  and an existing temporary item base resolves through its original [engine
-  design choice].
+  [documented: field names, package author documentation above; observed: Fallout:
+  New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official base masters, isolated
+  clean-room staging, yUI 140 + `ySI.json`, GSDocMitchellHouse (`0x00103DF9`), Wave 4E
+  black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`: `formlist: 2` resolves
+  `WeapBrassKnuckles` (`0x4324` -> `"(fna1)"`); zero DLL/PDB/source consulted].
+  [hypothesis] `form` is the hexadecimal local FormID in the named plugin,
+  `formlist: 1` tests membership in the referenced `FLST` (reading live `FLST`
+  contents including runtime `AddFormToFormList` changes; non-`FLST` targets on
+  mode `1` and modes outside `0..=2` remain unknown), `formlist: 2` matches an
+  item whose effective repair list (`REPL`, honoring live `SetRepairList`
+  overrides) equals the referenced `FLST`, or that is recursively reachable
+  through nested `FLST` entries (bounded at 256 visited `FLST` nodes with cycle
+  protection [design]), or directly equals a resolved live non-`FLST` form in a
+  mixed `formlist: 2` selector, and `formType` uses the full engine form-type
+  code table (`fnv_script::vm::form_type_code`). On `ySIGetTrait "filename"`,
+  placed references resolve to their base [design], and an existing temporary item
+  base resolves through its original [engine design choice].
 - The package's `questItem` condition reads the existing World quest-item predicate.
   [hypothesis] Integer 0/1 mean false/true; other representations remain unknown. The
   predicate includes the authored quest-item flag and saved SetQuestObject overrides,
@@ -132,9 +136,13 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
       hypothesis].
     - `armorDT` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json`;
       `schemas/fnv/objects.json` `ARMO.DNAM.damage_threshold`; GECK wiki `SetArmorDT`;
-      hypothesis: non-negative minimum DT threshold `effective_armor_dt >= threshold`
-      honoring live `SetArmorDT` overrides; design: negative, non-finite, or non-numeric
-      thresholds stay `Match::Unknown`].
+      observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official
+      base masters, isolated clean-room staging, yUI 140 + synthetic `w4e_armordt.json`,
+      GSDocMitchellHouse (`0x00103DF9`), Wave 4E black-box probe
+      `w4e_c01_ysi_armordt_sibling_formlist2`: `armorDT: N` acts as a `>= N` threshold
+      (`DT 6->zdt05`, `12->zdt10`, `15->zdt14`, `22->zdt20`); zero DLL/PDB/source
+      consulted; hypothesis: honors live `SetArmorDT` overrides; design: negative,
+      non-finite, or non-numeric thresholds stay `Match::Unknown`].
     - `armorPower` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
       `schemas/fnv/objects.json` `ARMO.BMDT.general_flags` bit 5 `"Power Armor"` / GECK
       wiki `IsPowerArmor`; observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d): `1`
@@ -154,12 +162,16 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
     - `miscProduct` [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` (used with `1`);
       `schemas/fnv/gameplay.json` `RCPE.RCOD` (including live `other.lutana.recipes`
       overrides); hypothesis: membership in any loaded recipe's output list].
-  - Boolean value encoding: `1` matches true and `0` matches false [observed: FNV 1.4.0.525
-    + xNVSE 6.4.9 + yUI 140 (v1.4d) on `weaponHasScope`]; `-1` matches false only on the 11
-    armor biped-slot keys [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` uses `1` and
-    `-1` on armor-slot rules], while `-1` on weapon/aid/power/recipe flags was `[observed]`
-    not to match false in `yUI 1.4d` and stays `Match::Unknown`. Any other JSON value
-    remains `Match::Unknown`.
+  - Boolean value encoding: `1` / JSON `true` match true and `0` / JSON `false` match
+    false [observed: FNV 1.4.0.525 + xNVSE 6.4.9 + yUI 140 (v1.4d) on `weaponHasScope`;
+    Wave 4E black-box probe `w4e_c01_ysi_armordt_sibling_formlist2`, 2026-11-24, 10
+    official base masters, isolated clean-room staging, GSDocMitchellHouse (`0x00103DF9`):
+    both JSON `true` and integer `0` match (`smgBool=[(zbool)]|9mmInt0=[(zint0)]`); zero
+    DLL/PDB/source consulted]; `-1` matches false only on the 11 armor biped-slot keys
+    [documented: Sorting Icons 1.4b `menus/ySI/ySI.json` uses `1` and `-1` on armor-slot
+    rules], while `-1` on weapon/aid/power/recipe flags was `[observed]` not to match
+    false in `yUI 1.4d` and stays `Match::Unknown`. Any other JSON value remains
+    `Match::Unknown`.
 - [engine design choice] Other uncited or unmapped property conditions (including
   `bookSkill`, `isSkillBook`, `noteType`, `ammoIgnoresDTDR`, `prefix`, `suffix`, `edid`,
   `edidPrefix`), remain **unknown**, rather than false.
@@ -193,34 +205,52 @@ remain [hypothesis] until an interactive-desktop multi-rule capture runs.
 `ysi_filename` handles the `"filename"` trait on `ySIGetTrait` (case-insensitive)
 with strict refusal: missing/default outputs, unsupported potentially winning
 predicates, conflicting priority/icon ties, invalid/empty receivers, and non-item
-forms explicitly refuse rather than inventing native defaults. The same cached
+forms explicitly refuse rather than inventing native defaults [design]. The same cached
 configuration snapshot also backs `crates/fnv-game/src/nvse_small.rs` for
-`ySIGetTrait` / `ySISetTrait` `"tag"` and `"icon"` [documented: GECK wiki
-`YSIGetTrait`/`YSISetTrait`, `"tag"` returns the sorting tag and `"icon"` returns
-the sorting icon texture path; changing a tagged form's icon applies to every form
-sharing that tag]. On `"tag"` and `"icon"`, session overrides set by `ySISetTrait` take precedence
-over JSON rules (including explicit `""` tag clearing), non-item forms are
-accepted [hypothesis: observed in community scripts querying world references
-and classes], and unavailable/unmatched/blocked configuration returns `""`
-rather than raising a script error [engine design choice]. Additional traits on
-`ySIGetTrait` / `ySISetTrait` are handled `[hypothesis]` in `nvse_small.rs` (icon-rule
-field names `[documented: Sorting Icons 1.4b menus/ySI/ySI.json]`; no ySI/yUI DLL or
-source code was consulted):
-- `"string"`: per-form `ySISetTrait "string"` override if set, else `"{tag} {name}"`
-  when both effective tag and display name are non-empty, `"{tag}"` when tagged
-  without a name, or `"{name}"` when untagged.
-- `"template"`, `"systemcolor"`, `"category"`, `"name"`, `"tab"`, `"count"`:
-  session `ySISetTrait` override (shared across forms with the same effective
-  tag, or per-form when untagged) falling back to unambiguous highest-priority
-  JSON icon-rule metadata (`"template"` defaults to `"ySIDefault"` when tagged `[design]`).
-- `ySISetTrait "filename"` updates the same session icon store as `"icon"` `[hypothesis]` while
-  `ySIGetTrait "filename"` retains its strict JSON-backed refusal path.
-Unrecognized traits continue to return `""`. No `yUI` provider presence/version
-is advertised (`ext-version.md`). This does **not** repair JAM sorting or
-establish full ySI/JAM compatibility. A configuration with unresolved
-potentially winning predicates cannot claim a filename merely because a lower
-supported rule exists. No original JSON, icons, scripts or private paths are
-included.
+`ySIGetTrait` / `ySISetTrait` `"tag"`, `"string"`, `"icon"`, and `ySISetTrait "filename"`
+[documented: GECK wiki `YSIGetTrait`/`YSISetTrait`; observed: Fallout: New Vegas
+1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official base masters, isolated clean-room
+staging, yUI 140 + `ySI.json` + `ySI.xml`, GSDocMitchellHouse (`0x00103DF9`), Wave 4E
+black-box probes `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`,
+`w4e_03_ysi_unmatched_icon_fallback`, `w4e_04_ysi_worldref_arg_vs_dot`, and
+`w4e_c01_ysi_armordt_sibling_formlist2`; zero DLL/PDB/source consulted]:
+- **Receiver vs explicit argument (`w4e_04_ysi_worldref_arg_vs_dot`):** calling
+  `rRef.ySIGetTrait` as a dot-receiver unwraps a placed world reference to its base form
+  (`"(fba1)"` / `"interface\\icons\\WeapA_Pistol.dds"`), whereas passing a placed world
+  reference as an explicit 2nd argument (`ySIGetTrait "tag" rRef`) does **not** unwrap
+  it (`tag=""`, `filename="interface\\icons\\Misc_Unknown.dds"`). Non-item base forms
+  are accepted without script error.
+- **`"string"` exact alias for `"tag"` (`w4e_01_ysi_string_alias`):** `ySIGetTrait
+  "string"` returns only the raw sorting tag (`"(fba1)"`, `"(jdd1)"`, or `""` when
+  untagged), not `"{tag} {name}"`. `ySISetTrait "string"` mutates the same per-form tag
+  store as `ySISetTrait "tag"` (updating both `"tag"` and `"string"` for that form while
+  leaving sibling forms unchanged) and returns `1`.
+- **Shared tag-scoped `"icon"` / `"filename"` store & `(trait, value, form)` order
+  (`w4e_c01_ysi_armordt_sibling_formlist2`):** `ySISetTrait` accepts `(trait, value,
+  form)` order (`orderTVF=1`, `orderTFV=0`), returns `1` for `"tag"`, `"string"`,
+  `"icon"`, and `"filename"`, and writes `"icon"` and `"filename"` into the same
+  tag-scoped icon store so changing a tagged form's icon propagates to sibling forms
+  sharing that tag. Session overrides take precedence over JSON rules (including
+  explicit `""` tag clearing). `ySIGetTrait "filename"` retains its strict JSON-backed
+  refusal path in `ysi_filename.rs` [design].
+- **Unmatched icon fallback (`w4e_03_ysi_unmatched_icon_fallback` &
+  `w4c_b4_15b_ysi_no_json_fallback`):** when `menus/ySI/*.json` packs are loaded and a
+  form has no matched tag/icon (e.g. `DocMitchell` NPC base `0x104C0E`, an untagged
+  form, or an explicit 2nd-arg world ref), `ySIGetTrait "icon"` returns
+  `"interface\\icons\\Misc_Unknown.dds"` (and natively `ySIGetTrait "filename"` does the
+  same). When no ySI JSON packs exist, both `"tag"` and `"icon"` return `""`.
+- **Metadata trait names rejected (`w4e_02_ysi_metadata_traits`):** `ySIGetTrait`
+  returns `""` for all 6 JSON icon-rule metadata names (`"template"`, `"systemcolor"`,
+  `"category"`, `"name"`, `"tab"`, `"count"`) even on tagged forms whose `ySI.json` rule
+  sets those keys, and `ySISetTrait` for those names returns `0` (rejected no-op) with no
+  invented `"ySIDefault"` fallback.
+- **BarterMenu XML injection (`w4e_c01_ysi_armordt_sibling_formlist2`):** `ySI.xml`
+  injects into `BarterMenu` with `_ySI=1`, `_ySIPipBoy=0`.
+Unrecognized traits continue to return `""` (get) and `0` (set). No `yUI` provider
+presence/version is advertised (`ext-version.md`). This does **not** repair JAM sorting
+or establish full ySI/JAM compatibility. A configuration with unresolved potentially
+winning predicates cannot claim a filename merely because a lower supported rule exists.
+No original JSON, icons, scripts or private paths are included.
 
 ## Source string arguments
 
@@ -287,18 +317,22 @@ items, and menu XML to cover:
     cyclic nested `FLST` membership, mixed direct item) and `armorDT` minimum
     threshold (pass/fail, non-`ARMO` disqualification, live `SetArmorDT` override,
     negative-threshold conservative refusal).
-19. `ySIGetTrait` / `ySISetTrait` `"string"`, `"template"`, `"systemcolor"`,
-    `"category"`, `"name"`, `"tab"`, and `"count"` resolution, tag-shared vs
-    per-form overrides, `Game::ysi_item_display` template override propagation,
-    and truthful unadvertised `yUI` version gate (`0` / `-1.0`).
+19. Wave 4E observed `yUI 140` trait parity (`w4e_01..04`, `w4e_c01`, `w4c_b4_15b`):
+    `"string"` as exact bidirectional alias of `"tag"`, 6 metadata names returning `""`
+    on get and `0` (no-op) on set, `"interface\\icons\\Misc_Unknown.dds"` unmatched
+    `"icon"` fallback when JSON packs are loaded vs `""` when absent, dot-receiver
+    unwrapping vs explicit 2nd-arg world ref non-unwrapping, `ySISetTrait` `(trait,
+    value, form)` return codes (`1` vs `0`) and shared `"icon"`/`"filename"` tag-scoped
+    store, JSON bool `true`/int `0` predicate matching, and truthful unadvertised `yUI`
+    version gate (`0` / `-1.0`).
 
 ## Engine list-row sorting and tile icons (`nvf-play`)
 
 - **Display resolution** `[design]`: `Game::ysi_active` and `Game::ysi_item_display`
   resolve each item's effective sorting tag, icon texture path, and XML template name
-  (`template` from `ySISetTrait "template"` override or the winning icon rule,
-  defaulting to `ySIDefault` when tagged/icon-bearing or `ySINoTag` otherwise) using
-  the same `ySISetTrait` > JSON precedence as `ySIGetTrait`.
+  (`template` from the winning icon rule, defaulting to `ySIDefault` when
+  tagged/icon-bearing or `ySINoTag` otherwise) using the same `ySISetTrait` > JSON
+  precedence as `ySIGetTrait`.
   When no ySI configuration, session overrides, or injected `ySI` UI tiles are present,
   `ysi_active` returns `false` and vanilla menus pay zero cost and keep identical order.
 - **Sorting** `[hypothesis]`: When ySI is active, `MenuModel::apply_ysi` attaches resolved
@@ -332,10 +366,10 @@ Per `docs/design/extender-compat.md` §5.7 and `docs/spec-notes/ext-version.md` 
 `IsPluginInstalled "yUI"` remains `0` and `GetPluginVersion "yUI"` remains `-1.0`
 (unregistered in `fnv_script::vm::jip::PLUGINS`). Remaining `yUI 140` gaps before
 advertising `yUI`:
-- Native original-game probe verification for `ySIGetTrait "string"` formatting,
-  `ySIGetTrait "filename"` on non-item / `CLAS` forms (used by contextual-prompt
-  mods), native default/fallback icon and equal-priority file-order tie policies,
-  and `formlist: 1` mixed non-`FLST` targets (`ySI.json` armor entries).
+- Native original-game probe verification for `ySIGetTrait "filename"` strict-refusal
+  reconciliation on non-item / `CLAS` forms (used by contextual-prompt mods),
+  equal-priority file-order tie policies, and `formlist: 1` mixed non-`FLST` targets
+  (`ySI.json` armor entries).
 - Non-ySI `yUI` configuration features outside Sorting Icons (cursor matching,
   hotkey icon replacement, interactive item categories, and remaining UI/sorting
   fixes).

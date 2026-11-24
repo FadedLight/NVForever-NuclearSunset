@@ -1275,3 +1275,77 @@ fn knvse_legacy_anim_time_paths_loaded_matched_and_kept_on_existing_clock() {
     let t_loop_vanilla = g.script_sequence_time_for(FormId::PLAYER_REF, legacy_loop, false);
     assert!((t_loop_vanilla - 1.25).abs() < 1e-6, "vanilla default keeps existing clock 1.25: got {t_loop_vanilla}");
 }
+
+#[test]
+fn knvse_play_animation_path_pre_tick_neg_flt_max_and_frequency_scaled_delta() {
+    files();
+    let f = fixture();
+    let mut g = game(&f);
+    g.cfg.frame_seconds = 0.055;
+    g.senses.first_person = true;
+    g.knvse_ini = fnv_game::knvse_ini::KnvseIni::parse(
+        b"[Anim Fixes]\nsLegacyAnimTimePaths = W4ELegacy,B42Inject\n",
+    );
+    let legacy = "test\\W4ELegacy\\test.kf";
+    let normal = "test\\W4ENormal\\test.kf";
+    assert!(g.knvse_ini.uses_legacy_anim_time(legacy));
+    assert!(!g.knvse_ini.uses_legacy_anim_time(normal));
+
+    // Advance a few frames so GetGlobalAnimTime is nonzero before PlayAnimationPath.
+    for _ in 0..8 {
+        g.tick();
+    }
+    assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.PlayAnimationPath \"test\\W4ELegacy\\test.kf\" 1)"), n(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.PlayAnimationPath \"test\\W4ENormal\\test.kf\" 1)"), n(1.0));
+
+    // Immediately after PlayAnimationPath before the first tick, GetAnimCurrentTime, offset,
+    // and lastTime all read -FLT_MAX (-3.40282e+38) [observed: w4e_08_knvse_legacy_anim_time].
+    let neg_flt_max = f64::from(-f32::MAX);
+    for path in [legacy, normal] {
+        let XVal::Num(t0) = q(&mut g, &format!("SetFunctionValue (PlayerREF.GetAnimCurrentTime \"{path}\")")) else {
+            panic!("expected GetAnimCurrentTime number");
+        };
+        let XVal::Num(off0) = q(&mut g, &format!("array_var a\nlet a := PlayerREF.GetAnimationAttributes \"{path}\"\nSetFunctionValue (a[\"offset\"])")) else {
+            panic!("expected offset");
+        };
+        let XVal::Num(last0) = q(&mut g, &format!("array_var a\nlet a := PlayerREF.GetAnimationAttributes \"{path}\"\nSetFunctionValue (a[\"lastTime\"])")) else {
+            panic!("expected lastTime");
+        };
+        assert_eq!(t0, neg_flt_max, "{path} pre-tick GetAnimCurrentTime must be -FLT_MAX");
+        assert_eq!(off0, neg_flt_max, "{path} pre-tick offset must be -FLT_MAX");
+        assert_eq!(last0, neg_flt_max, "{path} pre-tick lastTime must be -FLT_MAX");
+    }
+
+    // After ticking at frequency 1.0 (3 ticks -> 0.165 s), both legacy and normal paths match.
+    for _ in 0..3 {
+        g.tick();
+    }
+    let XVal::Num(g1) = q(&mut g, "SetFunctionValue (PlayerREF.GetGlobalAnimTime 1)") else { panic!("g1") };
+    let XVal::Num(t1_l) = q(&mut g, "SetFunctionValue (PlayerREF.GetAnimCurrentTime \"test\\W4ELegacy\\test.kf\")") else { panic!("t1_l") };
+    let XVal::Num(t1_n) = q(&mut g, "SetFunctionValue (PlayerREF.GetAnimCurrentTime \"test\\W4ENormal\\test.kf\")") else { panic!("t1_n") };
+    let XVal::Num(off1_l) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\W4ELegacy\\test.kf\"\nSetFunctionValue (a[\"offset\"])") else { panic!("off1_l") };
+    let XVal::Num(last1_l) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\W4ELegacy\\test.kf\"\nSetFunctionValue (a[\"lastTime\"])") else { panic!("last1_l") };
+    assert!((t1_l - 0.165).abs() < 1e-6, "got {t1_l}");
+    assert!((t1_n - t1_l).abs() < 1e-9);
+    assert!((last1_l - t1_l).abs() < 1e-6);
+
+    // After SetAnimSequenceFrequency 2.5 and 3 more ticks (dg = 0.165 s):
+    // GetAnimCurrentTime = t1 + dg * 2.5, offset stays fixed, lastTime = t1 + dg (unscaled)
+    // identically on BOTH listed (W4ELegacy) and unlisted (W4ENormal) paths [observed: w4e_08].
+    q(&mut g, "PlayerREF.SetAnimSequenceFrequency \"test\\W4ELegacy\\test.kf\" 2.5");
+    q(&mut g, "PlayerREF.SetAnimSequenceFrequency \"test\\W4ENormal\\test.kf\" 2.5");
+    for _ in 0..3 {
+        g.tick();
+    }
+    let XVal::Num(g2) = q(&mut g, "SetFunctionValue (PlayerREF.GetGlobalAnimTime 1)") else { panic!("g2") };
+    let dg = g2 - g1;
+    assert!((dg - 0.165).abs() < 1e-6);
+    for path in [legacy, normal] {
+        let XVal::Num(t2) = q(&mut g, &format!("SetFunctionValue (PlayerREF.GetAnimCurrentTime \"{path}\")")) else { panic!("t2") };
+        let XVal::Num(off2) = q(&mut g, &format!("array_var a\nlet a := PlayerREF.GetAnimationAttributes \"{path}\"\nSetFunctionValue (a[\"offset\"])")) else { panic!("off2") };
+        let XVal::Num(last2) = q(&mut g, &format!("array_var a\nlet a := PlayerREF.GetAnimationAttributes \"{path}\"\nSetFunctionValue (a[\"lastTime\"])")) else { panic!("last2") };
+        assert!((t2 - (t1_l + dg * 2.5)).abs() < 1e-6, "{path} GetAnimCurrentTime expected {}, got {t2}", t1_l + dg * 2.5);
+        assert!((off2 - off1_l).abs() < 1e-9, "{path} offset must remain fixed ({off1_l}), got {off2}");
+        assert!((last2 - (t1_l + dg)).abs() < 1e-6, "{path} lastTime must remain unscaled ({}), got {last2}", t1_l + dg);
+    }
+}

@@ -131,16 +131,37 @@ or source code was inspected or consulted.
     `nvf_play::script_input::mod_file_roots` calls `Game::reload_knvse_ini()` when VFS
     roots open, and `Game::tick()` calls `Game::sync_knvse_ini()` so root updates reload
     cleanly without overwriting manual overrides. Not serialized into save snapshots.
-- **Runtime clock behavior (not yet diverged from existing clock):**
-  - `[hypothesis]` The exact runtime conditions under which kNVSE v37's legacy animation
-    time algorithm diverges from its default algorithm for paths listed in
-    `sLegacyAnimTimePaths` are not yet established by a committed original-game probe.
+- **Runtime clock behavior (`w4e_08_knvse_legacy_anim_time`):**
+  - `[observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + kNVSE 37 + JIP LN 57.30,
+    2026-11-24, GSDocMitchellHouse (0x00103DF9), 10 official base masters, isolated
+    clean-room staging copy with staged Data\NVSE\Plugins\kNVSE.ini
+    (sLegacyAnimTimePaths = W4ELegacy,B42Inject) and read-only PrintToConsole probe
+    w4e_08_knvse_legacy_anim_time (tools/capture/nvse/catalogs/wave4e_mods.json, #3803;
+    s1_knvse_legacy raw output:
+    `PROBE|s1_knvse_legacy|t1:g1=0.5640|leg(t=0.1080,f=1.00,off=-0.4560,last=0.1080)`,
+    `PROBE|s1_knvse_legacy|t2_leg:dg=0.1650|dt=0.4125|t=0.5205|f=2.50|off=-0.4560|last=0.2730`,
+    `PROBE|s1_knvse_legacy|t2_nrm:dg=0.1650|dt=0.4125|t=0.5205|f=2.50|off=-0.4560|last=0.2730`,
+    plus same-frame pre-tick `t0L=-3.40282e+38,off=-3.40282e+38,last=-3.40282e+38`);
+    zero DLL, PDB, or third-party source consulted]`
+    1. Immediately after `PlayAnimationPath`, before the first animation tick,
+       `GetAnimCurrentTime`, `GetAnimationAttributes["offset"]`, and
+       `GetAnimationAttributes["lastTime"]` all read `-FLT_MAX` (`-3.40282e+38`,
+       `f64::from(-f32::MAX)`), not `0.0`.
+    2. After `SetAnimSequenceFrequency 2.5` (`dg = 0.1650`), **both** listed
+       `W4ELegacy\test.kf` and unlisted `W4ENormal\test.kf` advance `GetAnimCurrentTime`
+       identically by the frequency-scaled delta (`t1 + dg * freq = 0.1080 + 0.4125 =
+       0.5205`), while `offset` remains fixed (`-0.4560`) and `GetAnimationAttributes["lastTime"]`
+       tracks unscaled `global + offset` (`0.2730 = t1 + dg`).
+  - `[hypothesis]` Any additional runtime conditions (beyond `SetAnimSequenceFrequency`
+    tested in `w4e_08_knvse_legacy_anim_time`) under which kNVSE v37's
+    `sLegacyAnimTimePaths` diverges from normal paths remain unestablished.
   - `[design]` NVForever parses, syncs, and exposes `Game::knvse_ini` /
-    `KnvseIni::uses_legacy_anim_time(path)` cleanly, while keeping both listed and
-    unlisted paths on NVForever's existing `script_sequence_time_for` clock (with no
-    invented clamping or wrapping) until a committed original-game probe shows where
-    kNVSE v37 differs. Vanilla and modded gameplay timing are therefore unchanged by this
-    commit.
+    `KnvseIni::uses_legacy_anim_time(path)` cleanly, initializes `PlayAnimationPath`
+    sequence clocks to `-f32::MAX` until the first tick, and integrates frequency-scaled
+    deltas in `Game::script_sequence_time_for` while keeping `ScriptSequence::clock_offset`
+    fixed and `lastTime` unscaled on both listed and unlisted paths (with no invented
+    clamping or wrapping). Unmodded vanilla gameplay (without `PlayAnimationPath` /
+    `SetAnimSequenceFrequency`) is unchanged.
 - **Keys intentionally not wired (no dead struct fields):**
   - `[General] iConsoleLogLevel` (shipped `1`, `"; 0 = no log, 1 = kNVSE.log, 2 = console log"`),
     `iErrorLogLevel` (shipped `1`, `"; 0 = no log, 1 = kNVSE.log, 2 = error console log"`):

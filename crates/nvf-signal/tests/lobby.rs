@@ -466,3 +466,247 @@ fn relay_exchange_between_guests() {
     w.send(&mut si, ac, a.take_outgoing(), t0);
     assert_eq!(last_helpers(guest_events(&mut c, &mut w, cc)), Vec::<u32>::new());
 }
+
+/// Section 8 end to end, in one process: the host and guest C are both behind symmetric NATs,
+/// so C's direct checks fail. Guest A, behind a full-cone NAT, reaches the host and becomes a
+/// helper. C's planner asks A through the service, A's policy accepts, their checks find a
+/// path, and a packet from C reaches the host through A and comes back. That confirms the
+/// relay, and C reports `relay` to the host. Before this the pieces were only tested apart,
+/// and a gap between them (a late guest never hearing `helpers`) was first found live.
+#[test]
+fn relay_through_a_helper_across_nats() {
+    use nvf_nat::relay::{self, Answer, Helper, Planner, Policy, Refusal};
+    const H: usize = 0;
+    const A: usize = 1;
+    const C: usize = 2;
+
+    let mut now = Instant::now();
+    let mut sim = Sim::new();
+    let kinds = [NatKind::Symmetric, NatKind::FullCone, NatKind::Symmetric];
+    let socks: Vec<SocketAddr> = kinds
+        .iter()
+        .map(|&k| {
+            let lan = sim.add_lan(k);
+            sim.add_socket(lan, PORT)
+        })
+        .collect();
+    let cands: Vec<Vec<Candidate>> = (0..3).map(|i| gather(&mut sim, socks[i], &mut now, 1 + 2 * i as u8)).collect();
+
+    let mut si = StandIn::new(Config::default());
+    let lobby = create(&mut si, 6, now);
+    let mut w = Wires::default();
+    let hc = si.open(&lobby.code).unwrap();
+    let mut host = HostClient::new(&lobby.host_secret);
+    w.send(&mut si, hc, host.take_outgoing(), now);
+    host_events(&mut host, &mut w, hc);
+    cands[H].iter().for_each(|&c| host.add_local(c));
+
+    // A joins first, then C, so their peer numbers (1, 2) are their indexes; guests[i - 1].
+    // C joins only once A is a helper: the case first found live (lobby Q5Y-C1C).
+    let mut conns = [hc, si.open(&lobby.code).unwrap(), 0];
+    let mut guests = [GuestClient::new("A", &key(11), &cands[A]), GuestClient::new("C", &key(12), &cands[C])];
+    w.send(&mut si, conns[A], guests[0].take_outgoing(), now);
+    let mut joined = vec![A];
+
+    // One agent per (player, other player); every packet carries its sender's index.
+    let mut agents: HashMap<(usize, usize), Agent> = HashMap::new();
+    let mut planner = Planner::new(relay::Config::default());
+    let policy = Policy::default();
+    let (mut a_direct, mut c_direct_failed, mut chosen, mut confirmed) = (false, false, None, false);
+    let mut host_heard: Vec<(u32, String)> = Vec::new();
+    let mut try_reach_at = now;
+
+    let end = now + Duration::from_secs(40);
+    while now < end && !host_heard.contains(&(C as u32, "relay".into())) {
+        // Only after the service has passed A's `connected` on: the helper set is settled.
+        if joined.len() == 1 && host_heard.contains(&(A as u32, "direct".into())) {
+            conns[C] = si.open(&lobby.code).unwrap();
+            w.send(&mut si, conns[C], guests[C - 1].take_outgoing(), now);
+            joined.push(C);
+        }
+
+        // Lobby traffic, host side.
+        for ev in host_events(&mut host, &mut w, hc) {
+            match ev {
+                HostEvent::JoinRequest { peer, candidates, .. } => {
+                    let mut ag = Agent::new(Role::Host, &[socks[H]], IceConfig::default());
+                    candidates.into_iter().for_each(|c| ag.add_remote(c));
+                    agents.insert((H, peer as usize), ag);
+                    host.accept(peer);
+                }
+                HostEvent::Candidates { peer, candidates } => {
+                    let ag = agents.get_mut(&(H, peer as usize)).unwrap();
+                    candidates.into_iter().for_each(|c| ag.add_remote(c));
+                }
+                HostEvent::Go { peer } => agents.get_mut(&(H, peer as usize)).unwrap().start(now),
+                HostEvent::Connected { peer, path } => host_heard.push((peer, path)),
+                other => panic!("host: {other:?}"),
+            }
+        }
+        w.send(&mut si, hc, host.take_outgoing(), now);
+
+        // Lobby traffic, guest side.
+        for &i in &joined {
+            let g = &mut guests[i - 1];
+            for ev in guest_events(g, &mut w, conns[i]) {
+                match ev {
+                    GuestEvent::Waiting { peer } => assert_eq!(peer as usize, i),
+                    GuestEvent::Accepted { candidates, .. } => {
+                        let mut ag = Agent::new(Role::Guest, &[socks[i]], IceConfig::default());
+                        candidates.into_iter().for_each(|c| ag.add_remote(c));
+                        agents.insert((i, H), ag);
+                    }
+                    GuestEvent::Candidates { candidates } => {
+                        let ag = agents.get_mut(&(i, H)).unwrap();
+                        candidates.into_iter().for_each(|c| ag.add_remote(c));
+                    }
+                    GuestEvent::Go => agents.get_mut(&(i, H)).unwrap().start(now),
+                    GuestEvent::Helpers { peers } if i == C => {
+                        let hs: Vec<Helper> = peers.iter().map(|&id| Helper { id, host_rtt: None }).collect();
+                        planner.set_helpers(&hs, now);
+                        if c_direct_failed {
+                            planner.start(now);
+                        }
+                    }
+                    GuestEvent::Helpers { .. } => {}
+                    GuestEvent::RelayAsk { from, candidates } => {
+                        assert_eq!((i, from as usize), (A, C));
+                        match policy.answer(0, a_direct) {
+                            Answer::Accept => {
+                                let mut ag = Agent::new(Role::Host, &[socks[A]], IceConfig::default());
+                                candidates.into_iter().for_each(|c| ag.add_remote(c));
+                                ag.start(now);
+                                agents.insert((A, C), ag);
+                                g.relay_answer(from, true, "", &cands[A]);
+                            }
+                            Answer::Refuse(r) => g.relay_answer(from, false, r.as_wire(), &[]),
+                        }
+                    }
+                    GuestEvent::RelayAnswer { helper, accept, reason, candidates } => {
+                        assert_eq!((i, helper as usize), (C, A));
+                        if accept {
+                            let mut ag = Agent::new(Role::Guest, &[socks[C]], IceConfig::default());
+                            candidates.into_iter().for_each(|c| ag.add_remote(c));
+                            agents.insert((C, A), ag);
+                            planner.on_answer(helper, Answer::Accept);
+                        } else {
+                            planner.on_answer(helper, Answer::Refuse(Refusal::from_wire(&reason)));
+                        }
+                    }
+                    other => panic!("guest {i}: {other:?}"),
+                }
+            }
+        }
+
+        // C's relay choice.
+        for act in planner.poll(now) {
+            match act {
+                relay::Action::Ask { helper } => guests[C - 1].relay_ask(helper, &cands[C]),
+                relay::Action::TryReach { helper } => {
+                    try_reach_at = now;
+                    agents.get_mut(&(C, helper as usize)).unwrap().start(now);
+                }
+                relay::Action::Chosen { helper } => {
+                    chosen = Some(helper);
+                    // The first packet for the host goes to the helper, which forwards it.
+                    let (local, remote) = agents[&(C, A)].selected().unwrap();
+                    sim.send(local, remote, vec![b'F', C as u8]);
+                }
+                other => panic!("planner: {other:?}"),
+            }
+        }
+        for &i in &joined {
+            w.send(&mut si, conns[i], guests[i - 1].take_outgoing(), now);
+        }
+
+        // Game traffic.
+        let mut keys: Vec<(usize, usize)> = agents.keys().copied().collect();
+        keys.sort();
+        for (me, other) in keys {
+            let ag = agents.get_mut(&(me, other)).unwrap();
+            let guest_role = ag.role() == Role::Guest;
+            for act in ag.poll(now) {
+                match act {
+                    Action::SendProbe { from, to, check_id, .. } => {
+                        let mut d = vec![b'P', me as u8];
+                        d.extend_from_slice(&check_id.to_be_bytes());
+                        sim.send(from, to, d);
+                    }
+                    Action::Selected { local, remote, .. } => {
+                        if guest_role {
+                            sim.send(local, remote, vec![b'N', me as u8]);
+                        }
+                        match (me, other) {
+                            (A, H) => {
+                                a_direct = true;
+                                guests[A - 1].connected("direct");
+                            }
+                            (C, H) => panic!("C reached the host directly through two symmetric NATs"),
+                            (C, A) => planner.on_reach(A as u32, Some(now - try_reach_at)),
+                            _ => {}
+                        }
+                    }
+                    Action::Keepalive { local, remote } => sim.send(local, remote, vec![b'K', me as u8]),
+                    Action::Failed => match (me, other) {
+                        (C, H) => {
+                            c_direct_failed = true;
+                            planner.start(now);
+                        }
+                        (H, C) => {}
+                        (C, A) => planner.on_reach(A as u32, None),
+                        pair => panic!("no path for {pair:?}"),
+                    },
+                    Action::PathLost => panic!("path lost for {:?}", (me, other)),
+                }
+            }
+        }
+        for p in sim.deliver() {
+            let Some(me) = socks.iter().position(|&s| s == p.to) else { continue };
+            let from = p.data[1] as usize;
+            match p.data[0] {
+                b'P' => {
+                    if let Some(ag) = agents.get_mut(&(me, from)) {
+                        ag.on_probe_received(p.to, p.from, now);
+                        let mut d = p.data.clone();
+                        d[0] = b'R';
+                        d[1] = me as u8;
+                        sim.send(p.to, p.from, d);
+                    }
+                }
+                b'R' => {
+                    let id = u64::from_be_bytes(p.data[2..10].try_into().unwrap());
+                    agents.get_mut(&(me, from)).unwrap().on_probe_result(id, p.to, p.from, now);
+                }
+                b'N' => agents.get_mut(&(me, from)).unwrap().on_peer_selected(p.to, p.from, now),
+                b'K' => agents.get_mut(&(me, from)).unwrap().on_traffic(now),
+                // The relay: A forwards C's packet to the host, and the host's answer back.
+                b'F' if me == A => {
+                    let (local, remote) = agents[&(A, H)].selected().expect("A has its own path");
+                    sim.send(local, remote, vec![b'F', A as u8]);
+                }
+                b'F' if me == H => {
+                    let (local, remote) = agents[&(H, A)].selected().unwrap();
+                    sim.send(local, remote, vec![b'B', H as u8]);
+                }
+                b'B' if me == A => {
+                    let (local, remote) = agents[&(A, C)].selected().unwrap();
+                    sim.send(local, remote, vec![b'B', A as u8]);
+                }
+                b'B' if me == C => {
+                    planner.on_confirmed(chosen.unwrap());
+                    confirmed = true;
+                    guests[C - 1].connected("relay");
+                }
+                other => panic!("packet {other} at {me}"),
+            }
+        }
+        now += Duration::from_millis(10);
+    }
+    assert!(c_direct_failed, "C's direct checks should fail");
+    assert!(a_direct, "A should reach the host");
+    assert_eq!(chosen, Some(A as u32));
+    assert_eq!(planner.current(), Some(A as u32));
+    assert!(confirmed, "a round trip C -> A -> host -> A -> C");
+    assert!(host_heard.contains(&(A as u32, "direct".into())), "{host_heard:?}");
+    assert!(host_heard.contains(&(C as u32, "relay".into())), "{host_heard:?}");
+}

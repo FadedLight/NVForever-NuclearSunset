@@ -2075,7 +2075,7 @@ mod tests {
         }
         // V outside 0..1 or NaN is held: NaN as 0, 7 as 1, so N <= M.
         let g = grid_at(12_000.0);
-        let held = column_nm(&g, 1.0, CLEAR, &|k| if k % 2 == 0 { f32::NAN } else { 7.0 });
+        let held = column_nm(&g, 1.0, CLEAR, &|k| if k.is_multiple_of(2) { f32::NAN } else { 7.0 });
         assert!(held.iter().all(|s| s[0].is_finite() && s[0] <= s[1]));
     }
 

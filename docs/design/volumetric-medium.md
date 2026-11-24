@@ -680,8 +680,9 @@ each frame), and the shafts' pass, after tonemapping in the same frame, skips on
 shafts: the light in the air no longer draws, the shafts resume` once per change. The shafts'
 own uniform is left alone, so a view the render side refuses, a pipeline still compiling or a
 closed gate keeps the shafts, with no frame of lag [design]. The
-settings page greys the Sun shafts row while the Volumetric light row is on, a shared layout
-rule (`settings_layout::NEEDS_CHOICE`) the launcher reads too; the row's note ends "An addition
+game's settings page greys the Sun shafts row while the light is wanted at a strength above 0
+(settings.rs `shafts_status`; at 0 % the shafts draw and the row is free; the launcher, whose shared
+rules know no slider's value, does not grey it); the row's note ends "An addition
 of NVForever's.".
 
 **The three narrow edits** [design], each with a test beside it, each reading
@@ -894,7 +895,8 @@ distance d the share `F(d) = x^power x strength`, `x = clamp((d - near) / max(fa
 shaders get it (weather fades, fractional alpha and `--fog` included).
 
 **The Mojave's fog is front-loaded.** The shares at four distances for the base game's day fogs
-[observed, 2026-11-20: the WTHR records of the installed game, read with fnvtool: the near, far and
+[hypothesis: read on 2026-11-20 with fnvtool from the WTHR records of an installed game, whose version and
+the command were not kept: the near, far and
 power columns are their FNAM day values; the F columns
 are computed from them with fog.rs's curve and are not fields of the records]:
 
@@ -1063,7 +1065,8 @@ flags read from the model's NiAlphaProperty]. About 875 lit blended shapes, draw
 about 8,300 placed references, are of its plain class [hypothesis: counted on 2026-11-24 with a parser
 that is not committed].
 
-**What.** While the light in the air is wanted (and only then) such a shape is drawn once more as its
+**What.** While the light in the air is drawn (and only then: from its gate's "on" line to its "off" line,
+`AirDraws`, so not at night, indoors, under water or at a strength of 0) such a shape is drawn once more as its
 solid core: the same mesh with a copy of its material as a cut-out at 0.85
 (`SOLID_CORE_CUT`), so its solid texels are in the depth prepass. The blended draw stays and is drawn
 over the core at its depth (the main pass's test is greater or equal; a hair model's layer relies on
@@ -1126,15 +1129,14 @@ one frame: the GPU's instance history is kept by entity.
 picture: ambient occlusion round the shape, soft intersections, motion vectors, the copy the refracting and
 additive shapes read. A blended shape behind a core fails the depth test where the blend would
 have covered it anyway, and a concave shape's own far faces no longer show through its near ones
-where they were drawn out of order. All of it only while the light is wanted.
+where they were drawn out of order. All of it only while the light is drawn.
 
 **What stays wrong.** Glass and everything partly transparent (no solid texels), particles, water,
 windows, unlit effects, the soft edges themselves, skinned shapes, first-person and menu models: they
 take the light of what is behind them. **Shadows are unchanged**: a core casts none, and the blended
 shape casts none, as before.
 
-**Cost.** Off: three run conditions, and one optional texture name kept per candidate material; while a material is
-marked as animated (from when the light was on), also the materials' events. On: one extra
+**Cost.** Off: two run conditions, and one optional texture name kept per candidate material. On: one extra
 draw in the prepass and one in the main pass per loaded candidate (batched as other cut-outs are), a pass
 over the placed meshes' change ticks, one lookup and comparison a core, the material events and the removals each frame, one texture read per file.
 Measured (NVIDIA GeForce RTX 5070 Ti, four alternated pairs a view, one exe, cores on against
@@ -1152,7 +1154,7 @@ the count has rested and a core of that reference is in view (or after 20 s with
 reference <FormID>: <n> cores (<m> of them in view)`, and once, when some are drawn and the mesh terrain blend draws their shapes,
 `solid cores: reference <FormID>: <k> cores in view under a terrain blend clone`. In view: some view's visibility check passed it. Log: `solid cores: <n> (draws of
 <m> materials, for the light in the air)` once the count has rested a second, again when it is notably
-another; `solid cores: removed (...)` when the light is no longer wanted; nothing with the light off.
+another; `solid cores: removed (...)` when the light is no longer drawn; nothing with the light off.
 
 ### Where we differ from the talk
 
@@ -1227,9 +1229,9 @@ The four chunks a column ("The walk") against one invocation a column, the basel
 with the default grid (64 slices, so 16 kept a chunk), the grid pass's span in two views (heading and
 pitch 60:20 and 13:56), mean of two alternated runs of each build (the chunked build 6a85a673a against
 the development branch before it, 49a98dca2, on the same machine), the stills equal to the same build's own
-repeats within noise [observed, 2026-11-24: on the first machine the set-up of the cost figures of
-graphics-enhanced.md §3.23 with the Volumetric light row on as well, at the hours named (12.35, 17.5, 18.6),
-the overcast weather's name not kept; on the laptop `--play --cell Goodsprings --pos=-71680,2048,8372 --weather
+repeats within noise. The first machine's rows [hypothesis: 2026-11-24, at the hours named (12.35, 17.5,
+18.6); which rows were on and the overcast weather's name were not kept]. The laptop's [observed, 2026-11-24:
+`--play --cell Goodsprings --pos=-71680,2048,8372 --weather
 NVWastelandClear --still-sky --no-actors --no-messages --no-voice --graphics-only
 anisotropic,volumetric-clouds,cloud-shadows,volumetric-light --log-frame-times 5 --run-seconds 123` with
 `NVF_PLAY_DEBUG_CLOUD_PHASE=100`, the first view held to 60 s and 30 s more, the second 30 s, the median of
@@ -1250,9 +1252,11 @@ The composite is 0.09 to 0.17 ms on the first machine; on the 780M about 0.5 ms 
 at 1920x1080. So the chunks halve the grid pass on the one and cost 13 to 79 % more on the other, and
 only discrete NVIDIA cards take them. No discrete AMD or Intel card is measured, and no NVIDIA card but
 this one.
-Memory [design: from the formats]: one volume of 160 x 88 x 64 `Rgba16Float` texels is 6.9 MiB,
+Memory [design: from the formats], without the HDR picture, which the light keeps the main view in where
+nothing else does: one volume of 160 x 88 x 64 `Rgba16Float` texels is 6.9 MiB,
 13.8 MiB with the filter's second volume (the log's grid line states it); the columns follow the
-aspect. Besides, one uniform buffer and two 1 x 1 stand-ins for the terrain map and the cloud image; while
+aspect. Besides, one uniform buffer and two 1 x 1 stand-ins for the terrain map and the cloud image; its terrain map, made for it alone with the Terrain shadows row off, is the
+heightfield's texture (2 MiB) and two targets of 4 MiB; while
 the light volume is read, a 96-byte uniform and a 16-byte storage buffer more (its textures are the
 clouds'). The light volume's reads and the mean pass are not measured on their own yet.
 
@@ -1347,5 +1351,5 @@ then the light off holds nothing, a non-perspective camera unmarked, unsupported
 fogs refused, the format support cached apart from the grid); and the three narrow edits' tests. Smoke: `volumetric-light` (the aid at Goodsprings at 17:30 under NVWastelandClear
 with the Terrain shadows and Cloud shadows rows, 4x MSAA), `volumetric-light-taa` (single-sampled
 depth), `volumetric-light-fsr`, `volumetric-light-night` (01:00: off with the night reason, no
-composite), `volumetric-light-off` (no aid: no line of the light at all), `volumetric-light-row` (the row),
-`volumetric-light-clouds` (with the clouds and their shadows), `volumetric-light-solid-cores` and `-blend`.
+composite), `volumetric-light-off` (no aid: no line of the light at all), `volumetric-light-row` (the row), `volumetric-light-switch` (off, on, off, on in play),
+`volumetric-light-picture` (the picture with and without it, measured), `volumetric-light-clouds` (with the clouds and their shadows), `volumetric-light-solid-cores` and `-blend`.

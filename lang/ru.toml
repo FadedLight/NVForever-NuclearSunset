@@ -567,6 +567,8 @@ name = "Русский"
 "On: sunlight shows in the air as rays and a glow toward a low sun, shaded by hills and clouds. Best with Cloud shadows and Terrain shadows on. An addition of NVForever's." = "Вкл.: солнечный свет виден в воздухе лучами и сиянием у низкого солнца, с тенями холмов и облаков. Лучше с тенями облаков и рельефа. Дополнение NVForever."
 "Volumetric light strength" = "Сила объёмного света"
 "How strongly the light in the air brightens lit air and darkens shaded air: 100% is the look as tuned, 0% none." = "Насколько свет в воздухе осветляет освещённый воздух и затемняет затенённый: 100% — вид по настройке, 0% — ничего."
+"Needs Volumetric Light." = "Нужен объёмный свет."
+"Replaced by Volumetric Light." = "Заменено объёмным светом."
 # [design, #3146; engine/nvf-play/src/pause.rs] Why a settings row is greyed.
 "Greyed out: {why}" = "Недоступно: {why}"
 # [design, #3146; engine/nvf-play/src/lockpick.rs] Lockpicking: the refusals, the status line, the Force Lock button.

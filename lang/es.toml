@@ -546,6 +546,8 @@ name = "Español"
 "On: sunlight shows in the air as rays and a glow toward a low sun, shaded by hills and clouds. Best with Cloud shadows and Terrain shadows on. An addition of NVForever's." = "Activado: la luz del sol se ve en el aire como rayos y un resplandor hacia el sol bajo, con la sombra de colinas y nubes. Mejor con Sombras de nubes y Sombras del terreno. Un añadido de NVForever."
 "Volumetric light strength" = "Intensidad de la luz volumétrica"
 "How strongly the light in the air brightens lit air and darkens shaded air: 100% is the look as tuned, 0% none." = "Con qué fuerza la luz en el aire aclara el aire iluminado y oscurece el que está en sombra: 100% es el aspecto ajustado, 0% nada."
+"Needs Volumetric Light." = "Necesita Luz volumétrica."
+"Replaced by Volumetric Light." = "Sustituido por Luz volumétrica."
 # [design, #3146; engine/nvf-play/src/pause.rs] Why a settings row is greyed.
 "Greyed out: {why}" = "Desactivado: {why}"
 # [design, #3146; engine/nvf-play/src/lockpick.rs] Lockpicking: the refusals, the status line, the Force Lock button.

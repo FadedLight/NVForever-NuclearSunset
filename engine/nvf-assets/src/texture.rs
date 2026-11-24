@@ -1601,7 +1601,7 @@ mod tests {
         let mut pane = dxt5_block(255);
         pane[..8].copy_from_slice(&{
             // Alpha endpoints 255 and 230, index 0 for 255 and 1 for 230, 3 bits a texel.
-            let bits = (0..16u64).filter(|k| k % 4 == 0).fold(0u64, |bits, k| bits | 1 << (3 * k));
+            let bits = (0..16u64).filter(|k| k.is_multiple_of(4)).fold(0u64, |bits, k| bits | 1 << (3 * k));
             let mut block = (bits << 16).to_le_bytes();
             (block[0], block[1]) = (255, 230);
             block

@@ -485,7 +485,7 @@ mod tests {
         use crate::medium_air::{column_nm, sums_at};
         let g = AirGrid::for_view(16.0 / 9.0, None, None);
         let fog = AirFog { near: 0.0, far: 30_000.0, power: 0.6, strength: 1.0 };
-        let nm = column_nm(&g, 1.1, fog, &|k| if k % 3 == 0 { 0.0 } else { 1.0 });
+        let nm = column_nm(&g, 1.1, fog, &|k| if k.is_multiple_of(3) { 0.0 } else { 1.0 });
         let texels: Vec<Vec4> = nm.iter().map(|s| Vec4::new(s[0], s[1], 0.0, 1.0)).collect();
         for i in 0..=700 {
             let c = i as f32 * 0.1;

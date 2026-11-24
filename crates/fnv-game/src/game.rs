@@ -1463,6 +1463,9 @@ pub struct Game<'a> {
     pub showoff: crate::nvse_showoff::ShowOffState,
     /// Mods' INI and other files (`crate::mod_files`).
     pub mod_files: crate::mod_files::ModFiles,
+    /// Runtime settings loaded from `Data\NVSE\Plugins\kNVSE.ini` (`crate::knvse_ini`,
+    /// not saved in snapshots).
+    pub knvse_ini: crate::knvse_ini::KnvseIni,
     pub(crate) ysi_filename: crate::ysi_filename::State,
     /// SUP batch 6's state: the mouse, the cursor, the debug texts, the lockpick menu …
     /// (`crate::nvse_sup6`; the engine fills and takes it).
@@ -2696,6 +2699,7 @@ impl<'a> Game<'a> {
             hud: Default::default(),
             showoff: Default::default(),
             mod_files: Default::default(),
+            knvse_ini: crate::knvse_ini::KnvseIni::load(),
             ysi_filename: Default::default(),
             sup: Default::default(),
             lu3: Default::default(),
@@ -2779,7 +2783,7 @@ impl<'a> Game<'a> {
             locks: Default::default(),
             senses: Default::default(),
             vats: Default::default(),
-            weather: Default::default(),
+            weather: crate::weather::WeatherState::cold_start(data),
             ui: Default::default(),
             console_requests: Vec::new(),
             mfg: Default::default(),
@@ -3772,7 +3776,8 @@ impl<'a> Game<'a> {
         let opts = self.opts();
         self.udf.push(UdfFrame { value: None, caller: None });
         self.open_run();
-        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds: None };
+        let seconds = Some(self.stateless_udf_seconds());
+        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds };
         let result = Vm::new(&data.table, &mut ex, opts).run(&block.body).map_err(|e| e.to_string());
         if let Locals::Temp(m) = &ex.locals {
             for (&index, v) in m {
@@ -3946,9 +3951,23 @@ impl<'a> Game<'a> {
         self.run_function_with_seconds(f, on, args, caller, (ctx, None))
     }
 
+    /// Single-frame delta exposed to stateless UDFs (`GetSecondsPassed` when `ctx.inst` is
+    /// `None`): zero while paused in menus, loading, or `FreezeTime`, otherwise the current
+    /// frame step `cfg.frame_seconds` [observed: w4g_03_jip_callback_getsecondspassed].
+    pub(crate) fn stateless_udf_seconds(&self) -> f64 {
+        if self.in_menu() || self.loading || self.gaps.jip3.time_frozen {
+            0.0
+        } else {
+            self.cfg.frame_seconds
+        }
+    }
+
     /// An elapsed value belongs to this UDF invocation and its nested calls only.
-    /// JIP callbacks supply it; ordinary calls and result scripts do not.
+    /// Callers may supply an explicit delta; stateless UDFs without one receive the
+    /// single-frame delta (`stateless_udf_seconds`), while persistent instances keep their
+    /// own clocks and result scripts continue to read zero.
     pub(crate) fn run_function_with_seconds(&mut self, f: &fnv_script::vm::XVal, on: Option<Value>, args: Vec<fnv_script::vm::XVal>, caller: Option<FormId>, (ctx, seconds): (RunCtx, Option<f64>)) -> Result<fnv_script::vm::XVal, String> {
+        let seconds = seconds.or_else(|| Some(self.stateless_udf_seconds()));
         self.nested(move |g| g.run_function_here(f, on, args, caller, (ctx, seconds)))
     }
 
@@ -4265,9 +4284,6 @@ impl<'a> Game<'a> {
         self.handlers = s.handlers;
         self.jip.main_loop = s.main_loop;
         self.jip.restore_main_loop_registrars(s.main_loop_registrars, s.jip_seq);
-        for callback in &mut self.jip.main_loop {
-            callback.last_clock = functions::clock_now(self.time);
-        }
         self.restarted_seen = s.restarted_seen;
         self.handler_seq = s.handler_seq;
         self.pp_put_session(s.pp);
@@ -4659,6 +4675,7 @@ impl<'a> Game<'a> {
     /// ran, each after the previous one was closed, layer5-captures.md §10.1–10.2].
     pub fn tick(&mut self) {
         self.frame += 1;
+        self.sync_knvse_ini();
         self.temp_refs.clear();
         self.sync_player_level();
         // JIP's SetGameMainLoopCallback functions due this frame (task J6), then xNVSE's
@@ -7430,6 +7447,7 @@ impl<'a> Game<'a> {
         g.radio.npc_radios = s.npc_radios.clone();
         g.weather.shown = s.weather_shown;
         g.weather.raining = s.raining;
+        g.weather.clear_measurement();
         g.provocations.grudges = s.grudges.iter().copied().collect();
         g.provocations.forgiven = s.forgiven.clone();
         g.nav_switches = s.nav_switches.clone();
@@ -8138,9 +8156,6 @@ impl Host for Exec<'_, '_> {
     }
 
     fn ext_call(&mut self, name: &str, on: Option<Value>, args: &[fnv_script::vm::XVal]) -> Option<Result<fnv_script::vm::XVal, String>> {
-        if crate::ysi_filename::handles(name, args) {
-            return Some(crate::ysi_filename::call(self.game, on, args));
-        }
         if functions::player_source::handles(name) {
             let source_ctx = Ctx { unit: self.unit.shared_key().clone(), opcode: 0, on: None, self_ref: self.ctx.self_ref,
                 action_ref: self.ctx.action_ref, quest: self.ctx.quest, inst: None, in_condition: false };

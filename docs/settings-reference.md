@@ -1433,6 +1433,21 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
 - More: docs/design/graphics-enhanced.md §3.14
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `occlusion-culling`: Occlusion culling
+
+- On the page: On: hidden objects are skipped before drawing. Helps when the GPU limits
+  the frame rate (high resolutions, dense towns); costs some CPU. Takes effect at the next
+  start.
+- In full: [design] Bevy's two-phase GPU occlusion culling on the main camera: meshes
+  hidden behind nearer ones (by last frame's depth, then this frame's) are not drawn.
+  First-person shapes are never culled. [observed 2026-11-24, 4K DLSS Quality, maxed
+  settings, 9950X3D + RTX 5090] Novac's GPU time 4.96 → 4.31 ms, but its frame 6.96 → 7.18
+  ms, as the second culling phase costs render-thread time: it helps where the GPU holds
+  the frame rate and costs a little where the CPU does (docs/design/frame-rate-audit.md
+  §13). Off by default. Read once at the start, so a change applies at the next start. The
+  test aid `NVF_OCCLUSION_CULLING` (`1` on, `0` off) overrides the saved row for a run.
+- Registered in `engine/nvforever/src/gpu_occlusion.rs`
+
 ### `smooth-terrain`: Smooth terrain
 
 - On the page: Smooths height steps while keeping bumps and ridges: 2 x 2 or 4 x 4 squares

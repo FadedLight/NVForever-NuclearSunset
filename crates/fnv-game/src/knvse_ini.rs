@@ -16,10 +16,10 @@ pub const KNVSE_INI_PATH: &str = "NVSE\\Plugins\\kNVSE.ini";
 #[derive(Debug, Clone, Default)]
 pub struct KnvseIni {
     /// `[Anim Fixes] sLegacyAnimTimePaths`: normalized lower-case path segments/prefixes
-    /// (backslash-separated, trimmed, non-empty) whose sequence clocks use the legacy
-    /// animation time calculation [documented: kNVSE v37 `kNVSE.ini` comment, shipped
-    /// default `B42Inject,B42Interact,B42Loot`; absent-INI default: empty; hypothesis:
-    /// legacy sequence-time formula].
+    /// (backslash-separated, trimmed, non-empty) whose sequence clocks use NVForever's
+    /// legacy animation time calculation [documented: kNVSE v37 `kNVSE.ini` comment,
+    /// shipped default `B42Inject,B42Interact,B42Loot`; absent-INI default: empty; design:
+    /// see `docs/spec-notes/ext-knvse.md` §5 for Wave 4E `w4e_08_knvse_legacy_anim_time`].
     pub legacy_anim_time_paths: Vec<String>,
     roots_generation: u64,
     loaded_legacy_anim_time_paths: Vec<String>,

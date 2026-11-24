@@ -188,9 +188,11 @@ impl Game<'_> {
 
 /// Legacy kNVSE sequence-time reporting for paths listed in `kNVSE.ini`
 /// `[Anim Fixes] sLegacyAnimTimePaths` [documented: kNVSE v37 `kNVSE.ini` comment;
-/// hypothesis: frequency-scaled time clamped to `[begin, end]` for clamped clips or
-/// wrapped modulo `end - begin` for looping clips, non-negative fallback when sequence
-/// bounds are unknown].
+/// observed: Wave 4E `w4e_08_knvse_legacy_anim_time` showed basic `PlayAnimationPath`
+/// returning identical frequency-scaled `GetAnimCurrentTime` (`t1 + dg * freq`), fixed
+/// `offset`, and unscaled `lastTime` (`g + offset`) for both listed and normal paths;
+/// design: NVForever scopes frequency-scaled clamping/wrapping to `sLegacyAnimTimePaths`
+/// while preserving raw unscaled timing on unlisted paths and `lastTime`].
 fn legacy_anim_time(raw: f64, info: Option<&crate::nvse_knvse::SequenceInfo>) -> f64 {
     let clamped_raw = raw.max(0.0);
     let Some(info) = info else { return clamped_raw };

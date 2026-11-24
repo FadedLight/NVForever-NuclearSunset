@@ -317,17 +317,21 @@ fn attributes(g: &mut Game, a: Option<FormId>, path: &str) -> XVal {
     if let Some(a) = a.filter(|&a| g.plays(a, path)) {
         let first = a == FormId::PLAYER_REF && g.senses.first_person;
         let legacy = g.knvse_ini.uses_legacy_anim_time(path);
-        let (offset, now) = if let Some(sequence) = g.anim_paths.sequences.get(&(a, first, k.clone())) {
-            (sequence.clock_offset, g.script_sequence_time(a, path))
+        let (offset, raw_now, now) = if let Some(sequence) = g.anim_paths.sequences.get(&(a, first, k.clone())) {
+            (sequence.clock_offset, g.script_sequence_raw_time_for(a, path, first), g.script_sequence_time(a, path))
         } else {
             let offset = g.knvse.offsets.get(&(a, k.clone())).copied().unwrap_or(0.0);
-            let now = if legacy { g.script_sequence_time_for(a, path, false) } else { g.anim_clock(a, false) + offset };
-            (offset, now)
+            let raw = g.anim_clock(a, false) + offset;
+            let now = if legacy { g.script_sequence_time_for(a, path, false) } else { raw };
+            (offset, raw, now)
         };
-        let scaled = if legacy { now } else { now * info.frequency };
+        let scaled = if legacy { now } else { raw_now * info.frequency };
+        // [observed: w4e_08_knvse_legacy_anim_time] `offset` stays fixed and `lastTime`
+        // tracks unscaled `g + offset`, while `lastScaledTime`/`calculatedTime` carry the
+        // frequency-scaled sequence time without double-scaling on legacy paths.
         m.extend([
-            ("lastTime", XVal::Num(now)),
-            ("weightedLastTime", XVal::Num(now)),
+            ("lastTime", XVal::Num(raw_now)),
+            ("weightedLastTime", XVal::Num(raw_now)),
             ("lastScaledTime", XVal::Num(scaled)),
             // kState_Animating [documented: the State list].
             ("state", XVal::Num(1.0)),

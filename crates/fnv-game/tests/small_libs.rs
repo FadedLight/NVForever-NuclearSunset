@@ -1084,15 +1084,21 @@ fn knvse_legacy_anim_time_paths_scopes_clock_attributes_and_resume_to_listed_pre
     let resumed = g.script_sequence_time_for(FormId::PLAYER_REF, modern, true);
     assert!((resumed - 0.5).abs() < 1e-6, "resuming legacy sequence preserves 0.5 (not double-scaled to 1.0): got {resumed}");
 
-    // GetAnimationAttributes reports lastScaledTime == lastTime (no double-scaling) on legacy path.
+    // w4e_08_knvse_legacy_anim_time: GetAnimationAttributes reports unscaled raw time in
+    // lastTime (0.25 s) while lastScaledTime and calculatedTime carry the frequency-scaled
+    // time (0.5 s) without double-scaling on legacy paths.
     let XVal::Num(last_time) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\a.kf\"\nSetFunctionValue (a[\"lastTime\"])") else {
         panic!("expected lastTime");
     };
     let XVal::Num(last_scaled) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\a.kf\"\nSetFunctionValue (a[\"lastScaledTime\"])") else {
         panic!("expected lastScaledTime");
     };
-    assert!((last_time - 0.5).abs() < 1e-6, "legacy lastTime: got {last_time}");
+    let XVal::Num(calc_time) = q(&mut g, "array_var a\nlet a := PlayerREF.GetAnimationAttributes \"test\\a.kf\"\nSetFunctionValue (a[\"calculatedTime\"])") else {
+        panic!("expected calculatedTime");
+    };
+    assert!((last_time - 0.25).abs() < 1e-6, "legacy lastTime must track unscaled raw time 0.25: got {last_time}");
     assert!((last_scaled - 0.5).abs() < 1e-6, "legacy lastScaledTime must not double-scale: got {last_scaled}");
+    assert!((calc_time - 0.5).abs() < 1e-6, "legacy calculatedTime must report scaled 0.5: got {calc_time}");
 
     // Empty sLegacyAnimTimePaths restores vanilla raw timing for all paths (5 ticks * 0.25 s = 1.25 s).
     g.knvse_ini.legacy_anim_time_paths.clear();

@@ -133,15 +133,38 @@ or source code was inspected or consulted.
     `nvf_play::script_input::mod_file_roots` calls `Game::reload_knvse_ini()` when VFS
     roots open, and `Game::tick()` calls `Game::sync_knvse_ini()` so root updates reload
     cleanly without overwriting manual overrides. Not serialized into save snapshots.
-- **Legacy sequence-time calculation** [hypothesis] and **double-scaling guards** [design]:
-  - For matching paths, `Game::script_sequence_time_for` returns frequency-scaled time
-    clamped to `[begin, end]` for clamped clips (`cycle == 2`) or wrapped modulo
-    `end - begin` for looping clips, falling back to `raw.max(0.0)` when sequence bounds
-    are unknown [hypothesis].
-  - `script_sequences_tick` (`auto_finish`), `nvse_knvse::attributes` (`lastScaledTime`),
-    `nvforever::script_sequences::sequence_sample_phase`, and `sequence_resume` pause/resume
-    bookkeeping (`script_sequence_raw_time_for`) avoid multiplying legacy paths by
-    `frequency` a second time [design].
+- **Observed kNVSE 37 timing (`w4e_08_knvse_legacy_anim_time`)** [observed: Fallout: New
+  Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, 10 official base masters, isolated
+  clean-room staging, kNVSE 37 + `kNVSE.ini` `sLegacyAnimTimePaths=W4ELegacy,B42Inject`,
+  GSDocMitchellHouse (`0x00103DF9`), Wave 4E black-box probe
+  `w4e_08_knvse_legacy_anim_time`; zero DLL/PDB/source consulted]:
+  - Immediately after `PlayAnimationPath` on the same frame before the next animation
+    tick, `GetAnimCurrentTime`, `offset`, and `lastTime` all read `-FLT_MAX`
+    (`-3.40282e+38`, `NI_INVALID_TIME`), not `0.0`.
+  - After ticking to `t1` (`f=1`, `g1=0.5640`, `t=0.1080`, `offset=-0.4560`,
+    `lastTime=0.1080`) and calling `SetAnimSequenceFrequency 2.5` (`dg=0.1650`), **both**
+    `W4ELegacy\test.kf` (listed in `sLegacyAnimTimePaths`) and `W4ENormal\test.kf`
+    returned identical `GetAnimCurrentTime = 0.5205` (`t1 + dg * 2.5`), fixed
+    `offset = -0.4560`, and unscaled `lastTime = 0.2730` (`t1 + dg = g + offset`).
+  - Thus under basic `PlayAnimationPath`, `GetAnimCurrentTime` integrates
+    frequency-scaled delta rather than returning raw `offset + globalTime`, `offset`
+    remains fixed, and `lastTime` tracks unscaled `g + offset`; kNVSE 37's
+    `sLegacyAnimTimePaths` divergence only arises under conditions not triggered by basic
+    `PlayAnimationPath` (such as `timeSync` or looping/clamped sequence edge cases
+    [hypothesis]).
+- **NVForever legacy sequence-time fallback and double-scaling guards** [design]:
+  - For paths matching `sLegacyAnimTimePaths`, `Game::script_sequence_time_for` returns
+    frequency-scaled time clamped to `[begin, end]` for clamped clips (`cycle == 2`) or
+    wrapped modulo `end - begin` for looping clips, falling back to `raw.max(0.0)` when
+    sequence bounds are unknown [design: scoped to listed `sLegacyAnimTimePaths` while
+    unlisted paths keep NVForever's existing `script_sequence_raw_time_for` contract and
+    pre-first-tick `0.0` initialization rather than `-FLT_MAX`].
+  - `nvse_knvse::attributes` reports unscaled `raw_now` (`g + offset`) in `lastTime` and
+    `weightedLastTime` (matching `w4e_08_knvse_legacy_anim_time`), while `lastScaledTime`
+    and `calculatedTime` report the frequency-scaled time without double-scaling.
+  - `script_sequences_tick` (`auto_finish`), `nvforever::script_sequences::sequence_sample_phase`,
+    and `sequence_resume` pause/resume bookkeeping (`script_sequence_raw_time_for`) avoid
+    multiplying legacy paths by `frequency` a second time [design].
 - **Keys intentionally not wired (no dead struct fields):**
   - `[General] iConsoleLogLevel` (shipped `1`), `iErrorLogLevel` (shipped `1`): native
     kNVSE DLL logging.

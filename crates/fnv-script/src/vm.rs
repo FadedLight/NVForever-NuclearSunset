@@ -3620,9 +3620,15 @@ impl Vm<'_, '_> {
         // nvse-inv foreach.read.after, "script call failed"], unless the host admits an
         // explicit null receiver (`0`) for that global command (for example player-source
         // commands [observed: w4g_06_player_cmds_explicit_receiver]).
+        // Exception: JIP LN ProjectUITile logs the null-ref diagnostic, returns 0.0,
+        // and continues script execution without enqueueing a projection [observed:
+        // w4g_10_project_ui_tile_errors, tools/capture/nvse/catalogs/wave4g_f2_extenders.json].
         let explicit_null = matches!(on, Some(Value::Ref(0))) || matches!(on, Some(Value::Num(x)) if x == 0.0);
         if on.is_some_and(|v| v.as_form().is_none()) && !(explicit_null && self.host.allows_null_receiver(lname)) {
             self.host.no_reference_call(lname, on, c);
+            if lname == "projectuitile" {
+                return Ok(Some(XVal::Num(0.0)));
+            }
             return Err(VmError::NoReference(lname.to_string()));
         }
         let mut args = Vec::with_capacity(c.args.len());

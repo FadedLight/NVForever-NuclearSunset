@@ -13,9 +13,7 @@
 //! d the share F(d) (fog.rs `GAME_FOG`); a slice's weight is dF, the difference of F across the
 //! slice, so the weights telescope to what a surface at that depth was given.
 //!
-//! **What a froxel stores and how the composite uses it** (stage 3 rulings R6, R7, after the
-//! plan check of 2026-11-20; the phase left the sums after the stage 3 review, must-fix 3)
-//! [design]: per slice the sums to its far boundary, N = sum of dF x V and M = sum of dF
+//! **What a froxel stores and how the composite uses it** [design]: per slice the sums to its far boundary, N = sum of dF x V and M = sum of dF
 //! ([`column_nm`]; V the sun's visibility in 0..1). No phase is stored: a sum of neighbouring
 //! columns' phases, interpolated and then divided by the pixel's own phase, made a shadow out
 //! of a fully lit grid (0.655 at the centre of a 16 x 8 grid with g 0.8). The composite reads
@@ -24,7 +22,7 @@
 //! ([`relative_lit`]), applies the pixel's own phase once (p_eff, [`phase_floor`]), takes the
 //! fog share F_near analytically at the pixel's distance held to the grid's end
 //! ([`near_share`]) and applies **one continuous form** in display values for every sample
-//! ([`far_blend`], [`blended_correction`], [`compose_blended`]; the review's must-fix 2):
+//! ([`far_blend`], [`blended_correction`], [`compose_blended`]):
 //!
 //! `Y'_new = Y' + corr_t x B_t`, `B_t = mix(C', Y', t)`,
 //! `corr_t = max(k a F_near (Vbar_c x mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t), -min(F_near, 1))`,
@@ -38,10 +36,9 @@
 //! before the floor, so k 0 changes nothing and the floor holds at any k; the result held to
 //! 0..=[`AIR_HDR_MAX`] in linear light. For a fogged
 //! opaque fragment `Y' = (1 - f) S' + f C'` the result is never below `(1 - f) S'` per
-//! channel near (shadow loses at most the budget share F_near of B_t) [plan check, Decision 3;
-//! review must-fix 1].
+//! channel near (shadow loses at most the budget share F_near of B_t).
 //!
-//! **What [`scaled_share`]'s caller passes** (R11; at this base, sky.rs `update_sky`, the
+//! **What [`scaled_share`]'s caller passes** (at this base, sky.rs `update_sky`, the
 //! outdoor branch, read after it ran this frame) [verified against the code]:
 //! - `direct_luma`: [`display_luma`] of the `Sun` entity's `DirectionalLight::color` (its RGB
 //!   holds display values: sky.rs:2228-2231 sets it to `lights::display_color(
@@ -60,15 +57,15 @@
 //! - `ambient_scale`: `GlobalAmbientLight::brightness / light_unit()`, i.e.
 //!   `AMBIENT_SHARE` 0.9 outdoors (sky.rs:191, :2234).
 //!
-//! This matches the plan check's description (Decision 4). Two things it does not say: the
+//! Two things besides: the
 //! colours are rewritten only when `SkyState::changed` (the sky's half-minute steps), the
 //! illuminance every frame; and by night the "sun" light is the weather's night Sunlight
-//! colour from the opposite direction (sky.rs:2282), which the night gate (R7) declines.
+//! colour from the opposite direction (sky.rs:2282), which the night gate declines.
 //!
 //! The phase is two Henyey-Greenstein lobes [documented: Henyey and Greenstein 1941, "Diffuse
 //! radiation in the galaxy", Astrophysical Journal 93; Bauer 2019, slides 29-31 for mixing
 //! lobes], capped and normalised here so that the **final** function has sphere mean 1 and
-//! its largest value is the cap (R12). Everything is written from those publications'
+//! its largest value is the cap. Everything is written from those publications'
 //! descriptions; no code from any project.
 //!
 //! The GPU half (`medium_air_grid.wesl`, `medium_air_compose.wesl`) mirrors
@@ -91,17 +88,16 @@ use bevy::math::{Vec2, Vec3};
 /// The grid's columns and rows at 16:9 and its slices [documented: Bauer 2019, slide 42,
 /// "Resolution of 160x88x64"].
 pub const AIR_GRID: [u32; 3] = [160, 88, 64];
-/// The grid's depth by default, in game units (view depth) [design: the task's second
-/// candidate, chosen by the main session on 2026-11-20 after pictures: the cloud plane is about
-/// 29,000 units up, a 12,000 grid cannot reach its shafts, and the cost measured the same; the
-/// first candidate, 12,000 (the cascades' reach with Longer shadows), stays the aid's `DEPTH`].
+/// The grid's depth by default, in game units (view depth) [design: judged by eye
+/// from stills, 2026-11-20: the cloud plane is about
+/// 29,000 units up and a 12,000 grid (the cascades' reach with Longer shadows) cannot reach its
+/// shafts; the aid's `DEPTH` still takes it].
 pub const AIR_DEPTH: f32 = 48_000.0;
 /// The first slice's thickness in game units: the exponential curve's start [design].
 pub const AIR_FIRST: f32 = 50.0;
 /// Below this total of the scaled direct and ambient lumas [`scaled_share`] falls with the
 /// direct light instead of holding d / (d + a): with a black ambient the share would
-/// otherwise stay 1 while the sun fades out at the horizon (plan check, Decision 4: "fade
-/// the absolute direct contribution to zero even for a black ambient"). A dim day's total
+/// otherwise stay 1 while the sun fades out at the horizon. A dim day's total
 /// is about 0.5 (0.75 x luma 0.4 + 0.9 x luma 0.25), so this acts only near black [design].
 const SHARE_FLOOR: f32 = 1e-3;
 /// [`lit_fraction`]'s M at or below which the lit fraction is 1 (no fog weight yet: no
@@ -112,26 +108,23 @@ pub const RATIO_EMPTY: f32 = 1e-9;
 /// `GAME_FOG`, `bi.x > 0.5`]. medium_air_compose.wesl declares the same constant (tested).
 #[cfg(test)]
 pub const DISPLAY_GAMMA: f32 = 2.2;
-/// The far blend ([`far_blend`]) starts at this share of the sky's distance [design: rulings
-/// R10]. Mirrored in the composite.
+/// The far blend ([`far_blend`]) starts at this share of the sky's distance [design]. Mirrored in the composite.
 #[cfg(test)]
 pub const SKY_TAPER_FROM: f32 = 0.6;
 /// The composite's sample agreement: a pixel's depth samples share one volume tap when their
 /// view depths, held to the grid's end, lie within this share of a slice of each other
-/// ([`slices_agree`]); each sample still takes its own fog share and far blend [design; the
-/// stage 3 review's must-fix 5]. Mirrored in the composite.
+/// ([`slices_agree`]); each sample still takes its own fog share and far blend [design]. Mirrored in the composite.
 #[cfg(test)]
 pub const AIR_AGREE_SLICES: f32 = 0.25;
 /// The largest linear value the composite writes, per channel, on every path: inside
 /// `Rgba16Float`'s largest finite value 65,504 [documented: IEEE 754 binary16, the largest
-/// finite value (2 - 2^-10) x 2^15], so bloom and exposure never meet an infinity [design; the
-/// stage 3 review's must-fix 4]. Mirrored in the composite.
+/// finite value (2 - 2^-10) x 2^15], so bloom and exposure never meet an infinity [design]. Mirrored in the composite.
 pub const AIR_HDR_MAX: f32 = 60_000.0;
 const _: () = assert!(AIR_HDR_MAX < 65_504.0);
 /// The grid's visibility samples per froxel by default (the tune key `SAMPLES`; the grid pass
-/// reads it from the uniform's misc.y) [design: the grid writer's checkpoint 1f].
+/// reads it from the uniform's misc.y) [design].
 pub const AIR_SAMPLES_DEFAULT: u32 = 4;
-/// How often the tune file is looked at, real seconds (the task's decision 14) [design].
+/// How often the tune file is looked at, real seconds [design].
 pub const TUNE_POLL_SECONDS: f64 = 0.5;
 /// Columns held to this range when they follow the aspect [design].
 const AIR_COLUMNS: (u32, u32) = (64, 320);
@@ -149,8 +142,7 @@ const AIR_LINEAR_BELOW: f64 = 1e-3;
 /// Midpoint steps over cos theta for the phase's mean [design: at least 2,048 asked].
 const PHASE_STEPS: usize = 8_192;
 /// The strength's range, the aid's, the tune file's and the settings row's slider (0 to
-/// 200 %): the one overall scale k of the correction ([`applied_scale`]) [design: the user's
-/// request after the first look, 2026-11-20, "an overall strength slider"].
+/// 200 %): the one overall scale k of the correction ([`applied_scale`]) [design].
 const AIR_STRENGTHS: (f32, f32) = (0.0, 2.0);
 
 /// The start aids and the tune file's variable (read by the GPU half at start).
@@ -401,7 +393,7 @@ pub struct AirFog {
 impl AirFog {
     /// Whether the light can make sense of this fog: false for any non-finite field,
     /// `far <= near`, `power <= 0` or `strength <= 0`. Such a fog is shown the plain way: no
-    /// light is drawn [design: the user's rule for weathers the medium cannot read].
+    /// light is drawn [design].
     pub fn usable(&self) -> bool {
         let finite = self.near.is_finite() && self.far.is_finite() && self.power.is_finite() && self.strength.is_finite();
         finite && self.far > self.near && self.power > 0.0 && self.strength > 0.0
@@ -424,7 +416,7 @@ pub fn fog_share(distance: f32, fog: AirFog) -> f32 {
 
 /// The phase: a forward and a back Henyey-Greenstein lobe mixed by `back_weight`, each scaled
 /// to mean 1 over the sphere, capped and normalised so that the **final** function has
-/// sphere mean 1 and its largest value is `cap` (R12) [documented: Henyey and Greenstein 1941
+/// sphere mean 1 and its largest value is `cap` [documented: Henyey and Greenstein 1941
 /// for the lobe; Bauer 2019, slides 29-31, for mixed lobes; design: the cap, since the sky
 /// dome and Light glow already draw the sun's aureole, and a capped peak bounds the glare].
 ///
@@ -441,7 +433,7 @@ pub struct AirPhase {
 }
 
 impl Default for AirPhase {
-    /// R12's start values: forward g 0.3, no back lobe (weight 0; its shape -0.3 kept for
+    /// The first look's values: forward g 0.3, no back lobe (weight 0; its shape -0.3 kept for
     /// when a weight is given), final cap 1.5. With these the uncapped lobe's peak is
     /// (1 + g) / (1 - g)^2 = 1.3 / 0.49 = 2.653 at cos 1 and its least (1 - g) / (1 + g)^2 =
     /// 0.414 at cos -1; the inner cap solves to about 1.2953 with norm 1.1580 (closed form in
@@ -480,7 +472,7 @@ impl AirPhase {
         self.normed().norm
     }
 
-    /// The phase with its inner cap and norm solved, for the uniform (R12). The mean over
+    /// The phase with its inner cap and norm solved, for the uniform. The mean over
     /// solid angle is half the integral over cos in [-1, 1], taken by the midpoint rule
     /// ([`PHASE_STEPS`] steps); the norm is 1 / that mean of `min(mix, c)`, so the final
     /// function `min(mix, c) x norm` has sphere mean 1 (exactly, under the same rule) and its
@@ -570,7 +562,7 @@ impl NormedPhase {
 // The stored sums and the lit fraction
 // ---------------------------------------------------------------------------------------------
 
-/// The stored sums of one column (R6, phase-free since the stage 3 review's must-fix 3): per
+/// The stored sums of one column (phase-free): per
 /// slice k the cumulative `[N, M]` at its far boundary k + 1, `N += dF_k x V_k`, `M += dF_k`.
 /// dF_k is the fog share's step over the slice along the column's ray (`ray_len`, distance per
 /// unit of view depth), slice 0 starting from F = 0, not F(0) (a fog with near below 0 gives
@@ -597,7 +589,7 @@ pub fn column_nm(grid: &AirGrid, ray_len: f32, fog: AirFog, visibility: &dyn Fn(
         .collect()
 }
 
-/// The stored sums at a continuous slice boundary coordinate `c` in 0..=nz (R7, the 1D
+/// The stored sums at a continuous slice boundary coordinate `c` in 0..=nz (the 1D
 /// reference of the composite's texture addressing): texel k holds boundary k + 1, so for
 /// 1 <= c < nz the value is linear between texels floor(c) - 1 and floor(c); below 1 it is
 /// texel 0 scaled by c (the zero boundary at the camera: inside the first slice the sums grow
@@ -636,7 +628,7 @@ pub fn lit_fraction(n: f32, m: f32) -> f32 {
     v.clamp(0.0, 1.0)
 }
 
-/// F_near (R7): the fog share evaluated analytically at the sample's radial distance held to
+/// F_near: the fog share evaluated analytically at the sample's radial distance held to
 /// the grid's end on its ray (`grid_end_distance` = the grid's depth x the ray's length), so
 /// it is never above the sample's own share and beyond the grid it is the share at the end.
 /// A NaN distance gives the grid's end (`f32::min` ignores NaN) [design].
@@ -650,8 +642,7 @@ pub fn near_share(distance: f32, grid_end_distance: f32, fog: AirFog) -> f32 {
 /// taken at the nearest ([`AirCurve::slice_width`]). The volume's value moves by less than a
 /// quarter of a slice's change across them. Samples beyond the grid's end, cleared depth
 /// included (its view depth is the grid's end), all read the end's value and agree. Only the
-/// lookup is shared: each sample still takes its own F_near and far blend (the stage 3
-/// review's must-fix 5). True for no samples [design].
+/// lookup is shared: each sample still takes its own F_near and far blend. True for no samples [design].
 #[cfg(test)]
 pub fn slices_agree(view_depths: &[f32], curve: &AirCurve, within: f32) -> bool {
     let held = |z: f32| z.min(curve.depth);
@@ -673,8 +664,8 @@ pub fn ray_contrast(vbar: f32, rays: f32) -> f32 {
 /// max(p, FLOOR)`, p the normalised capped phase of the pixel's own ray. An **artistic
 /// choice** [design]: the mean-one phase is well under 1 away from the sun (0.41 at the back
 /// with g 0.3, less with a stronger lobe), so with FLOOR 0 every view away from the sun darkens
-/// (12 to 21 levels of 255 at g 0.6 to 0.8, cap 2.5 to 4 [measured by the main session,
-/// 2026-11-20]), while the weather's fog colour was authored for lit open air; FLOOR 1 keeps
+/// (12 to 21 levels of 255 at g 0.6 to 0.8, cap 2.5 to 4 [hypothesis: stills of 2026-11-20,
+/// docs/design/volumetric-medium.md "The composite"]), while the weather's fog colour was authored for lit open air; FLOOR 1 keeps
 /// lit air away from the sun as the weather drew it and lets only the forward side gain.
 /// FLOOR 0 is the energy-neutral phase. NaN p is taken as 1, a NaN FLOOR as 1; FLOOR is held
 /// to 0..=1, so p_eff <= most.
@@ -704,8 +695,8 @@ pub fn floor_from_flag(w: f32) -> f32 {
 /// override (held to 0.05..=1) when set, else the clouds' mean transmittance `cloud_mean`
 /// (the uniform's `cloud_mode.y`; 0 or not finite taken as 1; held to 0.25..=1). The weather's
 /// fog colour was authored for the average light under that weather's cloud, so the light is
-/// relative to the average visibility, not to full sun [design: the main session's sweep of
-/// 2026-11-20, every picture darker as a whole while lit air only ever lost light].
+/// relative to the average visibility, not to full sun [design: judged by
+/// eye from stills, 2026-11-20: every picture darker as a whole while lit air only ever lost light].
 #[cfg(test)]
 pub fn reference_visibility(reference: Option<f32>, cloud_mean: f32) -> f32 {
     match reference.filter(|r| r.is_finite()) {
@@ -721,9 +712,9 @@ pub fn reference_visibility(reference: Option<f32>, cloud_mean: f32) -> f32 {
 /// LIFT)`: air as lit as the weather's average (Vbar = V_ref) is exactly 1 whatever RAYS is
 /// (unchanged), shadowed air falls toward SHADE and lit air rises up to LIFT (1..=3: how far
 /// above the average a fully lit ray may rise) [design; an artistic gain]. SHADE (0..=1, the
-/// tune key, default 0.9 since the calibration of 2026-11-20) limits what shadow takes: the user's references never show shadowed
-/// air darker than the open haze, while at RAYS 6 a slightly below-average lit fraction went to
-/// no light at all [design: the main session's 17:30 picture, 2026-11-20]. With SHADE 0,
+/// tune key, default 0.9) limits what shadow takes: shadowed
+/// air is meant to be no darker than the open haze, while at RAYS 6 a slightly below-average lit
+/// fraction went to no light at all [design: judged by eye, 2026-11-20]. With SHADE 0,
 /// V_ref = 1 and any LIFT >= 1 it is [`ray_contrast`]. Vbar held to 0..=1 (NaN 1), V_ref to at
 /// least 0.05 (NaN 1), RAYS to at least 0 (NaN 1), LIFT to at least 1 (NaN 1), SHADE to 0..=1
 /// (NaN 0).
@@ -741,7 +732,7 @@ pub fn relative_lit(vbar: f32, v_ref: f32, rays: f32, lift: f32, shade: f32) -> 
 // The composite's one form
 // ---------------------------------------------------------------------------------------------
 
-/// The far blend t of a sample (the stage 3 review's must-fix 2): 1 for cleared depth (the
+/// The far blend t of a sample: 1 for cleared depth (the
 /// sky), else the smoothstep `x^2 (3 - 2x)`, x = clamp((d - 0.6 sky_from) / (0.4 sky_from), 0,
 /// 1), of its radial distance d: 0 nearer than [`SKY_TAPER_FROM`] x `sky_from`, 1 from
 /// `sky_from` on (sky.rs `SKY_DEPTH_FROM`), value and slope continuous at both ends. A
@@ -765,8 +756,7 @@ pub fn mix(x: f32, y: f32, t: f32) -> f32 {
     x * (1.0 - t) + y * t
 }
 
-/// One sample's display-space scalar in the one form (the stage 3 review's must-fixes 1 and
-/// 2): `corr_t = a F_near (Vbar_c x mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY,
+/// One sample's display-space scalar in the one form: `corr_t = a F_near (Vbar_c x mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY,
 /// t)`, then held to at least `-min(F_near, 1)`: shadow removes at most the budget share F_near
 /// of B_t ([`compose_blended`]), whatever the keys or the uniform carry. `a` here is the applied
 /// scale k x a ([`applied_scale`], 0..=2: the strength times the share), so this is the
@@ -784,22 +774,21 @@ pub fn blended_correction(vbar_c: f32, p_eff: f32, sky_phase: f32, a: f32, f_nea
     corr.max(-f_near.min(1.0))
 }
 
-/// The one form's composite (the stage 3 review's must-fix 2): per channel
+/// The one form's composite: per channel
 /// `Y'_new = Y' + corr_t x B_t` with the budget `B_t = mix(C', Y', t)` (the fog colour near,
 /// the pixel's own display value far: the sky's multiplicative form is the additive form with
 /// the pixel's own colour as the budget), `Y' = max(pixel, 0)^(1/2.2)`, `C' = max(fog_colour,
-/// 0)^(1/2.2)`; the result `max(Y'_new, 0)^2.2` held to 0..=[`AIR_HDR_MAX`] (must-fix 4).
+/// 0)^(1/2.2)`; the result `max(Y'_new, 0)^2.2` held to 0..=[`AIR_HDR_MAX`].
 /// Since B_t >= 0, `corr_t >= -F_near` gives `Y'_new >= Y' - F_near B_t`, and near (t = 0) for a
 /// fogged fragment `Y' = (1 - f) S' + f C'` with F_near <= f that is `>= (1 - f) S'`.
 ///
-/// **A sample with geometry keeps its surface light at every t** (the second review's new
-/// fault 1): far, the budget holds the pixel's own Y' and shadow could take part of the
+/// **A sample with geometry keeps its surface light at every t**: far, the budget holds the pixel's own Y' and shadow could take part of the
 /// surface's light (S' 1, C' 0, f = F_near = 0.5, t 1, full shadow: Y' 0.5 became 0.25). So for
 /// such a sample (`geometry_f_near` = Some(F_near)) the change is held per channel to
 /// `delta = max(corr_t x B_t, -F_near x C')`: shadow removes at most the fog's own share of the
 /// fog colour, `Y'_new >= Y' - F_near C' >= (1 - f) S'` whenever F_near <= f, at every t.
 /// Positive changes are left as they are. Cleared depth (`None`) keeps the scalar bound alone
-/// (the sky has no surface under it) [design: the main session's ruling, 2026-11-20].
+/// (the sky has no surface under it) [design].
 #[cfg(test)]
 pub fn compose_blended(pixel: Vec3, corr: f32, fog_colour: Vec3, t: f32, geometry_f_near: Option<f32>) -> Vec3 {
     let to_display = |v: Vec3| v.max(Vec3::ZERO).powf(1.0 / DISPLAY_GAMMA);
@@ -812,10 +801,10 @@ pub fn compose_blended(pixel: Vec3, corr: f32, fog_colour: Vec3, t: f32, geometr
     (y + delta).max(Vec3::ZERO).powf(DISPLAY_GAMMA).clamp(Vec3::ZERO, Vec3::splat(AIR_HDR_MAX))
 }
 
-// The first look's two forms, the one form's limits (t = 0 and t = 1), kept as the tests'
-// references.
+// The first look's two forms, the one form's limits (t = 0 and t = 1), kept for the tests to
+// compare with.
 
-/// The world rule (R7): `a x f_near x (r - 1)`, r = Vbar_c x p_eff ([`applied_ratio`]).
+/// The world rule: `a x f_near x (r - 1)`, r = Vbar_c x p_eff ([`applied_ratio`]).
 #[cfg(test)]
 pub fn correction(f_near: f32, r: f32, a: f32) -> f32 {
     a * f_near * (r - 1.0)
@@ -836,7 +825,7 @@ pub fn compose_ratio(pixel: Vec3, corr: f32, fog_colour: Vec3) -> Vec3 {
     (to_display(pixel) + corr * to_display(fog_colour)).max(Vec3::ZERO).powf(DISPLAY_GAMMA)
 }
 
-/// The sky rule (revised R10): `a x F_near x (Vbar_c x mix(1, p, SKYPHASE) - 1) x SKY`
+/// The sky rule: `a x F_near x (Vbar_c x mix(1, p, SKYPHASE) - 1) x SKY`
 /// [documented: Bauer 2019, slide 62].
 #[cfg(test)]
 pub fn sky_modulation(vbar: f32, p: f32, sky_phase: f32, a: f32, f_near: f32, sky: f32) -> f32 {
@@ -865,13 +854,13 @@ pub fn display_luma(c: Vec3) -> f32 {
     (0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z).max(0.0)
 }
 
-/// The sunlit share s from consistently scaled lights (R11): `d / (d + a)` with
+/// The sunlit share s from consistently scaled lights: `d / (d + a)` with
 /// d = `direct_luma x direct_scale`, a = `ambient_luma x ambient_scale` (each factor held to
 /// 0 or above), held to 0..=1; 0 for any non-finite input. The denominator is taken as at
 /// least [`SHARE_FLOOR`], so a black pair gives 0 and, with a black ambient, s falls with the
 /// direct light near black instead of holding 1 while the sun fades out. What the caller
 /// passes (sky.rs names and lines): the module doc, "What scaled_share's caller passes"
-/// [design; plan check, Decision 4].
+/// [design].
 pub fn scaled_share(direct_luma: f32, direct_scale: f32, ambient_luma: f32, ambient_scale: f32) -> f32 {
     let inputs = [direct_luma, direct_scale, ambient_luma, ambient_scale];
     if !inputs.iter().all(|v| v.is_finite()) {
@@ -883,9 +872,9 @@ pub fn scaled_share(direct_luma: f32, direct_scale: f32, ambient_luma: f32, ambi
     if s.is_finite() { s.clamp(0.0, 1.0) } else { 0.0 }
 }
 
-/// a = clamp(the tune's `SHARE` override, else s, 0, 1): the sunlit share alone (R11); NaN
+/// a = clamp(the tune's `SHARE` override, else s, 0, 1): the sunlit share alone; NaN
 /// gives 0. The strength is no longer in it: it scales the whole correction
-/// ([`applied_scale`]) [design: the user's overall strength slider, 2026-11-20].
+/// ([`applied_scale`]) [design].
 pub fn effective_share(s: f32, share_override: Option<f32>) -> f32 {
     let a = share_override.unwrap_or(s);
     if a.is_nan() { 0.0 } else { a.clamp(0.0, 1.0) }
@@ -902,7 +891,7 @@ pub fn applied_scale(strength: f32, a: f32) -> f32 {
     k * a
 }
 
-/// Whether it is day for the light (the gate's night test; the second review's should-fix):
+/// Whether it is day for the light (the gate's night test):
 /// the signed elevation, in degrees, of the sun at the hour that aimed the light above 0.
 /// sky.rs `update_sky` aims the `Sun` entity's light from `sun_direction(climate,
 /// SkyState::sun_light_hour())` (turned round to the moon by `aim_sun` while that is below the
@@ -936,8 +925,7 @@ pub enum AirView {
     Delta,
     /// The grid made but not composed (for pairs).
     Off,
-    /// The phase-free lit fraction Vbar at the pixel as opaque grey ([`lit_fraction`],
-    /// revised R10): the shafts with no look constants in the way.
+    /// The phase-free lit fraction Vbar at the pixel as opaque grey ([`lit_fraction`]): the shafts with no look constants in the way.
     Lit,
     /// The signed scalar the light actually applies (corr on world samples, corr_sky on sky
     /// samples) as opaque grey: what the light does, at a glance.
@@ -1101,7 +1089,7 @@ pub struct AirTune {
     /// The light's strength, the one overall scale of its correction ([`applied_scale`]),
     /// 0..=2 (0 off; 1 the look as tuned).
     pub strength: f32,
-    /// The sunlit share s, overriding [`scaled_share`] when set, 0..=1 (`SHARE`, R11).
+    /// The sunlit share s, overriding [`scaled_share`] when set, 0..=1 (`SHARE`).
     pub share: Option<f32>,
     /// The forward lobe's g, 0..=0.95 (`G`; a forward lobe, never a back one: that is
     /// `BACK`'s).
@@ -1110,18 +1098,17 @@ pub struct AirTune {
     pub back_g: f32,
     /// The back lobe's weight, 0..=1 (`BACKWEIGHT`).
     pub back_weight: f32,
-    /// The phase's final cap (its largest value after normalising, R12), 1..=8 (`CAP`; the
-    /// stage 3 review's must-fix 4: 100 let a lit ray write past the HDR target's range, and the
-    /// pictures' choices were 1.2 to 4).
+    /// The phase's final cap (its largest value after normalising), 1..=8 (`CAP`:
+    /// 100 let a lit ray write past the HDR target's range, and the
+    /// choices by eye were 1.2 to 4).
     pub cap: f32,
     /// The grid's depth, overriding the start aid when set, 1,000..=200,000.
     pub depth: Option<f32>,
     /// SKY: the weight of the far form (`mix(1, SKY, t)` in [`blended_correction`]: cleared
     /// depth takes it whole, far terrain by its far blend), 0..=1, default 0.5. Only ever a
-    /// weight: above 1 it amplified what shadow takes past the fog light a pixel was given (the
-    /// stage 3 review's must-fix 1).
+    /// weight: above 1 it amplified what shadow takes past the fog light a pixel was given.
     pub sky_weight: f32,
-    /// The revised R10's SKYPHASE: how much of the phase a sky sample's modulation takes
+    /// SKYPHASE: how much of the phase a sky sample's modulation takes
     /// ([`blended_correction`]), 0..=1; default 0 (the sky dome draws its own glow round the
     /// sun, so the sky only darkens where the near air is shadowed).
     pub sky_phase: f32,
@@ -1152,12 +1139,10 @@ pub struct AirTune {
 }
 
 impl Default for AirTune {
-    /// The calibrated look [design: the main session's calibration against the user's
-    /// reference pictures, 2026-11-20, 50 measured runs: the earlier defaults darkened shadowed
-    /// air by up to 24 levels of 255, where the references never show shadowed air darker than
-    /// the open haze, and washed the sky beside a low sun]: strength 0 (the start's value comes
+    /// The calibrated look [design, 2026-11-20: docs/design/volumetric-medium.md, "Debug aids, tune
+    /// keys and log lines"]: strength 0 (the start's value comes
     /// through [`AirTune::start`] or [`AirTune::with_strength`]: the slider's 100 % is 1),
-    /// forward g 0.6 and final cap 2.5 with no back lobe (R12's start values,
+    /// forward g 0.6 and final cap 2.5 with no back lobe (the first look's,
     /// [`AirPhase::default`], were g 0.3, cap 1.5), RAYS 6 (was 4), LIFT 1.5 (was 1.75), SHADE
     /// 0.9 (was 0.5), FLOOR 1, sky weight 0.5 (was 1) and sky phase 0, REF auto, no view, all
     /// occluders, SAMPLES 4, FILTER on.
@@ -1324,7 +1309,7 @@ pub fn poll_due(last: Option<f64>, now: f64) -> bool {
     last.is_none_or(|t| now < t || now - t >= TUNE_POLL_SECONDS)
 }
 
-/// Follows the tune file (the task's decision 14): each read's text is parsed over the
+/// Follows the tune file: each read's text is parsed over the
 /// **start** tune (so removing a line returns that key to its start value); a text seen before
 /// changes nothing; a missing or unreadable file is the start tune, said once until the file
 /// is read again [design].
@@ -1401,7 +1386,7 @@ impl TuneFollower {
 // The gate and the log
 // ---------------------------------------------------------------------------------------------
 
-/// Why the light is not drawn (R7: only the outdoor display-value fog by day is handled in
+/// Why the light is not drawn (only the outdoor display-value fog by day is handled in
 /// S3-1; everything else is shown the plain way) [design].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AirOff {
@@ -1452,7 +1437,7 @@ pub struct AirGateInput {
     pub share: f32,
 }
 
-/// The light's gate (R7), checked in this order: indoors, under water, no sun light, an
+/// The light's gate, checked in this order: indoors, under water, no sun light, an
 /// unusable fog, a blend not in display values, night, a strength not above 0, a share not
 /// above 0 (NaN included in both).
 pub fn gate(input: &AirGateInput) -> Result<(), AirOff> {
@@ -1487,8 +1472,7 @@ pub fn corner_ray_len(proj_x: f32, proj_y: f32) -> f32 {
     if proj_x > 0.0 && proj_y > 0.0 && len.is_finite() { len } else { f32::INFINITY }
 }
 
-/// The whole view's bounds of the light, in display values (the stage 3 review's must-fix 6,
-/// worded as what they are after the second review's new fault 3).
+/// The whole view's bounds of the light, in display values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewBounds {
     /// Near pixels (t = 0): at most `+near x C'`, `near = (LIFT x most - 1) x a x F`.
@@ -1527,7 +1511,7 @@ pub fn view_bounds(grid: &AirGrid, phase: &NormedPhase, a: f32, tune: &AirTune, 
 }
 
 /// How far a logged bound must move before the "on" line is written again, and how often at
-/// most it is looked at, real seconds (the second review's new fault 3: a weather fade can
+/// most it is looked at, real seconds (a weather fade can
 /// bring the fog's ramp into reach while the last line still said 0) [design].
 pub const BOUND_RELOG_STEP: f32 = 0.05;
 pub const BOUND_RELOG_SECONDS: f64 = 5.0;
@@ -1562,7 +1546,7 @@ pub fn on_line(grid: &AirGrid, phase: &NormedPhase, s: f32, tune: &AirTune, fog:
     on_line_with(grid, phase, s, tune, &on_bounds(grid, phase, s, tune, fog, corner))
 }
 
-/// An "at most" figure rounded **up** to the line's three places (the third review: 2.75044
+/// An "at most" figure rounded **up** to the line's three places (2.75044
 /// printed as 2.750 understated it): `ceil(1000 v) / 1000`, less one part in a million of the
 /// value first so that the f32 noise of an exact figure (2.75 computed as 2.7500002) does not
 /// lift it a step; the result is never below the value by more than that part [design].
@@ -1672,8 +1656,7 @@ pub struct AirUniformData {
 }
 
 /// Packs the groups: `sunlit` is the scaled share s ([`scaled_share`]), replaced by the tune's
-/// `share` when set; `phase2.z` is the applied scale k x a ([`applied_scale`], R11 with the
-/// strength as the overall scale). The scale shares the share's slot: the composite only ever
+/// `share` when set; `phase2.z` is the applied scale k x a ([`applied_scale`]). The scale shares the share's slot: the composite only ever
 /// used the product, so the shader's arithmetic is unchanged and no other field moved
 /// [design].
 pub fn pack(grid: &AirGrid, fog: AirFog, phase: &NormedPhase, tune: &AirTune, sunlit: f32) -> AirUniformData {
@@ -1864,7 +1847,7 @@ mod tests {
             // cap costs the midpoint rule O(h^2), far below 1e-4.
             let mean = sphere_mean(200_000, |c| n.phase(c) as f64);
             assert!((mean - 1.0).abs() < 1e-4, "{p:?}: mean {mean}");
-            // R12: the final peak is the cap (or the uncapped peak when that is lower).
+            // The final peak is the cap (or the uncapped peak when that is lower).
             assert!(n.most() <= p.cap + 1e-5, "{p:?}: most {}", n.most());
             assert!(n.most() >= n.phase(0.3));
         }
@@ -1997,7 +1980,7 @@ mod tests {
         assert_eq!((held.g, held.back_g, held.back_weight, held.cap), (0.95, -0.95, 0.0, 1.0));
         assert_eq!(held.depth, Some(1_000.0));
         assert_eq!(held.sky_weight, 1.0);
-        // The stage 3 review's ranges: G 0..=0.95 (a forward lobe), CAP 1..=8, SKY 0..=1.
+        // The ranges: G 0..=0.95 (a forward lobe), CAP 1..=8, SKY 0..=1.
         let wide = AirTune::parse("G=-0.5\nCAP=100\nSKY=-1", &base);
         assert_eq!((wide.g, wide.cap, wide.sky_weight), (0.0, 8.0, 0.0));
         // The keys that did nothing are gone: ignored like any unknown name.
@@ -2130,7 +2113,7 @@ mod tests {
 
     #[test]
     fn correction_and_near_share_are_bounded() {
-        // R7's bound for the world rule (the one form at t = 0): with r = Vbar_c x p_eff in
+        // The bound for the world rule (the one form at t = 0): with r = Vbar_c x p_eff in
         // 0..=most and a in 0..=1, -F_near <= a F_near (r - 1) <= (most - 1) F_near. Exact in
         // f32: r - 1 >= -1 and <= most - 1 under monotone rounding, (a x f) <= f, and a product
         // with the same factor rounds monotonically, so no slack is needed.
@@ -2193,7 +2176,7 @@ mod tests {
                 }
             }
         }
-        // The plan check's counter-example: S' = 2, C' = 1, f = 1/2, a = 1. Fogged
+        // A counter-example: S' = 2, C' = 1, f = 1/2, a = 1. Fogged
         // Y' = 0.5 x 2 + 0.5 x 1 = 1.5; full shadow leaves (1 - f) S' = 1.0. The old floor
         // (the unfogged surface, linear 2^2.2 = 4.59) is already above the fogged pixel
         // (1.5^2.2 = 2.44) with the light off, so it could never hold.
@@ -2300,7 +2283,7 @@ mod tests {
         assert_eq!(display_luma(Vec3::splat(-1.0)), 0.0);
     }
 
-    /// The far blend (must-fix 2): 0 near, 1 for cleared depth and from the sky's distance on,
+    /// The far blend: 0 near, 1 for cleared depth and from the sky's distance on,
     /// a smoothstep between (1/2 halfway), monotone, continuous at both ends.
     #[test]
     fn the_far_blend_runs_from_world_to_sky() {
@@ -2365,7 +2348,7 @@ mod tests {
         let nan = AirTune { strength: f32::NAN, ..a };
         assert!(!tune_changed(&nan, &nan));
         assert!(tune_changed(&AirTune { share: Some(f32::NAN), ..a }, &a));
-        // Every R10-R12 key reaches its field through the parser.
+        // Every key reaches its field through the parser.
         let t = AirTune::parse("STRENGTH=2\nSHARE=0.4\nG=0.2\nBACK=-0.1\nBACKWEIGHT=0.2\nCAP=1.2\nDEPTH=48000\nSKY=1\nOCCLUDERS=terrain\nVIEW=off", &a);
         assert_eq!((t.strength, t.share, t.g, t.back_g, t.back_weight, t.cap), (2.0, Some(0.4), 0.2, -0.1, 0.2, 1.2));
         assert_eq!((t.depth, t.sky_weight, t.occluders, t.view), (Some(48_000.0), 1.0, AirOccluders::Terrain, AirView::Off));
@@ -2373,7 +2356,7 @@ mod tests {
 
     #[test]
     fn air_light_bounds_figures() {
-        // The glare bound in numbers for the task's six weathers (day near, far, power; the
+        // The glare bound in numbers for six weathers (day near, far, power; the
         // camera clamps a negative near to 0 outdoors), on the centre ray (F at the grid's end
         // = fog_share(depth)), with the default phase. Per row: F; the peak display gain
         // (most - 1) x a x F as a share of C'; the full-shadow loss a x F (share of C'); the
@@ -2471,7 +2454,7 @@ mod tests {
             line,
             "volumetric medium: light in the air on: grid 160x88x64 to 12000 units, phase g 0.6, cap 2.5, sunlit share 0.50, strength 1, near pixels at most +0.255 x the fog colour, far pixels at most +0.255 x mix(fog colour, pixel, t), sky at most x1.024 (display values; a snapshot for this weather, hour and view), sky 0.5, sky phase 0, rays 6, floor 1, ref auto, lift 1.5, shade 0.9"
         );
-        // The review's case: DEPTH 12,000, fog from 15,000 to 18,000: nothing on the centre
+        // A far fog: DEPTH 12,000, fog from 15,000 to 18,000: nothing on the centre
         // ray, but the corner ray of a 75 degree field at 16:9 (proj_y 1 / tan 37.5 = 1.30323,
         // proj_x 0.73307: length sqrt(1 + 1.86087 + 0.58879) = 1.85733) reaches 22,288 units,
         // past the whole ramp: F = 1, world (2.5 x 1.75 - 1) x 1 = 3.375.
@@ -2504,7 +2487,7 @@ mod tests {
         assert!(on_line(&g, &phase, 0.5, &AirTune { share: Some(0.2), ..tune }, fog, 1.0).contains("sunlit share 0.20"));
     }
 
-    /// The strength is one overall scale (the user's slider, 2026-11-20): the logged bounds
+    /// The strength is one overall scale (the slider): the logged bounds
     /// are k times those at strength 1 (view_bounds is linear in its scale), the correction
     /// of every sample is k times the share's before the floor (so 0 at strength 0, monotone in
     /// k: lit air brightens and shadowed air darkens more), and the floor -min(F_near, 1) holds
@@ -2567,8 +2550,8 @@ mod tests {
         assert!((shown - Vec3::splat(0.2)).abs().max_element() < 1e-5, "{shown}");
     }
 
-    /// The second review's new fault 1: a sample with geometry keeps its surface light at every
-    /// far blend t. The reviewer's case, one channel: S' 1, C' 0, f = F_near = 0.5, a = SKY = t
+    /// A sample with geometry keeps its surface light at every
+    /// far blend t. One case, one channel: S' 1, C' 0, f = F_near = 0.5, a = SKY = t
     /// = 1, full shadow: Y' = 0.5 stays exactly 0.5 (it was 0.25 at SHADE 0 and 0.375 at SHADE
     /// 0.5); a bright surface in a dark fog (S' 2, C' 0.1, f = F_near = 0.4, strength 2) never
     /// goes below (1 - f) S' = 1.2 at t 0, 0.5 and 1; cleared depth keeps the scalar bound (the
@@ -2755,7 +2738,7 @@ mod tests {
         assert_eq!(compose_sky(Vec3::new(-1.0, 0.5, 0.5), 0.0).x, 0.0);
     }
 
-    /// The night gate's clock (the second review's should-fix): day while the aiming
+    /// The night gate's clock: day while the aiming
     /// elevation is above 0; the horizon and NaN are not day (medium_air_light.rs tests the
     /// whole clock with a degenerate climate).
     #[test]
@@ -2786,7 +2769,7 @@ mod tests {
 
     /// RAYS amplifies the shadow's depth but keeps every bound: Vbar_c = clamp(1 - k (1 -
     /// Vbar), 0, 1) lies in 0..=1 for any k >= 0, so (world) R_c = Vbar_c x p lies in 0..=p,
-    /// within R7's 0..=most, the correction a f_near (R_c - 1) in [-f, (most - 1) f] and the
+    /// within 0..=most, the correction a f_near (R_c - 1) in [-f, (most - 1) f] and the
     /// composed pixel keeps the floor (1 - f) S'; (sky) Vbar_c in place of Vbar keeps
     /// 1 - a F <= 1 + corr_sky <= 1 + a F (most - 1) (SKYPHASE 1) and <= 1 (SKYPHASE 0).
     #[test]
@@ -3024,7 +3007,7 @@ mod tests {
         assert_eq!(AirTune::parse("SHADE=3", &AirTune::default()).shade, 1.0);
         assert_eq!(tune_diff(&AirTune::default(), &t), "SHADE=0.2");
         assert_eq!(relative_lit(0.0, 0.84, 4.0, 1.75, f32::NAN), 0.0);
-        // The grid's default depth is 48,000 (q 1.067636, last slice 3,088: R5's figures).
+        // The grid's default depth is 48,000 (q 1.067636, last slice 3,088).
         assert_eq!(AIR_DEPTH, 48_000.0);
         let g = AirGrid::for_view(16.0 / 9.0, None, None);
         assert!((g.ratio() - 1.067636).abs() < 1e-5, "{}", g.ratio());

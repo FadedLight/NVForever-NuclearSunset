@@ -1119,9 +1119,9 @@ pub(crate) fn blend_is_opaque(props: &Props, cut: Option<f32>, alpha_mode: Alpha
 /// The alpha from which a blended shape's texels belong to its solid core ([`solid_core`])
 /// [engineering choice: at 0.85 and above the blend shows at most 15% of what lies behind, so
 /// the texel is a surface to everything that reads depth. At 0.98, the first choice, the
-/// border texels of `NV_WaterTank.dds` (226 to 244 of 255 [observed: the texture's alpha]) were
-/// left out, and the light of what is behind drew a bright line along the tank's rim
-/// [observed: player test of 2026-11-24]].
+/// border texels of `NV_WaterTank.dds` (226 to 244 of 255 [hypothesis: read from the texture on 2026-11-24;
+/// the steps were not kept]) were left out, and the light of what is behind drew a bright line along
+/// the tank's rim, judged by eye in a play test, 2026-11-24].
 pub const SOLID_CORE_CUT: f32 = 0.85;
 /// The cut where the texture has thin parts in that range too, or its alpha cannot be read
 /// (`texture::SolidTexels`): what is solid beyond doubt.
@@ -1138,7 +1138,7 @@ pub const SOLID_CORE_CUT_THIN: f32 = 0.98;
 /// [`BLEND_TEST_CUT`] (the corn rows, [`blended_cutout`]) is included: it is drawn blended
 /// where no temporal upscaler runs. The Goodsprings water tank
 /// (`architecture\goodsprings\nv_watertank.nif`, flags 4333: blend on, no test) is such a
-/// shape [observed: painted with the light of what is behind it, #3032].
+/// shape (painted with the light of what is behind it: that document says how it was seen).
 pub(crate) fn solid_core_rules(props: &Props, cut: Option<f32>, alpha_mode: AlphaMode) -> bool {
     let Some((flags, _)) = props.alpha else { return false };
     let source_over = (flags >> 1) & 0xF == 6 && (flags >> 5) & 0xF == 7;

@@ -2,9 +2,10 @@
 //! plugin, the per-frame camera state, its extraction, the froxel volume and the grid pass.
 //! An engineering choice of NVForever's own for the enhanced look: an addition of NVForever's
 //! own; not a statement about the original's frames, and never used to explain a difference
-//! from them [design]. Off unless `NVF_PLAY_DEBUG_MEDIUM_LIGHT` asks for it ([`AirWanted`]).
+//! from them [design]. Off unless the Volumetric light row or `NVF_PLAY_DEBUG_MEDIUM_LIGHT` asks for it
+//! ([`AirWanted`]).
 //!
-//! **What runs** (checkpoints 1a-1c of rulings-stage3, no light drawn yet) [design]:
+//! **What runs** [design]:
 //! - Main world, PostUpdate: [`follow_air`] keeps an [`AirCamera`] on the main camera
 //!   (`FlyCam`) while [`AirWanted`] is true, holding the grid, the tune, the camera's
 //!   effective fog, the direction to the sun or moon light and whether the camera is
@@ -27,8 +28,8 @@
 //!   chained: [`air_grid_pass`] (compute, `medium_air_grid.wesl`, span `nvf_medium_air`), with
 //!   `FILTER` on (the default) [`air_filter_pass`] (compute, `medium_air_filter.wesl`, span
 //!   `nvf_medium_air_filter`: a 3 x 3 tent in x and y within each slice into a second volume,
-//!   the one the composite then reads; checkpoint 1g), then medium_air_compose.rs
-//!   `air_compose_pass` (span `nvf_medium_air_compose`) [rulings R4].
+//!   the one the composite then reads), then medium_air_compose.rs
+//!   `air_compose_pass` (span `nvf_medium_air_compose`).
 //!
 //! **The grid** [documented: Wronski 2014, "Volumetric Fog", SIGGRAPH 2014 Advances, for
 //! froxel grids; Bauer 2019, "Creating the Atmospheric World of Red Dead Redemption 2",
@@ -36,8 +37,8 @@
 //! column]: one compute invocation per column (8 x 8 x 1 workgroups), or on a discrete NVIDIA
 //! card four (8 x 8 x 4), each walking a quarter of its slices front to back, their sums joined
 //! in order through workgroup memory after a barrier (medium_air_grid.wesl, "The chunks";
-//! [`GridWalk`]), storing the sums to the slice's far boundary (rulings R6 without the phase:
-//! r = N = sum of dF x V, g = M = sum of dF, b the slice's mean V; each visibility sample carries
+//! [`GridWalk`]), storing the sums to the slice's far boundary
+//! (r = N = sum of dF x V, g = M = sum of dF, b the slice's mean V; each visibility sample carries
 //! its own depth stratum's fog step). The geometry and the fog share are medium_air.rs's (pure functions and their tests); the CPU
 //! mirror of the loop, its chunks and their join is this file's test `column_mirror_at`.
 //!
@@ -78,7 +79,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
 /// The volume's format: four half floats (N = sum of dF x V, M = sum of dF, the slice's own
-/// V, 1) [rulings R6, the phase taken out].
+/// V, 1) [the phase taken out].
 pub const AIR_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 /// Bytes per texel of [`AIR_FORMAT`].
 const AIR_TEXEL_BYTES: u64 = 8;
@@ -224,7 +225,7 @@ impl AirGate {
 pub struct AirCamera {
     /// The grid for the main pass's aspect and the aids.
     pub grid: AirGrid,
-    /// The look's constants (the start aids; the tune file from checkpoint 1d).
+    /// The look's constants (the start aids; the tune file).
     pub tune: AirTune,
     /// The camera's effective fog: near, far, power, strength (the colour's alpha).
     pub fog: AirFog,
@@ -284,7 +285,7 @@ pub struct AirGpuUniform {
     pub fog_colour: Vec4,
     /// x: the occluders' code; y: the visibility samples per froxel (the tune's `SAMPLES`,
     /// default [`medium_air::AIR_SAMPLES_DEFAULT`]; the shader holds it to 1..8); z: the sky weight
-    /// (SKY); w: SKYPHASE (the revised R10).
+    /// (SKY); w: SKYPHASE.
     pub misc: Vec4,
     /// The main pass's viewport: origin and size in pixels.
     pub viewport: Vec4,
@@ -323,7 +324,7 @@ pub struct AirViewInputs {
     pub render: UVec2,
 }
 
-/// Why a view's inputs cannot be drawn, or none [design: review r1]: both shaders take Bevy's
+/// Why a view's inputs cannot be drawn, or none [design]: both shaders take Bevy's
 /// reverse infinite perspective (`ExtractedView::clip_from_view`'s documented form: clip w =
 /// -view z, no z scale, the near term in w_axis.z) with x and y scales above 0 (they divide
 /// NDC by them) and a near term above 0 (view depth = near / depth), all finite; and finite
@@ -352,7 +353,7 @@ pub fn unsupported_inputs(clip: &Mat4, fog: AirFog, fog_colour: Vec3) -> Option<
 }
 
 /// The uniform for a camera and a view (the sunlit share and the gate from
-/// medium_air_light.rs, R11 and R7).
+/// medium_air_light.rs).
 pub fn air_uniform(cam: &AirCamera, phase: &NormedPhase, view: &AirViewInputs) -> AirGpuUniform {
     let packed = medium_air::pack(&cam.grid, cam.fog, phase, &cam.tune, cam.share);
     let p = view.clip_from_view;
@@ -394,8 +395,7 @@ impl AirGpuUniform {
 
 /// The least dot between the light the terrain map was computed for and the current light for
 /// the map to count (about 2.6 degrees): at a sun/moon switch, or while a new map is computed
-/// after the light moved on, the map describes another light and T is 1 [design: plan check
-/// Decision 5, "check published versus current light on a switch"].
+/// after the light moved on, the map describes another light and T is 1 [design].
 pub const TERRAIN_SAME_LIGHT: f32 = 0.999;
 
 /// The terrain map's publication as the grid pass can use it: the extracted
@@ -419,7 +419,7 @@ pub struct AirTerrainBlock {
     pub light: Vec4,
 }
 
-/// The Cloud shadows image's block of the uniform (rulings R13's K, the flat clouds' half).
+/// The Cloud shadows image's block of the uniform (K, the flat clouds' half).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AirCloudBlock {
     pub uv: Vec4,
@@ -633,7 +633,7 @@ fn add_main_world(app: &mut App) -> AirGate {
 /// cached mean is forgotten, so the first frame it runs again works it out from the image's
 /// data. Across the gap the image's texels may have been rewritten under the same handle (a
 /// weather change with Cloud shadows on) and the modification's event expired unread, so the
-/// image id alone cannot tell the cache is stale (review r3).
+/// image id alone cannot tell the cache is stale.
 fn forget_cloud_mean(mut mean: ResMut<AirCloudMean>) {
     if *mean != AirCloudMean::default() {
         *mean = AirCloudMean::default();
@@ -751,7 +751,7 @@ fn extract_air(
 /// render entity loses its own (whether or not it is a view this frame: an inactive camera's
 /// render entity has no `ExtractedView` and is unmarked here like any other). Queuing a mark
 /// latches [`AirState::held`] at once, so the render side runs again to drain it even if the
-/// main world closes the gate before the pipelined preparation looks (review r2).
+/// main world closes the gate before the pipelined preparation looks.
 fn mark_views(commands: &mut Commands, state: &mut AirState, kept: Option<(Entity, AirCamera)>, marked: &Query<Entity, With<AirCamera>>) {
     if let Some((e, cam)) = kept {
         commands.entity(e).try_insert(cam);
@@ -945,7 +945,7 @@ pub(crate) struct AirViewGpu {
     /// with it off (the filter pass then does not run).
     pub(crate) filter_target: Option<TextureView>,
     /// The view the composite samples: the filtered volume's with `FILTER` on, else the grid
-    /// volume's (checkpoint 1g; the composite's binding is unchanged).
+    /// volume's (the composite's binding is unchanged).
     pub(crate) volume_view: TextureView,
     pub(crate) uniform: UniformBuffer<AirGpuUniform>,
     pub(crate) view: AirView,
@@ -1010,7 +1010,7 @@ pub fn grid_fits(max_texture_dimension_3d: u32, grid: &AirGrid) -> Result<(), St
 /// The adapter's answer for the volume: the format's support, asked once per activation and
 /// kept; the grid's size, checked again on every call (it depends on the grid, which a tune
 /// file can change both ways: a grid over the limit is refused, one under it afterwards is
-/// drawn) [design: review r1].
+/// drawn) [design].
 #[derive(Clone, Debug, Default)]
 pub struct VolumeSupport {
     format: Option<Result<(), String>>,
@@ -1054,9 +1054,9 @@ fn drain_air<G: Component>(mut commands: Commands, mut state: ResMut<AirState>, 
 
 /// medium_air_grid.wesl's bindings 0-7: the uniform, the volume (write-only storage), Bevy's
 /// lights (dynamic offset), the directional shadow maps (depth 2D array), their comparison
-/// sampler [rulings R3; bevy_pbr light.rs `LightMeta`, `ViewShadowBindings`, `ShadowSamplers`],
+/// sampler [bevy_pbr light.rs `LightMeta`, `ViewShadowBindings`, `ShadowSamplers`],
 /// the terrain shadow map (unfilterable, textureLoad), the Cloud shadows image (filterable)
-/// and its repeating linear sampler [rulings R13].
+/// and its repeating linear sampler.
 fn grid_layout() -> BindGroupLayoutDescriptor {
     BindGroupLayoutDescriptor::new(
         "medium_air_grid_layout",
@@ -1359,8 +1359,8 @@ fn prepare_air(
 /// surfaces' own window, strength and levels, in the frames whose surfaces read it
 /// ([`air_cloud_source`]). The variant's two pipelines (the grid's for this frame's [`GridWalk`],
 /// and the mean's) are asked for as soon as the volume may become
-/// the source (`CloudVolumeFrame::expected`: with the default source never while the Volumetric clouds row
-/// is off; the aids that force the volume ask for them whatever is traced), so they are
+/// the source (`CloudVolumeFrame::expected`: never while the Volumetric clouds row is off; with it on and
+/// Cloud shadows the aids that force the volume ask for them whatever is traced), so they are
 /// usually there when the first front fades in; until the ones this frame needs are, the flat variant
 /// reads the weather's image. One log line whenever the source in use changes.
 fn prepare_air_volume(
@@ -1418,7 +1418,7 @@ fn prepare_air_volume(
     volume.levels = Some(levels);
 }
 
-/// Whether the grid pass (and so the filter) runs for a view this frame (review r2): the views
+/// Whether the grid pass (and so the filter) runs for a view this frame: the views
 /// that show the light (`none`, `delta`, `rays`) and the `off` baseline (everything running
 /// but the correction, for paired pictures) only while the light draws (`light_on`: the gate
 /// open and the display-value fog); the diagnostic views the composite shows whatever the gate
@@ -1562,7 +1562,7 @@ fn filter_layout() -> BindGroupLayoutDescriptor {
     )
 }
 
-/// The filter pass (checkpoint 1g): with `FILTER` on and the grid drawn this frame, one
+/// The filter pass: with `FILTER` on and the grid drawn this frame, one
 /// dispatch over every texel (8 x 8 columns per group, one group layer per slice) from the
 /// grid volume into the filtered one the composite reads. While its pipeline compiles, or if
 /// it failed, the frame counts as not drawn so the composite never reads a filtered volume
@@ -1948,7 +1948,7 @@ pub(crate) mod tests {
         (0..1024).map(|n| eye + Vec3::new(((n % 32) as f32 + 0.5 - 16.0) * 4_000.0, 0.0, ((n / 32) as f32 + 0.5 - 16.0) * 4_000.0)).collect()
     }
 
-    /// Review airlv-r1, 1: the reference does not change before the volume contributes. With the
+    /// The reference does not change before the volume contributes. With the
     /// checker (2,000-unit cells, whole-pattern mean of K 0.5) the mean pass's lattice, 4,000 apart,
     /// can meet clear cells alone (a lattice mean of the image is 1); the mirror is 0.5 exactly at
     /// zero coverage, moves continuously with the levels' presence, and is the volume's own mean,
@@ -2010,7 +2010,7 @@ pub(crate) mod tests {
         (air_light_volume(&sv::with_cloud_volume(packed, used, strength, test_window(eye, presence))).expect("the volume"), flat)
     }
 
-    /// Review goal-r1, 2: a dark mean is not lost against a bright fallback. Full coverage, the image's
+    /// A dark mean is not lost against a bright fallback. Full coverage, the image's
     /// mean 0.9, strength 1, depth 15 everywhere: the mean is above 0, so the composite's reference is
     /// its least (0.25), not the 1 it takes for no mean; so too where K itself rounds to 0. No coverage
     /// stays the image's mean, bit for bit.
@@ -2030,7 +2030,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Review goal-r1, 4: from the weather plane up the image shades nothing (`air_cloud_weather` is 1),
+    /// From the weather plane up the image shades nothing (`air_cloud_weather` is 1),
     /// so the fallback's mean there is 1: clear volume air above it keeps the reference 1 at every
     /// coverage, where the image's mean 0.5 gave 0.75 at half.
     #[test]
@@ -2051,7 +2051,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Review goal-r2: the handoff from the image to the volume at zero coverage steps nothing, with the
+    /// The handoff from the image to the volume at zero coverage steps nothing, with the
     /// camera below, at and above the weather plane: the flat path's uniform (the CPU's mean at the
     /// camera's height) and the mean pass's result are the same number, bit for bit.
     #[test]
@@ -2068,7 +2068,7 @@ pub(crate) mod tests {
         assert!(GRID.contains("let origin = air.world_from_view[3].xyz;") && GRID.contains("origin.y >= air.cloud.x"));
     }
 
-    /// Review airlv-r1, 3: the mean pass runs (and has to be ready) only where the composite reads the
+    /// The mean pass runs (and has to be ready) only where the composite reads the
     /// automatic reference: the light's views without a fixed `REF`, as the shader takes it.
     #[test]
     fn the_mean_is_wanted_only_for_the_automatic_reference() {
@@ -2159,7 +2159,7 @@ pub(crate) mod tests {
         assert!(GRID.replace("\r\n", "\n").contains(entry) && (WORKGROUP, CHUNKS) == (8, 4));
         // The import the shader takes Bevy's lights from (the module path bevy_pbr loads it at).
         assert!(GRID.contains("import bevy_pbr::render::mesh_view_types::{Lights, DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT, DIRECTIONAL_LIGHT_FLAGS_NVF_OUTDOOR_SUN_BIT};"));
-        // The loop starts from a share of 0 (medium_air.rs column_sum) and keeps dF >= 0 (R6).
+        // The loop starts from a share of 0 (medium_air.rs column_sum) and keeps dF >= 0.
         assert!(GRID.contains("    var before = 0.0;\n") || GRID.contains("    var before = 0.0;\r\n"));
         assert!(GRID.contains("let df = max(after - before, 0.0);"));
     }
@@ -2174,8 +2174,7 @@ pub(crate) mod tests {
         Some((i, next))
     }
 
-    /// The cascade choice at the Quality layout's day bounds (plan check Decision 1:
-    /// 700/2,000/5,000/8,000) with Bevy's default overlap of 0.2.
+    /// The cascade choice at the Quality layout's day bounds (700/2,000/5,000/8,000) with Bevy's default overlap of 0.2.
     #[test]
     fn the_cascade_is_chosen_as_bevy_chooses_it() {
         let bounds = [700.0, 2_000.0, 5_000.0, 8_000.0];
@@ -2198,7 +2197,7 @@ pub(crate) mod tests {
         assert!(grid.contains("c = mix(c, air_cascade_lit(light, i + 1u, world), (z - next_near) / (far - next_near));"));
         assert!(grid.contains("let offset = world + lights.directional_lights[light].shadow_depth_bias * lights.directional_lights[light].direction_to_light;"));
         assert!(grid.contains("let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);"));
-        // Never index 0 or a direction match: the flagged light with shadows on (R3).
+        // Never index 0 or a direction match: the flagged light with shadows on.
         assert!(grid.contains("let wanted = DIRECTIONAL_LIGHT_FLAGS_NVF_OUTDOOR_SUN_BIT | DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT;"));
     }
 
@@ -2648,7 +2647,7 @@ pub(crate) mod tests {
         ]
     }
 
-    /// Must-fix 3 of review r1, the grid's half: the volume holds the phase-free N = sum of
+    /// The volume holds the phase-free N = sum of
     /// dF x V. With every visibility sample 1, N and M take the same f32 additions in the same
     /// order (`n += df * 1`, `m += df`), so N == M exactly for every slice of every column,
     /// whatever the phase block holds (the shader reads none of it: checked on its text).
@@ -3061,7 +3060,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Review r3: a modded fog ramp from 514 to 515 (one unit) inside a stratum spanning 500 to
+    /// A modded fog ramp from 514 to 515 (one unit) inside a stratum spanning 500 to
     /// 531.25 (linear slices 125 deep: 1,000 units over 8 slices with a first slice of 125,
     /// four strata of 31.25), with a shadow from 513.5 to 515.5 and clear air elsewhere. The
     /// tap unclamped sits at 515.625 (500 + 31.25 x 0.5, dither 0.5), in the clear air; it is
@@ -3181,7 +3180,7 @@ pub(crate) mod tests {
     /// widths) for every sample count 1..8 and a sweep of the column's two shift values,
     /// including both ends of [0, 1) and the shifts the shader gives the screen's corner
     /// columns; so column (0, 0)'s samples never leave the frustum (the turned pattern put
-    /// sample 0 about 0.625 widths out there: review r1). Hand bound: fract is in [0, 1), so
+    /// sample 0 about 0.625 widths out there). Hand bound: fract is in [0, 1), so
     /// fract - 0.5 is in [-0.5, 0.5).
     #[test]
     fn the_lateral_samples_stay_inside_their_column() {
@@ -3405,7 +3404,7 @@ pub(crate) mod tests {
         schedules.1.run(render);
     }
 
-    /// Must-fix 7 of review r1: a camera made inactive (Bevy takes `ExtractedView` off its
+    /// A camera made inactive (Bevy takes `ExtractedView` off its
     /// render entity and leaves the air's components there), then the light switched off:
     /// the render side keeps running until no render entity holds a mark or a GPU side, and
     /// afterwards nothing is held, the state is released and the render side stops.
@@ -3673,7 +3672,7 @@ pub(crate) mod tests {
         assert!(grid_dispatched(AirView::Visibility, false) && grid_dispatched(AirView::Lit, false));
     }
 
-    /// Review r2: the light wanted for one extraction, then off before the render side's
+    /// The light wanted for one extraction, then off before the render side's
     /// preparation looks (the main world closed the shared gate in between): the mark queued
     /// by that extraction latched `held`, so the render side runs on, drains it, and nothing
     /// is held afterwards.
@@ -3718,7 +3717,7 @@ pub(crate) mod tests {
         assert_eq!(holds(&render), (false, false, false), "nothing stranded");
         assert!(render.resource::<AirState>().cloud.is_none());
     }
-    /// Review r3: the cloud image's texels rewritten under the same handle while the light was
+    /// The cloud image's texels rewritten under the same handle while the light was
     /// off, with no modification event reaching the system (the asset events are never sent
     /// here, as an expired one is never read): on again, the mean is the new texels', not the
     /// cached one of the earlier weather.

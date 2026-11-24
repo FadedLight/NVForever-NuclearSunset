@@ -15,8 +15,8 @@
 //! Quarter-size passes on the tonemapped picture after the temporal anti-aliasing and
 //! before bloom and sharpening; on the main camera only, while it carries [`LightShafts`].
 //!
-//! **Yielding to the light in the air** [design: #3032 stage 3, "Sun shafts yielding (only
-//! while air actually draws)"; the third review's new fault 1]: decided in the render world,
+//! **Yielding to the light in the air** [design, #3032 stage 3: only while the
+//! air actually draws]: decided in the render world,
 //! per view and per frame. The light's composite (medium_air_compose.rs `air_compose_pass`,
 //! before early post) records a view when it issued its draw of the light
 //! (`AirComposedViews`); this pass, after tonemapping in the same frame, skips on such a view

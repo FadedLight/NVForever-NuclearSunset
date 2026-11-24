@@ -1,5 +1,4 @@
-// The volumetric medium's light in the air, the composite (medium_air_compose.rs; #3032 stage 3,
-// checkpoints 1a and 1d): a fullscreen pass after the main pass that reads the HDR picture, the
+// The volumetric medium's light in the air, the composite (medium_air_compose.rs; #3032 stage 3): a fullscreen pass after the main pass that reads the HDR picture, the
 // depth prepass and the froxel volume the grid pass (medium_air_grid.wesl) wrote this frame, and
 // writes the picture again. An engineering choice of NVForever's own for the enhanced look, not
 // the original game's behaviour. Entry `air_compose`; `MULTISAMPLED` picks the depth's sample
@@ -10,8 +9,7 @@
 // (`air_lookup`, mirrored by medium_air_compose.rs `lookup_mirror`, which matches medium_air.rs
 // `sums_at`).
 //
-// The light (views none, delta, rays; rulings R7, R9, R10 as the stage 3 review's must-fixes
-// left them), per depth sample, mirrored as a whole by medium_air_compose.rs `pixel_mirror`
+// The light (views none, delta, rays), per depth sample, mirrored as a whole by medium_air_compose.rs `pixel_mirror`
 // over medium_air.rs's functions:
 // - the lit fraction Vbar = clamp(N / M, 0, 1) (`lit_fraction`; 1 while M is empty) and its
 //   relative form Vbar_c = clamp(1 + RAYS (Vbar - V_ref) / V_ref, SHADE, LIFT) (`relative_lit`,
@@ -32,7 +30,7 @@
 // The pixel takes the mean of its samples' results; they share one volume lookup when their
 // view depths, held to the grid's end, lie within a quarter slice of each other
 // (`slices_agree`), each with its own F_near and t. A declared opaque-world approximation for
-// the first look (rulings R8).
+// the first look.
 
 import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput;
 import nvf_assets::first_person_depth::unsqueeze;
@@ -287,7 +285,7 @@ fn air_held(c: vec3<f32>) -> vec3<f32> {
 // max(Y' + delta, 0)^2.2 held with delta = corr_t x mix(C', Y', t); w its scalar corr_t. A
 // sample with geometry holds delta per channel to at least -F_near x C' (the fog's own share of
 // the fog colour), so far terrain keeps its surface light at every t: Y' + delta >= (1 - f) S'
-// whenever F_near <= f (the second review's new fault 1). Cleared depth keeps the scalar bound.
+// whenever F_near <= f. Cleared depth keeps the scalar bound.
 // The sky dome writes depth and is held as terrain is (a known limit: medium_air_compose.rs).
 fn air_result(px: AirPixel, s: AirSample, vc: f32) -> vec4<f32> {
     let t = air_far_blend(s);
@@ -305,7 +303,7 @@ fn air_result(px: AirPixel, s: AirSample, vc: f32) -> vec4<f32> {
 // (colours in linear light, as resolved). When the samples' view depths, held to the grid's
 // end, lie within AIR_AGREE_SLICES of a slice of each other (medium_air.rs `slices_agree`) they
 // share ONE volume lookup at the farthest of them: free of the samples' order, and its sums
-// hold all the fog in front of the nearer ones (the second review's new fault 2); otherwise (a
+// hold all the fog in front of the nearer ones; otherwise (a
 // silhouette against farther ground) each sample looks up its own. Each sample takes its own
 // F_near and far blend from its own distance.
 fn air_pixel(px: AirPixel, pixel: vec2<i32>) -> vec4<f32> {

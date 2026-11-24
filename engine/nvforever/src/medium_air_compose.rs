@@ -3,16 +3,15 @@
 //! about the original game and never used to explain a difference from it [design].
 //!
 //! A fullscreen pass right after the grid pass (medium_air_grid.rs), after
-//! `Core3dSystems::MainPass` and before `Core3dSystems::EarlyPostProcess` [rulings R4]: it
+//! `Core3dSystems::MainPass` and before `Core3dSystems::EarlyPostProcess`: it
 //! reads the HDR picture (`post_process_write().source`), the depth prepass at its real
 //! sample count, the froxel volume (linear, clamped) and the shared uniform, and writes the
 //! alternate HDR target, alpha kept. Pixels outside the main pass's viewport
 //! (`MainPassResolutionOverride` and the viewport's origin) pass through. Pipelines are keyed
-//! by the target's format and the depth's sample type [rulings R4].
+//! by the target's format and the depth's sample type.
 //!
 //! **What it draws, by view** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_VIEW` or the tune file's `VIEW`):
-//! - `none` (the default): **the light** (checkpoint 1d, rulings R7, R9, R10 as the stage 3
-//!   review's must-fixes left them; the shader's header names the medium_air.rs functions it
+//! - `none` (the default): **the light** (the shader's header names the medium_air.rs functions it
 //!   mirrors, [`pixel_mirror`] mirrors a pixel whole): one form for every depth sample, in
 //!   display values `Y' + corr_t x mix(C', Y', t)` with `corr_t = max(a F_near (Vbar_c x
 //!   mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t), -min(F_near, 1))` and the far
@@ -33,17 +32,16 @@
 //! - `off`: the grid made and the uniform written every frame, the composite not run and the
 //!   target not flipped (the cheapest exact pass-through): with HDR held on by the demand,
 //!   the baseline for paired pictures;
-//! - checkpoint 1a's `visibility` (slice k's own V as grey, 50 % over the picture), `slice`
+//! - the first `visibility` (slice k's own V as grey, 50 % over the picture), `slice`
 //!   (the slice index banded, 50 %) and `share` (the fog share at the pixel's distance as
 //!   grey, opaque), from depth sample 0.
 //!
-//! **A known limit: the sky dome counts as a surface** [design; the third review's new fault
-//! 2]. The dome writes depth (sky.rs: opaque, in the depth prepass), so its samples take the
+//! **A known limit: the sky dome counts as a surface** [design]. The dome writes depth (sky.rs: opaque, in the depth prepass), so its samples take the
 //! per-channel bound `-F_near x C'` meant for terrain, and shadowed air darkens the dome only
 //! as far as the fog colour's budget (at t 1, Y' 0.5, C' 0, F_near 0.5, full shadow: cleared
 //! depth reads 0.25, the dome stays 0.5). The dome cannot be told from far terrain by depth:
 //! its mesh is the weather's own `atmosphere.nif` (flat, about 500 across and 250 high
-//! [observed], so its distance depends on the direction and on the data, mods included)
+//! [hypothesis: read from the model; how was not kept], so its distance depends on the direction and on the data, mods included)
 //! scaled to sky.rs `DOME_RADIUS`, and distant LOD terrain reaches beyond sky.rs
 //! `SKY_DEPTH_FROM` (volumetric_clouds.rs, which for the same reason draws its clouds with the
 //! dome's own mesh under an Equal depth test). Telling them apart needs a coverage mask drawn
@@ -57,7 +55,7 @@
 //! volume written this frame, the depth's sample type and the target's format as the
 //! pipeline was made for) is checked before `post_process_write` is called.
 //!
-//! **Known limits** [design: rulings R8, R9]: a fullscreen pass cannot know which fragments
+//! **Known limits** [design]: a fullscreen pass cannot know which fragments
 //! were fogged, so blended surfaces (water, glass, particles), the scope image and emissive
 //! overlays get the correction of what the depth shows; under MSAA each sample's result is
 //! taken on the resolved colour and the results averaged, an edge approximation under a
@@ -67,7 +65,7 @@
 //! The volume's lookup (`air_lookup` in the shader, [`lookup_mirror`] here): texel k holds the
 //! sums at slice k's far boundary and the camera is a zero boundary, so boundary coordinate
 //! c in [0, nz] reads w = (c - 0.5) / nz, scaled by c below 1, the last texel at and beyond
-//! the grid's end [design: rulings R7].
+//! the grid's end [design].
 
 use crate::medium_air_grid::{AirState, AirViewGpu};
 use bevy::core_pipeline::prepass::ViewPrepassTextures;
@@ -206,10 +204,9 @@ pub struct PixelMirror {
 /// grid's end as its view depth, the end's radial distance), `lookup` the volume's (N, M) at a
 /// view depth already held to the grid's end. One lookup at the **farthest** held depth when the
 /// held depths agree ([`crate::medium_air::slices_agree`]; order-free, and the farthest
-/// sample's sums hold all the fog in front of the nearer ones: the second review's new fault 2),
+/// sample's sums hold all the fog in front of the nearer ones),
 /// else one per sample; each sample's far blend t and F_near from its own distance; a sample
-/// with geometry holds its change per channel to `-F_near C'` (new fault 1,
-/// `compose_blended`); xyz the mean of the samples' linear colours, w the mean of their scalars
+/// with geometry holds its change per channel to `-F_near C'` (`compose_blended`); xyz the mean of the samples' linear colours, w the mean of their scalars
 /// corr_t. Zero for no samples.
 #[cfg(test)]
 pub fn pixel_mirror(px: &PixelMirror, samples: &[Option<f32>], lookup: &dyn Fn(f32) -> [f32; 2]) -> Vec4 {
@@ -244,7 +241,7 @@ pub fn pixel_mirror(px: &PixelMirror, samples: &[Option<f32>], lookup: &dyn Fn(f
 }
 
 /// Whether the composite has a pipeline for a view: the light (`none`), its `delta` and
-/// `rays`, `lit` and the debug views of checkpoint 1a; `off` never (the grid alone, the target
+/// `rays`, `lit` and the debug views; `off` never (the grid alone, the target
 /// not flipped).
 pub(crate) fn draws(view: crate::medium_air::AirView) -> bool {
     use crate::medium_air::AirView;
@@ -259,13 +256,12 @@ pub(crate) fn shows_light(view: crate::medium_air::AirView) -> bool {
 
 /// Whether the uniform asks for the light: `light.w` (medium_air_light.rs's gate, 2 - FLOOR
 /// while drawn, medium_air.rs `light_flag`) above 0.5 and `fog_colour.w` (the display-value
-/// blend) 1 (R7).
+/// blend) 1.
 pub(crate) fn light_on(uniform: &crate::medium_air_grid::AirGpuUniform) -> bool {
     uniform.light.w > 0.5 && uniform.fog_colour.w > 0.5
 }
 
-/// The views whose composite drew the light this render frame (render world; the third
-/// review's new fault 1): [`air_compose_pass`] adds a view when it issued its draw for the
+/// The views whose composite drew the light this render frame (render world): [`air_compose_pass`] adds a view when it issued its draw for the
 /// light's views (`none`, `delta`, `rays`), the list is emptied at each frame's
 /// `PrepareResources` ([`forget_composed`]), and Sun shafts (shafts.rs `shafts_pass`, after
 /// tonemapping, in the same frame) skip their pass on such a view. `yielded` holds the views
@@ -463,7 +459,7 @@ mod tests {
     /// The shader's structure where no number can check it (naga validates, it does not run):
     /// every colour the entry computes leaves through `air_held` (the untouched pixel passes as
     /// `src`), the sample's result too; the lit fraction takes no phase (the volume's sums are
-    /// phase-free, the grid writer's half of must-fix 3) and no phase floor is left; shadow's
+    /// phase-free) and no phase floor is left; shadow's
     /// hold is in the sample's scalar.
     #[test]
     fn every_computed_colour_is_held() {
@@ -499,7 +495,7 @@ mod tests {
         }
     }
 
-    /// The review's must-fix 3 case: no occluder (every V 1), a coarse grid 16 x 8 x 64, g 0.8,
+    /// No occluder (every V 1), a coarse grid 16 x 8 x 64, g 0.8,
     /// cap 100, a 75 degree vertical field at 16:9 and the sun straight ahead. With the
     /// phase-free sums every column stores N = M exactly (df x 1 is df, the same additions), and
     /// a linear sampler weights N and M alike between columns and slices, so Vbar = N / M is
@@ -579,7 +575,7 @@ mod tests {
         }
     }
 
-    /// Must-fix 2: one form, no step at any distance. Near samples are the old world rule
+    /// One form, no step at any distance. Near samples are the old world rule
     /// exactly, cleared depth the old sky rule (to the f32 round trip of the display transfer,
     /// 1e-6 relative), opaque terrain beyond the sky's distance the same as cleared depth, and
     /// the colour is continuous across 0.6 x sky_from and sky_from (the smoothstep's slope is 0
@@ -628,7 +624,7 @@ mod tests {
         }
     }
 
-    /// Must-fix 1: shadow removes at most the budget share F_near of B_t. The review's case:
+    /// Shadow removes at most the budget share F_near of B_t. The case:
     /// a = 1, SHADE 0, RAYS 8, full shadow, f = F_near = 0.5, a white surface in white fog
     /// (Y' = 0.5 x 1 + 0.5 x 1 = 1): the result is (1 - f) S' = 0.5 in display values, and a
     /// stray SKY 2 in the uniform (the parser holds it to 1) cannot take more at any t.
@@ -669,7 +665,7 @@ mod tests {
         assert_eq!(AirTune::parse("SKY=2", &AirTune::default()).sky_weight, 1.0);
     }
 
-    /// Must-fix 4: the reviewer's extreme (G 0.9, CAP at its most, LIFT 3, REF 0.25, share 1,
+    /// The extreme (G 0.9, CAP at its most, LIFT 3, REF 0.25, share 1,
     /// fully fogged white, lit air on the phase peak): CAP is held to 8, so the display value is
     /// at most 1 + (3 x 8 - 1) = 24 (24^2.2 = 1,093 linear, finite and in range); an HDR sky
     /// (30,000) brightened by the same factor, and an absurd fog colour, are held at 60,000.
@@ -716,7 +712,7 @@ mod tests {
         assert!(wild.is_finite() && wild.truncate() == Vec3::splat(AIR_HDR_MAX), "{wild}");
     }
 
-    /// Must-fix 5: samples share the volume lookup, never their fog. (a) Two world samples one
+    /// Samples share the volume lookup, never their fog. (a) Two world samples one
     /// unit apart across a whole fog ramp (near 15,000, far 15,001: F 0 and 1), one lookup
     /// (well within a quarter slice, about 257 units there) with Vbar exactly 0.5 (N = M / 2:
     /// halving is exact): vc = 1 + (0.5 - 1) = 0.5, the far sample's corr = 1 x 1 x (0.5 - 1) =
@@ -799,7 +795,7 @@ mod tests {
         assert_eq!(lookups.replace(0), 4);
     }
 
-    /// The second review's new fault 2: sharing a lookup must not depend on the samples' order.
+    /// Sharing a lookup must not depend on the samples' order.
     /// Its case: a centred ray, GRID 17,9,64, DEPTH 1,000, fog from 500 to 501, all air in
     /// shadow, samples at 499.5 and 501 (within a quarter slice: one lookup). The one lookup is at
     /// the farther depth, whose sums hold the fog: the fogged sample (F_near 1) is shadowed,
@@ -844,7 +840,7 @@ mod tests {
         assert!((forward.w + 0.5).abs() < 1e-6, "the fogged sample is shadowed (corr -1): {forward}");
     }
 
-    /// The second review's new fault 1 through the whole pixel: far opaque terrain (t 1, beyond
+    /// Geometry keeps its surface light through the whole pixel: far opaque terrain (t 1, beyond
     /// the sky's distance) in a fog that gives it f = F_near = 0.5 (strength 0.5 reached within
     /// 1,000 units), a white surface in black fog (Y' 0.5), all air in shadow, SKY 1: the pixel
     /// keeps its surface light 0.5 at SHADE 0 and 0.5; cleared depth there still darkens.

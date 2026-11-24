@@ -1,15 +1,14 @@
 // The volumetric medium's light in the air, the grid pass (medium_air_grid.rs; #3032 stage 3,
-// checkpoint 1a): a compute pass over the froxel grid's columns [documented: Wronski 2014,
+// the grid): a compute pass over the froxel grid's columns [documented: Wronski 2014,
 // "Volumetric Fog", SIGGRAPH 2014 Advances; Bauer 2019, "Creating the Atmospheric World of Red
 // Dead Redemption 2", SIGGRAPH 2019 Advances, slides 42-48]. A column (i, j) is walked front to
 // back in four chunks of slices, one invocation each, whose sums are joined in order
 // ("The chunks" below; without AIR_CHUNKED in one walk), storing at slice k the sums to the slice's
 // far boundary: r = N = sum of dF x V, g = M = sum of dF, b = the slice's own V (the mean of the
-// samples read: those whose stratum the fog changes in; 1 with none), a = 1 (rulings-stage3 R6,
-// with the phase taken out: review r1 must-fix 3).
+// samples read: those whose stratum the fog changes in; 1 with none), a = 1 (with the phase taken out).
 // Each visibility sample owns its depth stratum's fog step dF_s, so a narrow fog ramp counts
-// the samples inside it (review r1), and its tap sits inside the part of its stratum where
-// the share changes (review r3). The grid has no phase: the composite applies the
+// the samples inside it, and its tap sits inside the part of its stratum where
+// the share changes. The grid has no phase: the composite applies the
 // pixel's own phase once to N / M (a column's phase interpolated across columns and divided
 // by the pixel's would make shade out of clear air). An engineering choice of NVForever's
 // own for the enhanced look, not the original game's behaviour. Entry `air_grid`, workgroup
@@ -17,14 +16,14 @@
 //
 // Separable pieces (stage 4 adds density sources and the incident light): the visibility
 // (`air_visibility`), the medium (`air_fog_share`) and the integration (the loop in
-// `air_grid`). The visibility (rulings R13) is V = K x min(C, T): the cascade shadow
-// C of the outdoor sun light (checkpoint 1b), chosen and compared as Bevy's own lighting does
+// `air_grid`). The visibility is V = K x min(C, T): the cascade shadow
+// C of the outdoor sun light, chosen and compared as Bevy's own lighting does
 // for a surface at that view depth (vendored bevy_pbr shadows.wesl
 // `fetch_directional_shadow`); the terrain's visibility T from the terrain shadow map
-// (checkpoint 1c) and the clouds' transmittance K, each read exactly as sun_visibility.wesl
+// and the clouds' transmittance K, each read exactly as sun_visibility.wesl
 // reads it for surfaces (`nvf_terrain_visibility`, `nvf_cloud_transmittance`: they read their
 // own bindings, so they are mirrored here, constants and all); the occluders' code picks which
-// parts count. K is the Cloud shadows image's (checkpoint 1e) or, in the variant
+// parts count. K is the Cloud shadows image's or, in the variant
 // AIR_LIGHT_VOLUME, the volumetric clouds' light volume through the surfaces' own reader
 // (light_volume_reader.wesl, whose header is the contract), with the image where it has no
 // data; the CPU binds that variant only in a frame whose surfaces read the volume
@@ -139,7 +138,7 @@ fn air_fog_share(d: f32) -> f32 {
 }
 
 // The index of the outdoor sun light: the directional light flagged NVF_OUTDOOR_SUN with its
-// shadows on; -1 when there is none (rulings R3: never index 0 or a direction match).
+// shadows on; -1 when there is none (never index 0 or a direction match).
 fn air_outdoor_light() -> i32 {
     for (var i = 0u; i < lights.n_directional_lights; i += 1u) {
         let flags = lights.directional_lights[i].flags;
@@ -326,7 +325,7 @@ fn air_clouds(P: vec3<f32>, L: vec3<f32>) -> f32 {
 
 // The light's visibility at a world point of view depth z, 0..1: by the occluders' code
 // (misc.x: 0 all, 1 cascades, 2 terrain, 3 none, 4 clouds) the cascade shadow C, the
-// terrain's T and the clouds' K; all: V = K x min(C, T) (rulings R13); 1 for what is not
+// terrain's T and the clouds' K; all: V = K x min(C, T); 1 for what is not
 // counted.
 // `reach` is the last cascade's far bound (0 without a flagged light): a sample beyond it
 // reads no cascade.
@@ -396,7 +395,7 @@ fn air_stratum_end(s: u32, count: u32, z0: f32, z1: f32) -> f32 {
 // Sample s's lateral offset in column widths: the R2 point s, shifted on the torus by the
 // column's two values `shift` (x by one, y by the other) and centred, unrotated: each axis in
 // [-0.5, 0.5), so every sample stays inside its own column (a turned pattern reached about
-// 0.71 and at the screen's edge read visibility outside the frustum: review r1). None for one
+// 0.71 and at the screen's edge read visibility outside the frustum). None for one
 // sample.
 fn air_sample_lateral(s: u32, count: u32, shift: vec2<f32>) -> vec2<f32> {
     if count <= 1u {
@@ -468,7 +467,7 @@ fn air_grid(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocat
             reach = lights.directional_lights[u32(found)].cascades[cascades - 1u].far_bound;
         }
     }
-    // The visibility samples (checkpoint 1f): S per froxel at stratified depths dithered by the
+    // The visibility samples: S per froxel at stratified depths dithered by the
     // column's o0, each on a ray moved inside the column's footprint (the R2 pattern shifted by
     // o1 across and o2 down); the three fixed in time. A sample's ray is the centre ray plus
     // its lateral offset along the view's x and y per unit of view depth (the ray is linear in
@@ -515,7 +514,7 @@ fn air_grid(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocat
             before = max(before, after);
             // No fog change in the stratum: its visibility weighs nothing and is not read.
             if df > 0.0 {
-                // The tap inside the part of the stratum where the share changes (review r3):
+                // The tap inside the part of the stratum where the share changes:
                 // a ramp narrower than the stratum is read where it is. An unclamped stratum
                 // keeps its place exactly; an empty intersection with a step (slice 0's share
                 // of a fog starting behind the camera) keeps it too.

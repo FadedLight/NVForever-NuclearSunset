@@ -1199,7 +1199,8 @@ below cover them all.
 - On the page: On: sunlight shows in the air as rays and a glow toward a low sun, shaded by
   hills and clouds. Best with Cloud shadows and Terrain shadows on. An addition of
   NVForever's.
-- While it is on, Sun shafts are greyed (they give way to it where it draws).
+- While it is on, Sun shafts are greyed (they give way to it where it draws). A prototype. Outdoors by day
+  only, in the main view only. Off in every preset; not in the original.
 - Command-line switches: `--graphics-only`
 - More: docs/design/volumetric-medium.md
 - Registered in `engine/nvforever/src/settings.rs`

@@ -1095,7 +1095,7 @@ fn apply(
         // The volumetric medium's far buffer is composed in the linear HDR picture before
         // tonemapping (medium.rs, volumetric_clouds.rs), so its row keeps the view HDR whatever
         // the glow and the upscaler say [design, #3032 decision 10]; the light in the air of
-        // stage 3 likewise (rulings-stage3 R2).
+        // stage 3 likewise.
         if temporal || g.volumetric_clouds || crate::hdr::on() || air {
             e.insert(bevy::camera::Hdr);
         }

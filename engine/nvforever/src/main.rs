@@ -1943,7 +1943,7 @@ fn main() -> AppExit {
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)
     .add_plugins((imagespace::ImageSpacePlugin, sky::SkyPlugin, cloud_shadows::CloudShadowsPlugin, volumetric_clouds::VolumetricCloudsPlugin, graphics::GraphicsPlugin(graphics, msaa, frame_times), minimap_render::MinimapRenderPlugin))
-    // The volumetric medium's light in the air (#3032 stage 3; off unless its debug aid asks).
+    // The volumetric medium's light in the air (#3032 stage 3; off unless its row or its debug aid asks).
     .add_plugins((medium_air_grid::MediumAirPlugin, medium_air_light::AirLightPlugin))
     // Its solid cores of blended shapes (only while the light is wanted).
     .add_plugins(solid_cores::SolidCoresPlugin)

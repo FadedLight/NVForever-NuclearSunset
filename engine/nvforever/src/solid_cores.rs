@@ -6,8 +6,9 @@
 //! **Why.** The light's composite (medium_air_compose.rs) is a fullscreen pass over the
 //! finished picture that tells each pixel's distance from the depth prepass. Bevy draws no
 //! blended material into that prepass, so a shape whose NiAlphaProperty blends but that is
-//! solid to the eye was painted with the light of what lies behind it [observed: the water
-//! tank by Goodsprings, `nv_watertank.nif`, flags 4333, reference 00106B5E].
+//! solid to the eye was painted with the light of what lies behind it (the water
+//! tank by Goodsprings, `nv_watertank.nif`, flags 4333, reference 00106B5E:
+//! docs/design/volumetric-medium.md, "Solid cores of blended shapes").
 //!
 //! **What.** While [`AirWanted`] is true, a placed shape whose material can have one
 //! (`nif_spawn::solid_core_rules` at the material's build, `nif_spawn::solid_core` of the

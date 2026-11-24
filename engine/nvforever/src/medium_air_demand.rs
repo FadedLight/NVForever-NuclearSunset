@@ -4,7 +4,7 @@
 //!
 //! [`AirWanted`] is the one main-world switch every part of stage 3 reads: the grid and the
 //! composite (medium_air_grid.rs, medium_air_compose.rs), and the three narrow consumers
-//! outside them (rulings-stage3 R2):
+//! outside them:
 //! - graphics.rs `apply`: the main view stays HDR while it is true (the light is composed in
 //!   the linear HDR picture before tonemapping);
 //! - terrain_shadows.rs `follow_graphics`: the terrain map's producer runs while it is true

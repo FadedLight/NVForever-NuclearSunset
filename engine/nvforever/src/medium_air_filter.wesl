@@ -1,5 +1,5 @@
 // The volumetric medium's light in the air, the filter pass (medium_air_grid.rs
-// `air_filter_pass`; #3032 stage 3, checkpoint 1g): a 3 x 3 filter in x and y within each
+// `air_filter_pass`; #3032 stage 3): a 3 x 3 filter in x and y within each
 // slice of the grid volume, for r (N), g (M) and b (the slice's V), into a second volume the
 // composite reads. The grid's visibility samples are dithered per column by interleaved
 // gradient noise, which is made to be followed by a 3 x 3 filter [documented: Jimenez 2014,

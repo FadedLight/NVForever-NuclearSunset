@@ -3579,8 +3579,8 @@ The clouds are the cloud source of the volumetric medium (docs/design/volumetric
 buffer, the levels, the tiles, the history, the upsample). The medium casts a ray per 3x3 tile of a
 buffer a share of the render size and calls the march once for each; the proxy in the main pass
 composes the result over the dome. This section is the source: what cloud is where, how it is lit,
-how it is marched, and what else reads it (the cloud shadows on the ground, while the volume is drawn:
-"Ground shadows from the light volume" below). One density model ships (the code calls it the lean model
+how it is marched, and what else reads it while the volume is drawn (the cloud shadows on the ground,
+"Ground shadows from the light volume" below, and with them the light in the air). One density model ships (the code calls it the lean model
 and names its functions `vc_m2_*`); a run draws with it and nothing else.
 
 | File (`engine/nvforever/src`) | Holds |
@@ -4107,12 +4107,11 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     in display values, night, interiors and under water are shown the plain way. The look's
     constants (ray contrast, lift, shade limit, phase floor, sky weights) are artistic choices made
     from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`).
-  - *Cost so far*: the passes' own spans (absolute, not compared with a frame without the light): grid 0.21
-    to 0.31 ms and composite 0.14 to 0.15 ms of GPU time at 2560x1440 with four samples a froxel, before the
-    filter pass [observed: the main session's run, 2026-11-20]; 6.9 MiB a volume, two with the filter. Not
+  - *Cost so far*: volumetric-medium.md, "Cost and memory" (the grid pass's two walks, measured on two
+    GPUs); 6.9 MiB a volume, two with the filter. Not
     done: a temporal filter, the cost of the light volume's reads, the moon, local lights, FSR's reactive
-    mask and the jitter offset, a quiet-window frame-time run. Smoke: `volumetric-light`, `-taa`, `-fsr`,
-    `-night`, `-off`, `-row`, `-clouds`.
+    mask and the jitter offset, a whole-frame time against a frame without the light. Smoke:
+    `volumetric-light`, `-taa`, `-fsr`, `-night`, `-off`, `-row`, `-clouds`.
 - **What follows the weather** (from `SkyState` and the cover every frame, through weather
   fades: no weather names, no per-weather result kept): the amount (so the threshold, the types and the
   share of sky move smoothly through a fade), the drift (the layers' ONAM speeds along the wind, as the

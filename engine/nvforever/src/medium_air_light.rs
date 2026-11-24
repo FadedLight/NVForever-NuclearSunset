@@ -1,26 +1,24 @@
-//! The volumetric medium's light in the air (LootJunkieAzza/NVForever#3032, stage 3,
-//! checkpoint 1d): the main world's side of the light. An engineering choice of NVForever's
+//! The volumetric medium's light in the air (LootJunkieAzza/NVForever#3032, stage 3): the main world's side of the light. An engineering choice of NVForever's
 //! own for the enhanced look, never a fact about the original game and never used to explain
 //! a difference from it [design].
 //!
 //! Each frame while the light is wanted, in `Last` (after medium_air_grid.rs `follow_air`
 //! in `PostUpdate` and its commands, before the render world extracts), [`follow_light`]
 //! finishes the main camera's `AirCamera`:
-//! - **the tune file** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`, the task's decision 14): looked
+//! - **the tune file** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`): looked
 //!   at every 0.5 s of real time (medium_air.rs `poll_due`), each text parsed over the start
 //!   tune (`TuneFollower`), its changes logged; the grid follows its `DEPTH` and `GRID`
 //!   (medium_air_grid.rs `prepare_air` makes the volume again when the grid changes);
-//! - **the sunlit share s** (R11): medium_air.rs `scaled_share` from the `Sun` light's
+//! - **the sunlit share s**: medium_air.rs `scaled_share` from the `Sun` light's
 //!   displayed colour and `illuminance / (PI U)` and the `GlobalAmbientLight`'s colour and
 //!   `brightness / U`, as sky.rs `update_sky` set them this frame (medium_air.rs module doc,
 //!   "What scaled_share's caller passes");
-//! - **the gate** (R7, medium_air.rs `gate`): outdoors, above water, a sun light, a usable fog
+//! - **the gate** (medium_air.rs `gate`): outdoors, above water, a sun light, a usable fog
 //!   blended in display values, day, a strength above 0, an effective share above 0. Day is
 //!   the elevation that aimed the light above 0 (medium_air.rs `day_by_aim`): sky.rs
 //!   `update_sky` aims the `Sun` entity from `sun_direction(climate, sun_light_hour())`, and
 //!   `SkyState::sun_elevation_at(sun_light_hour())` is that direction's elevation (both public
-//!   already: nothing added to sky.rs). No comparison with the stepped hour's sun (the second
-//!   review's should-fix: a modded climate with a day of a thousandth of an hour fooled it);
+//!   already: nothing added to sky.rs). No comparison with the stepped hour's sun (a modded climate with a day of a thousandth of an hour fooled it);
 //!   without a sky state the gate is closed as indoors before the night test. One line per
 //!   change: `volumetric medium: light in the air on: ...` at once (again when a tune change
 //!   alters its figures, medium_air.rs `tune_changed`, and when its bounds moved by more than
@@ -28,13 +26,13 @@
 //!   once the reason held 0.5 s of real time (medium_air.rs `GateLog`: at start the fog shader
 //!   is patched a moment after the first frames).
 //!
-//! - **the start strength** (the user's overall strength slider, 2026-11-20): the aid's value
+//! - **the start strength** (the overall strength): the aid's value
 //!   when the aid asks for the light, else the settings row's Volumetric light strength
 //!   (medium_air_demand.rs `AirStrengthSetting`, 0 to 200 %); a move of the slider makes new
 //!   start values at once (medium_air.rs `TuneFollower::restart`; a tune file's keys still win).
 //! - Sun shafts yield in the render world, per view, in a frame the light's composite drew
 //!   there (medium_air_compose.rs `AirComposedViews`, shafts.rs `shafts_skip`), not from
-//!   this main-world gate (the third review's new fault 1).
+//!   this main-world gate.
 //!
 //! With the light not wanted nothing runs but the check of the demand, and nothing is logged.
 
@@ -106,7 +104,7 @@ struct LightState {
 
 /// The solved phase for `phase`: the cached one while its four inputs are the same, else
 /// solved again (medium_air.rs `AirPhase::normed`, 8,192 steps and a bisection) and kept
-/// [design: the third review's should-fix].
+/// [design].
 fn solved(cache: &mut Option<NormedPhase>, phase: AirPhase) -> NormedPhase {
     match *cache {
         Some(n) if n.phase == phase => n,
@@ -129,7 +127,7 @@ pub fn bounds_due(looked: f64, now: f64) -> bool {
     now < looked || now - looked >= medium_air::BOUND_RELOG_SECONDS
 }
 
-/// The scaled share s from the lights as sky.rs set them this frame (R11; medium_air.rs module
+/// The scaled share s from the lights as sky.rs set them this frame (medium_air.rs module
 /// doc for the names): 0 without a sun light.
 fn light_share(sun: Option<&DirectionalLight>, ambient: Option<&GlobalAmbientLight>) -> f32 {
     let Some(sun) = sun else { return 0.0 };
@@ -206,7 +204,7 @@ fn follow_light(
     };
     let answer = medium_air::gate(&input);
     // The line and the bounds it states, from the phase solved once per change of its inputs
-    // (`solved`: the third review's should-fix on the 8,192-step solve).
+    // (`solved`: an 8,192-step solve).
     let fog = cam.fog;
     let bounds_of = |phase: &NormedPhase| medium_air::on_bounds(&grid, phase, s, &tune, fog, corner);
     let tell = |phase: &NormedPhase, bounds: ViewBounds| {
@@ -272,7 +270,7 @@ mod tests {
         assert!(bounds_due(10.0, 3.0));
     }
 
-    /// The night gate's clock (the second review's should-fix): the reviewer's degenerate
+    /// The night gate's clock: a degenerate
     /// climate, sunrise begin equal to sunset end (a day of a thousandth of an hour, as
     /// fnv-world's `sun_direction` allows), the sky stepped at 6:00 and the light aimed at
     /// 6:0009, 90 % through that day: the aiming elevation is above 0 (sin 0.9 pi > 0), so it

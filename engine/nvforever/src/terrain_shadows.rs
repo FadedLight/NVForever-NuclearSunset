@@ -143,7 +143,7 @@
 //! (`Graphics::terrain_shadows`, [`follow_graphics`]) sets it; `NVF_PLAY_DEBUG_TERRAIN_SHADOWS=1`
 //! turns it on whatever the row says ([`TerrainShadowsForced`]).
 //!
-//! **Producer and surfaces** (#3032 stage 3, rulings-stage3 R2) [design]: the producer (T0's
+//! **Producer and surfaces** (#3032 stage 3) [design]: the producer (T0's
 //! heightfield, the jobs, the publication, the dump) follows
 //! [`TerrainShadowsProducerWanted`] = the switch above or the light in the air
 //! (`medium_air_demand::AirWanted`, which reads the publication in the render world); the
@@ -779,7 +779,7 @@ impl Plugin for TerrainShadowsPlugin {
 /// The map needs T0's heightfield: switching its production on switches it on, switching it
 /// off switches it off again, but only when the production was what switched it on
 /// (`turned_on`): a heightfield already on by its own demand (`NVF_PLAY_DEBUG_SUN_HEIGHTFIELD`)
-/// stays on through any on/off cycle of the row or the light in the air (review r1 of #3032).
+/// stays on through any on/off cycle of the row or the light in the air.
 fn follow_wanted(wanted: Res<TerrainShadowsProducerWanted>, mut heightfield: ResMut<SunHeightfieldWanted>, mut turned_on: Local<bool>) {
     if !wanted.is_changed() {
         return;

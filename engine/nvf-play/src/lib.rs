@@ -20,6 +20,7 @@ pub mod ambient;
 pub mod audio_out;
 pub mod bindings;
 pub mod blocking;
+pub mod bullet_snap;
 pub mod chargen;
 pub mod clutter_pose;
 pub mod collision_view;
@@ -434,6 +435,15 @@ pub struct PlayPlugin(pub PlayData);
 impl Plugin for PlayPlugin {
     fn build(&self, app: &mut App) {
         let d = self.0;
+        // Populate `fnv_game::mod_files` read roots before `SimState::new` and
+        // `PostStartup` settings load so Stewie modular override folders
+        // (`NVSE\Plugins\Tweaks\INIs\*.ini`, `GameSettings\*.ini`) are visible at start.
+        if !app.world().contains_resource::<script_input::ModFileRootsReady>() {
+            if let Some(game_data) = app.world().get_resource::<nvf_assets::GameData>() {
+                script_input::init_mod_file_roots(game_data);
+                app.insert_resource(script_input::ModFileRootsReady);
+            }
+        }
         // Whose record names a file that is not there (game_files.rs, #2757).
         game_files::note_load_order(d.lo);
         app.insert_resource(PlayWorld(d))
@@ -453,7 +463,7 @@ impl Plugin for PlayPlugin {
             .init_resource::<furniture::PlayerSeat>()
             .configure_sets(Update, (PlaySet::Input, PlaySet::Physics, PlaySet::Activation, PlaySet::Scripts, PlaySet::Ui, PlaySet::Sync).chain())
             .add_plugins((sim::SimPlugin, phys::PhysPlugin, player::PlayerPlugin, activate::ActivatePlugin, menu::MenuPlugin, dropped::DroppedPlugin, moved::MovedPlugin, pause::PausePlugin, wait::WaitPlugin, flashlight::FlashlightPlugin))
-            .add_plugins((script::ScriptPlugin, hitvol::HitVolumePlugin, combat::CombatPlugin, sfx::SfxPlugin, music::MusicPlugin, ambient::AmbientPlugin, radio::RadioPlugin, voice::VoicePlugin, holotape::HolotapePlugin, loading::LoadingPlugin, dialogue_look::DialogueLookPlugin, hud::HudPlugin, compass::CompassPlugin))
+            .add_plugins((script::ScriptPlugin, hitvol::HitVolumePlugin, combat::CombatPlugin, bullet_snap::BulletSnapPlugin, sfx::SfxPlugin, music::MusicPlugin, ambient::AmbientPlugin, radio::RadioPlugin, voice::VoicePlugin, holotape::HolotapePlugin, loading::LoadingPlugin, dialogue_look::DialogueLookPlugin, hud::HudPlugin, compass::CompassPlugin))
             .add_plugins((world_sounds::WorldSoundsPlugin, effect_sounds::EffectSoundsPlugin, reticle::ReticlePlugin, quick_loot::QuickLootPlugin, xp_meter::XpMeterPlugin, radiation::RadiationPlugin, borders::BordersPlugin))
             .add_plugins((ui_sounds::UiSoundsPlugin, pad::PadPlugin, key_repeat::KeyRepeatPlugin, rumble::RumblePlugin, shake::ShakePlugin, script_input::ScriptInputPlugin, aim_assist::AimAssistPlugin))
             .add_plugins(script_switches::ScriptSwitchesPlugin)

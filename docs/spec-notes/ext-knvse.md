@@ -90,6 +90,8 @@ Follow-ups (engine side, slice 2 of knvse-anim.md):
   normalized phase or clock time when active and still running the transition with
   `destFrame` / default clock when inactive), global/per-sequence clocks
   (`SetGlobalAnimTime`, `SetAnimCurrentTime`), and clip metadata publication
-  (`Game::set_sequence_info` from `script_sequences.rs` and `anim_state.rs`).
-- **Remaining:** NPC layered sequences and runtime text-key triggers (`AddAnimTextKey` /
-  `SetAnimTextKeys`).
+  (`Game::set_sequence_info` from `script_sequences.rs` and `anim_state.rs`); for drawn
+  NPCs, layered `ActivateAnim` sequences on `BlendPlayer::script_layers` with sequence
+  priority, weight, ease-in/ease-out, sequence clocks, additive poses (`SetAnimAdditive`),
+  and `Game::set_sequence_info` clip metadata publication in `play_npc_sequences`.
+- **Remaining:** runtime text-key triggers (`AddAnimTextKey` / `SetAnimTextKeys`).

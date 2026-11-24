@@ -1105,7 +1105,7 @@ pub struct AirTune {
     /// The grid's depth, overriding the start aid when set, 1,000..=200,000.
     pub depth: Option<f32>,
     /// SKY: the weight of the far form (`mix(1, SKY, t)` in [`blended_correction`]: cleared
-    /// depth takes it whole, far terrain by its far blend), 0..=1, default 0.5. Only ever a
+    /// depth takes it whole, far terrain by its far blend), 0..=1, default 0.25. Only ever a
     /// weight: above 1 it amplified what shadow takes past the fog light a pixel was given.
     pub sky_weight: f32,
     /// SKYPHASE: how much of the phase a sky sample's modulation takes
@@ -1120,7 +1120,7 @@ pub struct AirTune {
     /// `auto` (none, the default) takes the clouds' mean transmittance.
     pub reference: Option<f32>,
     /// `LIFT`: how far above the weather's average a fully lit ray may rise
-    /// ([`relative_lit`]), 1..=3; default 1.5.
+    /// ([`relative_lit`]), 1..=3; default 1.4.
     pub lift: f32,
     /// `SHADE`: the least relative lit fraction shadowed air keeps ([`relative_lit`]), 0..=1;
     /// default 0.9 (0: shadow may take all the fog's light).
@@ -1139,29 +1139,28 @@ pub struct AirTune {
 }
 
 impl Default for AirTune {
-    /// The calibrated look [design, 2026-11-20: docs/design/volumetric-medium.md, "Debug aids, tune
+    /// The Natural look [design, 2026-11-24: docs/design/volumetric-medium.md, "Debug aids, tune
     /// keys and log lines"]: strength 0 (the start's value comes
     /// through [`AirTune::start`] or [`AirTune::with_strength`]: the slider's 100 % is 1),
-    /// forward g 0.6 and final cap 2.5 with no back lobe (the first look's,
-    /// [`AirPhase::default`], were g 0.3, cap 1.5), RAYS 6 (was 4), LIFT 1.5 (was 1.75), SHADE
-    /// 0.9 (was 0.5), FLOOR 1, sky weight 0.5 (was 1) and sky phase 0, REF auto, no view, all
-    /// occluders, SAMPLES 4, FILTER on.
+    /// forward g 0.5 and final cap 1.5 with no back lobe, RAYS 3, LIFT 1.4, SHADE 0.9, FLOOR 1,
+    /// sky weight 0.25 and sky phase 0, REF auto, no view, all occluders, SAMPLES 4, FILTER on.
+    /// Before it: g 0.6, cap 2.5, RAYS 6, LIFT 1.5, SHADE 0.9, sky weight 0.5 (2026-11-20).
     fn default() -> Self {
         let p = AirPhase::default();
         AirTune {
             strength: 0.0,
             share: None,
-            g: 0.6,
+            g: 0.5,
             back_g: p.back_g,
             back_weight: p.back_weight,
-            cap: 2.5,
+            cap: 1.5,
             depth: None,
-            sky_weight: 0.5,
+            sky_weight: 0.25,
             sky_phase: 0.0,
-            rays: 6.0,
+            rays: 3.0,
             floor: 1.0,
             reference: None,
-            lift: 1.5,
+            lift: 1.4,
             shade: 0.9,
             samples: AIR_SAMPLES_DEFAULT,
             filter: true,
@@ -1953,14 +1952,19 @@ mod tests {
         assert_eq!(debug_occluders(None), AirOccluders::All);
     }
 
+    /// The look the hand figures of the tests below are worked for (the defaults of 2026-11-20).
+    fn hand(t: AirTune) -> AirTune {
+        AirTune { g: 0.6, cap: 2.5, sky_weight: 0.5, rays: 6.0, lift: 1.5, shade: 0.9, ..t }
+    }
+
     #[test]
     fn tune_file_parses() {
         let base = AirTune::start(1.0, AirView::Slice, AirOccluders::Terrain, Some(48_000.0));
         assert_eq!((base.strength, base.view, base.occluders, base.depth), (1.0, AirView::Slice, AirOccluders::Terrain, Some(48_000.0)));
-        // The calibrated look (2026-11-20): sky weight 0.5, sky phase 0.
-        assert_eq!((base.sky_weight, base.sky_phase), (0.5, 0.0));
-        // The start tune's phase: g 0.6, cap 2.5, no back lobe (the 2026-11-20 pick).
-        assert_eq!(base.phase(), AirPhase { g: 0.6, back_g: -0.3, back_weight: 0.0, cap: 2.5 });
+        // The Natural look (2026-11-24): sky weight 0.25, sky phase 0.
+        assert_eq!((base.sky_weight, base.sky_phase), (0.25, 0.0));
+        // The start tune's phase: g 0.5, cap 1.5, no back lobe.
+        assert_eq!(base.phase(), AirPhase { g: 0.5, back_g: -0.3, back_weight: 0.0, cap: 1.5 });
         // Empty text, comments and blank lines keep the base.
         assert_eq!(AirTune::parse("", &base), base);
         assert_eq!(AirTune::parse("# nothing\n\n   \n", &base), base);
@@ -2001,16 +2005,16 @@ mod tests {
     #[test]
     fn uniform_packs_the_groups() {
         let g = grid_at(12_000.0);
-        let tune = AirTune::parse("STRENGTH=2\nVIEW=share", &AirTune::default());
+        let tune = hand(AirTune::parse("STRENGTH=2\nVIEW=share", &AirTune::default()));
         let phase = tune.phase().normed();
         let u = pack(&g, CLEAR, &phase, &tune, 0.6);
         assert_eq!(u.grid, [160.0, 88.0, 64.0, 12_000.0]);
         let curve = g.curve();
-        // curve.w is RAYS (default 6 since the calibration).
+        // curve.w is RAYS.
         assert_eq!(u.curve, [AIR_FIRST, curve.r, curve.ln_r, 6.0]);
         assert!((u.curve[2] - u.curve[1].ln()).abs() < 1e-6);
         assert_eq!(u.fog, [-10.0, 200_000.0, 0.6, 1.0]);
-        // The start tune's phase (g 0.6, final cap 2.5) with its solved inner cap: the closed
+        // The phase (g 0.6, final cap 2.5) with its solved inner cap: the closed
         // form of phase_has_mean_one_over_the_sphere gives inner 1.62387, norm 1.53953 (below
         // the final 2.5 because the norm is above 1).
         assert_eq!(u.phase, [0.6, -0.3, 0.0, phase.inner_cap]);
@@ -2323,14 +2327,14 @@ mod tests {
         let changed = [
             AirTune { strength: 2.0, ..a },
             AirTune { share: Some(0.3), ..a },
-            AirTune { g: 0.5, ..a },
+            AirTune { g: 0.4, ..a },
             AirTune { back_g: -0.5, ..a },
             AirTune { back_weight: 0.1, ..a },
             AirTune { cap: 3.0, ..a },
             AirTune { depth: Some(48_000.0), ..a },
-            AirTune { sky_weight: 0.25, ..a },
+            AirTune { sky_weight: 0.6, ..a },
             AirTune { sky_phase: 1.0, ..a },
-            AirTune { rays: 3.0, ..a },
+            AirTune { rays: 5.0, ..a },
             AirTune { floor: 0.0, ..a },
             AirTune { reference: Some(0.6), ..a },
             AirTune { lift: 2.0, ..a },
@@ -2442,13 +2446,12 @@ mod tests {
     #[test]
     fn the_on_line_states_the_bound() {
         let g = grid_at(12_000.0);
-        let tune = AirTune::start(1.0, AirView::None, AirOccluders::All, None);
+        let tune = hand(AirTune::start(1.0, AirView::None, AirOccluders::All, None));
         let phase = tune.phase().normed();
         let fog = AirFog { near: 0.0, ..CLEAR };
-        // The centre ray (corner 1): F = 0.06^0.6 = 0.184880; a = 0.5; most 2.5, LIFT 1.5 (the
-        // calibrated defaults): near (1.5 x 2.5 - 1) x 0.5 x F = 0.25421 (far the same: its factor
+        // The centre ray (corner 1): F = 0.06^0.6 = 0.184880; a = 0.5; most 2.5, LIFT 1.5
+        // (`hand`): near (1.5 x 2.5 - 1) x 0.5 x F = 0.25421 (far the same: its factor
         // is largest at t = 0); sky at SKYPHASE 0, SKY 0.5: (1.5 - 1) x 0.5 x F x 0.5 = 0.02311.
-        // (Before the calibration, LIFT 1.75 and SKY 1, the figures were 0.312 and 0.0693.)
         let line = on_line(&g, &phase, 0.5, &tune, fog, 1.0);
         assert_eq!(
             line,
@@ -2469,14 +2472,14 @@ mod tests {
         // Far pixels: the factor is largest at t = 0 (both the phase and the weight fall with
         // t), so the far bound is the near one here.
         assert_eq!(b.far, b.near);
-        // With share 1 and F 1 at the calibrated LIFT 1.5 and SKY 0.5: near 1.5 x 2.5 - 1 = 2.75,
+        // With share 1 and F 1 at LIFT 1.5 and SKY 0.5: near 1.5 x 2.5 - 1 = 2.75,
         // sky (1.5 - 1) x 0.5 = 0.25.
         assert!((world - 2.75).abs() < 1e-4 && (sky - 0.25).abs() < 1e-5, "{world} {sky}");
         assert!(on_line(&g, &phase, 0.5, &full, ramp, corner).contains("near pixels at most +2.750 x the fog colour, far pixels at most +2.750 x mix(fog colour, pixel, t), sky at most x1.250 (display values;"));
         // SKYPHASE 1 and SKY 0.5: the sky's factor takes the phase and the weight:
         // (1.75 x 2.5 - 1) x 0.5 = 1.6875.
         let sky = view_bounds(&g, &phase, 1.0, &AirTune { sky_phase: 1.0, sky_weight: 0.5, ..full }, ramp, corner).sky;
-        // (1.5 x 2.5 - 1) x 0.5 = 1.375 at the calibrated LIFT 1.5.
+        // (1.5 x 2.5 - 1) x 0.5 = 1.375 at LIFT 1.5.
         assert!((sky - 1.375).abs() < 1e-4, "{sky}");
         // A projection the bound cannot read takes the fog's whole strength.
         assert_eq!(corner_ray_len(0.0, 1.0), f32::INFINITY);
@@ -2496,7 +2499,7 @@ mod tests {
     fn the_strength_scales_the_whole_correction() {
         let g = grid_at(12_000.0);
         let fog = AirFog { near: 0.0, ..CLEAR };
-        let base = AirTune::start(1.0, AirView::None, AirOccluders::All, None);
+        let base = hand(AirTune::start(1.0, AirView::None, AirOccluders::All, None));
         let phase = base.phase().normed();
         // At strength 1 (the_on_line_states_the_bound): near 0.254, sky 0.0231 at s 0.5.
         let one = view_bounds(&g, &phase, applied_scale(1.0, 0.5), &base, fog, 1.0);
@@ -2510,7 +2513,7 @@ mod tests {
             assert!(w >= last.0 && s >= last.1, "monotone in the strength");
             last = (w, s);
         }
-        // The line at the calibrated defaults: F = 0.06^0.6 = 0.184880; near and far
+        // The line at these values: F = 0.06^0.6 = 0.184880; near and far
         // (1.5 x 2.5 - 1) x k x 0.5 x F = 0.25421 k, sky 1 + (1.5 - 1) x k x 0.5 x F x SKY 0.5 =
         // 1 + 0.023110 k.
         let line = |k: f32| on_line(&g, &phase, 0.5, &AirTune { strength: k, ..base }, fog, 1.0);
@@ -2817,15 +2820,15 @@ mod tests {
         assert_eq!(ray_contrast(f32::NAN, 4.0), 1.0);
         assert_eq!(ray_contrast(0.6, f32::NAN), 0.6);
         // The keys.
-        let t = AirTune::parse("RAYS=3\nSAMPLES=6", &AirTune::default());
-        assert_eq!((t.rays, t.samples), (3.0, 6));
+        let t = AirTune::parse("RAYS=4\nSAMPLES=6", &AirTune::default());
+        assert_eq!((t.rays, t.samples), (4.0, 6));
         let held = AirTune::parse("RAYS=99\nSAMPLES=0", &AirTune::default());
         assert_eq!((held.rays, held.samples), (8.0, 1));
         assert_eq!(AirTune::parse("SAMPLES=2.6\nRAYS=-1", &AirTune::default()).samples, 3);
         assert_eq!(AirTune::parse("RAYS=-1", &AirTune::default()).rays, 0.0);
         assert_eq!(AirTune::parse("SAMPLES=many", &AirTune::default()).samples, 4);
-        assert_eq!((AirTune::default().rays, AirTune::default().samples), (6.0, 4));
-        assert_eq!(tune_diff(&AirTune::default(), &t), "RAYS=3 SAMPLES=6");
+        assert_eq!((AirTune::default().rays, AirTune::default().samples), (3.0, 4));
+        assert_eq!(tune_diff(&AirTune::default(), &t), "RAYS=4 SAMPLES=6");
         // The phase floor (FLOOR 1 by default): a fully lit sample's correction is >= 0 and
         // <= a F (most - 1) everywhere; shadow still takes at most a F. p_eff = max(p, 1) is
         // in [1, most], R_c = Vbar_c p_eff in [0, most], and Vbar_c = 1 when fully lit.
@@ -2959,7 +2962,7 @@ mod tests {
         assert_eq!(AirTune::parse("REF=auto", &t).reference, None);
         let held = AirTune::parse("REF=0\nLIFT=9", &AirTune::default());
         assert_eq!((held.reference, held.lift), (Some(0.05), 3.0));
-        assert_eq!((AirTune::default().reference, AirTune::default().lift, AirTune::default().shade), (None, 1.5, 0.9));
+        assert_eq!((AirTune::default().reference, AirTune::default().lift, AirTune::default().shade), (None, 1.4, 0.9));
         assert_eq!(tune_diff(&AirTune::default(), &t), "LIFT=2 REF=0.6");
         assert_eq!(tune_diff(&t, &AirTune::parse("REF=auto\nLIFT=2", &t)), "REF=auto");
     }

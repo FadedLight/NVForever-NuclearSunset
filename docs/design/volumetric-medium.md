@@ -983,9 +983,9 @@ medium_air_compose.rs `pixel_mirror` over medium_air.rs's functions):
    views and the size were not kept], while the fog colour was
    authored for lit open air; FLOOR 1 keeps lit air away from the sun as the weather drew it and
    lets only the forward side gain. The cap bounds the glare toward the sun (the sky dome and
-   Light glow already draw the sun's aureole) [design]. g and CAP were chosen by eye: g 0.6 with
+   Light glow already draw the sun's aureole) [design]. g and CAP were chosen by eye: a first g 0.6 with
    cap 2.5 gave the hill toward a low sun a hazy glow with the near house clear [design: judged by eye, the
-   same stills].
+   same stills]; the defaults are lower since ("Debug aids, tune keys and log lines").
 5. **The far blend** t: 1 for cleared depth, else `smoothstep(0.6 S, S, d)`, S sky.rs
    `SKY_DEPTH_FROM` (157,500 units): 0 near, 1 for the sky, continuous in value and slope between,
    so far terrain (which lies beyond S too) reaches the sky's form with no step on a hillside
@@ -1290,25 +1290,28 @@ Read once at the start, usable in a played run:
 |---|---|---|---|
 | `STRENGTH` | 0..2 | the aid's value, else the slider's (1 at 100 %) | the overall scale k of the applied correction |
 | `SHARE` | 0..1, `auto` | `auto` (s from the lights) | the sunlit share s |
-| `G` | 0..0.95 | 0.6 | the forward lobe |
+| `G` | 0..0.95 | 0.5 | the forward lobe |
 | `BACK`, `BACKWEIGHT` | -0.95..0.95, 0..1 | -0.3, 0 | the back lobe and its weight |
-| `CAP` | 1..8 | 2.5 | the upper limit of the phase's largest value |
+| `CAP` | 1..8 | 1.5 | the upper limit of the phase's largest value |
 | `DEPTH` | 1,000..200,000, `auto` | `auto` (48,000, or the aid) | the grid's depth |
 | `GRID` | `<x>,<y>,<z>`, `auto` | `auto` (160 x 88 x 64 at 16:9) | the grid's size |
-| `SKY` | 0..1 | 0.5 | the far form's weight |
+| `SKY` | 0..1 | 0.25 | the far form's weight |
 | `SKYPHASE` | 0..1 | 0 | the phase's share on the sky |
-| `RAYS` | 0..8 | 6 | the ray contrast (1 physical) |
+| `RAYS` | 0..8 | 3 | the ray contrast (1 physical) |
 | `FLOOR` | 0..1 | 1 | the phase floor (0 energy-neutral) |
 | `REF` | 0.05..1, `auto` | `auto` (the clouds' mean K) | the reference visibility |
-| `LIFT` | 1..3 | 1.5 | the most a lit ray rises above the average |
+| `LIFT` | 1..3 | 1.4 | the most a lit ray rises above the average |
 | `SHADE` | 0..1 | 0.9 | the least shadowed air keeps |
 | `SAMPLES` | 1..8 | 4 | visibility samples a froxel |
 | `FILTER` | 0, 1 | 1 | the 3 x 3 filter pass |
 | `VIEW`, `OCCLUDERS` | as the aids | none, all | |
 
-The defaults were set by stills [design, 2026-11-20]: at the earlier values (RAYS 4, LIFT 1.75, SHADE 0.5,
-SKY 1) shadowed air went darker than the open haze by up to 24 levels of 255, and the sky beside a low sun
-washed out [hypothesis: about 50 runs of 2026-11-20 at Goodsprings with development builds of that day;
+The defaults are the Natural look, set by stills [design, 2026-11-24]. The earlier values (G 0.6, CAP 2.5,
+RAYS 6, LIFT 1.5, SKY 0.5, the same SHADE) drew the far plain and the pylons on the horizon of a hazy morning
+as white cut-outs and lifted noon and overcast air [hypothesis: stills of 2026-11-24 at Goodsprings, a
+development build of that day; the steps were not kept]. The first values (RAYS 4, LIFT 1.75, SHADE 0.5,
+SKY 1) took shadowed air darker than the open haze by up to 24 levels of 255 and washed out the sky beside a
+low sun [hypothesis: about 50 runs of 2026-11-20 at Goodsprings with development builds of that day;
 the views and the steps were not kept].
 
 Log lines (prefix `volumetric medium: light in the air`): ` wanted (debug aid

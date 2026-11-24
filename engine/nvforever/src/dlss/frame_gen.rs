@@ -41,8 +41,10 @@
 //! - **Queue parallelism** (2026-11-23): the options ask for `eBlockNoClientQueues`, so DLSS-G no
 //!   longer holds the game's queue (wgpu's one queue, which presents) until its whole workload
 //!   is done; the next frame's GPU work can run while DLSS-G still generates on its own queues
-//!   [documented: `sl_dlss_g.h` `DLSSGQueueParallelismMode`; §17: "may offer extra performance
-//!   gains depending on the workload ... most apparent in GPU-limited applications"]. In
+//!   [documented: Streamline v2.14.16 `sl_dlss_g.h:55-66` `DLSSGQueueParallelismMode`;
+//!   `ProgrammingGuideDLSS_G.md` (Version 2.14.16) §17.0, `:963-967`: "may offer extra
+//!   performance gains depending on the workload ... most apparent in GPU-limited
+//!   applications"; `docs/spec-notes/streamline.md`]. In
 //!   exchange the game must not touch DLSS-G's inputs (the depth, motion, HUD-less and UI buffer
 //!   it tagged) until DLSS-G has read them: [`state`] keeps `inputsProcessingCompletionFence` and
 //!   `lastPresentInputsProcessingCompletionFenceValue` after a present with the mode on, and
@@ -54,12 +56,13 @@
 //!   `queueWaitForSemaphore(Graphics, reinterpret_cast<VkSemaphore>(syncObj), syncObjVal)` on
 //!   Vulkan, called at the start of `RenderScene` "before any of the inputs are modified in the
 //!   subsequent command list submission", when DLSS-G was on last frame [documented:
-//!   NVIDIA-RTX/Streamline_Sample `src/SLWrapper.cpp`, `src/StreamlineSample.cpp`; the
-//!   Streamline headers and guide do not name the Vulkan type]. A wait no submit took (a frame
+//!   NVIDIA-RTX/Streamline_Sample tag v2.14.16 (94da85b65) `src/SLWrapper.cpp:250-279`,
+//!   `src/StreamlineSample.cpp:828-836`; the Streamline headers and guide do not name the
+//!   Vulkan type]. A wait no submit took (a frame
 //!   with nothing submitted) is taken back before the next one is staged, and when DLSS-G is
 //!   loaded or unloaded. `NVF_DLSSG_QUEUE=block` keeps the default mode, for comparisons.
-//!   GPU-bound at 4x it measured +6% real frames, latency the same [observed: design doc
-//!   "Queue parallelism"].
+//!   GPU-bound at 4x it measured +6% real frames, latency the same [observed: RTX 5090, driver
+//!   621.24, design doc "Queue parallelism"].
 //! - **UI buffer** ([`ui_buffer`], stage 4 item 2; after the UI, before Bevy's upscaling blit,
 //!   where FSR's frame generation's `generate` sits): on a tagged frame the UI is drawn a second
 //!   time, alone, over transparent black (`fg_ui_layer.rs`, the main texture's format), which

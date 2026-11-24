@@ -765,8 +765,8 @@ pub const DLSSG_FLAG_RETAIN_RESOURCES_WHEN_OFF: u32 = 1 << 3;
 /// during DLSS-G processing. In this mode, client must must wait on
 /// DLSSGState::inputsProcessingCompletionFence and associated value, before it can modify or
 /// destroy the tagged resources input to DLSS-G ... for the corresponding previously presented
-/// frame on any client queue") [documented: Streamline `include/sl_dlss_g.h`, main, read
-/// 2026-11-23].
+/// frame on any client queue") [documented: Streamline v2.14.16 `include/sl_dlss_g.h:55-66`; the
+/// options' `queueParallelismMode` at `:110-112`; `docs/spec-notes/streamline.md`].
 pub const DLSSG_QUEUE_BLOCK_PRESENTING_CLIENT_QUEUE: u32 = 0;
 pub const DLSSG_QUEUE_BLOCK_NO_CLIENT_QUEUES: u32 = 1;
 

@@ -35909,11 +35909,40 @@ env = { NVF_OCCLUSION_CULLING = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
 args = ["--cell", "Novac", "--play", "--no-voice", "--no-messages", "--hour", "12"]
 run_seconds = 20
 expect = [
-  { text = "occlusion culling: on for the main camera (NVF_OCCLUSION_CULLING=1)", count = 1, label = "the experiment is on" },
+  { text = "occlusion culling: on for the main camera", count = 1, label = "the test aid turns it on" },
 ]
 forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error in the culling or depth pyramid passes" },
 ]
+
+[[scenario]]
+name = "occlusion-culling-row-pick"
+source = "#3783, docs/settings-reference.md occlusion-culling: the Graphics row Occlusion culling is off by default and is read once at the start; turning it on in the page keeps this run as it was (off) and writes the next start's choice. occlusion-culling-row starts in the same home"
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+note = "The home's INI may hold the row from an earlier run: the test aid keeps this run off, Defaults puts the row back to Off, then a click turns it on (as settings-switch-write does)."
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_OCCLUSION_CULLING = "0", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:16", NVF_PLAY_TEST_SETTINGS = "11:page,13:occlusion-culling", NVF_PLAY_TEST_PAUSE_MENU = "12:defaults" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 18
+expect = [
+  { text = "occlusion culling: off", count = 1, label = "the test aid keeps this run off" },
+  { text = "pause menu: settings back to their defaults", label = "Defaults puts the row back to Off" },
+  { text = "settings: occlusion-culling on", label = "the row turned on in the page" },
+]
+order = [["pause menu: settings back to their defaults", "settings: occlusion-culling on"]]
+forbid = [{ text = "occlusion culling: on for the main camera", label = "the run's state changed before the next start" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
+
+[[scenario]]
+name = "occlusion-culling-row"
+source = "#3783, docs/settings-reference.md occlusion-culling: a start in occlusion-culling-row-pick's home reads the saved row and turns the culling on for the main camera"
+note = "runs after occlusion-culling-row-pick in the same home."
+areas = ["graphics", "ui"]
+paths = ["engine/nvforever/src/gpu_occlusion.rs", "engine/nvforever/src/settings.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvf-play/src/settings.rs"]
+env = { NVFOREVER_HOME = "occlusion-culling-row-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--no-voice", "--no-lodgen", "--no-messages"]
+run_seconds = 14
+expect = [{ text = "occlusion culling: on for the main camera", count = 1, label = "the saved row turns it on at the next start" }]
+forbid = [{ text = "occlusion culling: off", label = "the saved row not read" }, { text = "Caught rendering error", label = "a rendering (validation) error" }]
 
 [[scenario]]
 name = "gpu-light-clustering"

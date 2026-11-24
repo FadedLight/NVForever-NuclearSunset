@@ -1377,6 +1377,9 @@ said. The bench made an INI from the owner's with those values and kept the game
    late culling phase costs the CPU: frames 7.24 → 7.49 ms. Not on by default: it pays on a
    machine the GPU holds, not on this one. First-person shapes keep `NoFrustumCulling`,
    which the vendored mesh_preprocess.wesl now also reads as "never occlusion culled".
+   [2026-11-24, #3783] The player's choice since: the Graphics row Occlusion culling (off by
+   default, read at the start; docs/settings-reference.md), the test aid still overriding
+   it. On the build with the merged scene unpacking: GPU 4.96 → 4.31 ms, frame 6.96 → 7.18.
 6. **GPU light clustering's buffer churn** (bevy#25869, bevy#26588 backported): the reason
    for CPU clustering (#897) is gone, but `NVF_GPU_CLUSTERING=1` measured no better (Novac
    7.59 → 7.88 ms, Goodsprings at night the same), so the CPU stays the default.

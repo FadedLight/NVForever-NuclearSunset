@@ -1945,8 +1945,9 @@ fn main() -> AppExit {
     // Defaults snapshots this command-line/default choice before apply_stored reads the INI.
     .add_plugins(frame_gen::FrameGenPlugin(args.frame_generation.unwrap_or_default()))
     .add_plugins(blit_warm::BlitWarmPlugin)
-    // Bevy's GPU occlusion culling, an experiment behind NVF_OCCLUSION_CULLING=1.
-    .add_plugins(gpu_occlusion::GpuOcclusionPlugin)
+    // Bevy's GPU occlusion culling: the Graphics row Occlusion culling, read at the start
+    // (the test aid NVF_OCCLUSION_CULLING overrides it).
+    .add_plugins(gpu_occlusion::GpuOcclusionPlugin { read_ini: play.is_some() })
     // The driver's pipeline cache kept on disk (pipeline_disk_cache.rs).
     .add_plugins(pipeline_disk_cache::PipelineDiskCachePlugin)
     // Lights clustered on the CPU, Bevy's own fallback: its GPU clustering made about six

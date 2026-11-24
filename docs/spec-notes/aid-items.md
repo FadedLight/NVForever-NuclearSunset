@@ -95,7 +95,8 @@ The ActorValue page's three pools (actor-values.md §1) [documented: ActorValue]
     a regeneration:
   - **Regeneration** (#3471). The base effect `Regen` (0x000F3D42, named "Regeneration":
     Health, flags Self and No Duration, no Recover) is the only Health one with No Duration
-    in FalloutNV.esm and the add-ons [observed: decoded 2026-11-23]. Its users: the
+    in FalloutNV.esm and the add-ons [observed: `fnvtool esm decode` of every MGEF in the ten
+    masters, 2026-11-24]. Its users: the
     stages of radiation sickness `Radiation200` to `Radiation800` (Disease; 2, 4, 6, 8, on
     `HasPerk RadChild`), and the Abilities `PerkSolarPowered` (1, outdoors from 6 to 18),
     `RegenLow` (3) and `RegenMed` (5; `VLegateScript`, God), Dead Money's

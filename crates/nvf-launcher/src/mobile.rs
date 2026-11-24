@@ -236,18 +236,16 @@ fn check_update(current: &str, get: &mut impl FnMut(&str) -> Result<String, Stri
         }));
     }
     let asset = select_android_apk(&latest.assets, &latest.tag).and_then(|apk| {
-        // Fail closed when a release publishes SHA256SUMS.txt: if fetching it fails or it lacks
-        // a valid 64-hex-char entry for the selected APK, omit the direct in-app asset so the
-        // launcher falls back to opening the GitHub release page instead of skipping verification.
-        let sha256 = if let Some(sums) = latest.assets.iter().find(|a| a.name == CHECKSUMS_NAME) {
-            if !repo_asset_url(&sums.browser_download_url, &latest.tag, CHECKSUMS_NAME) {
-                return None;
-            }
-            let body = get(&sums.browser_download_url).ok()?;
-            Some(checksum_for(&body, &apk.name)?)
-        } else {
-            None
-        };
+        // Always fail closed (matching desktop `update.rs`): direct in-app APK download
+        // requires a published `SHA256SUMS.txt` on the same repository release with a valid
+        // 64-hex-char entry for the selected APK. Otherwise omit `asset` so the launcher
+        // offers only "Open release page" in the browser instead of an unverified download.
+        let sums = latest.assets.iter().find(|a| a.name == CHECKSUMS_NAME)?;
+        if !repo_asset_url(&sums.browser_download_url, &latest.tag, CHECKSUMS_NAME) {
+            return None;
+        }
+        let body = get(&sums.browser_download_url).ok()?;
+        let sha256 = checksum_for(&body, &apk.name)?;
         Some(json!({
             "name": apk.name,
             "url": apk.browser_download_url,

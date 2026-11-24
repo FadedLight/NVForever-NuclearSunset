@@ -38,6 +38,57 @@ via `NVFOREVER_HOME`. Schema files are extracted from this APK to `files/runtime
 before parsing engine arguments, and translations to `files/home/lang`. Game input and
 engine output stay separate, retaining the existing write guards.
 
+## In-app APK updater
+
+[design] The Android launcher (`crates/nvf-launcher/src/mobile.rs`,
+`android/app/src/main/java/org/nvforever/android/{MobileLauncher,UpdatePolicy,ApkUpdateProvider,LauncherActivity}.java`)
+offers an optional, user-confirmed in-app APK updater modeled on the desktop launcher's
+updater (`crates/nvf-launcher/src/update.rs`):
+
+- **Where it checks and downloads from:**
+  - Release metadata is queried from `https://api.github.com/repos/LootJunkieAzza/NVForever/releases?per_page=10`
+    (the same `news::RELEASES` endpoint used by the desktop launcher). Draft releases are ignored.
+  - Both the selected ARM64 APK and `SHA256SUMS.txt` must have exact URLs under
+    `https://github.com/LootJunkieAzza/NVForever/releases/download/<tag>/<name>` with
+    strict ASCII safe-component validation (`repo_asset_url` in `mobile.rs` and
+    `UpdatePolicy.isRepoReleaseAssetUrl` in Java).
+  - All requests use HTTPS (`HttpsURLConnection` with Android's system trust store) and
+    `AndroidManifest.xml` enforces `android:usesCleartextTraffic="false"` across both debug
+    and release builds. Redirects (such as GitHub's 302 to its asset CDN) are handled
+    manually up to 5 hops (`UpdatePolicy.MAX_REDIRECTS`) and refused unless every hop stays
+    on `https://` with no userinfo and one of four pinned GitHub release hosts:
+    `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, or
+    `github-releases.githubusercontent.com`.
+- **How it verifies what it downloads:**
+  - Asset selection (`select_android_apk` in `mobile.rs`) admits only signed ARM64 `.apk`
+    files, explicitly refusing names containing `unsigned`, `x86`, or `armeabi`, and
+    refusing off-repository URLs.
+  - **Fail-closed SHA-256 checksums:** direct in-app download always requires a published
+    `SHA256SUMS.txt` asset on the same release with a valid 64-hex-char SHA-256 entry for
+    the selected APK (matching desktop `update.rs`). If `SHA256SUMS.txt` is absent, fails
+    to fetch, or omits the APK, `check_update` omits `asset` so the launcher offers only
+    `"Open release page"` in the system browser instead of an unverified download.
+  - `MobileLauncher.downloadAndInstallUpdate` re-checks the URL and 64-hex SHA-256 before
+    opening a socket, enforces a 512 MiB cap (`UpdatePolicy.MAX_APK_BYTES`) and non-empty
+    download check, computes SHA-256 while streaming into `cache/updates/<name>.part`,
+    fsyncs, verifies the digest in constant time (`UpdatePolicy.checksumMatches`), deletes
+    `.part` on any error or cancellation, and only then atomically renames to
+    `cache/updates/<name>`.
+  - **System installer & Android signing-key enforcement:** the verified APK is exposed
+    read-only (`mode == "r"`) via the non-exported `ApkUpdateProvider`
+    (`android:exported="false"`, `FLAG_GRANT_READ_URI_PERMISSION`, canonical path check
+    inside `cache/updates/`) to Android's system PackageInstaller (`Intent.ACTION_VIEW`
+    with `application/vnd.android.package-archive`). Android itself requires user
+    confirmation (and `"Allow from this source"` permission on first install) and rejects
+    any upgrade APK whose signing certificate does not match the currently installed app.
+- **User control & opt-in:**
+  - Startup update checks run only when project news fetching is enabled
+    (`[Launcher] News != 0`, which the user can turn off in the launcher); users can also
+    trigger `"Check for updates"` manually from the Home page.
+  - No APK is ever downloaded or installed automatically: an explicit tap on `"Update"` in
+    the confirmation dialog is required to start the download (and `"Cancel download"` aborts
+    it immediately), and the game must not be running.
+
 ## Loading and process lifetime
 
 [documented: `engine/nvforever/src/handoff.rs`] The desktop engine starts a new process to
@@ -164,7 +215,8 @@ documentation. Neither tag there claims anything about the original game. The gr
   news/release formatting (`MarkdownParser.java` / `MarkdownRenderer.java`,
   700/400-character preview caps), user-confirmed HTTPS GitHub Releases ARM64 APK
   updater (`UpdatePolicy.java`, `ApkUpdateProvider.java`, 512 MiB cap, 5 HTTPS-only
-  redirects, fail-closed `SHA256SUMS.txt` verification when published), and Google's
+  redirects to pinned GitHub release hosts, mandatory fail-closed `SHA256SUMS.txt`
+  verification), and Google's
   Maven Central mirror ahead of `mavenCentral()` in `android/settings.gradle` as a
   CI rate-limit resilience fallback (`google()` remains first, `mavenCentral()` and
   `gradlePluginPortal()` remain fallbacks).
@@ -173,9 +225,11 @@ documentation. Neither tag there claims anything about the original game. The gr
   observations. The entire `dialogue/classic.png` image stretches cleanly to fill 100% × 100%
   of the mobile viewport (zero black borders, no edge-only strip stretching) with the live
   portrait, speech, responses, caps and TRADE openings mapped proportionally inside the
-  stretched layout (keeping interactive text/controls inside safe insets). The contributor
-  supplied the AI-generated image; it is not taken or derived from game files. Its TRADE
-  control opens the existing barter menu.
+  stretched layout (keeping interactive text/controls inside safe insets). Original
+  AI-generated artwork created by the PR author using ChatGPT image generation (not
+  extracted or derived from *Fallout: New Vegas*, Bethesda assets, or any third-party mod)
+  and contributed under the repository's `GPL-3.0-or-later` licence (carrying no upstream
+  third-party copyright/licence restrictions). Its TRADE control opens the existing barter menu.
 - Round-2 and Round-3 mobile defaults and layout rules (`[design]`): Android defaults
   double-tap look space for VATS (`touch-vats-double-tap-v1`) On, auto-move lock target
   (`touch-auto-move-lock-v1`) On positioned `1.95 × stick_radius` above the movement

@@ -36,6 +36,12 @@ public final class UpdatePolicyTest {
         for (int i = 0; i < 32; i++) digest[i] = (byte) i;
         String hex = UpdatePolicy.hexSha256(digest);
         check(hex.length() == 64, "64 hex chars");
+        check(UpdatePolicy.isValidSha256Hex(hex), "valid lowercase sha256 hex");
+        check(UpdatePolicy.isValidSha256Hex(hex.toUpperCase()), "valid uppercase sha256 hex");
+        check(!UpdatePolicy.isValidSha256Hex(null), "reject null sha256");
+        check(!UpdatePolicy.isValidSha256Hex(""), "reject empty sha256");
+        check(!UpdatePolicy.isValidSha256Hex("short"), "reject short sha256");
+        check(!UpdatePolicy.isValidSha256Hex("g".repeat(64)), "reject non-hex sha256");
         check(UpdatePolicy.checksumMatches(hex.toUpperCase(), digest), "case-insensitive checksum match");
         check(!UpdatePolicy.checksumMatches("0".repeat(64), digest), "mismatch detected");
         check(!UpdatePolicy.checksumMatches("short", digest), "short hex rejected");

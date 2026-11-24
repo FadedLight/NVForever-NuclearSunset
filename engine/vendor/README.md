@@ -94,8 +94,11 @@ amount that jumped as the view's average crossed an entry.
 
 ## bevy_pbr 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
-Normal hardening in `src/render/skinning.wesl`: an exactly singular skin matrix
-uses an identity normal transform, and an exactly zero transformed normal uses +Z.
+Skinning storage-buffer wrapping and normal hardening in `src/render/skinning.wesl`:
+storage `joint_matrices` and `prev_joint_matrices` are wrapped in
+`struct StorageJointMatrices`, an exactly singular skin matrix (`det == 0.0` in
+`inverse_transpose_3x3m`) uses an identity normal transform, and an exactly zero
+transformed normal in `skin_normals` uses `+Z`.
 Finite zero-scale animation and unweighted vertices can reach these cases; WGSL leaves
 runtime divide-by-zero and zero normalization indeterminate
 ([WGSL floating point evaluation](https://www.w3.org/TR/WGSL/#floating-point-evaluation)).
@@ -1129,7 +1132,8 @@ and prebuilt binaries.
 
 ## winit 0.30.13 (Apache-2.0; rust-windowing contributors)
 
-Android controller admission only, marked `NVForever controller admission`: an optional
+Android controller admission only, marked `NVForever controller admission` in
+`src/platform/android.rs` and `src/platform_impl/android/mod.rs`: an optional
 application handler runs before the single native queue consumer translates input into
 window events. Unhandled inputs use the upstream path. NVForever copies controller
 samples into its own bounded queue, then uses Bevy's ordinary RawGamepadEvent route.
@@ -1137,3 +1141,13 @@ No other platform backend changes. The upstream crate archive checksum was match
 Cargo.lock and its source files matched the installed registry before copying; upstream
 licences remain beside the source. Drop this patch when winit exposes equivalent native
 controller admission or provides a complete controller-event backend.
+
+## rapier3d 0.36.1 (Apache-2.0, Dimforge)
+
+Vendored at the repository root (`vendor/rapier3d/`) and wired via `[patch.crates-io]`
+in both `Cargo.toml` and `engine/Cargo.toml` so both workspaces resolve the exact same
+physics crate. Carries two bounded zero-dt collision-query refresh fixes in
+`src/pipeline/physics_pipeline/substep.rs` (deferred BVH optimization join before
+`dt <= 0.0` return) and `src/dynamics/island_manager/manager.rs`
+(`commit_sleeping_chunks` after persistent sleep bootstrap). Full baseline SHA-256,
+rationale, and test notes are in `vendor/rapier3d/README.nvforever.md`.

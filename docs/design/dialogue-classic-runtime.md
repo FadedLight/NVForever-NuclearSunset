@@ -6,8 +6,11 @@ override is present, it uses the same bundled PNG on desktop and Android. The
 desktop executable embeds it; Android reads `assets/dialogue/classic.png` from
 the APK via the native asset manager. No file is written into the player's data.
 
-AI-generated image supplied by the contributor for NVForever's Classic dialogue
-frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
+Original AI-generated artwork created by the PR author using ChatGPT image generation
+for NVForever's Classic dialogue frame; not extracted or derived from *Fallout: New Vegas*,
+Bethesda assets, or any third-party mod. Contributed by the author under the repository's
+own licence (`GPL-3.0-or-later`; carries no upstream third-party copyright/licence
+restrictions).
 
 The bundled atlas is a 1774×887 (2:1) PNG. Local 8-bit RGB/RGBA overrides can
 use that layout or the previous 1447×1087 layout, with openings and controls

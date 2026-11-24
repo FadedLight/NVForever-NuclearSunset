@@ -478,6 +478,10 @@ final class MobileLauncher {
             message("Refused untrusted update download URL.");
             return;
         }
+        if (!UpdatePolicy.isValidSha256Hex(expectedSha)) {
+            message("Refused update without a valid SHA-256 checksum.");
+            return;
+        }
         updateDownloading = true;
         updateCancel.set(false);
         updateProgress = "Starting download…";
@@ -490,7 +494,7 @@ final class MobileLauncher {
             try {
                 if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Cannot create updates cache folder");
                 byte[] digest = downloadHttpsApk(url, part, expectedSize);
-                if (expectedSha != null && !expectedSha.isEmpty() && !UpdatePolicy.checksumMatches(expectedSha, digest)) {
+                if (!UpdatePolicy.checksumMatches(expectedSha, digest)) {
                     throw new IOException("Downloaded APK failed SHA-256 verification");
                 }
                 if (target.exists() && !target.delete()) throw new IOException("Cannot replace previous cached APK");

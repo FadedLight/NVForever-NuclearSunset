@@ -272,8 +272,10 @@ the on-screen controls still available, without changing the saved theme.
 Minimal, Classic Glass and Split Panel still load as Normal, Classic and Field
 Notes, respectively.
 
-AI-generated image supplied by the contributor for NVForever's Classic dialogue
-frame; not taken or derived from game files; licensed GPL-3.0-or-later with the project.
+Original AI-generated artwork created by the PR author using ChatGPT image generation
+for NVForever's Classic dialogue frame; not extracted or derived from *Fallout: New Vegas*,
+Bethesda assets, or any third-party mod. Contributed by the author under the repository's
+`GPL-3.0-or-later` licence (carrying no upstream third-party copyright/licence restrictions).
 
 Field Notes uses the speaker-side and backing/accent settings. Retro Console and
 Wrist Terminal place their model on the half opposite the chosen speaker side

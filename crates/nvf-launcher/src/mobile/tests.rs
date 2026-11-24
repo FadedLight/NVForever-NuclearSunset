@@ -293,6 +293,26 @@ fn check_update_selects_signed_arm64_apk_verifies_url_and_extracts_checksum() {
     assert_eq!(sums_missing_entry["data"]["available"], true);
     assert!(sums_missing_entry["data"]["asset"].is_null());
 
+    // Fail closed when a release publishes no SHA256SUMS.txt asset at all.
+    let no_sums_release = json!([{
+        "tag_name": "v0.8.5",
+        "draft": false,
+        "html_url": "https://github.com/LootJunkieAzza/NVForever/releases/tag/v0.8.5",
+        "body": "Release missing checksums",
+        "assets": [{
+            "name": "NVForever-v0.8.5-android-arm64.apk",
+            "browser_download_url": "https://github.com/LootJunkieAzza/NVForever/releases/download/v0.8.5/NVForever-v0.8.5-android-arm64.apk",
+            "size": 45_000_000
+        }]
+    }]).to_string();
+    let refused_no_sums: Value = serde_json::from_str(&request(
+        &fixture.home(),
+        &json!({"action": "check_update", "current": "0.8.1"}).to_string(),
+        |_| Ok(no_sums_release.clone()),
+    )).unwrap();
+    assert_eq!(refused_no_sums["data"]["available"], true);
+    assert!(refused_no_sums["data"]["asset"].is_null());
+
     // Unsigned-only ARM64 release is refused (Android package installer rejects unsigned APKs).
     let unsigned_only = json!([{
         "tag_name": "v0.8.4",

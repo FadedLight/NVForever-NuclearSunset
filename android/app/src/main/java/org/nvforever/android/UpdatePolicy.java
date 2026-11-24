@@ -57,6 +57,16 @@ final class UpdatePolicy {
         }
     }
 
+    static boolean isValidSha256Hex(String value) {
+        if (value == null || value.length() != 64) return false;
+        for (int i = 0; i < 64; i++) {
+            char c = value.charAt(i);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!hex) return false;
+        }
+        return true;
+    }
+
     static String hexSha256(byte[] digest) {
         if (digest == null || digest.length != 32) return "";
         StringBuilder out = new StringBuilder(64);

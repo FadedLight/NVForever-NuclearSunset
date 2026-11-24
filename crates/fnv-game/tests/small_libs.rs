@@ -1385,8 +1385,10 @@ fn knvse_play_animation_path_pre_tick_neg_flt_max_and_frequency_scaled_delta() {
     assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.PlayAnimationPath \"test\\W4ELegacy\\test.kf\" 1)"), n(1.0));
     assert_eq!(q(&mut g, "SetFunctionValue (PlayerREF.PlayAnimationPath \"test\\W4ENormal\\test.kf\" 1)"), n(1.0));
 
-    // Immediately after PlayAnimationPath before the first tick, GetAnimCurrentTime, offset,
-    // and lastTime all read -FLT_MAX (-3.40282e+38) [observed: w4e_08_knvse_legacy_anim_time].
+    // Immediately after PlayAnimationPath before the first tick, GetAnimCurrentTime reads
+    // -FLT_MAX (t0L=-3.40282e+38) [observed: w4e_08_knvse_legacy_anim_time], while
+    // pre-first-tick offset and lastTime returning -f32::MAX is [hypothesis]
+    // (nvse_knvse.rs, docs/spec-notes/ext-knvse.md §5).
     let neg_flt_max = f64::from(-f32::MAX);
     for path in [legacy, normal] {
         let XVal::Num(t0) = q(&mut g, &format!("SetFunctionValue (PlayerREF.GetAnimCurrentTime \"{path}\")")) else {

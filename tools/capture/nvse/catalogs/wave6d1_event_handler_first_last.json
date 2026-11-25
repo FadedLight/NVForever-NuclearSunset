@@ -18,7 +18,6 @@
   ],
   "extender_versions": {
     "JIP LN NVSE": "57.30 (5730)",
-    "ShowOffNVSE Plugin": "184",
     "lStewieAl's Tweaks": "1005"
   },
   "batches": [
@@ -35,8 +34,7 @@
           "bucket": "A",
           "extender": "xNVSE 6.4.9",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,

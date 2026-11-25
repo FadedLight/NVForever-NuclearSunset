@@ -7,25 +7,24 @@
 //! and gives its [`DustFrame`] to the air's grid. Until then only the tests use it, so the
 //! dead code lint is off outside them (the attribute below goes with the first caller).
 //!
-//! - **How much** ([`strength_from_wind`]): the weather's wind byte, blended through a weather
-//!   fade as the trees' wind is (`tree::wind_vector`). 0 on a calm day, 1 at the common wind,
-//!   3 in strong wind.
-//! - **None while drops fall** ([`dry_share`], [`precipitation_falls`], [`Drops`]): it thins
-//!   out before a weather's precipitation starts, is 0 while any falls or any drop of any
-//!   precipitation placed so far is still in the air, and comes back slowly after the last.
-//! - **No jump** ([`Follow`]): the wind's strength glides, and the amount rises by at most
-//!   [`RISE_RATE`] a second whatever moved its target (the end of rain, a forced weather, a
-//!   turned-round fade).
-//! - **Where it goes** ([`wind_velocity`], [`Drift`]): the sum of the wind's steps, so a turn
-//!   changes the way from then on and never the place.
-//! - **Colour** ([`dust_colour`]): the weather's fog colour tinted by the hue of its light.
-//! - **Weather values only**: no form IDs, no editor IDs and no file names decide anything, so
-//!   a mod's weather gets what its values say. What is not a finite number counts as none.
+//! The amount from the weather's wind ([`strength_from_wind`]), none while drops fall
+//! ([`asked`], [`Precipitation`]), no jump back ([`Follow`]), the way it goes ([`Drift`]) and
+//! its colour ([`dust_colour`]): weather values only, no form IDs, editor IDs or file names. A
+//! number that is not finite counts as 0 (none); a wind direction that is not leaves the dust
+//! its velocity.
+//!
+//! **What the next slice must do for [`Precipitation`]** (nothing here knows a particle): tag
+//! every birth that comes from a weather's precipitation in particles.rs, the model's own
+//! systems' and its add-on nodes', whichever model it was; count the tagged ones alive after
+//! the frame's simulation; and say whether weather_fx.rs has a model placed. A caller without
+//! the count passes 0 and `false`, and gets the weather's own rule only (the dust then begins
+//! to come back while the last drops fall).
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::sky::SkyState;
 use crate::weather_fx::{fade_share_on, Role};
+use bevy::math::DVec2;
 use bevy::prelude::*;
 use fnv_world::sky::{ColorType, Weather};
 
@@ -44,24 +43,20 @@ pub const RISE_RATE: f32 = 0.1;
 /// How fast the amount may fall, a second, when nothing cuts it to 0 at once: the whole range
 /// in a second, quicker than an ordinary fade into rain asks for [design, start value].
 pub const FALL_RATE: f32 = 3.0;
-/// A longer frame counts as this many seconds, so a hitch is no jump [design].
+/// A longer frame counts as this many seconds for the amount, so a hitch is no jump [design].
+/// The drift takes the whole time: the wind blew for all of it.
 pub const LONGEST_STEP: f32 = 0.25;
 /// How fast the dust goes in a wind of byte 255, units a second: 118 at the common 50
 /// [design, start value: about 1.7 m/s at 70 units a metre].
 pub const SPEED_AT_FULL: f32 = 600.0;
 /// The time constant with which the dust's velocity follows the wind's, seconds [design: a
 /// script's SetWindDirection is instant].
-pub const TURN_SECONDS: f32 = 2.0;
-/// [`Drift`] wraps after this many units, where both octaves of the patches must repeat: 48
-/// cells of 2,000 and 160 cells of 600 [design; the cells are the next slice's start values].
+pub const TURN_SECONDS: f64 = 2.0;
+/// [`Drift`] wraps after this many units: 48 cells of 2,000 and 160 cells of 600, the patches'
+/// two octaves [design; the cells are the next slice's start values]. The wrap is seamless
+/// only if the next slice's shader hashes both lattices periodically, every 48 and every 160
+/// cells on each axis.
 pub const DRIFT_PERIOD: f64 = 96_000.0;
-/// A shared system's drops are waited for this long after their longest life, for the births
-/// of the frame that took the model down [design].
-pub const LIFE_MARGIN: f32 = 0.25;
-/// The longest life taken for a shared system's drops when it is not known, and the longest
-/// they are waited for at all [design].
-pub const UNKNOWN_LIFE: f32 = 30.0;
-pub const LONGEST_WAIT: f32 = 120.0;
 /// WTHR DATA classification bits [documented: xEdit; `fnv_world::sky::Weather`].
 const RAINY: u8 = 4;
 const SNOW: u8 = 8;
@@ -122,7 +117,7 @@ pub fn dry_share(w: &Weather) -> f32 {
 
 /// Whether a weather's own precipitation falls now, by weather_fx.rs's rule: the one shown or
 /// coming in from its begin-fade-in byte, the one going out until its end-fade-out byte
-/// [hypothesis there: from the fields' names]. Drops still in the air are [`Drops`]'.
+/// [hypothesis there: from the fields' names]. Drops still in the air are [`Precipitation`]'s.
 pub fn precipitation_falls(sky: &SkyState) -> bool {
     let t = progress(sky);
     let falls = |w: &Weather, role| w.precipitation_model.is_some() && fade_share_on(w.precipitation_fade, role);
@@ -132,11 +127,12 @@ pub fn precipitation_falls(sky: &SkyState) -> bool {
     }
 }
 
-/// The weathers' dry share now (0..1): [`dry_share`] blended through the fade; 0 while either's
-/// precipitation falls, reached in a straight line from the fade's start to the incoming
-/// precipitation's start and left from the outgoing one's stop to the fade's end [design]. A
-/// byte that leaves no room (begin 0, end 255) lets it go or come at once, as the rain does;
-/// [`Follow`] then still lets it come back slowly.
+/// The weathers' dry share now (0..1); 0 while either's precipitation falls. A product of
+/// linear ramps of the fade's progress: [`dry_share`] blended from one weather to the other;
+/// into a precipitation model, 1 at the fade's start down to 0 where it begins to fall; out of
+/// one, 0 where it stops up to 1 at the fade's end [design]. So with a model on one side it is
+/// a curve, not a straight line. A byte that leaves no room (begin 0, end 255) lets it go or
+/// come at once, as the rain does; [`Follow`] then still lets it come back slowly.
 pub fn dry_through_fade(sky: &SkyState) -> f32 {
     let now = dry_share(&sky.weather);
     let Some(p) = &sky.prev else { return now };
@@ -175,86 +171,26 @@ pub fn asked(sky: &SkyState) -> Asked {
     Asked { strength: strength_from_wind(wind_byte(sky)), dry, cut }
 }
 
-/// Whose drops fall, by what particles.rs keeps a system under (its `Source`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DropSource {
-    /// The precipitation model's own systems, by its path. Their count is trusted alone.
-    Model(String),
-    /// An add-on node of it (a child emitter), by its node index. Every emitter of one index
-    /// feeds one system (particles.rs `Key`), so a burning barrel of the same index may keep
-    /// the count above 0 for ever: the wait also ends when the longest life is over.
-    Addon(i32),
+/// The weather's precipitation in the world this frame, from whoever draws it (the module
+/// notes: what the next slice must do).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Precipitation {
+    /// A precipitation model is placed now, also one that has given no drop yet.
+    pub placed: bool,
+    /// Drops alive after this frame's simulation that any precipitation gave, whichever model
+    /// and whether it still stands.
+    pub alive: usize,
 }
 
-/// A source placed this frame, with the longest a drop of it lives (seconds), when known; read
-/// for [`DropSource::Addon`] only.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Placed {
-    pub source: DropSource,
-    pub longest_life: Option<f32>,
-}
-
-impl Placed {
-    /// How long after it is taken down the source's drops may be in the air; `None`: as long
-    /// as any is counted.
-    fn wait(&self) -> Option<f32> {
-        match self.source {
-            DropSource::Model(_) => None,
-            DropSource::Addon(_) => {
-                let life = self.longest_life.filter(|l| l.is_finite() && *l > 0.0).unwrap_or(UNKNOWN_LIFE);
-                Some((life + LIFE_MARGIN).min(LONGEST_WAIT))
-            }
-        }
+impl Precipitation {
+    /// No dust while it lasts.
+    pub fn here(self) -> bool {
+        self.placed || self.alive > 0
     }
 }
 
-/// Every source of drops placed so far whose drops may still be in the air. An earlier version
-/// remembered one model: rain that gave way to snow was forgotten with its drops still
-/// falling, and drops of a model's add-on nodes were never counted.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Drops {
-    /// Each source and the seconds it may still be waited for (`None`: by its count alone).
-    sources: Vec<(DropSource, Option<f32>)>,
-}
-
-impl Drops {
-    /// A frame: `placed` is what stands now (all of it, also what has given no drop yet),
-    /// `alive` the count of a source's drops alive after this frame's births and deaths.
-    /// Whether drops may be in the air.
-    pub fn follow(&mut self, placed: &[Placed], alive: impl Fn(&DropSource) -> usize, dt: f32) -> bool {
-        let dt = step(dt);
-        self.sources.retain_mut(|(source, left)| {
-            if placed.iter().any(|p| p.source == *source) {
-                return true;
-            }
-            if let Some(left) = left {
-                *left -= dt;
-                if *left <= 0.0 {
-                    return false;
-                }
-            }
-            alive(source) > 0
-        });
-        for p in placed {
-            match self.sources.iter_mut().find(|(s, _)| *s == p.source) {
-                Some((_, left)) => *left = p.wait(),
-                None => self.sources.push((p.source.clone(), p.wait())),
-            }
-        }
-        !self.sources.is_empty()
-    }
-
-    /// The sources still waited for (a debug line, the tests).
-    pub fn waiting(&self) -> usize {
-        self.sources.len()
-    }
-}
-
-/// The amount as it moves from frame to frame.
-///
-/// An earlier version followed its target as it was except after a turned-round fade, so one
-/// frame after the rain's end it stood at full strength. Here the glide is not a state that a
-/// cut could forget to set: every rise, whatever its reason, is held to [`RISE_RATE`].
+/// The amount as it moves from frame to frame. There is no gliding state that a cut could forget
+/// to set: every rise, whatever its reason, is held to [`RISE_RATE`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Follow {
     /// The strength and the amount shown last; `None` before the first frame.
@@ -266,15 +202,15 @@ impl Follow {
     /// (a forced weather changes the wind at once). The dry share acts as the fade has it, so
     /// the amount reaches 0 where the rain starts. Their product rises by at most
     /// [`RISE_RATE`] and falls by at most [`FALL_RATE`] a second; 0 at once while cut
-    /// (`asked.cut` or `drops`). The first frame shows its target.
-    pub fn follow(&mut self, asked: Asked, drops: bool, dt: f32) -> f32 {
+    /// (`asked.cut` or `rain`). The first frame shows its target.
+    pub fn follow(&mut self, asked: Asked, rain: Precipitation, dt: f32) -> f32 {
         let (wanted, dry) = (held(asked.strength, 0.0, MOST), held(asked.dry, 0.0, 1.0));
         let dt = step(dt);
         let (strength, last) = match self.shown {
             Some((s, a)) => (s + (wanted - s).clamp(-RISE_RATE * dt, RISE_RATE * dt), a),
             None => (wanted, wanted * dry),
         };
-        let amount = if asked.cut || drops {
+        let amount = if asked.cut || rain.here() {
             0.0
         } else {
             held(last + (strength * dry - last).clamp(-FALL_RATE * dt, RISE_RATE * dt), 0.0, MOST)
@@ -295,56 +231,54 @@ pub fn wind_velocity(sky: &SkyState) -> Option<Vec2> {
     v.is_finite().then_some(v)
 }
 
-/// How far the wind has carried the dust: the sum of its velocity over the game's clock, in
-/// f64, kept within one [`DRIFT_PERIOD`] on each axis (the patches repeat there, so wrapping
-/// moves nothing).
+/// How far the wind has carried the dust: its velocity summed exactly over the game's clock, so
+/// the frames it is cut into change nothing; in f64, kept within one [`DRIFT_PERIOD`] on each
+/// axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Drift {
     /// Bevy world x and z, 0..[`DRIFT_PERIOD`].
-    at: [f64; 2],
+    at: DVec2,
     /// The dust's velocity, which follows the wind's; `None` before the first wind.
-    velocity: Option<Vec2>,
+    velocity: Option<DVec2>,
 }
 
 impl Drift {
-    /// A frame: the velocity goes toward `wind` over [`TURN_SECONDS`] (it is `wind` at first,
-    /// and stays as it is for `None`), and the dust goes with it.
+    /// `dt` seconds of `wind` (all of them: a hitch does not hold the dust still). The velocity
+    /// goes toward the wind with the time constant T = [`TURN_SECONDS`], v(t) = w + (v0 - w)
+    /// e^(-t/T), and the place by its integral, w t + (v0 - w) T (1 - e^(-t/T)). The first
+    /// wind is taken whole; without one (`None`, or not finite) the velocity stays as it is.
     pub fn advance(&mut self, wind: Option<Vec2>, dt: f32) {
-        let dt = step(dt);
-        let wind = wind.filter(|w| w.is_finite());
-        self.velocity = match (self.velocity, wind) {
-            (Some(v), Some(w)) => Some(v + (w - v) * (1.0 - (-dt / TURN_SECONDS).exp())),
-            (v, w) => v.or(w),
-        };
-        let v = self.velocity().to_array();
-        for (at, v) in self.at.iter_mut().zip(v) {
-            *at = wrapped(*at + f64::from(dt) * f64::from(v));
-        }
+        let t = if dt.is_finite() { f64::from(dt.max(0.0)) } else { 0.0 };
+        let wind = wind.filter(|w| w.is_finite()).map(|w| w.as_dvec2());
+        let Some(from) = self.velocity.or(wind) else { return };
+        let to = wind.unwrap_or(from);
+        let share = -(-t / TURN_SECONDS).exp_m1();
+        self.velocity = Some(from + (to - from) * share);
+        self.at = wrapped(self.at + to * t + (from - to) * (TURN_SECONDS * share));
     }
 
     /// The patches' phase at `camera` (Bevy world x and z): (camera - drift) within
     /// 0..[`DRIFT_PERIOD`], to which a shader adds a place relative to the camera. In f64, so
     /// a camera far from the origin keeps its fraction.
-    pub fn phase(&self, camera: [f64; 2]) -> Vec2 {
-        let p = |k: usize| {
-            let p = wrapped(camera[k] - self.at[k]) as f32;
-            // The f32 nearest to a number just under the period is the period.
-            if p < DRIFT_PERIOD as f32 { p } else { 0.0 }
-        };
-        Vec2::new(p(0), p(1))
+    pub fn phase(&self, camera: DVec2) -> Vec2 {
+        let p = wrapped(camera - self.at).as_vec2();
+        // The f32 nearest to a number just under the period is the period.
+        Vec2::from(p.to_array().map(|p| if p < DRIFT_PERIOD as f32 { p } else { 0.0 }))
     }
 
     /// The dust's velocity now (Bevy world x and z, units a second).
     pub fn velocity(&self) -> Vec2 {
-        self.velocity.unwrap_or(Vec2::ZERO)
+        self.velocity.unwrap_or(DVec2::ZERO).as_vec2()
     }
 }
 
-/// `x` within 0..[`DRIFT_PERIOD`]; 0 when it is not a finite number.
-fn wrapped(x: f64) -> f64 {
-    let p = x.rem_euclid(DRIFT_PERIOD);
-    // A tiny negative number's remainder rounds up to the period itself.
-    if p.is_finite() && p < DRIFT_PERIOD { p } else { 0.0 }
+/// Each axis within 0..[`DRIFT_PERIOD`]; 0 where it is not a finite number.
+fn wrapped(x: DVec2) -> DVec2 {
+    DVec2::from(x.to_array().map(|x| {
+        let p = x.rem_euclid(DRIFT_PERIOD);
+        // A tiny negative number's remainder rounds up to the period itself.
+        if p.is_finite() && p < DRIFT_PERIOD { p } else { 0.0 }
+    }))
 }
 
 /// The dust's colour (linear): the fog's, tinted by the hue of the light on it, its ambient
@@ -379,36 +313,32 @@ pub struct DustFrame {
 }
 
 /// The rules' state between frames.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WindDust {
     follow: Follow,
-    drops: Drops,
     pub drift: Drift,
 }
 
 impl WindDust {
-    /// A frame, after the sky's and the particles', by the game's clock (`dt` 0 while it is
-    /// paused: nothing moves). In an interior (`indoors`: the streamer's cell, which may have
-    /// no lighting of its own; or the sky's interior lighting) the amount is 0 and the rest
-    /// goes on as the weather outside does.
-    pub fn advance(&mut self, sky: &SkyState, indoors: bool, placed: &[Placed], alive: impl Fn(&DropSource) -> usize, dt: f32) -> DustFrame {
-        let drops = self.drops.follow(placed, alive, dt);
+    /// A frame, after the sky's and the particles' simulation, by the game's clock (`dt` 0
+    /// while it is paused: nothing moves). In an interior (`indoors`: the streamer's cell,
+    /// which may have no lighting of its own; or the sky's interior lighting) the amount is
+    /// masked to 0 and the rest goes on as the weather outside does: call it there too, so
+    /// coming out shows what the glide has reached.
+    pub fn advance(&mut self, sky: &SkyState, indoors: bool, rain: Precipitation, dt: f32) -> DustFrame {
         let asked = asked(sky);
-        let amount = self.follow.follow(asked, drops, dt);
+        let amount = self.follow.follow(asked, rain, dt);
         self.drift.advance(wind_velocity(sky), dt);
         let indoors = indoors || sky.interior.is_some();
-        DustFrame { amount: if indoors { 0.0 } else { amount }, colour: sky_dust_colour(sky), wet: asked.cut || drops, indoors }
+        DustFrame { amount: if indoors { 0.0 } else { amount }, colour: sky_dust_colour(sky), wet: asked.cut || rain.here(), indoors }
     }
 
-    /// A load, a new game or a long trip: the next frame shows its target (0 if it is cut).
-    /// What is in the air and how far the dust has drifted stay.
+    /// A game loaded or a new one, and nothing else: the next frame shows its target (0 if it
+    /// is cut). Never for a door, a cell change or a trip within a game: the amount carries on
+    /// over those (masked indoors), or the dust would jump back after rain. How far the dust
+    /// has drifted stays.
     pub fn arrive(&mut self) {
         self.follow = Follow::default();
-    }
-
-    /// The sources of drops waited for (a debug line, the tests).
-    pub fn waiting(&self) -> usize {
-        self.drops.waiting()
     }
 }
 
@@ -417,8 +347,12 @@ mod tests {
     use super::*;
 
     const DT: f32 = 1.0 / 60.0;
-    const RAIN: &str = "meshes\\a\\rain.nif";
-    const SNOWFALL: &str = "meshes\\a\\snow.nif";
+    const DRY: Precipitation = Precipitation { placed: false, alive: 0 };
+    const PLACED: Precipitation = Precipitation { placed: true, alive: 0 };
+
+    fn falling(alive: usize) -> Precipitation {
+        Precipitation { placed: false, alive }
+    }
 
     fn weather(wind: u8) -> Weather {
         Weather { classification: 1, wind_speed: wind, ..default() }
@@ -442,24 +376,6 @@ mod tests {
         s.prev = Some(from);
         s.fade = fade;
         s
-    }
-
-    fn model(path: &str) -> Placed {
-        Placed { source: DropSource::Model(path.into()), longest_life: None }
-    }
-
-    fn addon(index: i32, longest_life: Option<f32>) -> Placed {
-        Placed { source: DropSource::Addon(index), longest_life }
-    }
-
-    /// A count of `n` drops of `of`, 0 of any other source.
-    fn drops(of: &Placed, n: usize) -> impl Fn(&DropSource) -> usize {
-        let of = of.source.clone();
-        move |s| if *s == of { n } else { 0 }
-    }
-
-    fn no_drops(_: &DropSource) -> usize {
-        0
     }
 
     /// What the weather asks for with nothing to follow: the steady amount.
@@ -503,10 +419,6 @@ mod tests {
         // A fade that is not a number, or past its ends.
         for (bad, want) in [(f32::NAN, 50.0), (f32::INFINITY, 50.0), (-3.0, 50.0), (7.0, 127.0)] {
             assert_eq!(wind_byte(&fading(weather(50), weather(127), bad)), want, "{bad}");
-        }
-        // The trees' wind, to its thousandths.
-        for s in [sky(weather(50)), sky(weather(255)), fading(weather(50), weather(127), 0.4)] {
-            assert!((crate::tree::wind_vector(&s).w * 255.0 - wind_byte(&s)).abs() < 0.13);
         }
     }
 
@@ -582,11 +494,11 @@ mod tests {
     fn a_fade_into_rain_is_followed_to_nothing_without_a_step() {
         // 30 s to the weather, rain from a fifth of it on: the amount goes down its line.
         let mut f = Follow::default();
-        let mut last = f.follow(asked(&sky(weather(127))), false, DT);
+        let mut last = f.follow(asked(&sky(weather(127))), DRY, DT);
         assert!((last - 3.0).abs() < 1e-5);
         for frame in 0..=1800 {
             let s = fading(weather(127), wet((51, 128)), frame as f32 / 1800.0);
-            let a = f.follow(asked(&s), false, DT);
+            let a = f.follow(asked(&s), DRY, DT);
             assert!(a <= last + 1e-6 && last - a < 0.02, "frame {frame}: {last} -> {a}");
             assert!(!precipitation_falls(&s) || a == 0.0);
             last = a;
@@ -599,34 +511,31 @@ mod tests {
         // Every way rain can end: its fade's last frame (end byte 255, no room to fade in), a
         // forced dry weather, the last drop of it.
         let mut f = Follow::default();
-        assert_eq!(f.follow(asked(&sky(wet((0, 255)))), false, DT), 0.0);
-        assert_eq!(f.follow(asked(&fading(wet((0, 255)), weather(127), 0.999)), false, DT), 0.0);
+        assert_eq!(f.follow(asked(&sky(wet((0, 255)))), DRY, DT), 0.0);
+        assert_eq!(f.follow(asked(&fading(wet((0, 255)), weather(127), 0.999)), DRY, DT), 0.0);
         let dry = asked(&sky(weather(127)));
-        assert_eq!(f.follow(dry, true, DT), 0.0, "its last drops still fall");
+        assert_eq!(f.follow(dry, falling(3), DT), 0.0, "its last drops still fall");
         let mut last = 0.0;
         for frame in 1..=600 {
-            let a = f.follow(dry, false, DT);
+            let a = f.follow(dry, DRY, DT);
             assert!(a > last && a - last <= RISE_RATE * DT + 1e-5, "frame {frame}: {last} -> {a}");
             last = a;
         }
         assert!((last - 1.0).abs() < 0.01, "ten seconds at a tenth a second: {last}");
         for _ in 0..1300 {
-            last = f.follow(dry, false, DT);
+            last = f.follow(dry, DRY, DT);
         }
         assert!((last - 3.0).abs() < 1e-3, "and all of it in thirty: {last}");
-        // Cut again half way and back: from 0 again.
-        assert_eq!(f.follow(dry, true, DT), 0.0);
-        assert!(f.follow(dry, false, DT) <= RISE_RATE * DT + 1e-6);
     }
 
     #[test]
     fn a_forced_weather_never_makes_the_amount_jump() {
         let run = |from: Weather, to: Weather| {
             let mut f = Follow::default();
-            let mut last = f.follow(asked(&sky(from)), false, DT);
+            let mut last = f.follow(asked(&sky(from)), DRY, DT);
             let s = sky(to);
             for _ in 0..(40 * 60) {
-                let a = f.follow(asked(&s), false, DT);
+                let a = f.follow(asked(&s), DRY, DT);
                 assert!((a - last).abs() <= RISE_RATE * DT + 1e-5, "{last} -> {a}");
                 last = a;
             }
@@ -635,17 +544,6 @@ mod tests {
         run(weather(0), weather(255));
         run(weather(255), weather(0));
         run(weather(50), weather(127));
-        // Through the sky's own forced change, to a wet weather and back.
-        let mut s = sky(weather(127));
-        let mut f = Follow::default();
-        assert!(f.follow(asked(&s), false, DT) > 2.9);
-        s.script_weather(Weather { rainy: true, form_id: 0x77, ..weather(127) }, [None; 6], true, true);
-        assert!(s.prev.is_none() && s.weather.rainy);
-        assert_eq!(f.follow(asked(&s), false, DT), 0.0, "wet at once, gone at once");
-        s.script_weather(Weather { form_id: 0x78, ..weather(127) }, [None; 6], true, true);
-        assert!(s.prev.is_none() && !s.weather.rainy);
-        let a = f.follow(asked(&s), false, DT);
-        assert!(a > 0.0 && a <= RISE_RATE * DT + 1e-6, "dry at once, back slowly: {a}");
     }
 
     #[test]
@@ -656,13 +554,13 @@ mod tests {
         assert!(!precipitation_falls(&before) && !precipitation_falls(&after));
         assert!(target(&after) - target(&before) > 0.5, "the target jumps");
         let mut f = Follow::default();
-        let a = f.follow(asked(&before), false, DT);
-        let b = f.follow(asked(&after), false, DT);
+        let a = f.follow(asked(&before), DRY, DT);
+        let b = f.follow(asked(&after), DRY, DT);
         assert!(b > a && b - a <= RISE_RATE * DT + 1e-6, "{a} -> {b}");
         // The other way round it goes down within a second, not in a frame.
         let mut f = Follow::default();
-        let a = f.follow(asked(&after), false, DT);
-        let b = f.follow(asked(&before), false, DT);
+        let a = f.follow(asked(&after), DRY, DT);
+        let b = f.follow(asked(&before), DRY, DT);
         assert!(b < a && a - b <= FALL_RATE * DT + 1e-6, "{a} -> {b}");
     }
 
@@ -670,18 +568,18 @@ mod tests {
     fn a_pause_holds_a_hitch_is_one_step_and_wild_numbers_stay_in_range() {
         let dry = Asked { strength: 3.0, dry: 1.0, cut: false };
         let mut f = Follow::default();
-        f.follow(Asked { cut: true, ..dry }, false, DT);
-        assert_eq!(f.follow(dry, false, 0.0), 0.0, "paused");
-        assert!(f.follow(dry, false, 1e6) <= RISE_RATE * LONGEST_STEP + 1e-6, "a hitch");
+        f.follow(Asked { cut: true, ..dry }, DRY, DT);
+        assert_eq!(f.follow(dry, DRY, 0.0), 0.0, "paused");
+        assert!(f.follow(dry, DRY, 1e6) <= RISE_RATE * LONGEST_STEP + 1e-6, "a hitch");
         let wild = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 0.0, 0.5, 1e30];
         for &strength in &wild {
             for &dry in &wild {
                 for &dt in &wild {
                     for cut in [false, true] {
-                        let a = f.follow(Asked { strength, dry, cut }, false, dt);
+                        let a = f.follow(Asked { strength, dry, cut }, DRY, dt);
                         assert!((0.0..=MOST).contains(&a) && (!cut || a == 0.0), "{a} for {strength} {dry} {dt}");
                         let mut first = Follow::default();
-                        let a = first.follow(Asked { strength, dry, cut }, false, dt);
+                        let a = first.follow(Asked { strength, dry, cut }, DRY, dt);
                         assert!((0.0..=MOST).contains(&a) && (!cut || a == 0.0));
                     }
                 }
@@ -690,82 +588,55 @@ mod tests {
     }
 
     #[test]
-    fn every_model_placed_is_waited_for_until_its_last_drop() {
-        let (rain, snow) = (model(RAIN), model(SNOWFALL));
-        let mut d = Drops::default();
-        assert!(!d.follow(&[], |_| 99, DT), "nothing placed: another effect's particles are nobody's drops");
-        assert!(d.follow(std::slice::from_ref(&rain), no_drops, DT), "placed, no drop yet");
-        // Rain gives way to snow in one frame; the rain's drops are still falling.
-        assert!(d.follow(std::slice::from_ref(&snow), drops(&rain, 40), DT));
-        assert_eq!(d.waiting(), 2);
-        // The snow is taken down with no flake left: the rain's drops are still falling.
-        assert!(d.follow(&[], drops(&rain, 12), DT), "the first version forgot them");
-        assert_eq!(d.waiting(), 1);
-        assert!(!d.follow(&[], no_drops, DT));
-        assert_eq!(d.waiting(), 0);
-        assert!(!d.follow(&[], drops(&rain, 5), DT), "and is not taken up again by itself");
-        // Placed again and again: one entry each.
-        for _ in 0..100 {
-            d.follow(&[rain.clone(), snow.clone()], no_drops, DT);
+    fn drops_in_the_air_keep_the_dust_off_after_the_weather_is_dry() {
+        // The sky is dry already; what fell before it is down to its last drops.
+        let mut w = WindDust::default();
+        let s = sky(weather(127));
+        for alive in [40, 40, 12, 1] {
+            let f = w.advance(&s, false, falling(alive), DT);
+            assert!(f.amount == 0.0 && f.wet, "{alive} in the air: {f:?}");
         }
-        assert_eq!(d.waiting(), 2);
+        // The last one gone: slowly back. A model placed, with no drop yet: none.
+        let f = w.advance(&s, false, DRY, DT);
+        assert!(f.amount > 0.0 && f.amount <= RISE_RATE * DT + 1e-6 && !f.wet, "{f:?}");
+        let f = w.advance(&s, false, PLACED, DT);
+        assert!(f.amount == 0.0 && f.wet);
+        assert!(w.advance(&s, false, DRY, DT).amount <= RISE_RATE * DT + 1e-6);
+        // From full strength, one drop: gone in that frame.
+        let mut w = WindDust::default();
+        assert!(w.advance(&s, false, DRY, DT).amount > 2.9);
+        assert_eq!(w.advance(&s, false, falling(1), DT).amount, 0.0);
     }
 
     #[test]
-    fn a_child_emitters_drops_count_but_another_emitter_of_its_kind_holds_nothing_up() {
-        let (rain, child) = (model(RAIN), addon(7, Some(2.0)));
-        let mut d = Drops::default();
-        assert!(d.follow(&[rain.clone(), child.clone()], no_drops, DT));
-        // The model's own drops are gone, its add-on node's are not.
-        assert!(d.follow(&[], drops(&child, 3), DT));
-        assert!(!d.follow(&[], no_drops, DT), "gone before their longest life");
-        // A burning barrel of the same index keeps the shared count up: the longest life ends it.
-        d.follow(&[rain.clone(), child.clone()], no_drops, DT);
-        let mut waited = 0.0;
-        while d.follow(&[], drops(&child, 50), DT) {
-            waited += DT;
-            assert!(waited < 10.0, "held up for ever");
-        }
-        assert!((2.0..2.4).contains(&waited), "{waited}");
-        // Standing, its time does not run; a model's own drops have none.
-        for _ in 0..600 {
-            assert!(d.follow(std::slice::from_ref(&child), drops(&child, 50), DT));
-        }
-        d.follow(std::slice::from_ref(&rain), no_drops, DT);
-        for _ in 0..(200 * 60) {
-            assert!(d.follow(&[], drops(&rain, 1), DT), "as long as one falls");
-        }
-        // Paused: nothing runs out.
-        let mut d = Drops::default();
-        d.follow(std::slice::from_ref(&child), no_drops, DT);
-        for _ in 0..1000 {
-            assert!(d.follow(&[], drops(&child, 50), 0.0));
-        }
+    fn dust_first_enabled_in_the_last_drops_of_rain_starts_from_none() {
+        let mut w = WindDust::default();
+        let s = sky(weather(127));
+        assert_eq!(w.advance(&s, false, falling(5), DT).amount, 0.0);
+        assert!(w.advance(&s, false, DRY, DT).amount <= RISE_RATE * DT + 1e-6, "no first frame at its target");
     }
 
     #[test]
-    fn a_life_that_is_not_known_or_not_a_number_is_waited_for_within_bounds() {
-        for (life, want) in [
-            (None, UNKNOWN_LIFE + LIFE_MARGIN),
-            (Some(f32::NAN), UNKNOWN_LIFE + LIFE_MARGIN),
-            (Some(f32::INFINITY), UNKNOWN_LIFE + LIFE_MARGIN),
-            (Some(-4.0), UNKNOWN_LIFE + LIFE_MARGIN),
-            (Some(1.5), 1.5 + LIFE_MARGIN),
-            (Some(1e30), LONGEST_WAIT),
-        ] {
-            assert_eq!(addon(1, life).wait(), Some(want), "{life:?}");
-        }
-        assert_eq!(model(RAIN).wait(), None);
-        let mut d = Drops::default();
-        d.follow(&[addon(1, None)], no_drops, f32::NAN);
-        assert!(d.follow(&[], |_| 1, f32::NAN) && d.follow(&[], |_| 1, -5.0));
+    fn a_weather_a_script_forces_wet_cuts_the_dust_and_dry_lets_it_back_slowly() {
+        // Through the sky's own forced change, by the weather's rule alone (no count).
+        let mut s = sky(weather(127));
+        let mut w = WindDust::default();
+        assert!(w.advance(&s, false, DRY, DT).amount > 2.9);
+        s.script_weather(Weather { rainy: true, form_id: 0x77, ..weather(127) }, [None; 6], true, true);
+        assert!(s.prev.is_none() && s.weather.rainy);
+        let f = w.advance(&s, false, DRY, DT);
+        assert!(f.amount == 0.0 && f.wet, "wet at once, gone at once");
+        s.script_weather(Weather { form_id: 0x78, ..weather(127) }, [None; 6], true, true);
+        assert!(s.prev.is_none() && !s.weather.rainy);
+        let a = w.advance(&s, false, DRY, DT).amount;
+        assert!(a > 0.0 && a <= RISE_RATE * DT + 1e-6, "dry at once, back slowly: {a}");
     }
 
     #[test]
     fn a_turn_changes_the_way_and_never_the_place() {
         let mut d = Drift::default();
         let (east, south) = (Vec2::new(118.0, 0.0), Vec2::new(0.0, 118.0));
-        let (mut at, mut v) = (d.phase([0.0; 2]), None::<Vec2>);
+        let (mut at, mut v) = (d.phase(DVec2::ZERO), None::<Vec2>);
         for frame in 0..1800 {
             // A right angle at once, then straight back, then a stop (a forced calm weather).
             let wind = match frame {
@@ -775,12 +646,12 @@ mod tests {
                 _ => Vec2::ZERO,
             };
             d.advance(Some(wind), DT);
-            let now = d.phase([0.0; 2]);
+            let now = d.phase(DVec2::ZERO);
             let moved = (now - at).abs();
             let moved = moved.min(Vec2::splat(DRIFT_PERIOD as f32) - moved);
             assert!(moved.length() <= 118.0 * DT + 0.02, "frame {frame}: {moved}");
             if let Some(v) = v {
-                assert!((d.velocity() - v).length() <= 2.0 * 118.0 * DT / TURN_SECONDS + 1e-3, "frame {frame}: no lurch");
+                assert!((d.velocity() - v).length() <= 2.0 * 118.0 * DT / TURN_SECONDS as f32 + 1e-3, "frame {frame}: no lurch");
             }
             (at, v) = (now, Some(d.velocity()));
         }
@@ -788,25 +659,56 @@ mod tests {
     }
 
     #[test]
-    fn the_drift_is_the_winds_way_and_its_first_wind_is_whole() {
+    fn the_frames_a_stretch_of_time_is_cut_into_do_not_move_the_place() {
+        // A second of one wind, then four of another, in 1 frame or in 1,000.
+        let (first, then) = (Vec2::new(0.0, -118.0), Vec2::new(299.0, 20.0));
+        let run = |frames: u32| {
+            let mut d = Drift::default();
+            d.advance(Some(first), 1.0);
+            for _ in 0..frames {
+                d.advance(Some(then), 4.0 / frames as f32);
+            }
+            d
+        };
+        let one = run(1);
+        for frames in [7, 60, 1000] {
+            let d = run(frames);
+            assert!((d.at - one.at).abs().max_element() < 1e-3, "{frames} frames: {} and {}", d.at, one.at);
+            assert!((d.velocity() - one.velocity()).length() < 1e-3);
+        }
+        // And it is where the velocity summed in small steps of its own ends.
+        let (mut at, mut v) = (first.as_dvec2(), first.as_dvec2());
+        let steps = 400_000;
+        let h = 4.0 / f64::from(steps);
+        for _ in 0..steps {
+            let mid = v + (then.as_dvec2() - v) * (h * 0.5 / TURN_SECONDS);
+            at += mid * h;
+            v += (then.as_dvec2() - mid) * (h / TURN_SECONDS);
+        }
+        assert!((one.at - wrapped(at)).abs().max_element() < 1e-3, "{} and {at}", one.at);
+    }
+
+    #[test]
+    fn the_first_wind_is_whole_and_what_is_not_one_changes_nothing() {
         let mut d = Drift::default();
         d.advance(None, DT);
-        assert_eq!((d.velocity(), d.phase([5.0, 6.0])), (Vec2::ZERO, Vec2::new(5.0, 6.0)));
-        for _ in 0..600 {
-            d.advance(Some(Vec2::new(100.0, -50.0)), DT);
-        }
+        assert_eq!((d.velocity(), d.phase(DVec2::new(5.0, 6.0))), (Vec2::ZERO, Vec2::new(5.0, 6.0)));
         // Ten seconds on, the patch that was at the origin is at (1000, -500).
-        let p = d.phase([1000.0, -500.0]);
-        let off = p.min(Vec2::splat(DRIFT_PERIOD as f32) - p);
-        assert!(off.max_element() < 0.1, "{p}");
-        // A paused or broken clock, or a wind that is not a number, changes nothing.
+        d.advance(Some(Vec2::new(100.0, -50.0)), 10.0);
+        let p = d.phase(DVec2::new(1000.0, -500.0));
+        assert!(p.min(Vec2::splat(DRIFT_PERIOD as f32) - p).max_element() < 0.01, "{p}");
         let before = d;
-        d.advance(Some(Vec2::new(100.0, -50.0)), 0.0);
+        d.advance(Some(Vec2::new(0.0, 500.0)), 0.0);
         d.advance(Some(Vec2::new(0.0, 500.0)), f32::NAN);
         d.advance(Some(Vec2::new(0.0, 500.0)), -1.0);
-        assert_eq!(d, before);
-        d.advance(Some(Vec2::new(f32::NAN, 1.0)), DT);
-        assert_eq!(d.velocity(), before.velocity(), "the wind it had");
+        assert_eq!(d, before, "a paused or broken clock");
+        // No direction: the velocity it had, and it goes on.
+        d.advance(Some(Vec2::new(f32::NAN, 1.0)), 1.0);
+        d.advance(None, 1.0);
+        assert_eq!(d.velocity(), Vec2::new(100.0, -50.0));
+        assert!((d.at.x - 1200.0).abs() < 1e-6, "{}", d.at);
+        d.advance(Some(Vec2::new(600.0, 600.0)), f32::MAX);
+        assert!(d.at.cmpge(DVec2::ZERO).all() && d.at.cmplt(DVec2::splat(DRIFT_PERIOD)).all() && d.velocity().is_finite());
     }
 
     #[test]
@@ -819,13 +721,13 @@ mod tests {
             d.advance(Some(Vec2::new(-133.3, 77.7)), 0.2);
         }
         for cam in [0.0, 1234.5, -77_777.25, 1.0e6, -1.0e6, 1.0e6 + 0.37, -1e-12, f64::NAN, f64::INFINITY, -1e300] {
-            let p = d.phase([cam, -cam]);
+            let p = d.phase(DVec2::new(cam, -cam));
             assert!(p.cmpge(Vec2::ZERO).all() && p.cmplt(Vec2::splat(DRIFT_PERIOD as f32)).all(), "{p} at {cam}");
         }
-        let moved = d.phase([1.0e6 + 1.0, 0.0]).x - d.phase([1.0e6, 0.0]).x;
+        let moved = d.phase(DVec2::new(1.0e6 + 1.0, 0.0)).x - d.phase(DVec2::new(1.0e6, 0.0)).x;
         assert!((moved - 1.0).abs() < 0.01, "one unit a million units out: {moved}");
         // Where it wraps, nothing moves: a period on is the same place.
-        let (a, b) = (d.phase([1234.5, 9.0]), d.phase([1234.5 + DRIFT_PERIOD, 9.0 - DRIFT_PERIOD]));
+        let (a, b) = (d.phase(DVec2::new(1234.5, 9.0)), d.phase(DVec2::new(1234.5 + DRIFT_PERIOD, 9.0 - DRIFT_PERIOD)));
         assert!((a - b).abs().max_element() < 1e-2, "{a} {b}");
     }
 
@@ -875,48 +777,55 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_puts_the_rules_together() {
+    fn an_indoor_spell_masks_the_amount_and_coming_out_is_no_jump() {
+        let s = sky(weather(127));
+        let rain = sky(wet((0, 255)));
+        // Dry all along: the dust outside is as it was, and the wind went on.
         let mut w = WindDust::default();
-        let s = sky(weather(50));
-        let f = w.advance(&s, false, &[], no_drops, DT);
-        assert!((f.amount - 1.0).abs() < 1e-6 && !f.wet && !f.indoors, "the first frame shows its target: {f:?}");
-        // A model placed on a dry weather (the test aid, a script): cut while it stands and
-        // while its drops fall, then slowly back.
-        let rain = model(RAIN);
-        let f = w.advance(&s, false, std::slice::from_ref(&rain), no_drops, DT);
-        assert!(f.amount == 0.0 && f.wet);
-        let f = w.advance(&s, false, &[], drops(&rain, 8), DT);
-        assert!(f.amount == 0.0 && f.wet && w.waiting() == 1);
-        let f = w.advance(&s, false, &[], no_drops, DT);
-        assert!(f.amount > 0.0 && f.amount <= RISE_RATE * DT + 1e-6 && !f.wet, "{f:?}");
-        // Inside, none; the weather outside goes on, so coming out is no jump back to the rain.
-        for _ in 0..300 {
-            let f = w.advance(&s, true, &[], no_drops, DT);
+        let before = w.advance(&s, false, DRY, DT).amount;
+        let drift = w.drift;
+        for _ in 0..120 {
+            let f = w.advance(&s, true, DRY, DT);
             assert!(f.amount == 0.0 && f.indoors);
         }
-        let f = w.advance(&s, false, &[], no_drops, DT);
-        assert!((f.amount - 0.5).abs() < 0.02, "five seconds of the way back: {f:?}");
-        // The sky's interior lighting says it too, and the wind goes on there.
-        let mut inside = sky(weather(50));
+        assert!((w.drift.velocity() - drift.velocity()).length() < 1e-3 && w.drift != drift);
+        assert!((w.advance(&s, false, DRY, DT).amount - before).abs() < 1e-5);
+        // In just after rain: out again five seconds on, five seconds of the way back.
+        w.advance(&rain, false, PLACED, DT);
+        for _ in 0..300 {
+            assert_eq!(w.advance(&s, true, DRY, DT).amount, 0.0);
+        }
+        let a = w.advance(&s, false, DRY, DT).amount;
+        assert!((a - 0.5).abs() < 0.02, "{a}");
+        // It rained for a frame while inside: from none again at the door.
+        w.advance(&rain, true, DRY, DT);
+        w.advance(&s, true, DRY, DT);
+        let a = w.advance(&s, false, DRY, DT).amount;
+        assert!(a <= 2.0 * RISE_RATE * DT + 1e-6, "no full strength at the door: {a}");
+        // The sky's interior lighting masks it too.
+        let mut inside = sky(weather(127));
         inside.interior = Some(fnv_world::lighting::CellLighting::default());
-        let f = w.advance(&inside, false, &[], no_drops, DT);
-        assert!(f.amount == 0.0 && f.indoors && w.drift.velocity().length() > 100.0);
-        // A load: the target at once; but not into rain.
-        w.arrive();
-        assert!((w.advance(&s, false, &[], no_drops, DT).amount - 1.0).abs() < 1e-6);
-        w.arrive();
-        assert_eq!(w.advance(&sky(wet((0, 255))), false, &[], no_drops, DT).amount, 0.0);
-        assert!(w.advance(&s, false, &[], no_drops, DT).amount <= RISE_RATE * DT + 1e-6);
+        let f = w.advance(&inside, false, DRY, DT);
+        assert!(f.amount == 0.0 && f.indoors);
     }
 
     #[test]
-    fn rain_that_starts_while_the_player_is_inside_is_not_forgotten() {
+    fn a_load_shows_its_target_and_is_the_only_thing_that_does() {
+        let s = sky(weather(50));
         let mut w = WindDust::default();
-        let (dry, rain) = (sky(weather(127)), sky(wet((0, 255))));
-        w.advance(&dry, false, &[], no_drops, DT);
-        w.advance(&rain, true, &[], no_drops, DT);
-        w.advance(&dry, true, &[], no_drops, DT);
-        let f = w.advance(&dry, false, &[], no_drops, DT);
-        assert!(f.amount <= 2.0 * RISE_RATE * DT + 1e-6, "no full strength at the door: {f:?}");
+        w.advance(&s, false, falling(1), DT);
+        // Without it, as at a door or on a trip, the amount carries on.
+        let mut carried = w;
+        assert!(carried.advance(&s, false, DRY, DT).amount <= RISE_RATE * DT + 1e-6);
+        let drift = w.drift;
+        w.arrive();
+        assert_eq!(w.drift, drift);
+        assert!((w.advance(&s, false, DRY, DT).amount - 1.0).abs() < 1e-6);
+        // Loaded into rain or its last drops: none, and from none.
+        for (into, rain) in [(sky(wet((0, 255))), DRY), (sky(weather(50)), falling(2))] {
+            w.arrive();
+            assert_eq!(w.advance(&into, false, rain, DT).amount, 0.0);
+            assert!(w.advance(&s, false, DRY, DT).amount <= RISE_RATE * DT + 1e-6);
+        }
     }
 }

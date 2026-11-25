@@ -98,6 +98,12 @@ impl Fields {
         }
     }
 
+    /// Whether these are neither TTW's start nor the base game's: another mod's, set through
+    /// the card's Custom… window (#4288).
+    pub fn is_custom(&self) -> bool {
+        !self.is_ttw() && *self != Fields::original()
+    }
+
     /// Whether these are Tale of Two Wastelands' start: its quest and no film.
     pub fn is_ttw(&self) -> bool {
         self.quest.trim().eq_ignore_ascii_case(TTW_QUEST) && self.no_film
@@ -120,23 +126,6 @@ pub fn ttw_missing(fields: &Fields, ttw_active: Option<bool>) -> Option<String> 
     }
     let state = if ttw_active.is_some() { "is off in the load order" } else { "is not in the load order" };
     Some(format!("{TTW_PLUGIN} {state}: New Game starts the New Vegas opening instead. Turn it on, or turn TTW off."))
-}
-
-/// The start card's short words for `fields` while its quest and film boxes are closed
-/// (#4288): which start it is, then the quest and the film as they would be saved.
-pub fn summary(fields: &Fields) -> String {
-    let quest = fields.quest.trim();
-    let quest = if quest.is_empty() { DEFAULT_QUEST } else { quest };
-    let film = fields.film.trim();
-    let film = if fields.no_film { "no film" } else if film.is_empty() { DEFAULT_FILM } else { film };
-    let which = if fields.is_ttw() {
-        "Tale of Two Wastelands"
-    } else if quest.eq_ignore_ascii_case(DEFAULT_QUEST) && !fields.no_film && film.eq_ignore_ascii_case(DEFAULT_FILM) {
-        "New Vegas opening"
-    } else {
-        "Custom"
-    };
-    format!("{which}: {quest}, {film}")
 }
 
 /// `text` without the `key=` lines of `[section]` (names without case); every other line kept.
@@ -239,13 +228,12 @@ mod tests {
     }
 
     #[test]
-    fn the_closed_card_names_the_start() {
-        assert_eq!(summary(&Fields::ttw()), "Tale of Two Wastelands: 001FFFF8, no film");
-        assert_eq!(summary(&Fields::original()), "New Vegas opening: 00102037, FNVIntro.bik");
-        assert_eq!(summary(&Fields::default()), "New Vegas opening: 00102037, FNVIntro.bik");
-        let other = Fields { quest: " MyStart ".into(), film: "Mine.bik".into(), no_film: false };
-        assert_eq!(summary(&other), "Custom: MyStart, Mine.bik");
-        let quiet = Fields { no_film: true, ..Fields::original() };
-        assert_eq!(summary(&quiet), "Custom: 00102037, no film");
+    fn a_start_that_is_neither_ttws_nor_the_base_games_is_custom() {
+        assert!(!Fields::ttw().is_custom());
+        assert!(!Fields::original().is_custom());
+        assert!(!Fields::read("").is_custom());
+        assert!(Fields { quest: "MyStart".into(), ..Fields::original() }.is_custom());
+        assert!(Fields { film: "Mine.bik".into(), ..Fields::original() }.is_custom());
+        assert!(Fields { no_film: true, ..Fields::original() }.is_custom());
     }
 }

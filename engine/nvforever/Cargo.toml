@@ -123,7 +123,7 @@ winresource = "0.1"
 [dev-dependencies]
 # [design, #2403] Exercise the real reports system with synthetic UI navigation states.
 # [design, #2652] Authored-plugin runtimes for the Use Weapon shooter tests.
-nvf-play = { workspace = true, features = ["test-support", "report-test-support", "test-fixtures"] }
+nvf-play = { workspace = true, features = ["test-support", "report-test-support", "test-fixtures", "dev-aids"] }
 
 [[example]]
 name = "dialogue_model_capture"

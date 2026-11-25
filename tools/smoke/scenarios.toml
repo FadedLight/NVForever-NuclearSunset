@@ -36644,6 +36644,7 @@ note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a
 requires = ["NVF_SMOKE_DEV_AIDS"]
 run_seconds = 111
 expect = [
+  { text = "solid cores: off (debug aid NVF_PLAY_DEBUG_SOLID_CORES)", label = "the solid cores are off, so the switch moves the light alone" },
   { re = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_b\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the row on moves the picture past what it moves by itself in the same time" },
   { re = 'vl_on_d\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_c\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the same against the second pair with the row off" },
   { re = 'vl_off_e\.png: ([\d.]+) levels of 255 from the shot before', above = 'vl_off_b\.png: [\d.]+ levels of 255 from the shot before \(tolerance ([\d.]+)\)', label = "the row off moves it back" },

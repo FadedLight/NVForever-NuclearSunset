@@ -12,7 +12,8 @@
 //! `#[cfg(any(test, debug_assertions, feature = "dev-aids"))]`.
 //!
 //! The debug switches older than this module are read in every build, as is `NVF_PLAY_TEST_*`
-//! (nvf-play's test_aid.rs).
+//! (nvf-play's test_aid.rs) but for `NVF_PLAY_TEST_SHOT_DIFF`, which nvf-play compiles in under the
+//! same condition (its own `dev-aids` feature, which this crate's turns on).
 
 /// Whether this build has the developer aids.
 pub const ON: bool = cfg!(any(test, debug_assertions, feature = "dev-aids"));

@@ -170,6 +170,7 @@ const _: () = assert!(medium_air::AIR_SLICES.1 <= CHUNKS * GridWalk::LongChunks.
 const _: () = assert!(medium_air::AIR_GRID[2] <= CHUNKS * GridWalk::Chunks.chunk_slices());
 
 /// The start aids, read once [design: medium_air.rs's parsers].
+#[derive(Clone, Copy)]
 struct AirAids {
     tune: AirTune,
     grid: Option<[u32; 3]>,
@@ -186,6 +187,13 @@ static AIDS: LazyLock<AirAids> = LazyLock::new(|| {
     );
     AirAids { tune, grid: medium_air::debug_grid(var(medium_air::ENV_GRID).as_deref()), walk: medium_air::debug_walk(var(medium_air::ENV_WALK).as_deref()) }
 });
+
+/// The start aids; a build without the developer aids (dev_aids.rs) has their defaults, without a look
+/// at the static.
+#[inline]
+fn aids() -> AirAids {
+    if crate::dev_aids::ON { *AIDS } else { AirAids { tune: AirTune::default(), grid: None, walk: AirWalkAid::Auto } }
+}
 
 /// A view's name in the log, by its shader code (medium_air.rs `AirView::code`, so a view
 /// added there needs no arm here to compile; an unknown code reads "other").
@@ -705,7 +713,7 @@ pub(crate) fn follow_air(
     }
     // The main pass's render aspect: the perspective's own (the upscalers keep it).
     let Some((entity, aspect, fog, was)) = main else { return };
-    let aids = &*AIDS;
+    let aids = aids();
     let grid = AirGrid::for_view(aspect, aids.grid, aids.tune.depth);
     let (air_fog, fog_colour, display_blend) = camera_air_fog(fog);
     let outdoors = sky.as_ref().is_some_and(|s| s.interior.is_none()) && !submerged.is_some_and(|s| s.0);
@@ -1227,7 +1235,7 @@ fn prepare_air(
             }
             continue;
         }
-        let (walk, why) = GridWalk::choose(AIDS.walk, kind, fits, grid.nz);
+        let (walk, why) = GridWalk::choose(aids().walk, kind, fits, grid.nz);
         state.walk = walk;
         if state.told_walk != Some(walk) {
             state.told_walk = Some(walk);

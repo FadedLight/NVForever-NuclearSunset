@@ -421,7 +421,7 @@ fn follow(
     let want = wanted.is_some_and(|w| w.0);
     look.clear();
     lost.drain(&mut look);
-    if !want || st.aid == Aid::Off {
+    if !want || (crate::dev_aids::ON && st.aid == Aid::Off) {
         if want && !st.said_off {
             st.said_off = true;
             info!("solid cores: off (debug aid {AID})");

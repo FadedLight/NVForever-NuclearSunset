@@ -587,15 +587,19 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "getactivatorradiostation" => reff(form(args, 0).or(subject).map(|f| base(g, f)).and_then(|a| record_ref(g, a, "RNAM"))),
         // `form [activator]`: RNAM, VNAM, SNAM for the session, read by their getters
         // (GetActivatorSoundActivate/Looping, `nvse_plugins`).
-        "setactivatorradiostation" | "setactivatorsoundactivate" | "setactivatorsoundlooping" => {
-            let sub = match name {
-                "setactivatorradiostation" => "RNAM/",
-                "setactivatorsoundactivate" => "VNAM/",
-                _ => "SNAM/",
-            };
+        "setactivatorradiostation" | "setactivatorsoundlooping" => {
+            let sub = if name == "setactivatorradiostation" { "RNAM/" } else { "SNAM/" };
             let a = form(args, 1).or(subject).map(|f| base(g, f)).filter(|&a| g.data.sig(a) == Some(*b"ACTI"));
             if let Some(a) = a {
                 g.field_overrides.insert((a, sub.into()), XVal::Ref(form(args, 0).map_or(0, |f| f.0)));
+            }
+            zero
+        }
+        "setactivatorsoundactivate" => {
+            let a = form(args, 1).or(subject).map(|f| base(g, f)).filter(|&a| g.data.sig(g.unclone(a)) == Some(*b"ACTI"));
+            let s = form(args, 0).filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"SOUN"));
+            if let (Some(a), Some(s)) = (a, s) {
+                g.field_overrides.insert((a, "VNAM/".into()), XVal::Ref(s.0));
             }
             zero
         }

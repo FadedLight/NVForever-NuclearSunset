@@ -6326,7 +6326,7 @@ order = [[
 
 [[scenario]]
 name = "xp-meter"
-source = "[observed: private job hud_xp_limbs2, x9_level_up_long] meter fade/hold/fade about 2/2/2 s, pointer moving during hold; LEVEL UP alone at about 7.2 s, up within 0.34 s, full about 1.3 s; [owner 2026-10-24] filled-bar sound and 5 s wait retained. The HUD's XP meter and levelling by experience (docs/spec-notes/experience.md §6): RewardXP at the console shows the meter, a second reward reaches level 2, LEVEL UP, then the level-up menu opens by itself"
+source = "[observed: private job hud_xp_limbs2, x9_level_up_long] meter fade/hold/fade about 2/2/2 s, pointer moving during hold; LEVEL UP alone at about 7.2 s, up within 0.34 s, full about 1.3 s, menu at 9.35 s; [owner 2026-10-24; design: #3438] filled-bar sound at 4.0 s and 5.35 s wait to 9.35 s menu open. The HUD's XP meter and levelling by experience (docs/spec-notes/experience.md §6): RewardXP at the console shows the meter, a second reward reaches level 2, filled-bar sound, LEVEL UP, then the level-up menu opens by itself"
 areas = ["levelup", "hud"]
 paths = ["engine/nvf-play/src/xp_meter.rs", "crates/fnv-game/src/experience.rs", "engine/nvf-play/src/hud.rs"]
 env = { NVF_PLAY_TEST_SCRIPT_MENUS = "off", NVF_PLAY_TEST_CONSOLE = "14:rewardxp 54;14.3:close;22:rewardxp 150;22.3:close", NVF_PLAY_TEST_SHOTS = "18.5:xp_meter.png,30.3:xp_level_up.png,32.5:xp_levelup_menu.png" }
@@ -6337,6 +6337,7 @@ order = [[
   "xp: +54 XP from a script",
   "xp meter: +54 XP (54 in all): level 1, 27 % to 2",
   "xp meter: +150 XP (204 in all): level 1, 100 % to 2, next level earned",
+  "xp meter: sound UILevelUpText",
   "xp meter: LEVEL UP (1 -> 2)",
   { re = 'xp: level up taken: level 2 \(cap \d+\)' },
   { re = 'levelup: menu open, level 2, \d+ skill points, perk due' },
@@ -6347,7 +6348,7 @@ expect = [
   { gap = ["xp meter: +150 XP", "xp meter: LEVEL UP"], range = [7.1, 8.0], label = "LEVEL UP follows the six-second meter and gap (console holds HUD time until 22.3 s)" },
   { text = "xp meter: sound UILevelUpText", label = "the bar filled: the level-up sound" },
   { text = "ui sounds: level up opened: MUSSuccess", label = "the level-up screen's music" },
-  { gap = ["xp meter: sound UILevelUpText", "levelup: menu open"], range = [4.9, 6.0], label = "the menu opens 5 s after the level-up sound" },
+  { gap = ["xp meter: sound UILevelUpText", "levelup: menu open"], range = [5.2, 6.2], label = "the menu opens 5.35 s after the filled-bar level-up sound (~9.35 s after gain)" },
 ]
 manual = "xp_meter.png against the owner's screenshot (2026-10-16): the bar at the middle right, 1 at its left, 2 at its right, the pointer about a quarter along, +54 XP under its right end; xp_level_up.png LEVEL UP alone, no bracket, pointer, levels or +n XP; xp_levelup_menu.png the level-up menu"
 
@@ -33679,6 +33680,20 @@ order = [[
 forbid = [{ text = "EDE1Ref: does not talk", label = "ED-E has a greeting to say" }]
 
 [[scenario]]
+name = "android-start-options"
+source = "NVForever design, issue #2436 (docs/design/android.md): the Android launch defaults reach the shared game's main menu with MSAA off. This desktop scenario checks the shared argument path only, not NativeActivity, touch input or Android GPU behavior."
+areas = ["main-menu", "android"]
+paths = ["engine/nvf-android/**", "engine/nvforever/src/android.rs", "engine/nvforever/src/bin/nvforever.rs", "engine/nvforever/src/main.rs", "android/**"]
+env = { NVFOREVER_HOME = "android-start-options-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_MAIN_MENU = "5:continue" }
+args = ["--play", "--menu", "--msaa", "1", "--window", "borderless"]
+run_seconds = 12
+expect = [
+  { re = 'main menu: open \(\d+ loading screens, 0 saves\)', label = "the Android default arguments open the shared main menu" },
+  { text = "main menu: Continue is greyed out", label = "the main menu accepts the existing navigation input" },
+]
+forbid = [{ text = "explore: the free-camera explorer", label = "the port defaults do not select the explorer" }]
+
+[[scenario]]
 name = "mod-diagnostic-log-tool"
 kind = "tool"
 source = "docs/handoff/mod-diagnostic-cli.md: actual bounded mod-log CLI over two authored log files; log records differ from reported exit totals, and private words are opt-in"
@@ -35808,6 +35823,24 @@ expect = [
 ]
 
 [[scenario]]
+name = "new-game-start-quest-missing"
+source = "issue #3229 (player report R-PEZL695T, 0.8.1): NVForever.ini kept Tale of Two Wastelands' SCharGenQuest=001FFFF8 and empty SIntroMovie with TTW not loaded; New Game started nothing and said so only in the log"
+note = "the test aid gives TTW's two [General] lines in place of the INI's (a fixture home's NVForever.ini would be rewritten by every run); vanilla load order. New Game falls back to VCG00, whose stage 0 PlayBink then plays the New Vegas film, and a corner message names the setting"
+areas = ["scripts", "ui"]
+paths = ["engine/nvf-play/src/game_start.rs", "engine/nvf-play/src/script.rs"]
+env = { NVF_PLAY_TEST_GAME_START = "SCharGenQuest=001FFFF8;SIntroMovie=", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--play", "--new-game", "--no-voice", "--no-messages"]
+run_seconds = 25
+expect = [
+  { re = 'game start: sCharGenQuest=001FFFF8 sIntroMovie=\(none\) \(test aid NVF_PLAY_TEST_GAME_START\)', label = "TTW's two lines are read" },
+  { re = 'new game: sCharGenQuest=001FFFF8: 001FFFF8 \(0x001FFFF8\) is not a quest in the load order; New Game starts the New Vegas opening \(VCG00\) instead', label = "the warning says what happens instead" },
+  "new game: falling back to VCG00: the New Vegas opening starts",
+  "new game notice: The start quest 001FFFF8 (sCharGenQuest in NVForever.ini) is not in the load order: the New Vegas opening starts instead.",
+  { re = 'no opening quest started', count = 0, label = "never a silent empty start" },
+]
+order = [["new game: falling back to VCG00: the New Vegas opening starts", "new game notice: The start quest 001FFFF8"]]
+
+[[scenario]]
 name = "aerial-perspective"
 source = "[design, #2993] engine/nvforever/src/aerial.rs, fog.rs GAME_FOG, docs/design/graphics-enhanced.md §3.18: the Aerial perspective switch (off by default and in every preset) turned on while the game runs outdoors at Goodsprings at noon writes its figures, worked from the shown weather, into the fog uniform and logs them; turned off it logs off; the shader edits it rides on (pbr_functions.wesl nvf_aerial around the desert haze's fog call, fog.wesl GAME_FOG, the vendored Fog struct's nvf_params) are in place and every world pipeline compiles, without a rendering error"
 areas = ["renderer", "graphics", "settings"]
@@ -35938,6 +35971,21 @@ expect = [
   { json = "files.?tree=wastelandshrub01.stub_levels.#", schema = "fnv.spt.shape/1", equals = 0, count = 1, label = "WastelandShrub01 has no stub level" },
   { json = "files.?tree=whiteoak01.stub_levels.#", schema = "fnv.spt.shape/1", equals = 0, count = 1, label = "WhiteOak01 has no stub level" },
 ]
+
+[[scenario]]
+name = "locker-shelf-pick"
+source = "#3351: in the Sloan barracks an open locker (QJLocker01 0x000E7610) holds a first aid kit (0x000E7612) and Duck and Cover! (0x000E7613) on its shelves; the ray enters the locker's own render box before either, so the locker was always the crosshair's target (engine/nvf-play/src/activate/pick.rs choose_inside)"
+areas = ["activate"]
+paths = ["engine/nvf-play/src/activate/pick.rs"]
+note = "From in front of the open half the view is turned to the kit, then the book, then the locker's body beside the shelves [observed 2026-11-22: the three target lines in this order]"
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_GOTO = "2:2774:-640:16284", NVF_PLAY_TEST_LOOK = "4:180:-24,6:182:-40,8:177.5:-37" }
+args = ["--cell", "QJBarracks", "--play", "--no-voice", "--no-messages"]
+run_seconds = 11
+order = [[
+  { re = 'target 0x000E7612 First Aid Box \(Open', label = "the kit on the upper shelf is the target" },
+  { re = 'target 0x000E7613 Duck and Cover! \(Take', label = "the book on the lower shelf is the target" },
+  { re = 'target 0x000E7610 Locker \(Open', label = "beside the shelves' contents the locker is still the target" },
+]]
 
 [[scenario]]
 name = "vats-templated-name"

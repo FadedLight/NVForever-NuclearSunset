@@ -888,8 +888,10 @@ fn nif_fragment(
         // mask × the distance fade, added to the lit colour. The game is Z-up and the
         // cube's faces are laid out Y-up: the game-space direction (x, y, z) is looked up
         // as (x, z, y), which from Bevy's Y-up world space (x, z, -y of the game) is
-        // (x, y, -z) [hypothesis]; env_how.x picks another orientation for a debug switch
-        // (env_map.rs Axes: 1 flip x, 2 flip y, 3 flip z, 4 swap y and z). A premultiplied
+        // (x, y, -z) [hypothesis, window shapes]. env_how.x 4, every other shape by default
+        // (#4392): the game-space direction as it is, Bevy's (x, -z, y) [hypothesis, from the
+        // original's picture of the Goodsprings camper]; 1 flip x, 2 flip y, 3 flip z are
+        // debug switches (env_map.rs Axes). A premultiplied
         // shape (a blended window shape that reflects) has its colour multiplied by its
         // alpha first, so the reflection lies over the blend whatever the alpha; a blended
         // shape is weighted by its alpha, reflection included [hypothesis]. Not in the blend
@@ -917,7 +919,10 @@ fn nif_fragment(
             out.color = vec4(select(out.color.rgb, out.color.rgb * out.color.a, premultiplied), out.color.a);
         }
         @if(!NIF_SURFACE_BLEND) if surface.env.x > 0.0 && env_fade > 0.0 {
-            let r = reflect(-pbr_input.V, pbr_input.N);
+            // env_how.w 2: the interpolated normal (turned to the viewer on a two-sided
+            // shape), 1: the normal-mapped one (env_map.rs EnvNormal).
+            let env_n = select(pbr_input.N, normalize(pbr_input.world_normal), surface.env_how.w > 1.5);
+            let r = reflect(-pbr_input.V, env_n);
             var dir = vec3(r.x, r.y, -r.z);
             let axes = surface.env_how.x;
             if axes > 3.5 {

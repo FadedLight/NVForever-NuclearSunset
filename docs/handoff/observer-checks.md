@@ -3949,7 +3949,9 @@ capture setup, so every part of a check that needs an interior is still open.
      object or the view [observed, firm: envmap4's pot and held pistol]; whether they are
      the cube or the sun's own highlight cannot be told, so that the cube lookup is
      world-fixed is a hypothesis. Which axis is up and what the window flag flips are
-     open: no cube content could be recognised. Lucky 38 is an interior: not captured.
+     open: no cube content could be recognised. For shapes without the window flag the Goodsprings camper, captured
+     2026-11-25, fits the direction (x, y, z) unchanged and the interpolated normal
+     [hypothesis; nif.md §6, #4392], now the default (`swap-yz`; `NVF_PLAY_DEBUG_ENV_NORMAL`). Lucky 38 is an interior: not captured.
      The wiki also says Lighting30ShaderProperty flips the cube orientation and is "Used
      by the engine for … advanced effect combinations (e.g. parallax + cube mapping)": if
      the engine switches a PPLighting shape with parallax and a cube to it at run time,

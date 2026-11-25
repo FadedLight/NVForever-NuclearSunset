@@ -1498,7 +1498,8 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
     7 in all) were left as they were by #2462 [design: its scope]; since #2841 they reflect
     too (next bullet), and the distance fade described there applies to window shapes as
     well.
-- **Environment maps on other shapes** (#2841). What is documented about the effect:
+- **Environment maps on other shapes** (#2841; the lookup changed by #4392, last bullets of this
+  entry). What is documented about the effect:
   - "Environment Mapping: Enables environment mapping on the object"; the texture set's
     "Texture 5: Environment Map (Cubemap) (Needs "Environment Mapping" shader flag set)"
     and "Texture 6: Environment Mask (Needs "Environment Mapping" shader flag set)"
@@ -1598,6 +1599,17 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
   sides of small upright objects much more than NVForever does. The no-cube wine bottle is
   1.4-1.7× NVForever main's by day and 3.3-3.8× at night at the same cameras, while the
   ground is 0.86-0.91× and 0.63-0.66× [observed: envmap against NVForever main].
+
+  The lookup (#4392; the Goodsprings camper `mobilehomeasnv.nif`, `chrome_e.dds` behind the
+  mask `car05_m.dds`, the original captured at hours 8, 13.1 and 17, the pictures private):
+  - In the original the body reflects in soft, broad areas cut out by the mask; they do not
+    follow the dents of the normal map `car03_n.dds`, the curved rear has no streak, and the
+    inner wall seen through the rear window is bright [observed].
+  - So, for shapes without the window flag, the reflection is taken at the interpolated
+    normal, and the cube is looked up by the game-space direction (x, y, z) as it is, not as
+    (x, z, y) [hypothesis: the pair comes closest of the variants tried, judged by eye, at one
+    model; the strength was not compared, as the sun and sky differ there].
+  - Window shapes keep the lookup of #2669 [design: not captured again].
 
   What the renderers draw (nvf_assets `env_map.rs`, `nif_spawn::shape_env`): a lit shape
   with Environment_Mapping, a slot-4 file that loads as a cube map and a scale above 0

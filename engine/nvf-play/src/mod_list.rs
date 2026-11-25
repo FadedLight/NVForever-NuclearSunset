@@ -8,6 +8,7 @@
 //!   source is stale) and name nothing NVForever lacks; or it has no scripts (**data**).
 //! - **Partial**: it runs, but calls functions or names NVForever does not have yet (those
 //!   calls do nothing), or holds extender bytes with no source to compile.
+//!
 //! The details under the list name the functions and names, and the scripts that run from
 //! their bytes. The facts are the ones `crate::mod_log` prints (`GameData::source_units`).
 //! Keys: Up/Down, Page Up/Down, Home/End to move; Esc closes.

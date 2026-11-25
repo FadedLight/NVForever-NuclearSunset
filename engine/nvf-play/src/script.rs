@@ -2950,12 +2950,11 @@ type EngineMenus<'w> = (
 fn hold_player(
     script: Res<ScriptState>,
     active: Res<ActiveMenu>,
-    (paused, wait): (Res<crate::pause::Paused>, Res<crate::wait::WaitMenu>),
+    (paused, wait, mod_list, bug_log): (Res<crate::pause::Paused>, Res<crate::wait::WaitMenu>, Option<Res<crate::mod_list::ModList>>, Option<Res<crate::bug_log::BugLog>>),
     (terminal, lockpick, console, recipe, roulette, repair): EngineMenus,
     (blackjack, poker, caravan, wheel, slots): (Option<Res<crate::blackjack::BlackjackScreen>>, Res<crate::poker::PokerScreen>, Option<Res<crate::caravan::CaravanScreen>>, Option<Res<crate::companion_wheel::WheelScreen>>, Option<Res<crate::slots::SlotsScreen>>),
     state: Res<State<PlayState>>,
     mut next: ResMut<NextState<PlayState>>,
-    (mod_list, bug_log): (Option<Res<crate::mod_list::ModList>>, Option<Res<crate::bug_log::BugLog>>),
 ) {
     // Our Mod List and Bug Log panels hold `Menu` too; without this they were sent back to
     // `Playing` (and closed) the frame they opened [observed 2026-11-21: "bug log: open",

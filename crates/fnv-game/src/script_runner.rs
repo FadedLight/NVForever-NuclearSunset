@@ -206,7 +206,7 @@ impl<'a> Game<'a> {
         }
         self.sr.running = None;
         let mut calls: Vec<_> = std::mem::take(&mut self.sr.call_times).into_iter().collect();
-        calls.sort_by(|a, b| b.1 .1.cmp(&a.1 .1));
+        calls.sort_by_key(|c| std::cmp::Reverse(c.1 .1));
         let top: Vec<String> = calls.iter().take(8).filter(|(_, (_, us))| *us >= 50_000).map(|(n, (c, us))| format!("{n} {c}x {} ms", us / 1000)).collect();
         if !top.is_empty() {
             tracing::info!("script runner: {} files' slowest functions: {}", m.name(), top.join(", "));

@@ -105,10 +105,8 @@ impl Bounds {
     const EMPTY: Bounds = Bounds { min: [f32::MAX; 3], max: [f32::MIN; 3] };
 
     fn add(&mut self, p: [f32; 3]) {
-        for i in 0..3 {
-            self.min[i] = self.min[i].min(p[i]);
-            self.max[i] = self.max[i].max(p[i]);
-        }
+        self.min = std::array::from_fn(|i| self.min[i].min(p[i]));
+        self.max = std::array::from_fn(|i| self.max[i].max(p[i]));
     }
 
     fn is_empty(&self) -> bool {
@@ -246,11 +244,9 @@ pub fn check(s: &Seen, exterior: bool, ground: &mut dyn Ground) -> Vec<Finding> 
             if let Some(i) = (0..3).find(|&i| s.sig != *b"DOOR" && cs[i] > 2.0 * size[i] + 64.0) {
                 say(Kind::CollisionTooBig, format!("collision {:.0} units on {} against the model's {:.0}", cs[i], ["x", "y", "z"][i], size[i]));
             }
-            if c.dynamic {
-                if exterior {
-                    if let Some(t) = ground.terrain_z(cc[0], cc[1]).filter(|t| c.max[2] < *t - 2.0) {
-                        say(Kind::FellThrough, format!("collision top {:.0} under the terrain at {t:.0}", c.max[2]));
-                    }
+            if c.dynamic && exterior {
+                if let Some(t) = ground.terrain_z(cc[0], cc[1]).filter(|t| c.max[2] < *t - 2.0) {
+                    say(Kind::FellThrough, format!("collision top {:.0} under the terrain at {t:.0}", c.max[2]));
                 }
             }
         }

@@ -2,7 +2,7 @@
 //! and removed in the extraction alone, as bevy_pbr requires (mesh_view_bindings.rs).
 
 use super::admit::{self, Asked};
-use super::plan::{plan, Admission, Key, Latch, Now, Pipelines, Plan, Why};
+use super::plan::{older, plan, Admission, Key, Latch, Now, Pipelines, Plan, Why};
 use super::{hook_state, place, Did, Place, RtgiCounts, RtgiRequest, RtgiVolumeUniform};
 use bevy::app::SubApp;
 use bevy::ecs::system::SystemParam;
@@ -26,6 +26,7 @@ pub(super) fn add(render_app: &mut SubApp) {
 /// What is bound.
 pub(super) struct Held {
     pub(super) key: Key,
+    atlas: [u32; 3],
     buffer: UniformBuffer<RtgiVolumeUniform>,
     written: RtgiVolumeUniform,
     texture: TextureView,
@@ -37,11 +38,10 @@ pub(super) struct RtgiGpu {
     pub(super) held: Option<Held>,
     latch: Latch,
     pub(super) asked: Option<Asked>,
-    /// The visit in which a pipeline that reads failed.
-    failed: Option<Place>,
-    /// The visit whose pipelines the log has, and the visit of which it says why the light is stock.
+    /// The visit that has the stock light to its end; the log has why.
+    ended: Option<(Place, Why)>,
+    /// The visit whose pipelines the log has.
     told_ready: Option<Place>,
-    told_stock: Option<(Place, Why)>,
 }
 
 /// The main world's, at the extraction.
@@ -72,11 +72,7 @@ impl Device<'_> {
         let (Some(device), Some(adapter), Some(layouts), true) = (&self.device, &self.adapter, &self.layouts, self.queue.is_some()) else { return Admission::Deferred };
         let clouds = self.sun.as_ref().is_some_and(|s| s.light_volume_bound());
         if asked.as_ref().is_none_or(|a| !a.is_of(clouds, atlas)) {
-            let answer = Asked::of(device, adapter, layouts, clouds, atlas);
-            if let Err(why) = &answer.granted {
-                warn!("rtgi: {why}; the stock light");
-            }
-            *asked = Some(answer);
+            *asked = Some(Asked::of(device, adapter, layouts, clouds, atlas));
         }
         if asked.as_ref().is_some_and(|a| a.granted.is_ok()) {
             Admission::Granted
@@ -95,18 +91,20 @@ fn extract(mut commands: Commands, main: Extract<Main>, mut bound: Query<(Entity
         return;
     }
     let here = place(main.streamer.as_deref(), main.script.as_deref());
-    let admission = match request.filter(|r| here == Some(r.place)) {
-        Some(r) => gpu.admission(&mut state.asked, r.atlas().0),
-        None => Admission::Deferred,
+    let cams: Vec<Entity> = main.cams.iter().collect();
+    let admission = match (request.filter(|r| here == Some(r.place)), &state.held) {
+        (None, _) => Admission::Deferred,
+        // What would stay bound is what is asked about.
+        (Some(r), Some(h)) if older(r.key(), h.key) => gpu.admission(&mut state.asked, h.atlas),
+        (Some(r), _) => gpu.admission(&mut state.asked, r.atlas().0),
     };
-    let now = Now { here, hook: hook_state(), admission, open, failed: state.failed };
+    let now = Now { here, hook: hook_state(), admission, open, views: !cams.is_empty(), ended: state.ended };
     let plan = plan(request.map(RtgiRequest::key), &now, state.held.as_ref().map(|h| h.key));
     tell(state, request, plan);
-    let cams: Vec<Entity> = main.cams.iter().collect();
     carry_out(plan, request, &cams, &mut commands, &mut bound, &mut state.held, gpu.device.as_deref().zip(gpu.queue.as_deref()), &counts);
 }
 
-/// The log's line of a change.
+/// The log's line of a change, and the end of a visit's light.
 fn tell(state: &mut RtgiGpu, request: Option<&RtgiRequest>, plan: Plan) {
     match (plan, request) {
         (Plan::Bind { new: true }, Some(r)) => {
@@ -117,13 +115,13 @@ fn tell(state: &mut RtgiGpu, request: Option<&RtgiRequest>, plan: Plan) {
             if state.held.is_some() {
                 info!("rtgi: unbound ({why:?}), the stock light");
             }
-            // The log has a refusal and a failed pipeline already.
-            let Some(r) = request.filter(|r| matches!(why, Why::Hook | Why::Late) && state.told_stock != Some((r.place, why))) else { return };
-            state.told_stock = Some((r.place, why));
-            if why == Why::Hook {
-                error!("rtgi: the hook is not in the lighting; the stock light");
-            } else {
-                info!("rtgi: cell {:08X}: asked for with no screen up that waits for its pipelines; the stock light until the next visit", r.place.cell);
+            let Some(r) = request.filter(|r| why.ends_visit() && state.ended.is_none_or(|e| e.0 != r.place)) else { return };
+            state.ended = Some((r.place, why));
+            let refusal = state.asked.as_ref().and_then(|a| a.granted.as_ref().err());
+            match (why, refusal) {
+                (Why::Hook, _) => error!("rtgi: the hook is not in the lighting; the stock light"),
+                (Why::Refused, Some(refusal)) => warn!("rtgi: {refusal}; the stock light"),
+                _ => info!("rtgi: cell {:08X}: asked for with no screen up that waits for its pipelines; the stock light", r.place.cell),
             }
         }
         _ => {}
@@ -132,7 +130,7 @@ fn tell(state: &mut RtgiGpu, request: Option<&RtgiRequest>, plan: Plan) {
 
 /// `gpu` is needed for [`Plan::Bind`] alone, which is never planned without (it is admitted first).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn carry_out(
+fn carry_out(
     plan: Plan,
     request: Option<&RtgiRequest>,
     cams: &[Entity],
@@ -149,18 +147,19 @@ pub(super) fn carry_out(
             if new {
                 // The GPU lets go of what was held when it is done with it; the buffer and the
                 // sampler stay.
-                let texture = make_texture(device, queue, request.atlas());
+                let atlas = request.atlas();
+                let texture = make_texture(device, queue, atlas);
                 counts.add(Did::Allocation, 1);
                 counts.add(Did::Upload, 1);
                 match held {
-                    Some(h) => (h.key, h.texture) = (request.key(), texture),
+                    Some(h) => (h.key, h.atlas, h.texture) = (request.key(), atlas.0, texture),
                     None => {
                         let mut buffer = UniformBuffer::from(uniform);
                         buffer.set_label(Some("nvf_rtgi_volume"));
                         buffer.write_buffer(device, queue);
                         counts.add(Did::Allocation, 2);
                         counts.add(Did::Upload, 1);
-                        *held = Some(Held { key: request.key(), buffer, written: uniform, texture, sampler: make_sampler(device) });
+                        *held = Some(Held { key: request.key(), atlas: atlas.0, buffer, written: uniform, texture, sampler: make_sampler(device) });
                     }
                 }
             }
@@ -237,7 +236,7 @@ fn reads(descriptor: &PipelineDescriptor) -> bool {
 /// visit's light (the next extraction takes the component away, before anything is specialised). It
 /// is told by the def alone, so one whose stock twin is broken too counts as well [design].
 fn observe(cache: Res<PipelineCache>, mut state: ResMut<RtgiGpu>) {
-    let Some(place) = state.held.as_ref().map(|h| h.key.place).filter(|p| state.failed != Some(*p)) else { return };
+    let Some(place) = state.held.as_ref().map(|h| h.key.place).filter(|p| state.ended.is_none_or(|e| e.0 != *p)) else { return };
     let mut n = Pipelines::default();
     for p in cache.pipelines().filter(|p| reads(&p.descriptor)) {
         n.count(&p.state);
@@ -246,7 +245,7 @@ fn observe(cache: Res<PipelineCache>, mut state: ResMut<RtgiGpu>) {
         }
     }
     if n.failed > 0 {
-        state.failed = Some(place);
+        state.ended = Some((place, Why::Failed));
         error!("rtgi: {} pipelines that read the volume failed ({} are there); the stock light in this visit", n.failed, n.there);
     } else if n.there > 0 && n.waiting == 0 && state.told_ready != Some(place) {
         state.told_ready = Some(place);

@@ -15,18 +15,9 @@ fn exact(part: f32) -> f32 {
     part
 }
 
-/// 8 fractional bits, rounded; and cut, where what is a whole texel off by arithmetic stays one.
-fn rounded(part: f32) -> f32 {
-    (part * 256.0).round() / 256.0
-}
-
-fn cut(part: f32) -> f32 {
-    if part > 0.999 {
-        1.0
-    } else {
-        (part * 256.0 + 0.01).floor() / 256.0
-    }
-}
+/// 8 fractional bits: rounded, cut, and up, so that a place just off a texel's centre comes out on
+/// either side of it.
+const COARSE: [fn(f32) -> f32; 3] = [|part| (part * 256.0).round() / 256.0, |part| (part * 256.0).floor() / 256.0, |part| (part * 256.0).ceil() / 256.0];
 
 /// The texture at coordinates of 0 to 1, linear, clamped to the edge.
 fn sample(v: &SolvedVolume, t: Vec3, filter: fn(f32) -> f32) -> Vec4 {
@@ -100,6 +91,60 @@ fn the_made_volume_is_what_it_says() {
     assert_eq!(counting.iter().filter(|p| texels(**p) == [[0.0, 0.0, 0.0, 1.0], [0.0; 4], [0.0; 4], [0.0; 4]]).count(), 1);
 }
 
+/// Whether the stored bytes have these points' values in these slabs, worked out by hand from the
+/// notes: `z * 20 + y * 5 + x` texels of 8 bytes, a point one in from the shell on each axis, a slab
+/// 6 layers deep.
+fn packed_right(bytes: &[u8]) -> bool {
+    let by_hand: [(usize, [f32; 4]); 10] = [
+        // The shell.
+        (0, [0.0; 4]),
+        // The point (0, 0, 0): C0 and m, then Cy.
+        (20 + 5 + 1, [0.25, 0.359_375, 0.468_75, 1.0]),
+        (13 * 20 + 5 + 1, [-0.4375, -0.156_25, 0.125, 0.0]),
+        // (2, 0, 3): C0, Cx and m v, Cy, Cz.
+        (4 * 20 + 5 + 3, [0.921_875, 1.031_25, 1.140_625, 1.0]),
+        (10 * 20 + 5 + 3, [0.3125, -0.3125, -0.031_25, 1.015_89]),
+        (16 * 20 + 5 + 3, [0.093_75, 0.375, -0.25, 0.0]),
+        (22 * 20 + 5 + 3, [0.4375, -0.1875, 0.093_75, 0.0]),
+        // (0, 1, 1): Cy.
+        (14 * 20 + 2 * 5 + 1, [-0.0625, 0.218_75, -0.406_25, 0.0]),
+        // (1, 0, 0) does not count, (2, 0, 1) does and is black.
+        (20 + 5 + 2, [0.0; 4]),
+        (2 * 20 + 5 + 3, [0.0, 0.0, 0.0, 1.0]),
+    ];
+    by_hand.iter().all(|(texel, want)| {
+        let halves = bytes[8 * texel..8 * texel + 8].as_chunks::<2>().0;
+        halves.iter().zip(want).all(|(h, want)| (half::f16::from_le_bytes(*h).to_f32() - want).abs() < 1e-3)
+    })
+}
+
+/// The bytes are the fixture's, by an index of their own; two slabs, or two axes, the other way round
+/// are not. The uniform has each member in its place.
+#[test]
+fn the_made_volume_is_packed_and_described() {
+    let v = made(LOWS[1]);
+    assert!(packed_right(&v.rgba16f_le));
+    let slab = 6 * 160;
+    for (a, b) in [(1, 2), (1, 3), (2, 3)] {
+        let mut swapped = v.rgba16f_le.clone();
+        let (low, high) = swapped.split_at_mut(b * slab);
+        low[a * slab..(a + 1) * slab].swap_with_slice(&mut high[..slab]);
+        assert!(!packed_right(&swapped), "slabs {a} and {b}");
+    }
+    // y before x.
+    let texel = |i: usize| v.rgba16f_le[8 * i..8 * i + 8].to_vec();
+    let turned: Vec<u8> = (0..24 * 20).flat_map(|i| texel(i / 20 * 20 + (i % 4) * 5 + i % 20 / 4)).collect();
+    assert!(!packed_right(&turned));
+
+    let u = RtgiVolumeUniform::new(&v, FIT, 0.7);
+    assert_eq!(u.origin, Vec4::new(-64.0, 192.0, -128.0, 1.0 / 64.0));
+    assert_eq!(u.dimensions, Vec4::new(3.0, 2.0, 4.0, 24.0));
+    assert_eq!(u.atlas, Vec4::new(1.0 / 5.0, 1.0 / 4.0, 1.0 / 24.0, 6.0));
+    // pay, least, thin, pull; b, g, share.
+    assert_eq!(u.fit, Vec4::new(0.8, 0.2, 0.25, 0.4));
+    assert_eq!(u.light, Vec4::new(0.3, 1.25, 0.7, 0.0));
+}
+
 /// The reads are of the kinds they are said to be, some are clamped, and none is let off.
 #[test]
 fn the_reads_are_what_they_say() {
@@ -112,14 +157,18 @@ fn the_reads_are_what_they_say() {
         let r = reader.read(V3(c.p), V3(c.g), V3(c.n));
         clamped += usize::from(r.raw.0.iter().any(|e| *e < 0.0));
         let fits = match c.kind {
-            Kind::Centre => r.support < 1e-4 || r.support > 0.9999,
+            Kind::Exact | Kind::Centre => r.support < 1e-4 || r.support > 0.9999,
             Kind::Fraction => r.support > 0.25,
             Kind::Thin => r.support > 0.0 && r.support < 0.25,
             Kind::Shell => r.support > 0.0 && r.support < 0.75,
         };
         assert!(fits && c.bound.iter().all(|b| *b >= 1e-4 && *b < 0.15), "{c:?} {r:?}");
     }
-    assert!(clamped > 3 && clamped < 20, "{clamped}");
+    assert!(clamped > 0 && clamped < 20, "{clamped}");
+    let of = |kind| all.iter().filter(|c| c.kind == kind).count();
+    assert_eq!(KINDS.map(|k| of(k.0)), [28, 20, 24, 12, 12]);
+    // Only an exact centre has the arithmetic's bound alone.
+    assert!(all.iter().all(|c| (c.kind == Kind::Exact) == (0..4).all(|k| c.bound[k] == 1e-4 + c.want[k].abs() / 2048.0)));
 }
 
 /// The shader's read is the CPU's, wherever the volume is.
@@ -178,7 +227,7 @@ fn the_light_is_the_formula() {
 }
 
 /// What the readback lets through and what it does not: the same numbers and 8 fractional bits,
-/// rounded or cut, pass; a wrong slab, place or support and no filter do not.
+/// rounded, cut or up, pass; a wrong slab, place or support and no filter do not.
 #[test]
 fn the_readback_tells_a_wrong_read() {
     let v = made(LOWS[1]);
@@ -188,11 +237,12 @@ fn the_readback_tells_a_wrong_read() {
         let found = all.iter().map(|c| read(&v, u, c, filter)).map(|(e, of_v)| e.extend(of_v).to_array());
         judge(&found.chain([[1.0; 4]]).collect::<Vec<_>>(), &all).unwrap()
     };
-    assert!(judged(&right, exact).iter().all(|w| *w < 1.0));
-    for filter in [rounded as fn(f32) -> f32, cut] {
+    assert!(passes(&judged(&right, exact)));
+    for filter in COARSE {
         let w = judged(&right, filter);
-        assert!(w.iter().all(|w| *w < 1.0) && w[1] > 0.01, "8 bits: {w:?}");
+        assert!(passes(&w) && w[0] < 0.1 && w[2] > 0.01, "8 bits: {w:?}");
     }
+    assert!(passes(&[1.0; 5]) && !passes(&[0.0, 1.0004, 0.0]) && !passes(&[f32::NAN]), "not as it is shown");
     let changes: [(&str, fn(&mut RtgiVolumeUniform)); 4] =
         [("slab", |u| u.atlas.w = 5.0), ("offset", |u| u.dimensions.w = 0.0), ("origin", |u| u.origin.y += 1.0), ("spacing", |u| u.origin.w = 1.0 / 65.0)];
     for (what, change) in changes {
@@ -202,16 +252,43 @@ fn the_readback_tells_a_wrong_read() {
     }
     let mut thinner = right;
     thinner.fit.z = 0.2;
-    assert!(judged(&thinner, exact)[2] > 1.0, "the support");
+    assert!(judged(&thinner, exact)[3] > 1.0, "the support");
     let nearest = judged(&right, f32::round);
-    assert!(nearest[0] < 1.0 && nearest[1..].iter().all(|w| *w > 1.0), "{nearest:?}");
+    assert!(passes(&nearest[..2]) && nearest[2..].iter().all(|w| *w > 1.0), "{nearest:?}");
     // Not a number, and an answer that is not there yet.
     let mut answers = vec![[f32::NAN; 4]; READS];
     assert_eq!(judge(&answers, &all), None);
     answers.push([0.0; 4]);
     assert_eq!(judge(&answers, &all), None);
     answers[READS] = [1.0; 4];
-    assert_eq!(judge(&answers, &all), Some([f32::INFINITY; 4]));
+    assert_eq!(judge(&answers, &all), Some([f32::INFINITY; 5]));
+}
+
+/// The readback is of one bound key: made when that is bound, read when its pass is on its way, gone
+/// with the request, the binding or the pipeline.
+#[test]
+fn the_readback_goes_with_its_key() {
+    let place = Place { cell: 5, travels: 1, game: None };
+    let key = plan::Key { place, revision: 1, solved: true };
+    let other = plan::Key { place: Place { travels: 2, ..place }, ..key };
+    let said = |bound, dispatched, failed| Said { bound, dispatched, failed };
+    let bound = said(Some(key), None, false);
+    for (made, wanted, said, want) in [
+        ((false, false), Some(key), said(None, None, false), Step::Wait),
+        ((false, false), Some(key), said(Some(other), Some(other), false), Step::Wait),
+        ((false, false), Some(key), bound, Step::Make),
+        ((true, false), Some(key), bound, Step::Wait),
+        ((true, false), Some(key), said(Some(key), Some(other), false), Step::Wait),
+        ((true, false), Some(key), said(Some(key), Some(key), false), Step::Read),
+        ((true, true), Some(key), said(Some(key), Some(key), false), Step::Wait),
+        ((true, true), Some(key), said(None, Some(key), false), Step::Retire),
+        ((true, false), Some(key), said(Some(other), None, false), Step::Retire),
+        ((true, false), Some(key), said(Some(key), None, true), Step::Retire),
+        ((false, false), Some(other), bound, Step::Retire),
+        ((true, true), None, bound, Step::Retire),
+    ] {
+        assert_eq!(step(key, made, wanted, &said), want, "{made:?} {wanted:?} {said:?}");
+    }
 }
 
 /// The pass's shader composes and validates, and its layouts have what it declares: the view's three

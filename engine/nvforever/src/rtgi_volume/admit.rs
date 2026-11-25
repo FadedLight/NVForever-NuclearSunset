@@ -9,8 +9,9 @@ use bevy::render::renderer::{RenderAdapter, RenderDevice};
 pub(super) const FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 pub(super) const USAGE: TextureUsages = TextureUsages::TEXTURE_BINDING.union(TextureUsages::COPY_DST);
 
-/// The most bytes of a texture: an old one, a new one, its staging copy and the main world's are
-/// four times that at the most.
+/// The most bytes of a texture. Of one replacement the old one, the new one, its staging copy and the
+/// main world's are four times that at the most; that counts the payload, and replacements still in
+/// the queue add to it.
 pub(super) const MOST_BYTES: u64 = 32 << 20;
 
 /// The mesh bind group's, at the most: a lightmap, the morph targets, the mesh's and the skin's
@@ -39,10 +40,10 @@ impl Limits {
 }
 
 /// The key of the fullest view with a volume: the cloud shadows' ([`fullest_view_key`]), without
-/// the light volume's arrays where they are not bound, with the tonemapping's table, which that one
-/// leaves out.
+/// the light volume's arrays where they are not bound, and with what that one leaves out, the
+/// tonemapping's table and the contact shadows' uniform (light_shadow_detail.rs).
 pub(super) fn view_key(clouds: bool) -> MeshPipelineViewLayoutKey {
-    let key = fullest_view_key() | MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER | MeshPipelineViewLayoutKey::NVF_RTGI_VOLUME;
+    let key = fullest_view_key() | MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER | MeshPipelineViewLayoutKey::CONTACT_SHADOWS | MeshPipelineViewLayoutKey::NVF_RTGI_VOLUME;
     if clouds {
         key
     } else {
@@ -82,8 +83,8 @@ pub(super) fn admit(limits: &Limits, counts: StageCounts, atlas: [u32; 3]) -> Re
 
 /// What was asked last, and the answer.
 pub(super) struct Asked {
-    clouds: bool,
-    atlas: [u32; 3],
+    pub(super) clouds: bool,
+    pub(super) atlas: [u32; 3],
     pub(super) granted: Result<(), String>,
 }
 

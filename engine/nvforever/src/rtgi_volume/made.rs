@@ -8,23 +8,23 @@
 //! seen means nothing.
 
 use super::gpu::RtgiGpu;
+use super::plan::Key;
 use super::{place, Did, Fit, Place, RtgiCounts, RtgiRequest, RtgiVolumeUniform};
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::pbr::NvfRtgiVolumeBindings;
 use bevy::prelude::*;
-use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::binding_types::{sampler, storage_buffer_read_only_sized, storage_buffer_sized, texture_3d, uniform_buffer};
 use bevy::render::render_resource::{
-    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedComputePipelineId, ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, SamplerBindingType, ShaderStages, TextureSampleType,
+    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedComputePipelineId, CachedPipelineState, ComputePassDescriptor, ComputePipelineDescriptor, PipelineCache, SamplerBindingType, ShaderStages, TextureSampleType,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems};
 use bevy::render::storage::{GpuShaderBuffer, ShaderBuffer};
-use bevy::render::RenderApp;
+use bevy::render::{Extract, ExtractSchedule, RenderApp};
 use bevy::shader::Shader;
 use nvf_rtgi::{Counts, Read, Reader, SolvedVolume, SLABS, V3};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// rtgi_readback.wesl.
 const SHADER: Handle<Shader> = uuid_handle!("f5b7a1c3-2e64-4d0e-9a38-61c0f7d25b12");
@@ -40,7 +40,7 @@ const POINTS: [u32; 3] = [3, 2, 4];
 const SPACING: f32 = 64.0;
 const OFFSET: f32 = 24.0;
 /// The light's constants of the aid alone.
-pub(super) const FIT: Fit = Fit { b: 0.25, g: 1.0, pay: 1.0, least: 0.25, pull: 0.25 };
+pub(super) const FIT: Fit = Fit { b: 0.3, g: 1.25, pay: 0.8, least: 0.2, pull: 0.4 };
 /// The points that do not count, and one that does and is black.
 pub(super) const UNSUPPORTED: [[u32; 3]; 3] = [[1, 0, 0], [0, 1, 2], [2, 1, 3]];
 const BLACK: [u32; 3] = [2, 0, 1];
@@ -117,7 +117,10 @@ fn stored(v: &SolvedVolume, at: [usize; 3], slab: usize) -> [f32; 4] {
 /// What a read is of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
-    /// At a texel's centre: nothing between, so the right texel of every slab or not. Also outside.
+    /// At a texel's centre that the texture's coordinates hold exactly, in every slab: nothing between,
+    /// so the right texel or not. Also outside, where nothing is sampled.
+    Exact,
+    /// At any other centre: a sampler may come out on either side of it.
     Centre,
     /// Between the points.
     Fraction,
@@ -127,7 +130,7 @@ pub(super) enum Kind {
     Shell,
 }
 
-pub(super) const KINDS: [(Kind, &str); 4] = [(Kind::Centre, "centre"), (Kind::Fraction, "fraction"), (Kind::Thin, "thin"), (Kind::Shell, "shell")];
+pub(super) const KINDS: [(Kind, &str); 5] = [(Kind::Exact, "exact"), (Kind::Centre, "centre"), (Kind::Fraction, "fraction"), (Kind::Thin, "thin"), (Kind::Shell, "shell")];
 
 /// A read, and what the CPU has of it.
 #[derive(Clone, Copy, Debug)]
@@ -144,9 +147,8 @@ pub(super) struct Check {
 
 pub(super) const READS: usize = 96;
 
-/// The filter's error that is let through, in texels on an axis [design]: 8 fractional bits and what
-/// the coordinate's own arithmetic loses. A threshold on the machines the smoke test runs on; it says
-/// nothing of a GPU's precision.
+/// The filter's error that is let through, in texels on an axis [design]: 8 fractional bits, rounded
+/// or cut, and what the coordinate's own arithmetic loses. A threshold, no claim about any GPU.
 const EPS: f32 = 1.0 / 256.0 + 1e-4;
 
 /// The error of arithmetic alone that is let through.
@@ -154,25 +156,47 @@ fn arithmetic(value: f32) -> f32 {
     1e-4 + value.abs() / 2048.0
 }
 
-/// How far a filtered channel of the cell whose low corner is `low` may be, for an error of [`EPS`]
-/// on each axis: that times the largest difference of two corners next to each other, axis by axis.
-fn delta(v: &SolvedVolume, low: [usize; 3], slab: usize, channel: usize) -> f32 {
-    let corner = |i: usize| stored(v, std::array::from_fn(|k| low[k] + ((i >> k) & 1)), slab)[channel];
-    let range = |axis: usize| (0..8).filter(|i| (i >> axis) & 1 == 0).map(|i| (corner(i | (1 << axis)) - corner(i)).abs()).fold(0.0, f32::max);
-    EPS * (range(0) + range(1) + range(2))
+/// How far a filtered channel may be at `q` for an error of [`EPS`] on each axis: that times the
+/// largest difference of two texels next to each other, axis by axis, in all the cells it reaches.
+fn delta(v: &SolvedVolume, q: [f32; 3], slab: usize, channel: usize) -> f32 {
+    let low = q.map(|q| (q + 1.0 - EPS).floor() as usize);
+    let high = q.map(|q| (q + 1.0 + EPS).ceil() as usize);
+    let mut range = [0.0f32; 3];
+    for x in low[0]..=high[0] {
+        for y in low[1]..=high[1] {
+            for z in low[2]..=high[2] {
+                let here = [x, y, z];
+                for axis in (0..3).filter(|k| here[*k] < high[*k]) {
+                    let mut next = here;
+                    next[axis] += 1;
+                    range[axis] = range[axis].max((stored(v, next, slab)[channel] - stored(v, here, slab)[channel]).abs());
+                }
+            }
+        }
+    }
+    EPS * range.iter().sum::<f32>()
+}
+
+/// Whether the filter has nothing to do at `q`: the coordinates are exactly those of a texel's centre
+/// in every slab, as the shader works them out; or it is outside.
+fn exact(v: &SolvedVolume, q: [f32; 3]) -> bool {
+    let sides = v.atlas.map(|s| s as f32);
+    let held = |t: f32, side: f32| f64::from(t * (1.0 / side)) * f64::from(side) == f64::from(t);
+    let outside = (0..3).any(|k| q[k] <= -1.0 || q[k] >= v.dimensions[k] as f32);
+    let centres = |slab: usize| (0..3).all(|k| q[k].fract() == 0.0 && held(q[k] + 1.5 + if k == 2 { (slab as u32 * (v.dimensions[2] + 2)) as f32 } else { 0.0 }, sides[k]));
+    outside || (0..SLABS).all(centres)
 }
 
 /// How far a read at `q` (in spacings from the first point) may be from the CPU's: with a numerator's
 /// error N and a denominator d of the error D, |dE| <= (N + |E| D) / (d - D).
 fn filtered(v: &SolvedVolume, q: [f32; 3], n: [f32; 3], read: &Read) -> [f32; 4] {
-    let low = q.map(|q| (q + 1.0).floor() as usize);
-    let (d, dd) = (read.support.max(nvf_rtgi::THIN), delta(v, low, 0, 3));
+    let (d, dd) = (read.support.max(nvf_rtgi::THIN), delta(v, q, 0, 3));
     let over = |error: f32, value: f32| (error + value.abs() * dd) / (d - dd);
     let e = |k: usize| {
-        let bands: f32 = (0..3).map(|j| n[j].abs() * delta(v, low, j + 1, k)).sum();
-        over(delta(v, low, 0, k) + bands, read.raw.0[k])
+        let bands: f32 = (0..3).map(|j| n[j].abs() * delta(v, q, j + 1, k)).sum();
+        over(delta(v, q, 0, k) + bands, read.raw.0[k])
     };
-    [e(0), e(1), e(2), over(delta(v, low, 1, 3), read.v())]
+    [e(0), e(1), e(2), over(delta(v, q, 1, 3), read.v())]
 }
 
 /// The geometric normals and the shading normals the reads go through.
@@ -189,7 +213,7 @@ fn places() -> Vec<(Kind, [f32; 3], [f32; 3])> {
     let last = POINTS.map(|d| d as f32 - 1.0);
     // Every point, and of four of them every slab alone.
     out.extend(points().enumerate().map(|(i, at)| (Kind::Centre, at.map(|c| c as f32), N[i % N.len()])));
-    for at in [[0.0, 0.0, 0.0], [2.0, 1.0, 1.0], [1.0, 1.0, 3.0], [1.0, 0.0, 2.0]] {
+    for at in [[1.0, 1.0, 0.0], [1.0, 0.0, 3.0], [1.0, 1.0, 3.0], [1.0, 0.0, 0.0]] {
         out.extend([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|n| (Kind::Centre, at, n)));
     }
     // The shell's own texels are outside: nothing.
@@ -223,19 +247,16 @@ pub(super) fn checks(v: &SolvedVolume) -> Result<Vec<Check>, String> {
         let p: [f32; 3] = std::array::from_fn(|k| v.origin[k] + v.spacing * q[k] - v.offset * g[k]);
         let read = reader.read(V3(p), V3(g), V3(n));
         let want = Vec3::from(read.e().0).extend(read.v()).to_array();
-        let mut bound = want.map(arithmetic);
-        if kind != Kind::Centre {
-            // No less than a centre's: there is arithmetic where the corners are alike too.
-            let filtered = filtered(v, q, n, &read);
-            bound = std::array::from_fn(|k| bound[k].max(filtered[k]));
-        }
+        let kind = if kind == Kind::Centre && exact(v, q) { Kind::Exact } else { kind };
+        let filter = if kind == Kind::Exact { [0.0; 4] } else { filtered(v, q, n, &read) };
+        let bound = std::array::from_fn(|k| arithmetic(want[k]) + filter[k]);
         Check { kind, p, g, n, want, bound }
     };
     Ok(places().into_iter().enumerate().map(check).collect())
 }
 
 /// The largest difference over its bound, of each of [`KINDS`]; none before the pass has run.
-pub(super) fn judge(answers: &[[f32; 4]], checks: &[Check]) -> Option<[f32; 4]> {
+pub(super) fn judge(answers: &[[f32; 4]], checks: &[Check]) -> Option<[f32; KINDS.len()]> {
     let (found, done) = answers.split_at_checked(checks.len())?;
     if done.first()?[0] != 1.0 {
         return None;
@@ -257,31 +278,122 @@ impl Plugin for MadePlugin {
     fn build(&self, app: &mut App) {
         info!("rtgi: NVF_PLAY_DEBUG_RTGI_MADE: a volume made by hand in every interior, its read checked once on the GPU");
         load_internal_asset!(app, SHADER, "../rtgi_readback.wesl", |s, _| Shader::from_wesl(s, "embedded://nvforever/rtgi_readback.wesl"));
-        app.add_plugins(ExtractResourcePlugin::<Job>::default()).add_systems(PostUpdate, ask);
+        let told = Told::default();
+        app.init_resource::<Aid>().insert_resource(told.clone()).add_systems(PostUpdate, (follow, ask).chain());
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
-        render_app.init_resource::<Pass>().add_systems(RenderGraph, dispatch.in_set(RenderGraphSystems::Begin));
+        render_app.insert_resource(told).init_resource::<Pass>().add_systems(ExtractSchedule, take).add_systems(RenderGraph, dispatch.in_set(RenderGraphSystems::Begin));
     }
 }
 
-/// The readback's buffers.
-#[derive(Resource, Clone, ExtractResource)]
-#[extract_app(RenderApp)]
+/// Main world: the run's one readback, of the bound key it is for.
+#[derive(Resource, Default)]
+struct Aid {
+    done: bool,
+    job: Option<Job>,
+}
+
 struct Job {
-    asked: Handle<ShaderBuffer>,
-    answers: Handle<ShaderBuffer>,
+    key: Key,
+    checks: Arc<Vec<Check>>,
+    /// The reads and the answers, once the texture is bound.
+    buffers: Option<[Handle<ShaderBuffer>; 2]>,
+    /// The readback, once the pass is on its way.
+    reader: Option<Entity>,
+}
+
+/// What the render world tells of it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Said {
+    pub(super) bound: Option<Key>,
+    pub(super) dispatched: Option<Key>,
+    /// The pass has no pipeline, for good.
+    pub(super) failed: bool,
+}
+
+#[derive(Resource, Clone, Default)]
+struct Told(Arc<Mutex<Said>>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Step {
+    Wait,
+    /// Make the buffers.
+    Make,
+    /// Read the answers back.
+    Read,
+    /// Let all of it go.
+    Retire,
+}
+
+/// What a job does next: it is of one key, made when that is bound, and gone with it, with the
+/// request or with its pipeline.
+pub(super) fn step(key: Key, (made, reading): (bool, bool), wanted: Option<Key>, said: &Said) -> Step {
+    let bound = said.bound == Some(key);
+    if wanted != Some(key) || said.failed || (made && !bound) {
+        Step::Retire
+    } else if !made && bound {
+        Step::Make
+    } else if made && !reading && said.dispatched == Some(key) {
+        Step::Read
+    } else {
+        Step::Wait
+    }
+}
+
+fn follow(mut commands: Commands, mut aid: ResMut<Aid>, told: Res<Told>, request: Option<Res<RtgiRequest>>, mut buffers: ResMut<Assets<ShaderBuffer>>) {
+    let said = *told.0.lock().unwrap();
+    let Some(job) = aid.job.as_mut() else { return };
+    match step(job.key, (job.buffers.is_some(), job.reader.is_some()), request.map(|r| r.key()), &said) {
+        Step::Wait => {}
+        Step::Make => {
+            let asked: Vec<[f32; 4]> = job.checks.iter().flat_map(|c| [c.p, c.g, c.n]).map(|[x, y, z]| [x, y, z, 0.0]).collect();
+            job.buffers = Some([asked, vec![[0.0; 4]; job.checks.len() + 1]].map(|of| buffers.add(ShaderBuffer::from(of))));
+        }
+        Step::Read => {
+            let Some([_, answers]) = &job.buffers else { return };
+            let checks = job.checks.clone();
+            let mut reader = commands.spawn((Name::new("RTGI readback"), Readback::buffer(answers.clone())));
+            job.reader = Some(reader.id());
+            reader.observe(move |read: On<ReadbackComplete>, mut commands: Commands, mut aid: ResMut<Aid>| {
+                let floats: Vec<f32> = read.data.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+                let Some(worst) = judge(floats.as_chunks::<4>().0, &checks) else { return };
+                commands.entity(read.entity).try_despawn();
+                *aid = Aid { done: true, job: None };
+                say(checks.len(), worst);
+            });
+        }
+        Step::Retire => {
+            if let Some(e) = job.reader {
+                commands.entity(e).try_despawn();
+            }
+            aid.job = None;
+            aid.done |= said.failed;
+        }
+    }
+}
+
+/// Whether the worst of each kind is within its bound: of the numbers as they are, not as they are shown.
+pub(super) fn passes(worst: &[f32]) -> bool {
+    worst.iter().all(|w| *w <= 1.0)
+}
+
+fn say(reads: usize, worst: [f32; KINDS.len()]) {
+    let of: Vec<String> = KINDS.iter().zip(worst).map(|((_, name), w)| format!("{name} {w:.3}")).collect();
+    let line = format!("{reads} reads, the largest difference over its bound: {}", of.join(", "));
+    if passes(&worst) {
+        info!("rtgi: readback passed: {line}");
+    } else {
+        warn!("rtgi: readback FAILED: {line}; a wrong slab, place or uniform, or a coarser filter than is let through: this adapter is to be looked at");
+    }
 }
 
 /// The request of the place the player is in: the empty texture, and the made one once no screen is up.
-#[allow(clippy::too_many_arguments)]
 fn ask(
     mut commands: Commands,
+    mut aid: ResMut<Aid>,
     request: Option<Res<RtgiRequest>>,
-    streamer: Option<Res<crate::world::Streamer>>,
-    script: Option<Res<nvf_play::script::ScriptState>>,
+    (streamer, script): (Option<Res<crate::world::Streamer>>, Option<Res<nvf_play::script::ScriptState>>),
     loading: Option<Res<nvf_play::loading::Loading>>,
     camera: Query<&GlobalTransform, crate::fly::WorldCamera>,
-    job: Option<Res<Job>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let Some(here) = place(streamer.as_deref(), script.as_deref()) else {
         if request.is_some() {
@@ -299,10 +411,10 @@ fn ask(
     let Ok(camera) = camera.single() else { return };
     match show(here, camera.translation()) {
         Ok((request, checks)) => {
-            commands.insert_resource(request);
-            if job.is_none() {
-                read_back(&mut commands, &mut buffers, checks);
+            if !aid.done {
+                aid.job = Some(Job { key: request.key(), checks: Arc::new(checks), buffers: None, reader: None });
             }
+            commands.insert_resource(request);
         }
         Err(why) => error!("rtgi: the made volume: {why}"),
     }
@@ -316,27 +428,15 @@ fn show(here: Place, about: Vec3) -> Result<(RtgiRequest, Vec<Check>), String> {
     Ok((RtgiRequest::solved(here, 1, Arc::new(volume), FIT, 1.0)?, checks))
 }
 
-/// Ask the GPU the same, once, and say what it has.
-fn read_back(commands: &mut Commands, buffers: &mut Assets<ShaderBuffer>, checks: Vec<Check>) {
-    let asked: Vec<[f32; 4]> = checks.iter().flat_map(|c| [c.p, c.g, c.n]).map(|[x, y, z]| [x, y, z, 0.0]).collect();
-    let answers = ShaderBuffer::from(vec![[0.0f32; 4]; checks.len() + 1]);
-    let job = Job { asked: buffers.add(ShaderBuffer::from(asked)), answers: buffers.add(answers) };
-    commands.spawn((Name::new("RTGI readback"), Readback::buffer(job.answers.clone()))).observe(move |read: On<ReadbackComplete>, mut commands: Commands| {
-        let floats: Vec<f32> = read.data.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
-        let Some(worst) = judge(floats.as_chunks::<4>().0, &checks) else { return };
-        commands.entity(read.entity).try_despawn();
-        let most = (0..KINDS.len()).fold(0, |m, i| if worst[i] > worst[m] { i } else { m });
-        let of: Vec<String> = KINDS.iter().zip(worst).map(|((_, name), w)| format!("{name} {w:.3}")).collect();
-        info!("rtgi: readback: {} reads, the largest difference is {:.3} of its bound ({}); {}", checks.len(), worst[most], KINDS[most].1, of.join(", "));
-    });
-    commands.insert_resource(job);
-}
-
-/// The compute pass, and whether it has run.
+/// Render world: the job's buffers while it has them, and the pass.
 #[derive(Resource, Default)]
 struct Pass {
+    job: Option<(Key, [Handle<ShaderBuffer>; 2])>,
     pipeline: Option<CachedComputePipelineId>,
-    done: bool,
+}
+
+fn take(aid: Extract<Res<Aid>>, mut pass: ResMut<Pass>) {
+    pass.job = aid.job.as_ref().and_then(|j| Some((j.key, j.buffers.clone()?)));
 }
 
 /// Group 0 as the view has it, for the compute stage; group 1 the reads and the answers.
@@ -352,20 +452,19 @@ pub(super) fn layouts() -> [BindGroupLayoutDescriptor; 2] {
     ]
 }
 
-/// Once, from what a view has bound, when that is the made texture.
+/// Once, from what a view has bound, while that is the job's key.
 fn dispatch(
-    job: Option<Res<Job>>,
     mut pass: ResMut<Pass>,
+    told: Res<Told>,
     state: Option<Res<RtgiGpu>>,
     views: Query<&NvfRtgiVolumeBindings>,
     buffers: Res<RenderAssets<GpuShaderBuffer>>,
     (cache, device, counts): (Res<PipelineCache>, Res<RenderDevice>, Res<RtgiCounts>),
     mut ctx: RenderContext,
 ) {
-    let Some(job) = job.filter(|_| !pass.done) else { return };
-    if !state.is_some_and(|s| s.held.as_ref().is_some_and(|h| h.key.solved)) {
-        return;
-    }
+    let mut said = told.0.lock().unwrap();
+    said.bound = state.and_then(|s| s.held.as_ref().map(|h| h.key));
+    let Some((key, [asked, answers])) = pass.job.clone().filter(|j| said.bound == Some(j.0) && said.dispatched != Some(j.0) && !said.failed) else { return };
     let [volume, reads] = layouts();
     let id = *pass.pipeline.get_or_insert_with(|| {
         cache.queue_compute_pipeline(ComputePipelineDescriptor {
@@ -376,8 +475,15 @@ fn dispatch(
             ..default()
         })
     });
+    if let CachedPipelineState::Err(e) = cache.get_compute_pipeline_state(id) {
+        if !crate::pipeline_gate::retried(e) {
+            said.failed = true;
+            error!("rtgi: readback FAILED: its pipeline: {e}");
+        }
+        return;
+    }
     let (Some(pipeline), Some(view)) = (cache.get_compute_pipeline(id), views.iter().next()) else { return };
-    let (Some(asked), Some(answers)) = (buffers.get(&job.asked), buffers.get(&job.answers)) else { return };
+    let (Some(asked), Some(answers)) = (buffers.get(&asked), buffers.get(&answers)) else { return };
     let volume = device.create_bind_group(
         "rtgi_readback_volume",
         &cache.get_bind_group_layout(&volume),
@@ -390,5 +496,5 @@ fn dispatch(
     compute.set_bind_group(1, &reads, &[]);
     compute.dispatch_workgroups((READS as u32).div_ceil(32), 1, 1);
     counts.add(Did::Dispatch, 1);
-    pass.done = true;
+    said.dispatched = Some(key);
 }

@@ -30,8 +30,10 @@ pub(super) struct Now {
     pub(super) admission: Admission,
     /// A view may get the bindings now ([`Latch`]).
     pub(super) open: bool,
-    /// The visit in which a pipeline that reads failed.
-    pub(super) failed: Option<Place>,
+    /// There is a world camera's view.
+    pub(super) views: bool,
+    /// The visit that has the stock light to its end.
+    pub(super) ended: Option<(Place, Why)>,
 }
 
 /// Why the light is the stock one.
@@ -41,13 +43,20 @@ pub(super) enum Why {
     Nothing,
     /// Asked for another cell, travel or game than the player is in, or outdoors.
     Elsewhere,
-    /// The hook or the device cannot say yet.
+    /// The hook or the device cannot say yet, or there is no view.
     Waiting,
     Hook,
     Failed,
     Refused,
     /// Asked for when no view can be given the bindings: the next visit's screen is waited for.
     Late,
+}
+
+impl Why {
+    /// Whether it is so to the end of the visit, whatever is asked for later in it.
+    pub(super) fn ends_visit(self) -> bool {
+        matches!(self, Why::Hook | Why::Failed | Why::Refused | Why::Late)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +69,11 @@ pub(super) enum Plan {
     Bind { new: bool },
 }
 
+/// Whether a request is an older result of the place than what is bound: that one stays.
+pub(super) fn older(want: Key, held: Key) -> bool {
+    want.place == held.place && want.revision < held.revision
+}
+
 /// The first binding of a visit only while its screen is up and has not settled; another texture of
 /// the same visit at any time, as it changes no key.
 pub(super) fn plan(request: Option<Key>, now: &Now, held: Option<Key>) -> Plan {
@@ -67,13 +81,13 @@ pub(super) fn plan(request: Option<Key>, now: &Now, held: Option<Key>) -> Plan {
     if now.here != Some(want.place) {
         return Plan::Stock(Why::Elsewhere);
     }
+    if let Some((_, why)) = now.ended.filter(|e| e.0 == want.place) {
+        return Plan::Stock(why);
+    }
     match now.hook {
         HookState::Pending => return Plan::Stock(Why::Waiting),
         HookState::Failed => return Plan::Stock(Why::Hook),
         HookState::Installed => {}
-    }
-    if now.failed == now.here {
-        return Plan::Stock(Why::Failed);
     }
     match now.admission {
         Admission::Deferred => return Plan::Stock(Why::Waiting),
@@ -81,8 +95,9 @@ pub(super) fn plan(request: Option<Key>, now: &Now, held: Option<Key>) -> Plan {
         Admission::Granted => {}
     }
     match held.filter(|h| h.place == want.place) {
-        Some(h) if want.revision < h.revision => Plan::Keep,
+        Some(h) if older(want, h) => Plan::Keep,
         Some(h) => Plan::Bind { new: h != want },
+        None if !now.views => Plan::Stock(Why::Waiting),
         None if now.open => Plan::Bind { new: true },
         None => Plan::Stock(Why::Late),
     }

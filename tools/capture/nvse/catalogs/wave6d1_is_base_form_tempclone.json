@@ -25,9 +25,8 @@
     {
       "id": "w6d1_is_base_form_tempclone",
       "title": "Wave 6D-1 - ShowOff IsBaseForm TempCloneForm Support",
-      "extender": "xNVSE 6.4.9 + JIP LN 57.30 + ShowOffNVSE 184",
+      "extender": "xNVSE 6.4.9 + ShowOffNVSE 184",
       "required_plugins": [
-        "jip_nvse.dll",
         "ShowOffNVSE.dll"
       ],
       "probes": [
@@ -36,7 +35,6 @@
           "bucket": "A",
           "extender": "ShowOff 184",
           "required_plugins": [
-            "jip_nvse.dll",
             "ShowOffNVSE.dll"
           ],
           "optional_extender": false,

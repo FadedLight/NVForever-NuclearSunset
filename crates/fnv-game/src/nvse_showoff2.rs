@@ -193,14 +193,16 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // [documented: IsBaseForm, a valid base form; IsReferenceCloned, a reference made
         // in play, mod index 0xFF; IsActorAlt, an actor reference or an NPC or creature
         // base].
-        // A base form: any authored or TempCloneForm base record (including WEAP, NPC_,
-        // CELL, WRLD, QUST, FACT, FLST), never a placed or temporary inventory reference
-        // [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184,
-        // GSDocMitchellHouse (0x00103DF9), 10 official base masters,
+        // A base form: returns 1 for authored base forms (WEAP, NPC_, CELL, WRLD, QUST,
+        // FACT, FLST) and TempCloneForm 0xFF base forms, and 0 for Player, DocMitchellRef,
+        // and doors [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9,
+        // ShowOffNVSE 184, GSDocMitchellHouse (0x00103DF9), 10 official base masters,
         // `tools/capture/nvse/catalogs/wave6d1_is_base_form_tempclone.json` probe
         // `w6d1_35_showoff_is_base_form_and_fade_state`:
         // `base(w=1,cl=1,n=1,ce=1,wr=1,qu=1,fa=1,fl=1,doc=0,pc=0,dr=0)`;
-        // no DLL, PDB, or third-party source consulted].
+        // no DLL, PDB, or third-party source consulted]. Rejecting 0xFF PlaceAtMe placed
+        // refs and temporary inventory refs via `world.placed`, `temp_item`, and `clones`
+        // follows [documented: IsBaseForm, a valid base form; design].
         "isbaseform" => yes(form(args, 0).is_some_and(|f| {
             g.world.placed.get(f).is_none()
                 && g.temp_item(f).is_none()

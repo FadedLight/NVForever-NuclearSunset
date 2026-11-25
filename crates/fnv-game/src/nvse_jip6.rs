@@ -349,8 +349,9 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // ---- messages [documented: the pages; flags 1 Is Message Box, 2 Auto-display].
         "getmessageflags" => XVal::Num(of_sig(g, form(args, 0), b"MESG").map_or(0, |m| g.message_flags(m)) as f64),
         "setmessageflags" => {
-            if let Some(m) = of_sig(g, form(args, 0), b"MESG") {
-                g.field_overrides.insert((m, "DNAM/".into()), XVal::Num(f64::from(num(args, 1, 0.0).max(0.0) as u32 & 3)));
+            let v = num(args, 1, f64::NAN).trunc();
+            if let Some(m) = of_sig(g, form(args, 0), b"MESG").filter(|_| (0.0..=3.0).contains(&v)) {
+                g.field_overrides.insert((m, "DNAM/".into()), XVal::Num(v));
             }
             zero
         }

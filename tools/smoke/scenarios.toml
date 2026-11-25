@@ -8570,6 +8570,21 @@ expect = [
 ]
 
 [[scenario]]
+name = "creature-stored-pose-settles"
+source = "issue #3408 (TTW report: dead brahmin at Arefu stood on their heads or hung above the ground beside a fence): a creature corpse's stored pose (XRGD) read with the human skeleton's reading floats or sinks, so on a skeleton other than the human one it starts awake in that pose and settles (engine/nvforever/src/deaths.rs, ragdoll.rs, authored_pose.rs CHECKED_ROOT; dead-on-spawn.md §5)"
+note = "the base game alone: DEADCaravanBrahmin 0x000F6909 (WastelandNV, stored pose above the ground, not lifted); before the fix it was held in its stored pose ('at rest ... after 0.0 s of physics') [observed 2026-11-25]; the Arefu corpses themselves need TTW's data, which is not a smoke data dir"
+areas = ["ragdoll", "deaths"]
+paths = ["engine/nvforever/src/authored_pose.rs", "engine/nvforever/src/deaths.rs", "engine/nvforever/src/ragdoll.rs"]
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_UNSEEN = "1" }
+args = ["--play", "--pos=-11967,45400,4250", "--heading", "0", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 20
+expect = [
+  "ragdoll: actor 000F6909 starts awake from the pose its reference stores, to settle",
+  { re = 'ragdoll: actor 000F6909 at rest at .*, trunk (?P<h>-?\d+) units over its lowest bone, after (?P<s>[\d.]+) s of physics', range = [-1000, 35], label = "the brahmin settles lying down" },
+]
+forbid = [{ re = 'ragdoll: actor 000F6909 at rest at .* after 0\.0 s of physics', label = "not held in the stored pose without physics" }]
+
+[[scenario]]
 name = "dead-on-spawn"
 source = "owner's playtest 2026-10-11 (the tribal village's corpses stand up): Base Health 0 starts dead, docs/spec-notes/dead-on-spawn.md"
 areas = ["combat", "deaths"]

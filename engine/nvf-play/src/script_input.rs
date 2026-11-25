@@ -424,6 +424,9 @@ pub(crate) fn init_mod_file_roots(d: &nvf_assets::GameData) {
     let mods = fnv_install::EngineHome::default_root().map(|r| fnv_install::EngineHome::new(r).mods());
     let data_dir = vfs.data_dir().to_path_buf();
     let mut read_roots: Vec<std::path::PathBuf> = Vec::new();
+    // The VFS's loose roots (a Mod Organizer 2 merge's mod folders) come after NVForever's
+    // layer; the file questions ask the VFS's index for them (`Roots::hosted_from`).
+    let hosted_from = usize::from(mods.is_some());
     if let Some(m) = mods {
         read_roots.push(m);
     }
@@ -451,6 +454,7 @@ pub(crate) fn init_mod_file_roots(d: &nvf_assets::GameData) {
             list_vfs.loose_paths_under(&pre)
         }));
         r.read = read_roots;
+        r.hosted_from = Some(hosted_from);
         r.archives = archives;
         r.reader = Some(std::sync::Arc::new(move |p: &str| reader_vfs.read(p).and_then(Result::ok)));
         r.lookup = Some(std::sync::Arc::new(move |p: &str| {

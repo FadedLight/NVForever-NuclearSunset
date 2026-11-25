@@ -145,7 +145,7 @@ pub const JIP_NAMES: [&str; 1] = ["JIP NVSE Plugin"];
 /// The only other NS plugin asking (MAPMO) prints the version. Not reported: the plugins
 /// whose registered name no page gives (ITR, One111, ppNVSE, vheyes-nvse and the smaller
 /// ones): ext-version.md §6.
-pub const PLUGINS: [(&str, f64); 17] = [
+pub const PLUGINS: [(&str, f64); 19] = [
     ("JIP NVSE Plugin", JIP_VERSION),
     ("JIP LN NVSE", JIP_VERSION),
     ("ShowOffNVSE Plugin", 184.0),
@@ -163,6 +163,12 @@ pub const PLUGINS: [(&str, f64); 17] = [
     ("UI Organizer Plugin", UNOBSERVED_VERSION),
     ("yUI", 140.0),
     ("Improved Console", 3.0),
+    // Nuclear Sunset's start-up Script Runner check ("Outdated xNVSE plugins detected!")
+    // asks for both; their work (engine speed-ups, a larger local map) is the engine's own
+    // here [observed: the owner's nvse.log, "Engine Optimizations; version 100" and
+    // "HighResLocalMaps; version 12", 2026-11-20].
+    ("Engine Optimizations", 100.0),
+    ("HighResLocalMaps", 12.0),
 ];
 
 /// The version reported for a plugin the engine builds whose own number is neither

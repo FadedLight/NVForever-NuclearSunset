@@ -66,6 +66,8 @@ notes); **built** = compiles and its unit tests pass, not yet seen in a run.
 
 | # | Problem | Cause | Fix (files) | Testing |
 |---|---|---|---|---|
+| 39 | New game took 98 s to the world, then ~2.5 min more for the new-game scripts (after the upstream sync) | upstream's Script Runner files ran FileExists, INI and folder reads that walked all 1,665 MO2 mod folders on disk | `fnv-game/src/mod_files.rs` `Roots::hosted_from`/`disk_roots`, `fnv-vfs` sorted loose listing, `nvf-play/src/script_input.rs` | crate tests; new game 6.2 s to the world (**verified**, log named in note 39) |
+| 40 | "Outdated xNVSE plugins detected!" box | Engine Optimizations / HighResLocalMaps reported absent | `fnv-script/src/vm/jip.rs` `PLUGINS` | box gone (**verified**) |
 | 1 | Black HUD/Pip-Boy; start-up error box | mod INI/config files exist only inside the MO2 merge | `crates/fnv-game/src/mod_files.rs`, `crates/fnv-vfs`, `nvf-play/src/script_input.rs` | test `mo2_mod_files.rs`; log `script switches: colour 1 130 232 112` (**verified**) |
 | 2 | JIP Companions C&C scripts failed | `RemoveFac` is an accepted alias of RemoveFromFaction | `schemas/script/functions.json` | `fnvtool ext report` |
 | 3 | "Download the latest yUI" box, game stuck in menu state | yUI reported absent | `crates/fnv-script/src/vm/jip.rs` | **verified** (no box) |

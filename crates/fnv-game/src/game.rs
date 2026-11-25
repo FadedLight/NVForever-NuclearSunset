@@ -8223,7 +8223,13 @@ impl Host for Exec<'_, '_> {
         // reads the calling script.
         self.game.other.plugin = self.unit_plugin().unwrap_or_default();
         self.game.other.script = self.current_script().map(FormId);
+        let timed = self.game.sr.is_running().then(std::time::Instant::now);
         let out = crate::nvse::call(self.game, &ctx, name, on, args);
+        if let Some(t) = timed {
+            let e = self.game.sr.call_times.entry(name.to_ascii_lowercase()).or_default();
+            e.0 += 1;
+            e.1 += t.elapsed().as_micros();
+        }
         // The host's own plugin questions (IsDLLLoaded, IsModLoaded), for the test aid.
         if self.game.plugin_questions.is_some() && crate::plugin_questions::FUNCTIONS.contains(&name) {
             if let (Some(Ok(fnv_script::vm::XVal::Num(answer))), Some(fnv_script::vm::XVal::Str(asked))) = (&out, args.first()) {

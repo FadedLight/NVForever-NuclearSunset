@@ -191,6 +191,10 @@ pub struct Vfs {
     index: HashMap<String, Location>,
     /// Lower-cased loose path → winning physical path (preserving filesystem casing).
     loose: HashMap<String, PathBuf>,
+    /// [`Vfs::loose`]'s keys sorted, made at the first folder listing and dropped when a
+    /// root is indexed: a listing is then a range of it, not a pass over every key
+    /// [observed: Nuclear Sunset's GetFilesInFolder ~200 ms a call, 2026-11-25].
+    loose_sorted: Mutex<Option<Vec<String>>>,
     /// The folders loose files were indexed from, lowest precedence first: `Data`, then
     /// the mods folders (#1526).
     loose_roots: Vec<PathBuf>,
@@ -336,6 +340,7 @@ impl Vfs {
             archive_files: Vec::new(),
             index: HashMap::new(),
             loose: HashMap::new(),
+            loose_sorted: Mutex::new(None),
             loose_roots: Vec::new(),
             under_loose: HashMap::new(),
             skipped: Vec::new(),
@@ -388,6 +393,7 @@ impl Vfs {
             }
             self.loose.insert(key, root.join(rel));
         }
+        *self.loose_sorted.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Default setup: the INI archive list, `Update.bsa`, and the base + DLC plugins.
@@ -611,9 +617,14 @@ impl Vfs {
         if !pre.is_empty() && !pre.ends_with('\\') {
             pre.push('\\');
         }
-        let mut v: Vec<String> = self.loose.keys().filter(|k| k.starts_with(&pre)).cloned().collect();
-        v.sort();
-        v
+        let mut sorted = self.loose_sorted.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let keys = sorted.get_or_insert_with(|| {
+            let mut k: Vec<String> = self.loose.keys().cloned().collect();
+            k.sort();
+            k
+        });
+        let start = keys.partition_point(|k| k.as_str() < pre.as_str());
+        keys[start..].iter().take_while(|k| k.starts_with(&pre)).cloned().collect()
     }
 
     pub fn paths(&self, pred: impl Fn(&str) -> bool) -> Vec<String> {

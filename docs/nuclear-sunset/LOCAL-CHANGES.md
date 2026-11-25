@@ -368,3 +368,34 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
    [observed: JIP Companions Command & Control.esp's script source calls `rAux.RemoveFac JIPCCCIsHired`, and
    its compiled data (SCDA) holds RemoveFromFaction's opcode 0x1180 at those calls, so the GECK took the
    name as RemoveFromFaction.] `fnvtool ext report` listed it as unknown in 3 plugins (4 units).
+
+39. **Start-up 98 s → 6 s: file questions through the MO2 index** (after the upstream sync of
+    2026-11-25). Upstream's Script Runner now runs Nuclear Sunset's 219 `gr_*.txt` files when the
+    game starts and its `ln_*.txt` files at a new game or load, behind the loading screen. Upstream's
+    read roots also hold every MO2 mod folder (`vfs.loose_roots()`, 1,665 of them), and each
+    FileExists, INI read, CompileScript read and folder listing walked them all on disk.
+    [observed: log `nvforever-20261125-145542-7604.log`: restart files `fileexists 149x 19811 ms,
+    getinisection 482x 11657 ms, compilescript 600x 9365 ms`; new-game files `fileexists 505x
+    76944 ms`; loading screen down after 79.98 s, then 314.14 s; `gr_Keybinder.txt took 24433 ms`.]
+    Fix: `Roots::hosted_from` (`crates/fnv-game/src/mod_files.rs`) marks the read roots the host's
+    index already holds; `Roots::disk_roots` keeps only NVForever's layer and Data on disk, and
+    `exists`, `read_data_file`, `read_loose`, `ModFiles::read`, `data_files`, `entries_in`,
+    `list_files`, `read_data_folder_inis`, FileExists and GetFilesInFolder/GetFoldersInFolder ask
+    the index (`lookup`, `reader`, `list`) for the rest. Set in `engine/nvf-play/src/script_input.rs`
+    `init_mod_file_roots`. `crates/fnv-vfs` `loose_paths_under` keeps the loose keys sorted once and
+    lists a folder as a range of them (was a pass over every key, ~200 ms a listing). Timing aids
+    kept in the log: `script runner: <file> took N ms` for files over 250 ms and each moment's
+    slowest extender functions (`script_runner.rs`, `game.rs` `ext_call`).
+    Checked: crate tests fnv-vfs, fnv-script, fnv-game (lib, mo2_mod_files, script_runner,
+    get_files_data_roots, synthetic, small_libs, jg9) pass, new test
+    `hosted_roots_tests`; new game on this PC (Ryzen 7 5800XT held at base clock), log
+    `nvforever-20261125-152502-11852.log`: `loading screen down after 6.21 s`, restart files'
+    slowest function 239 ms in all, new-game files `fileexists 505x 607 ms`.
+
+40. **Engine Optimizations 100 and HighResLocalMaps 12 reported** (`crates/fnv-script/src/vm/jip.rs`
+    `PLUGINS`). A Script Runner check showed "Outdated xNVSE plugins detected! ... Engine
+    Optimizations: -1 -> 100+ / HighResLocalMaps: -1 -> 12+" at a new game [observed: log
+    `nvforever-20261125-142835-8120.log`]. Their work is the engine's own here; the versions are the
+    owner's [observed: nvse.log in the stock game folder, "Engine Optimizations; version 100" and
+    "HighResLocalMaps; version 12"], as yUI's 140 (change 3). Checked: the box is gone in
+    `nvforever-20261125-152502-11852.log`.

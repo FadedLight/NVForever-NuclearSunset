@@ -185,9 +185,13 @@ checked there: the tests have them. The job belongs to the visit and the revisio
 buffers are made when that is bound and go with it, and one answer ends it. One of another length is
 a failure.
 
-**Pending**: both smoke scenarios on a GPU; pictures of off against main at three views; turning and
-walking with the made volume under DLSS, FSR and multisampling. What the smoke test sees is that
+**Run** [observed, in our own runs on 2026-11-25, NVIDIA RTX 5070 Ti, Vulkan]: both smoke scenarios
+pass; the readback passed at 96 of 96 reads (the largest difference was 0.000 of its bound at the exact
+centres and 0.33 of it between points) with 4x MSAA, TAA, FSR and DLSS; the runs with the made volume
+while turning and walking made no validation error and no failed pipeline. Off against main at eight
+views: equal up to what two runs of one build differ by. What the smoke test sees is that
 pipelines with the def were made and that bind groups had the entries, not which camera drew with them.
+Other GPUs and Android are not run.
 
 ## What nothing bound means
 

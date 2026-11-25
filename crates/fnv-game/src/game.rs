@@ -4121,7 +4121,10 @@ impl<'a> Game<'a> {
                         && e.priority == h.priority
                         && e.alt == h.alt
                         && e.filters.len() == h.filters.len()
-                        && e.filters.iter().all(|f| h.filters.contains(f))
+                        && e.filters.iter().all(|f| {
+                            e.filters.iter().filter(|x| *x == f).count()
+                                == h.filters.iter().filter(|x| *x == f).count()
+                        })
                 }) {
                     return Ok(XVal::Num(0.0));
                 }

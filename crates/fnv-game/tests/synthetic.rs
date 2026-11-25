@@ -3544,6 +3544,21 @@ fn set_event_handler_and_alt_deduplicate_identical_registrations() {
         XVal::Num(101.0)
     );
     assert_eq!(g.world.global(FormId(0x0000_0800)).unwrap(), 6.0);
+    // Multiset filter equality: repeated filter pairs (1::5, 1::5) must not match distinct
+    // pairs of equal length (1::5, 2::6), while reordered identical pairs (2::6, 1::5) deduplicate.
+    assert_eq!(
+        q(
+            &mut g,
+            "let cb := (Begin Function {int x, int y}
+               let TestGlobal := TestGlobal + x + y
+             End)
+             let r1 := SetEventHandlerAlt \"W6DupMulti\" cb 1::5 1::5
+             let r2 := SetEventHandlerAlt \"W6DupMulti\" cb 1::5 2::6
+             let r3 := SetEventHandlerAlt \"W6DupMulti\" cb 2::6 1::5
+             SetFunctionValue (r1 * 100 + r2 * 10 + r3)",
+        ),
+        XVal::Num(110.0)
+    );
 }
 
 #[test]

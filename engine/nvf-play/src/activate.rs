@@ -1046,6 +1046,15 @@ pub(crate) fn drawn(sim: &SimState, script: Option<&crate::script::ScriptState>,
     sim.present(id) && !script.and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.culled(FormId(id)))
 }
 
+/// Whether a `RefChanged` entry should emit its own `info!` line: always for live
+/// changes (`!all_restored`) and for any restored reference that actually updated drawn
+/// render entities (`updated > 0`). Restored references in unloaded cells (`updated == 0`)
+/// are counted into a single summary `info!` line so loading a mature save does not flood
+/// the log with tens of thousands of no-op lines.
+fn log_ref_change_individually(all_restored: bool, updated: usize) -> bool {
+    !all_restored || updated > 0
+}
+
 /// Hide or show `RefVisual` entities from the simulation's state ([`drawn`]): every entity
 /// of a reference named by `RefChanged`, and new entities as cells stream in (a taken item
 /// must not come back when its cell reloads).
@@ -1062,17 +1071,24 @@ pub fn sync_visuals(
             v.set_if_neq(Visibility::Hidden);
         }
     }
-    let mut changed: HashMap<u32, usize> = changes.read().map(|m| (m.form_id, 0)).collect();
+    let mut changed: HashMap<u32, (usize, bool)> = HashMap::new();
+    for m in changes.read() {
+        changed
+            .entry(m.form_id)
+            .and_modify(|(_, all_restored)| *all_restored &= m.restored)
+            .or_insert((0, m.restored));
+    }
     if changed.is_empty() {
         return;
     }
     for (r, mut v) in &mut visuals.p1() {
-        if let Some(n) = changed.get_mut(&r.0) {
+        if let Some((n, _)) = changed.get_mut(&r.0) {
             v.set_if_neq(if drawn(&sim, script, r.0) { Visibility::Inherited } else { Visibility::Hidden });
             *n += 1;
         }
     }
-    for (id, n) in changed {
+    let mut restored_unloaded = 0usize;
+    for (id, (n, all_restored)) in changed {
         let how = if !sim.present(id) {
             "gone"
         } else if drawn(&sim, script, id) {
@@ -1080,6 +1096,14 @@ pub fn sync_visuals(
         } else {
             "culled (critical stage)"
         };
-        info!("reference 0x{id:08X} {how}: {n} render entities updated");
+        if log_ref_change_individually(all_restored, n) {
+            info!("reference 0x{id:08X} {how}: {n} render entities updated");
+        } else {
+            restored_unloaded += 1;
+            debug!("reference 0x{id:08X} {how}: 0 render entities updated");
+        }
+    }
+    if restored_unloaded > 0 {
+        info!("references restored from save: {restored_unloaded} not drawn (0 render entities updated)");
     }
 }

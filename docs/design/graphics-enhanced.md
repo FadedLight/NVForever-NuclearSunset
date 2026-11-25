@@ -3857,14 +3857,14 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     light and the light from below are each dimmed toward the visible layers' PNAM luminance by
     `min(1, L(cloud) / L(light))^q`, q `NIGHTPULL` (0.45; 0.5 would be the geometric mean of the two) times the night's
     share (0 at the horizon, 1 from 4 degrees under it, smooth). It only ever dims, keeps every hue, follows the weather's values alone (no weather named,
-    no level fixed), and leaves a weather whose night Sunlight is no brighter than its clouds as it was. With no
+    no level fixed), and leaves the direct light of a weather whose night Sunlight is no brighter than its clouds as it was (the light from below has its own gain). With no
     visible cloud colour nothing is dimmed, and the dimming grows in over eight times that least luminance.
     The sky level, the moon's share and MoonlightNVSE.ini's factor are outside of it. The bound is taken of
     the undimmed light. It is part of Volumetric clouds, with Volumetric light on or off; without a moon the light from below
     dims alone. `MOONFORWARD` and `MOONBACK` can give the phase's forward lobe and back-scatter floor weights of their own by
     the same share: 1.6 and 0.1 as tuned, so the cloud facing the moon stays bright while its body darkens, and `MOONCAP` (9) is the phase's cap by
     the same share in place of the day's 4, so the cloud right at the moon can be the brightest thing in the sky (all three [design]: the contributor's pick from stills, 2026-11-25).
-    `MOONFORWARD`, `MOONBACK` and `MOONCAP` unset: the day's. By day and at the horizon none of it is computed (test
+    The bound on the cloud light takes the larger of the two caps. By day and at the horizon none of it is computed (test
     `the_day_is_untouched_by_the_night_pull`, bit for bit).
   - *The bound*: the most a step emits per channel, computed in f64, sets one factor `min(1, 30,000 / B)` for
     every colour, so a mod's huge sky level stays inside the HDR target (`light_bound`).

@@ -36558,7 +36558,7 @@ paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs",
 env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "1", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,volumetric-light"]
 run_seconds = 30
-note = "Made the moonlight's check on 2026-11-25 (before it the gate closed at night); its expectations were written from the code and not yet checked by a run."
+note = "Made the moonlight's check on 2026-11-25 (before it the gate closed at night); run on 2026-11-25 (passed)."
 expect = [
   { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light" },
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, lit by the moon, .*, moonlit share (0\.(0[1-9]|[1-9]\d)|1\.00), strength ', label = "the gate opens by the moon, with a share of its light" },

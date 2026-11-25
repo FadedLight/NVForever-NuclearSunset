@@ -598,7 +598,9 @@ pub fn lighting(i: &VolumeInputs) -> Lighting {
     let mut lower = bounce * f64::from(HEMISPHERE * a.weight(LightWeight::Lower)) * level * lean_gain;
     let shade = shade_colour(i, upper);
     let night = night_share(elevation);
-    let cap = a.phase_cap(night);
+    // The bound takes the larger of the day's cap and the night's: a deck's scattered light is added past the
+    // cap, so a small night cap must not loosen it.
+    let cap = a.phase_cap(night).max(PHASE_CAP);
     let k = light_bound(light, direct, ambient, upper.max(shade), lower, f64::from(a.weight(LightWeight::Sun)), 0.0, cap);
     // By night: each light toward the cloud layers' luminance, in the weather's own units (before the sky
     // level and the gains; MOON_SHARE and MoonlightNVSE.ini's factor stay whole, on top).
@@ -1221,6 +1223,38 @@ mod tests {
         }
     }
 
+    /// The same bound by moonlight, at every night cap (0 and tiny ones included), with a storm deck's scattered
+    /// light past the cap: the emission is finite and at most MAX_LIGHT for the extreme inputs.
+    #[test]
+    fn the_night_cap_keeps_the_emission_bounded() {
+        for cap in [0.0f32, 0.01, 1.0, PHASE_CAP, 9.0, MAX_MOON_CAP] {
+            for scale in [1.0f32, 1e3, 3e38] {
+                let i = VolumeInputs {
+                    sunlight: [1e30, 5.0, 1e30],
+                    ambient: [0.0; 3],
+                    sky_scale: scale,
+                    light_dir: Vec3::new(0.0, 1.0, 0.0),
+                    light_strength: 1.0,
+                    density: 4.0,
+                    amount: 1.0,
+                    sky: SkyLight { upper: [0.0; 3], horizon: [0.0; 3], ambient: [0.0; 3], elevation: -40.0 },
+                    light_aids: LightAids { moon_cap: Some(cap), night_pull: 0.0, ..most_aids() },
+                    ..Default::default()
+                };
+                let u = uniform(&i);
+                assert!(u.light.is_finite(), "cap {cap}, scale {scale}: {}", u.light);
+                let s = shading(&u);
+                for cos in [-1.0f32, 0.0, 1.0] {
+                    let ray = RayLight { p0: octave_phase(cos, u.phase, u.loct.w * (1.0 - u.phase.z), 1.0), p1: octave_phase(cos, u.phase, u.loct.w * (1.0 - u.phase.z), u.loct.z), powder: powder_share(cos, u.lpowder.x), ..ray_light(Vec3::Y, &u) };
+                    for sheet in [0.0f32, 0.5, 3.0] {
+                        let e = lean_shade(Vec4::new(0.8, 3.0 / 5_000.0, 0.95, 0.9), 900.0, 1.5, true, &ray, &s, 0.0, 0.0, sheet, 0.0);
+                        assert!(e.is_finite() && e.cmpge(Vec3::ZERO).all() && e.max_element() <= MAX_LIGHT * 1.0002, "cap {cap}, scale {scale}, cos {cos}, sheet {sheet}: {e}");
+                    }
+                }
+            }
+        }
+    }
+
     /// Energy: unit radiance from both hemispheres, no direct beam, the
     /// default hemisphere weights (summing to one) and a unit background behind: whatever the slab's
     /// depth, its amount and however its steps are cut, what leaves it toward the camera is at most 1.
@@ -1624,7 +1658,7 @@ mod tests {
         }
         let lower = bounce * f64::from(HEMISPHERE * a.weight(LightWeight::Lower)) * level * lean_gain;
         let shade = shade_colour(i, upper);
-        let k = light_bound(light, direct, ambient, upper.max(shade), lower, f64::from(a.weight(LightWeight::Sun)), 0.0, a.phase_cap(night_share(i.sky.elevation)));
+        let k = light_bound(light, direct, ambient, upper.max(shade), lower, f64::from(a.weight(LightWeight::Sun)), 0.0, a.phase_cap(night_share(i.sky.elevation)).max(PHASE_CAP));
         [direct, upper, lower].map(|v| (v * k).as_vec3())
     }
 

@@ -1323,6 +1323,8 @@ another; `solid cores: removed (...)` when the light is no longer drawn; nothing
   NVForever runs, 2026-11-25, 1920x1080]. The bright hold, the moon's disc, the Strip's lamps, the Sun shafts' yield in
   the first degrees after sunset (they end at 2 degrees under the horizon, and give way to the moonlit air from
   its first frame) and FSR are not looked at by night.
+- In a frame in which the light's share is exactly 0 at the horizon the air draws nothing, so Sun shafts may draw in it, though
+  their own fade is above 0 down to 2 degrees under the horizon [design; not seen].
 - A halo round the moon in the sky (`MOON_SKYPHASE`) multiplies the sky's own light (the composite's far
   form), so a black zenith stays black: what it can add there is bounded by the sky's own value.
 - Interiors and under water are off; so are a fog not blended in display values, an unreadable

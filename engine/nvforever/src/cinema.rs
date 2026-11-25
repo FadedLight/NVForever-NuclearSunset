@@ -290,8 +290,7 @@ mod tests {
         assert!((mid.x - 0.5).abs() < 1e-6, "180 frames: gone after 3 s");
         assert!(mid.z > 0.0, "the drops run down");
         assert_eq!(lens_for(&w, Some(3.0), 1), Vec4::ZERO);
-        let mut c = CinemaLook::default();
-        c.lens = mid;
+        let c = CinemaLook { lens: mid, ..CinemaLook::default() };
         assert!(c.on(), "drops alone draw, without NVR's Cinema");
     }
 }

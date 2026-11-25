@@ -155,9 +155,15 @@ SetEventHandlerAlt].
 event to every handler registered for that name. A handler receives one string map: by
 default `"eventName"` (the name) and `"eventSender"` (the dispatching mod's file name);
 `infoMap` replaces the whole map, and `senderName` replaces the sender string
-[documented: DispatchEvent]. Whether a replaced map still gets `eventName`: open (the
-page's example reads both from a custom map, which suggests both are added
-[hypothesis]). Whether handlers run at once, inside the dispatching line: open.
+[documented: DispatchEvent]. A custom `infoMap` still receives `"eventName"` and
+`"eventSender"` alongside its custom keys, and handlers run synchronously inside
+`DispatchEvent` before the dispatching script continues [observed: Fallout: New Vegas
+1.4.0.525 + xNVSE 6.4.9, 2026-11-23, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base
+masters, read-only `PrintToConsole` probe `core_09_dispatch_event_custom_map_sync`
+(`tools/capture/nvse/catalogs/wave4a_extenders.json`, #3679, dispatching `"W4CustomEvent"`
+with custom stringmap `{"k": 42}` and sender `"W4Sender"` and reading the handler's side
+effects immediately afterward): `PROBE|core_09_dispatch_event_custom_map_sync|1,1,1,42`;
+no DLL or source consulted].
 
 **DispatchEventAlt** `[ref.]DispatchEventAlt "Name" [arg1 … arg15]` (xNVSE 6.2.8):
 calls every handler registered for that user-defined event whose filters match the

@@ -546,8 +546,9 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
             return Some(Ok(outputs(g, 0.0, &[f64::from(c[0]), f64::from(c[1]), f64::from(c[2])])));
         }
         // ---- arrays [documented: Ar_Shuffle, a new shuffled array; Ar_SortEditor, a new
-        // array of the forms by editor ID, `reverse` the other way; hypothesis: the IDs
-        // compared without case, forms without one first].
+        // array of the forms by editor ID, `reverse` the other way; observed: IDs compared
+        // without case in `jg_30_ar_sort_editor_case_order` (`wave4a_extenders.json`),
+        // see docs/spec-notes/ext-jg8.md §2; hypothesis: forms without an editor ID first].
         "ar_shuffle" => {
             let Some(XVal::Array(id)) = args.first() else { return Some(Ok(zero)) };
             let mut vals: Vec<XVal> = g.ext.array(*id).map(|a| a.entries.iter().map(|(_, v)| v.clone()).collect()).unwrap_or_default();
@@ -573,7 +574,9 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
         }
         // ---- the system colours: 1 HUD, 2 HUD alt, 3 terminal, 4 Pip-Boy, 5 main menu
         // [documented], SetSystemColor's (`nvse_jip9`) else [`default_colour`]. GetSystemColor packs
-        // them as 0xRRGGBB [hypothesis]; GetSystemColorAlt writes the three variables.
+        // them as 0xRRGGBB and returns 0 for another id [observed: `jg_31_get_system_color_packed`
+        // (`wave4a_extenders.json`), see docs/spec-notes/ext-jg8.md §2]; GetSystemColorAlt writes
+        // the three variables.
         "getsystemcolor" => XVal::Num(system_colour(g, num(args, 0, 0.0) as i64).map_or(0.0, |c| f64::from((u32::from(c[0]) << 16) | (u32::from(c[1]) << 8) | u32::from(c[2])))),
         "getsystemcoloralt" => {
             let c = system_colour(g, num(args, 0, 0.0) as i64).unwrap_or([0; 3]);

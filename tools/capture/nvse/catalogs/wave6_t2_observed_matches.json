@@ -200,7 +200,7 @@
             "ShowOff:OnPreActivateInventoryItem",
             "ShowOff:OnPreActivateInventoryItemAlt"
           ],
-          "claim": "Verify ShowOff:OnPreActivateInventoryItem vs ShowOff:OnPreActivateInventoryItemAlt on scripted EquipItem and UseAidItem: ThisAlt, all 5 args (rBase, rRef, bNotPrev, iKey, bEquipping), and SetFunctionValue 0 veto.",
+          "claim": "Verify ShowOff:OnPreActivateInventoryItem vs ShowOff:OnPreActivateInventoryItemAlt on scripted EquipItem: ThisAlt, all 5 args (rBase, rRef, bNotPrev, iKey, bEquipping), and SetFunctionValue 0 veto.",
           "expected": "reg=1/1|eq=0,na=0,al=1,selfP=1,isRef=1,key=0,bEq=1|unAl=1,unBEq=1|vetoEq=0",
           "script_lines": [
             "ref cbNA = CompileScript \"nvseprobe_s_w6t2_02_noalt.gek\"",

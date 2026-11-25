@@ -48,6 +48,25 @@ pub struct NvrLook {
     pub fog: f32,
     /// NVR's Cinema values when its Cinema is on (`cinema.rs` draws them), else `None`.
     pub cinema: Option<Cinema>,
+    /// NVR's Water Lens when on (water drops on the lens after surfacing, `cinema.rs`).
+    pub water_lens: Option<WaterLens>,
+}
+
+/// NVR's Water Lens settings [observed: NVR's defaults file, `[_Shaders.WaterLens]`: "Short
+/// refraction water drop animation on the lens when exiting water"; Hikikomori keeps NVR's
+/// defaults: Amount 0.1, Time 180, TimeMultA 0.1, TimeMultB 0.2, Viscosity 0.05]. The file
+/// says nothing of the units; how each is used here is ours (`cinema.rs`) [hypothesis].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WaterLens {
+    /// Refraction strength.
+    pub amount: f32,
+    /// How long the drops last, read as frames at 60 a second.
+    pub time: f32,
+    /// How fast the drops run down the lens (the two speed factors).
+    pub mult_a: f32,
+    pub mult_b: f32,
+    /// How fast the drops thin out as they run.
+    pub viscosity: f32,
 }
 
 /// NVR's Cinema settings as the preset gives them, each held to a range [engineering
@@ -69,7 +88,7 @@ pub struct Cinema {
 
 impl Default for NvrLook {
     fn default() -> Self {
-        NvrLook { bloom: [1.0; 3], sharpen: Some(1.0), fog: 0.0, cinema: None }
+        NvrLook { bloom: [1.0; 3], sharpen: Some(1.0), fog: 0.0, cinema: None, water_lens: None }
     }
 }
 
@@ -127,6 +146,10 @@ impl NvrLook {
                     vignette_radius: get("VignetteRadius", 2.0),
                 }
             }),
+            water_lens: value(text, "_Shaders.WaterLens.Status", "Enabled").is_some_and(|v| v > 0.5).then(|| {
+                let get = |key: &str, default: f32, max: f32| value(text, "_Shaders.WaterLens.Main", key).filter(|v| v.is_finite()).unwrap_or(default).clamp(0.0, max);
+                WaterLens { amount: get("Amount", 0.1, 1.0), time: get("Time", 180.0, 1200.0), mult_a: get("TimeMultA", 0.1, 2.0), mult_b: get("TimeMultB", 0.2, 2.0), viscosity: get("Viscosity", 0.05, 1.0) }
+            }),
         }
     }
 
@@ -164,6 +187,7 @@ fn load(mut commands: Commands, data: Option<Res<GameData>>, look: Option<Res<Nv
         Some(bytes) => {
             let look = NvrLook::parse(&String::from_utf8_lossy(&bytes));
             info!("nvr look: from {NVR_SETTINGS}: bloom day x{:.2}, night x{:.2}, interiors x{:.2}; sharpening {}; height fog x{:.2}; cinema {}", look.bloom[0], look.bloom[1], look.bloom[2], look.sharpen.map_or("off".into(), |s| format!("x{s:.2}")), look.fog, look.cinema.map_or("off".into(), |c| format!("grain {:.2}, aberration {:.2}, overlay {:.2}, vignette {:.2}/{:.2}", c.grain, c.aberration, c.overlay, c.vignette_darkness, c.vignette_radius)));
+            info!("nvr look: water lens {}", look.water_lens.map_or("off".into(), |w| format!("amount {:.2}, {:.0} frames", w.amount, w.time)));
             look
         }
         None => {
@@ -238,7 +262,10 @@ mod tests {
 
     #[test]
     fn missing_or_switched_off_nvr_settings_change_nothing() {
-        assert_eq!(NvrLook::parse(""), NvrLook { bloom: [1.0; 3], sharpen: None, fog: 0.0, cinema: None });
+        assert_eq!(NvrLook::parse(""), NvrLook { bloom: [1.0; 3], sharpen: None, fog: 0.0, cinema: None, water_lens: None });
+        let lens = "[_Shaders.WaterLens.Main]\nAmount = 0.1\nTime = 180.0\nTimeMultA = 0.1\nTimeMultB = 0.2\nViscosity = 0.05\n[_Shaders.WaterLens.Status]\nEnabled = true\n";
+        assert_eq!(NvrLook::parse(lens).water_lens, Some(WaterLens { amount: 0.1, time: 180.0, mult_a: 0.1, mult_b: 0.2, viscosity: 0.05 }));
+        assert_eq!(NvrLook::parse(&lens.replace("true", "false")).water_lens, None);
         let fog = "[_Shaders.VolumetricFog.Main]\nAmount = 1.553\n[_Shaders.VolumetricFog.Status]\nEnabled = true\n";
         assert_eq!(NvrLook::parse(fog).fog, RATIO_RANGE.1, "Hikikomori's 1.553 over 0.4 is held to the range");
         assert_eq!(NvrLook::parse(&fog.replace("true", "false")).fog, 0.0);

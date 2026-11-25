@@ -464,3 +464,17 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
     (SCOLParkingLotChunk03bSandy) Misaligned 1542 and CollisionTooBig 3922. Checked: fnv-collide
     tests (the bhkRigidBodyT expectation back to 7 / -7) pass; bug hunt Goodsprings
     Misaligned 1 → 0, CollisionTooBig 1 → 0.
+
+48. **NVR Water Lens, own code** (`engine/nvforever/src/cinema.rs`, `cinema.wesl`,
+    `nvr_look.rs` `NvrLook::water_lens`, struct `WaterLens`). Reads `[_Shaders.WaterLens.Main]`
+    when `[_Shaders.WaterLens.Status] Enabled` (Hikikomori keeps NVR's defaults: Amount 0.1,
+    Time 180, TimeMultA 0.1, TimeMultB 0.2, Viscosity 0.05) [observed: the profile's
+    NewVegasReloaded.dll.toml]. When the camera comes up out of the water (upstream's
+    `underwater::CameraSubmerged`), drops on the lens bend the picture behind them, run down
+    and fade over Time read as frames at 60 a second [hypothesis: 180 = 3 s]; their rims are
+    lifted 4 % and the Cinema colour fringes follow the bent read. Drawn in the Cinema pass,
+    also when NVR's Cinema is off. Own code from the setting names and the effect's look, not
+    from NVR's shader. Checked: cinema tests (7) pass incl. `water_drops_fade_after_surfacing`;
+    play run at Lake Mead (WastelandNV cell 28,16), dived to 1,800 and surfaced at 2 s / 5 s:
+    log "water lens: out of the water, drops on the lens"; `results\visual\lens-surfaced.png`
+    shows the drops, `lens-gone.png` (4 s later) none.

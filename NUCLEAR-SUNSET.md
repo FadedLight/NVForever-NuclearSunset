@@ -43,6 +43,7 @@ NVForever never writes into the game folder, the MO2 folders or `Documents\My Ga
 - No more hard straight lines where ground textures meet with **Terrain anti-tiling** on
   (46), and the Goodsprings parking-lot road's collision is back in place (47): two of our
   first-pass fixes that the upstream merge had dropped.
+- NVR's **Water Lens**: water drops on the screen for a few seconds after you surface (48).
 
 ## Sync with upstream, 2026-11-25
 

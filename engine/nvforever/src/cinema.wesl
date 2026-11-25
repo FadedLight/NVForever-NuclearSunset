@@ -9,6 +9,50 @@ struct Cinema {
     params: vec4<f32>,
     // x vignette darkness, y radius it starts at.
     vignette: vec4<f32>,
+    // Water drops: x left (1..0), y refraction, z run, w surfacing number.
+    lens: vec4<f32>,
+}
+
+// One hash of a drop cell and the surfacing number, 0..1 (four values).
+fn cell_hash(c: vec2<i32>, n: u32) -> vec4<f32> {
+    let p = vec2<u32>(bitcast<u32>(c.x), bitcast<u32>(c.y));
+    return vec4(hash(p, n * 4u), hash(p, n * 4u + 1u), hash(p, n * 4u + 2u), hash(p, n * 4u + 3u));
+}
+
+// Rows of drop cells over the picture's height [engineering choice].
+const DROP_ROWS: f32 = 9.0;
+
+// Where the drops bend the picture: a uv offset in xy, and in z how much of a drop covers here.
+fn drops(uv: vec2<f32>, aspect: f32) -> vec3<f32> {
+    let left = cinema.lens.x;
+    var off = vec2(0.0);
+    var cover = 0.0;
+    // In units of cells, x stretched by the aspect so the drops stay round.
+    let base = vec2(uv.x * aspect, uv.y) * DROP_ROWS;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let cell = vec2<i32>(floor(base)) + vec2(dx, dy);
+            let h = cell_hash(cell, u32(cinema.lens.w));
+            if h.x > 0.45 {
+                continue;
+            }
+            // Each drop runs down at its own pace, bigger ones faster.
+            let r = 0.18 + 0.22 * h.w;
+            let run = cinema.lens.z * DROP_ROWS * (0.4 + 1.2 * h.z) * (r / 0.4);
+            let centre = vec2<f32>(cell) + vec2(0.2 + 0.6 * h.y, 0.2 + 0.6 * h.z + run);
+            let d = (base - centre) / r;
+            let q = dot(d, d);
+            if q < 1.0 {
+                // A lens-shaped drop: steepest at its rim, flat in its middle.
+                let dome = sqrt(1.0 - q);
+                off -= d * (1.0 - dome) * cinema.lens.y;
+                cover = max(cover, smoothstep(1.0, 0.7, q));
+            }
+        }
+    }
+    // Drops thin out as they go: smaller bends and edges as `left` falls.
+    let fade = smoothstep(0.0, 0.6, left);
+    return vec3(off * fade * vec2(1.0 / aspect, 1.0), cover * fade);
 }
 
 @group(0) @binding(0) var source: texture_2d<f32>;
@@ -30,9 +74,17 @@ fn hash(p: vec2<u32>, frame: u32) -> f32 {
 
 @fragment
 fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let src = textureSampleLevel(source, source_sampler, in.uv, 0.0);
-    var c = src.rgb;
     let dims = vec2<f32>(textureDimensions(source));
+    // Water drops on the lens bend where the picture is read from.
+    var uv = in.uv;
+    var cover = 0.0;
+    if cinema.lens.x > 0.0 {
+        let w = drops(in.uv, dims.x / dims.y);
+        uv = clamp(in.uv + w.xy, vec2(0.0), vec2(1.0));
+        cover = w.z;
+    }
+    let src = textureSampleLevel(source, source_sampler, in.uv, 0.0);
+    var c = textureSampleLevel(source, source_sampler, uv, 0.0).rgb;
     // From the centre, in units of the picture's height (round, whatever the aspect).
     let d = (in.uv - 0.5) * vec2(dims.x / dims.y, 1.0);
     let r2 = dot(d, d);
@@ -41,10 +93,14 @@ fn composite(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // with the square of the distance (nothing at the centre, where the reticle is).
     let ab = cinema.params.y;
     if ab > 0.0 {
+        // From the place the drops moved the read to, so the fringes follow the drops.
         let shift = (in.uv - 0.5) * (ab * r2 / 0.6);
-        c.r = textureSampleLevel(source, source_sampler, in.uv + shift, 0.0).r;
-        c.b = textureSampleLevel(source, source_sampler, in.uv - shift, 0.0).b;
+        c.r = textureSampleLevel(source, source_sampler, uv + shift, 0.0).r;
+        c.b = textureSampleLevel(source, source_sampler, uv - shift, 0.0).b;
     }
+    // A drop's rim catches a little light [engineering choice: 4 % lift at full cover, so a
+    // drop reads as water on the lens and not only as a bend].
+    c += vec3(0.04) * cover;
 
     // The picture overlaid on itself (the overlay blend), mixed in by its strength: darks
     // darker, lights lighter, mid-grey unchanged.

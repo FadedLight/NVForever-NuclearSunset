@@ -126,8 +126,6 @@ fn heading(dir: V3) -> f32 {
     }
 }
 
-/// Place thrown mines, set off, burn and explode mines (module notes).
-#[allow(clippy::too_many_arguments)]
 /// Disable a mine that went off (or DisableAllMines turned off) for good: its own flag
 /// counts from now on, not its enable parent's state. A placed mine with an enable parent
 /// (XESP) otherwise stays enabled whatever its own flag says (`World::is_enabled`), so it
@@ -141,6 +139,8 @@ fn put_out(world: &mut fnv_sim::World, id: FormId) -> Result<(), fnv_sim::world:
     world.set_enabled(id, false)
 }
 
+/// Place thrown mines, set off, burn and explode mines (module notes).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn tick(
     time: Res<Time>,
     mut mines: ResMut<Mines>,

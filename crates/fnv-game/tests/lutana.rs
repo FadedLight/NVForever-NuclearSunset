@@ -407,6 +407,7 @@ SetActivatorSoundActivate 0 TestActivator");
     assert_eq!(n(&mut g, "GetFormFlag ItemA 1024"), 0.0);
     q(&mut g, "SetFormFlag ItemA 1024 1");
     assert_eq!(n(&mut g, "GetFormFlag ItemA 1024"), 1.0);
+    assert_eq!(n(&mut g, "GetFormFlag ItemA 1280"), 1.0, "any bit in mask (1024 | 256) matches [observed: w6d2_32]");
     assert_eq!(n(&mut g, "GetFlagsLow ItemA") as u32 & 1024, 1024);
     q(&mut g, "SetFormFlag ItemA 1024 0");
     assert_eq!(n(&mut g, "GetFormFlag ItemA 1024"), 0.0);

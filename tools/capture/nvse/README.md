@@ -78,8 +78,8 @@ Probes in `catalogs/` target:
     write JSON and Markdown scoreboards.
   - `cite` — format copy-paste-ready clean-room `[observed: ...]` citations with
     the automated privacy gate.
-- `catalogs/` — 10 sanitized declarative console-only JSON catalogs (28 batches,
-  543 read-only probes total; all file-writing and `con_Save` probes excluded):
+- `catalogs/` — 11 sanitized declarative console-only JSON catalogs (32 batches,
+  600 read-only probes total; all file-writing and `con_Save` probes excluded):
   - `wave1_parity_probes.json` — Wave 1/2 parity probes covering xNVSE compound
     assignments & `dATan2`, JIP hit 3D direction/base damage/reticle limbs,
     ShowOff `OnFireWeapon` & `ForceWeaponJamAnim`, ShowOff objective/unholster
@@ -123,6 +123,13 @@ Probes in `catalogs/` target:
   - `wave6_t1_jg_colors.json` — Wave 6 Tier 1 read-only console-only probes
     covering JohnnyGuitar `RGBtoHSV`, `HSVtoRGB`, and `GetSystemColorAlt` (1
     batch, 2 probes: `w6_t1_jg_colors`).
+  - `wave6d9_dialogue_quests_containers_barter.json` — Wave 6D-9 read-only
+    console-only probes covering quests, stages, objectives, targets, delays,
+    variables, and events; dialogue, Say/SayTo, topics/infos, notes, radios,
+    talking activators, and disposition; locks, terminals, doors, destruction,
+    activators, and containers/inventory; and merchants, barter, vendor
+    services, item values/health, repair lists, casinos, and economy GMSTs
+    (4 batches, 57 probes: `w6d9_01`..`w6d9_04`).
 - `tests/test_nvse_harness.py` — offline stdlib `unittest` suite (no game
   install or captured logs required).
 

@@ -432,6 +432,65 @@ End)"#,
     assert_eq!(num(&mut g2, "ord.pre"), 1.0);
     assert_eq!(num(&mut g2, "ord.act"), 0.0, "veto must skip OnActivate");
     no_errors(&g2);
+
+    // 3. A pre-destroyed door (DOOR with SetDestroyed 1) still dispatches
+    // ShowOff:OnPreScriptedActivate on scripted Activate (ActMode::Default and ActMode::Block),
+    // returning "destroyed" when unvetoed and "prevented" when vetoed.
+    let mut bytes = tes4();
+    bytes.extend(top(
+        b"NPC_",
+        &record(b"NPC_", 0, 7, &[sub(b"EDID", z("Player"))]),
+    ));
+    bytes.extend(top(
+        b"DOOR",
+        &record(
+            b"DOOR",
+            0,
+            0x910,
+            &[sub(b"EDID", z("OwnedDoor")), sub(b"FULL", z("Test Door"))],
+        ),
+    ));
+    let plugins = vec![Plugin::parse(&bytes, "OwnedPreDestroyed.esm".into()).unwrap()];
+    let lo = LoadOrder::new(&plugins).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas");
+    let schema = Schema::load_dir(root.join("fnv")).unwrap();
+    let path = root.join("script/functions.json");
+    let json = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let forms = FormStore::build(&lo, &schema);
+    let refs = RefTable::build(&lo, &schema);
+    let data = GameData::build(&lo, &schema, FunctionTable::load(&path).unwrap(), &json, &refs);
+    let mut g3 = Game::new(
+        &data,
+        World::new(&forms, &refs, Default::default()),
+        GameConfig {
+            strict: true,
+            ..Default::default()
+        },
+    );
+    query(
+        &mut g3,
+        r#"SetModLocalData "dest.door" (player.PlaceAtMe OwnedDoor)
+let ownRef := GetModLocalData "dest.door"
+ownRef.SetDestroyed 1
+SetEventHandlerAlt "ShowOff:OnPreScriptedActivate" (Begin Function {ref actor, int blockFlag, int allowed}
+SetModLocalData "dest.calls" ((GetModLocalData "dest.calls") + 1)
+if eval (GetModLocalData "dest.veto")
+SetFunctionValue 0
+endif
+End) 0::ownRef"#,
+    );
+    let door = target(&mut g3, "dest.door");
+    let r_def = g3.activate(FormId::PLAYER_REF, door, ActMode::Default).unwrap();
+    assert_eq!(r_def["result"], "destroyed");
+    assert_eq!(num(&mut g3, "dest.calls"), 1.0);
+    let r_blk = g3.activate(FormId::PLAYER_REF, door, ActMode::Block).unwrap();
+    assert_eq!(r_blk["result"], "destroyed");
+    assert_eq!(num(&mut g3, "dest.calls"), 2.0);
+    query(&mut g3, "SetModLocalData \"dest.veto\" 1");
+    let r_veto = g3.activate(FormId::PLAYER_REF, door, ActMode::Default).unwrap();
+    assert_eq!(r_veto["result"], "prevented");
+    assert_eq!(num(&mut g3, "dest.calls"), 3.0);
+    no_errors(&g3);
 }
 
 #[test]

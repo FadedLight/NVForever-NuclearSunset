@@ -979,7 +979,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 228] = [
+    const KNOWN: [(&str, &str); 230] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -1099,6 +1099,7 @@ mod android_profile_tests {
         ("neon-glow", "Graphics"),
         ("sharpen", "Graphics"),
         ("anisotropic", "Graphics"),
+        ("texture-size-limit", "Graphics"),
         ("authored-materials", "Graphics"),
         ("authored-reflections", "Graphics"),
         ("terrain-height-blend", "Graphics"),
@@ -1135,6 +1136,7 @@ mod android_profile_tests {
         ("god-mode", "Debug"),
         ("navmesh", "Debug"),
         ("terrain-wireframe", "Debug"),
+        ("collision-view", "Debug"),
         ("send-reports", "Reports"),
         ("reports-delete", "Reports"),
             ("lockpick-touch-hints", "Touch"),
@@ -1320,7 +1322,8 @@ mod android_profile_tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait \
+        no-invisible-walls outdoor-fog-distance";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -1382,7 +1385,7 @@ mod android_profile_tests {
             keys(&list, &l, NVF_FEATURES_TAB),
             ["[Advanced Movement]", "advanced-movement", "movement-weight", "", "[Gameplay]", "movement-inertia", "weapon-handling", "advanced-recoil", "sprint", "", "[Visual Only]", "weapon-inertia", "animation-smoothing", "camera-motion", "", "[World Interaction]", "grass-fire", "", "[Quick Loot]", "quick-loot", "quick-loot-scale", "quick-loot-background", "quick-loot-weight", "quick-loot-value", "quick-loot-value-per-weight"]
         );
-        assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "scope-3d"]);
+        assert_eq!(keys(&list, &l, "Debug"), ["overlay", "hit-markers", "god-mode", "navmesh", "terrain-wireframe", "collision-view", "scope-3d"]);
         assert!(keys(&list, &l, "Tweaks").is_empty(), "an empty tab is still a tab");
         let at = |k: &str| l.placement_of(list.iter().position(|s| s.key == k).unwrap()).unwrap().path();
         assert_eq!(at("menu-pause"), "Gameplay > Dialogue");
@@ -1471,7 +1474,7 @@ mod android_profile_tests {
         // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
         // Running Costs AP sneak options (#3183), Stewie 9.65-9.70 sub-options (#3184),
         // and No Encounter Zone Level Lock (#3878), plus Faster Sleep and Wait (#3193).
-        assert_eq!(tweaks.len(), 575);
+        assert_eq!(tweaks.len(), 577);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);

@@ -618,6 +618,24 @@ v\FuseSparks.dds`), below the node
     drops, were chosen as the combination that looks most like the video. Four were
     tried; with system units for the drag or the reference's scale on the radius, the
     mist floated above the jet or off to its side.
+- **Update (#3673, placed smoke at small reference scales):**
+  - On Point Lookout's steamboat (`DLC04Steamboat01`, PointLookout.esm), three
+    references of `tSmokePillerMesh01` (MSTT `0x00096C7C`,
+    `effects\tests\testsmokepillermesh01.nif`) sit at reference scales `0.11`
+    (`0x01010F85`) and `0.03` (`0x01010F86`, `0x01010F87`), while the system
+    `pSmokePuffs` has node scale `1` and emitter radius `2,447.5` [observed: `fnvtool
+    nif decode` and player report on #3673]. Without multiplying radius by the
+    reference's scale, the puffs grew toward `2,447.5` units instead of `269` and `73`
+    units and hid the steamboat. In WastelandNV (FalloutNV.esm), 183 of 369 placed
+    particle-emitting references are scaled (53 below 0.5), including 9 of 10
+    `dlc03fxdarksmoke.nif` at `0.23`–`0.37` vs `0x00137F86` at scale `1` [observed:
+    #3673 `fnvtool world refs` survey].
+  - `engine/nvforever/src/particles.rs::emit` now multiplies born particle radius by
+    `spray` (`frame_scale(&node) * d.system_scale`) as well as `ModelEmitter::size`
+    [hypothesis: #3673; observer-checks.md item 87 still open — once confirmed in the
+    original on `dlc03fxdarksmoke.nif` (`0x000E72EF` vs `0x00137F86`), re-check the
+    Ultra-Luxe fountain (`0x0016566E`, scale `0.5`) and `fxtiresmoke.nif` before and
+    after to see whether the fountain's drag or decay units also need adjusting].
 
 
 ### 7.8 External idle KF tracks on animated objects (#2685)

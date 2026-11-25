@@ -198,8 +198,9 @@ pub struct ModelEmitter {
     /// one. A system not named does not emit.
     pub driven: Option<HashMap<String, Option<f32>>>,
     /// A factor on the size of the particles it gives birth to from now on (1: as the
-    /// file says). The reference's scale leaves the size alone (particles.md §7.7); a grass
-    /// fire's flames grow and die down with this (`crate::grass_fire_fx`) [design].
+    /// file says), multiplying on top of the reference's and system node's scale
+    /// (particles.md §7.7, #3673); a grass fire's flames grow and die down with this
+    /// (`crate::grass_fire_fx`) [design].
     pub size: f32,
     /// Owned by a script-attached model (`AttachModel` / camera overlay): kept isolated
     /// from the host reference's placed particle systems (`instance_refs`) [design].
@@ -1111,9 +1112,10 @@ fn emit(
                     sequence: sequence.map(|s| s.index),
                     age: 0.0,
                     life: (vals.life + vals.life_variation * spread(&mut rng) * 0.5).max(0.02),
-                    // Sized by the system node's scale; the reference's scale moves and speeds
-                    // the spray but leaves the drops' size (particles.md §3, §7.7).
-                    radius: (vals.radius + vals.radius_variation * spread(&mut rng)).max(0.0) * d.system_scale * size,
+                    // Sized by the reference's scale and the system node's (`spray =
+                    // frame_scale(&node) * d.system_scale`), plus `ModelEmitter::size`
+                    // (particles.md §7.7, #3673; hypothesis pending observer-checks.md item 87).
+                    radius: (vals.radius + vals.radius_variation * spread(&mut rng)).max(0.0) * spray * size,
                     angle: rot.angle + rot.angle_variation * spread(&mut rng),
                     spin,
                     tex: if d.subtextures.is_empty() { 0 } else { ((rng.next_f32() * d.subtextures.len() as f32) as usize).min(d.subtextures.len() - 1) },
@@ -1526,6 +1528,44 @@ mod tests {
         assert!((frame_scale(&half) - 0.5).abs() < 1e-5);
         // A frame squashed to nothing sizes nothing down to zero: 1.
         assert_eq!(frame_scale(&Affine3A::from_scale(Vec3::ZERO)), 1.0);
+    }
+
+    /// [hypothesis, #3673] A particle born from a placed reference at scale 0.1 takes
+    /// that reference's scale on its radius (alongside `system_scale` and `ModelEmitter::size`),
+    /// while a scale-1.0 reference keeps the authored radius unchanged.
+    #[test]
+    fn a_scaled_reference_sizes_its_born_particles_radius() {
+        let emit_radius = |ref_scale: f32, system_scale: f32, emitter_size: f32| -> f32 {
+            let mut s = Scene::emitting(None, Quat::IDENTITY);
+            let emitter = s.world.query_filtered::<Entity, With<ModelEmitter>>().single(&s.world).unwrap();
+            *s.world.get_mut::<Transform>(emitter).unwrap() = Transform::from_translation(AHEAD).with_scale(Vec3::splat(ref_scale));
+            s.world.get_mut::<ModelEmitter>(emitter).unwrap().size = emitter_size;
+            {
+                let mut p = s.world.resource_mut::<Particles>();
+                let live = p.systems.values_mut().flatten().flatten().next().unwrap();
+                live.def.rate = 100.0;
+                live.def.emitter.radius = 2447.5;
+                live.def.emitter.radius_variation = 0.0;
+                live.def.system_scale = system_scale;
+            }
+            s.frame(0.05);
+            let live = s.live();
+            assert!(!live.particles.is_empty(), "particles should be born at ref_scale={ref_scale}");
+            let r = live.particles[0].radius;
+            for q in &live.particles {
+                assert!((q.radius - r).abs() < 1e-4, "every born particle shares the zero-variation radius");
+            }
+            r
+        };
+
+        let at_one = emit_radius(1.0, 1.0, 1.0);
+        assert!((at_one - 2447.5).abs() < 1e-3, "scale 1.0 keeps full radius: {at_one}");
+
+        let at_tenth = emit_radius(0.1, 1.0, 1.0);
+        assert!((at_tenth - 244.75).abs() < 1e-3, "scale 0.1 scales radius to a tenth: {at_tenth}");
+
+        let combined = emit_radius(0.1, 0.5, 0.5);
+        assert!((combined - 2447.5 * 0.1 * 0.5 * 0.5).abs() < 1e-3, "combines reference, system, and emitter size: {combined}");
     }
 
     fn test_particle(pos: Vec3, trail: Vec<Vec3>) -> Particle {

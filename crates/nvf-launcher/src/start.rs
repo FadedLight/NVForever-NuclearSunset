@@ -34,7 +34,9 @@ pub const DEFAULT_QUEST: &str = "00102037";
 /// (code: `open_film` in `engine/nvf-play/src/intro.rs` reads the loose file that wins
 /// among the data's layers, through `Vfs::loose_path`).
 /// The game's own `Fallout_default.ini` names `sIntroMovie=Fallout INTRO Vsk.bik`, which
-/// that folder does not have [documented: `Fallout_default.ini`]. Without the key
+/// that folder does not have [documented: `Fallout_default.ini`].
+/// NVForever's default is `FNVIntro.bik` by owner decision [owner, 2026-10-15]; the other
+/// file is Fallout 3's film (`engine/nvf-play/src/game_start.rs` module doc). Without the key
 /// NVForever plays `video\fnvintro.bik` (code: `DEFAULT_INTRO` in
 /// `engine/nvf-play/src/game_start.rs`).
 pub const DEFAULT_FILM: &str = "FNVIntro.bik";

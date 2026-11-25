@@ -41,6 +41,11 @@ in the game folder the player provides, not a mod's; NVForever ships no film.
   data's layers, through `Vfs::loose_path`).
 - [documented: `Fallout_default.ini` in the player's game folder; GECK Wiki, "INI Settings"]
   `sIntroMovie` is `Fallout INTRO Vsk.bik`. The `Data\Video` above has no such file.
+- [owner, 2026-10-15] Without the key NVForever plays `FNVIntro.bik`, not the original's
+  default `Fallout INTRO Vsk.bik`, which is Fallout 3's film; New Vegas does not ship it and
+  TTW brings it (the module doc of `engine/nvf-play/src/game_start.rs`).
+- [hypothesis] The opening's own call for `FNVIntro.bik` (VCG00 stage 0, a PlayBink) is a
+  script's film and plays whatever `sIntroMovie` names, as in the original (same module doc).
 - With no `sIntroMovie` line, NVForever plays `video\fnvintro.bik`, and an empty
   `sIntroMovie=` plays no film (code: `DEFAULT_INTRO` and `film_path` in
   `engine/nvf-play/src/game_start.rs`).
@@ -52,3 +57,13 @@ writes those two lines into the home's ini. A missing key still means the same o
 so the written lines match a fresh game (code: `GameStart::parse` in
 `engine/nvf-play/src/game_start.rs` reads those values as quest `00102037` and film
 `video\fnvintro.bik`).
+
+## TTW's lines left in (#3229)
+
+- Since #3229, New Game with a `sCharGenQuest` that names no quest of the load order (TTW's
+  `001FFFF8` with TTW off or removed) starts VCG00 instead, logs it and shows a corner message
+  naming the setting (code: `not_a_quest` and `fallback_notice` in
+  `engine/nvf-play/src/game_start.rs`).
+- #3229 asked the launcher to clear or flag those lines. The card flags them
+  (`start::ttw_missing` in `crates/nvf-launcher/src/start.rs`), and TTW off clears them in
+  one step: it writes the base game's two values above over TTW's.

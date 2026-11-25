@@ -1742,8 +1742,8 @@ impl Combat {
     pub fn vats_weapon(&self, sim: &SimState, gravity: f32) -> Result<VatsWeapon, &'static str> {
         let no_gun = tr("VATS mode needs a weapon to aim.");
         use fnv_combat::vats::{shot_ap_cost, throw_reach, AttackStyle};
-        let id = self.weapon.ok_or(NO_GUN)?;
-        let w = &self.player_stats(id).ok_or(NO_GUN)?;
+        let id = self.weapon.ok_or(no_gun)?;
+        let w = &self.player_stats(id).ok_or(no_gun)?;
         let cost = shot_ap_cost(w, &self.rules.ap_attack);
         let edid = w.edid.clone().unwrap_or_else(|| id.to_string());
         if self.melee {
@@ -1765,7 +1765,7 @@ impl Combat {
         if self.equipped.flatten() != Some(id) || self.player_weapon_is_mine() {
             return Err(no_gun);
         }
-        let proj = self.forms.chain(id, self.ammo).and_then(|ch| ch.projectile).ok_or(NO_GUN)?;
+        let proj = self.forms.chain(id, self.ammo).and_then(|ch| ch.projectile).ok_or(no_gun)?;
         if self.self_ammo {
             let carried = player_count(sim, Some(id));
             if carried == 0 {
@@ -1779,7 +1779,7 @@ impl Combat {
         if AttackKind::of(w) != AttackKind::Gun {
             return Err(no_gun);
         }
-        let cy = self.cycle.as_ref().ok_or(NO_GUN)?;
+        let cy = self.cycle.as_ref().ok_or(no_gun)?;
         if cy.reloading() || cy.jammed() {
             return Err(tr("Not while reloading."));
         }

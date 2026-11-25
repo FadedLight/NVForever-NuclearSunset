@@ -1267,7 +1267,7 @@ mod tests {
     fn faster_sleep_wait_shortens_hour_countdown_only_when_enabled() {
         assert_eq!(hour_seconds(false), HOUR_SECONDS);
         assert_eq!(hour_seconds(true), FASTER_HOUR_SECONDS);
-        assert!(FASTER_HOUR_SECONDS > 0.0 && FASTER_HOUR_SECONDS < HOUR_SECONDS);
+        const { assert!(FASTER_HOUR_SECONDS > 0.0 && FASTER_HOUR_SECONDS < HOUR_SECONDS); }
 
         let mut vanilla = Model::open(false);
         vanilla.apply(Command::Hours(3));

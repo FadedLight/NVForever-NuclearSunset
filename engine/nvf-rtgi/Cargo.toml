@@ -1,0 +1,7 @@
+[package]
+name = "nvf-rtgi"
+description = "The ray scene of a cell, for the bounce light of its lamps on the CPU"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false

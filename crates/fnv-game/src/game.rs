@@ -4137,28 +4137,39 @@ impl<'a> Game<'a> {
                 });
                 XVal::Num(if self.handlers.len() < before { 1.0 } else { 0.0 })
             }
-            // [documented: DispatchEvent] one string map: eventName and eventSender, or the
-            // info map given (eventName and eventSender added when it lacks them
-            // [hypothesis]); the handlers run at once [hypothesis].
+            // [documented: DispatchEvent; observed: 2026-11-24, Fallout: New Vegas
+            // 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, GSDocMitchellHouse (0x00103DF9),
+            // 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_dispatch_event_return_overwrite.json`
+            // probe `w6d1_04_dispatch_event_map_and_sync`:
+            // `PROBE|w6d1_04_dispatch_event_map_and_sync|def(r=1,n=1,en=W6D1_DEv,es=)|c1(r=1,mut=1/1,en=W6D1_DEv)|c2(r=1,en=W6D1_DEv,es=NewSnd)`;
+            // returns 1, runs handlers synchronously, and overwrites eventName and
+            // eventSender on a caller-supplied infoMap; no DLL, PDB, or third-party
+            // source consulted].
             EventCall::Dispatch { event, map, sender: s } => {
                 let sender = s.unwrap_or_else(|| sender.to_string());
                 let id = match map {
                     Some(XVal::Array(id)) => id,
                     _ => self.ext.new_array(fnv_script::vm::ArrayKind::StringMap, Vec::new()),
                 };
+                let mut replaced = Vec::new();
                 if let Some(a) = self.ext.array_mut(id).filter(|a| a.kind == fnv_script::vm::ArrayKind::StringMap) {
                     for (k, v) in [("eventName", event.clone()), ("eventSender", sender)] {
                         let key = XKey::Str(k.into());
-                        if a.get(&key).is_none() {
+                        if let Some((_, slot)) = a.entries.iter_mut().find(|(ek, _)| *ek == key) {
+                            replaced.push(std::mem::replace(slot, XVal::Str(v)));
+                        } else {
                             a.entries.push((key, XVal::Str(v)));
                         }
                     }
                     a.entries.sort_by(|x, y| x.0.cmp_key(&y.0));
                 }
+                for old in replaced {
+                    self.ext.release(&old);
+                }
                 self.ext.retain(&XVal::Array(id));
                 self.dispatch_event(&event, vec![XVal::Array(id)], None);
                 self.ext.hand_over(&XVal::Array(id));
-                XVal::Num(0.0)
+                XVal::Num(1.0)
             }
             EventCall::DispatchAlt { event, on, args } => {
                 self.dispatch_event(&event, args, on.and_then(|v| v.as_form()).map(FormId));

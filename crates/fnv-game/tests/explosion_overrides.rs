@@ -480,10 +480,25 @@ fn live_explosion_overrides_reach_effect_pickpocket_radiation_placement_and_hit_
     assert_eq!(got_radius, XVal::Num(777.0));
     assert_eq!(g.explosion_hit_damage(FormId(clone), FormId(TARGET_REF)), Some(135.0));
 
-    // 5. PlaceAtMe of an authored EXPL emits CombatRequest::Explode resolving live overrides.
+    // 5. PlaceAtMe of an authored EXPL emits CombatRequest::Explode resolving live overrides and caller source.
     g.combat_requests.clear();
     q(&mut g, "player.PlaceAtMe OwnedBlastExpl 1");
-    assert!(matches!(g.combat_requests.as_slice(), [CombatRequest::Explode { explosion, .. }] if *explosion == FormId(EXPL_A)));
+    assert!(matches!(
+        g.combat_requests.as_slice(),
+        [CombatRequest::Explode { explosion, source, .. }]
+            if *explosion == FormId(EXPL_A) && *source == Some(FormId::PLAYER_REF)
+    ));
+}
+
+#[test]
+fn unhandled_explosion_hit_damage_does_not_spawn_explosion_ref() {
+    let f = fixture();
+    let mut g = game(&f);
+
+    let before = g.explosion_placed(FormId(EXPL_A), None, [0.0; 3], 400.0).expect("baseline ref");
+    assert_eq!(g.explosion_hit_damage(FormId(EXPL_A), FormId(TARGET_REF)), Some(80.0));
+    let after = g.explosion_placed(FormId(EXPL_A), None, [0.0; 3], 400.0).expect("next ref");
+    assert_eq!(after.0, before.0 + 1, "unhandled explosion_hit_damage must not allocate a live explosion ref");
 }
 
 #[test]

@@ -124,13 +124,13 @@ impl Game<'_> {
     /// ShowOff:OnExplosionHit, before a blast's damage reaches an actor: calling
     /// reference (`GetSelfAlt`) is the live `EXPL` reference (whose `GetBaseObject` is
     /// the `EXPL` form), argument 1 is the hit actor, and argument 2 is the source actor
-    /// (or `0` when none). Handlers read the damage (`GetExplosionHitDamage`) and may
-    /// change it (`SetExplosionHitDamage`). Returns the damage to deal [observed:
-    /// showoff1, MineFragExplosion at the player read 100 and set to 5 the player lost 5
-    /// Health; observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
-    /// ShowOffNVSE 184 + JIP LN 57.30, 10 official base masters, GSDocMitchellHouse
-    /// (`0x00103DF9`), isolated clean-room staging copy, committed probe
-    /// `w6t2_01_showoff_on_explosion_hit`
+    /// (or `0` when none [observed: showoff1]). Handlers read the damage
+    /// (`GetExplosionHitDamage`) and may change it (`SetExplosionHitDamage`). Returns the
+    /// damage to deal [observed: showoff1, MineFragExplosion at the player read 100 and
+    /// set to 5 the player lost 5 Health, and argument 2 read 0; observed 2026-11-24:
+    /// Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184 + JIP LN 57.30, 10
+    /// official base masters, GSDocMitchellHouse (`0x00103DF9`), isolated clean-room
+    /// staging copy, committed probe `w6t2_01_showoff_on_explosion_hit`
     /// (`tools/capture/nvse/catalogs/wave6c_showoff_on_explosion_hit.json`):
     /// `PROBE|w6t2_01_showoff_on_explosion_hit|reg=1,n=1,selfIsP=0,tSelf=81,tBase=81,base=0007078B,hitIsP=1,src=00000014,dmg=100.0`;
     /// no DLL or source consulted; hypothesis: the damage is the blast's before armour,
@@ -168,6 +168,9 @@ impl Game<'_> {
     pub fn explosion_hit_damage(&mut self, explosion: FormId, target: FormId) -> Option<f64> {
         let traits = self.explosion_traits(explosion)?;
         let damage = f64::from(traits.damage);
+        if !self.handled(ON_EXPLOSION_HIT) {
+            return Some(damage);
+        }
         let at = self.ref_pos_rot(target).map_or([0.0; 3], |(p, _)| p);
         let expl_ref = self.explosion_placed(explosion, None, at, traits.radius);
         Some(self.explosion_hit_with_context(expl_ref, target, None, damage))

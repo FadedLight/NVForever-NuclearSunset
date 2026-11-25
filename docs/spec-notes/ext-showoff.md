@@ -42,13 +42,16 @@ ran.
     no DLL or source consulted]`: the calling reference (`GetSelfAlt`) is the live
     explosion reference (type 81 `EXPL`, `GetBaseObject` = `0x0007078B`, not the hit
     actor), argument 1 is the hit actor (`Player`), and argument 2 is the source actor
-    (`Player` `0x00000014` when placed on the player, `0` when there is no source actor).
+    (`Player` `0x00000014` when placed on the player; `0` when there is no source actor
+    [observed: showoff1]).
 - `GetExplosionHitDamage` read 100 inside the handler; after `SetExplosionHitDamage 5` the
   player lost 5 Health [observed]. Both are unusable outside the event [documented]; outside
   it NVForever reads 0 and ignores a set.
 - NVForever asks for the damage in the engine's blast loop (`Game::explosion_hit_with_context`,
-  passing the live `expl_ref` as calling reference and `cause.map(|c| c.actor)` as the
-  source actor argument), before armour is taken off, and deals what the handlers leave
+  passing the live `expl_ref` as calling reference and `cause.map(|c| c.actor).or(source)` as
+  the source actor argument, including the caller ref forwarded by `PlaceAtMe` via
+  `CombatRequest::Explode { source }` without fabricating a weapon `Cause`), before armour is
+  taken off, and deals what the handlers leave
   [hypothesis: whether the original's value is before or after armour is not measured; the
   player in nvfairport took exactly the set value].
 

@@ -457,7 +457,9 @@ struct NifSurface {
                     continue;
                 }
                 raw[k + 1u] = detail_sample_taps(instance_index, terrain_detail_word(instance_index, q + 15u + k), diffuse_sampler, taps, fp);
-                let s = saturate(o * raw[k + 1u].a);
+                // The painted opacity alone, not the diffuse's alpha (terrain.wesl; Nuclear
+                // Sunset's DXT5 landscape textures keep other data there; FIXES.md [28], note 46).
+                let s = o;
                 w[k + 1u] = s * remaining;
                 remaining *= 1.0 - s;
             }
@@ -476,7 +478,7 @@ struct NifSurface {
                     continue;
                 }
                 raw[k + 1u] = detail_sample(instance_index, terrain_detail_word(instance_index, q + 15u + k), diffuse_sampler, uv, ddx, ddy);
-                paint[k] = o * raw[k + 1u].a;
+                paint[k] = o;
             }
             w = terrain_ordered_shares(paint, n);
         }

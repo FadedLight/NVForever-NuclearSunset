@@ -170,6 +170,9 @@ pub struct App {
     edits: BTreeMap<String, String>,
     // Game folder.
     game_edit: String,
+    /// The Game folder page's Mod Organizer 2 instance box and profile (`[Launcher]` `Mo2Instance`, `Mo2Profile`).
+    mo2_edit: String,
+    mo2_profile: String,
     /// The Mods page's new-game start fields (src/start.rs), as typed.
     start_edit: crate::start::Fields,
     /// The start card's Custom… window, open while `Some`: the quest and film as typed there,
@@ -241,6 +244,8 @@ impl App {
             stored: BTreeMap::new(),
             edits: BTreeMap::new(),
             game_edit: String::new(),
+            mo2_edit: String::new(),
+            mo2_profile: String::new(),
             start_edit: crate::start::Fields::default(),
             start_custom: None,
             mods: None,
@@ -384,6 +389,8 @@ impl App {
         self.tab = on.and_then(|on| self.tabs.iter().position(|t| *t == on)).unwrap_or(0);
         self.game_edit = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
         self.ini = IniForm::read(&self.ini_text);
+        self.mo2_edit = ini_get(&self.ini_text, LAUNCHER, "Mo2Instance").unwrap_or_default();
+        self.mo2_profile = ini_get(&self.ini_text, LAUNCHER, "Mo2Profile").unwrap_or_default();
         // None set: the box starts on Steam's usual folder when the game is there; it is
         // stored only by Save (#2938).
         if self.game_edit.is_empty() {
@@ -406,9 +413,77 @@ impl App {
         launch::game_from_ini(&self.ini_text)
     }
 
-    /// Whether the game would find its folder when started now ([`launch::folder_known`]).
+    /// Whether the game would find its folder when started now ([`launch::folder_known`]),
+    /// or plays through a saved Mod Organizer 2 instance that checks out.
     fn folder_known(&self) -> bool {
-        launch::folder_known(self.game().is_some(), fnv_install::mo2::usvfs_loaded(), std::env::var_os("NVFOREVER_DATA").as_deref())
+        self.saved_mo2().is_some() || launch::folder_known(self.game().is_some(), fnv_install::mo2::usvfs_loaded(), std::env::var_os("NVFOREVER_DATA").as_deref())
+    }
+
+    /// The saved Mod Organizer 2 instance and its check, when one is saved and checks out.
+    fn saved_mo2(&self) -> Option<(PathBuf, launch::Mo2Check)> {
+        let dir = ini_get(&self.ini_text, LAUNCHER, "Mo2Instance").filter(|s| !s.trim().is_empty())?;
+        let profile = ini_get(&self.ini_text, LAUNCHER, "Mo2Profile").unwrap_or_default();
+        let dir = PathBuf::from(dir.trim());
+        launch::check_mo2(&dir, &profile).ok().map(|c| (dir, c))
+    }
+
+    /// The Game folder page's Mod Organizer 2 card: pick the instance folder (browse, or find
+    /// the one this PC uses), choose a profile from its list, see in plain words what NVForever
+    /// will use, and save or clear it. Saved, Play starts the game through that profile.
+    fn mo2_card(&mut self, ui: &mut egui::Ui) {
+        card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("Play a Mod Organizer 2 modlist (Nuclear Sunset, Tale of Two Wastelands, …) without starting MO2. Pick the folder that holds ModOrganizer.exe, or the instance's folder. NVForever only reads it.").small().color(WEAK));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.mo2_edit).hint_text("Mod Organizer 2 folder").desired_width(ui.available_width() - 260.0));
+                if cfg!(windows) && ui.button("Browse…").clicked() {
+                    if let Some(d) = pick_folder("Your Mod Organizer 2 folder (the one holding ModOrganizer.exe)") {
+                        self.mo2_edit = d.display().to_string();
+                    }
+                }
+                if ui.button("Find it").on_hover_text("Use the instance Mod Organizer 2 itself would open on this PC.").clicked() {
+                    match fnv_install::mo2::instance_dir() {
+                        Some(d) => self.mo2_edit = d.display().to_string(),
+                        None => self.message = Some(("No Mod Organizer 2 instance found on this PC: use Browse… to pick its folder.".into(), true)),
+                    }
+                }
+            });
+            let dir = self.mo2_edit.trim().to_string();
+            if dir.is_empty() {
+                ui.label(RichText::new("Not set: Play uses the game folder above.").small().color(WEAK));
+                return;
+            }
+            match launch::check_mo2(std::path::Path::new(&dir), &self.mo2_profile) {
+                Ok(c) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Profile");
+                        egui::ComboBox::from_id_salt("mo2-profile").selected_text(c.profile.clone()).show_ui(ui, |ui| {
+                            for p in &c.profiles {
+                                if ui.selectable_label(*p == c.profile, p).clicked() {
+                                    self.mo2_profile = p.clone();
+                                }
+                            }
+                        });
+                    });
+                    ui.label(RichText::new(format!("{} plugins enabled; the game itself from {}.", c.plugins, c.game.display())).color(GOOD));
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("Save").strong()).clicked() {
+                            let (dir, profile) = (dir.clone(), c.profile.clone());
+                            let r = self.write_ini(|t| ini_set(&ini_set(&t, LAUNCHER, "Mo2Instance", &dir), LAUNCHER, "Mo2Profile", &profile));
+                            self.after_write(r, Some("Saved: Play starts the game through this Mod Organizer 2 profile."));
+                        }
+                        if ui.button("Clear").on_hover_text("Play the game folder above again, without Mod Organizer 2.").clicked() {
+                            let r = self.write_ini(|t| ini_set(&ini_set(&t, LAUNCHER, "Mo2Instance", ""), LAUNCHER, "Mo2Profile", ""));
+                            self.after_write(r, Some("Mod Organizer 2 cleared."));
+                        }
+                    });
+                }
+                Err(e) => {
+                    ui.label(RichText::new(e).color(BAD));
+                }
+            }
+        });
     }
 
     /// Read the latest file first, keeping every other line.
@@ -565,7 +640,8 @@ impl App {
             self.message = Some((format!("{} was not found beside the launcher: pick it on the Game folder page.", launch::GAME_EXE), true));
             return;
         };
-        match launch::spawn(&exe, &start) {
+        let extra = self.saved_mo2().map(|(dir, c)| launch::mo2_args(&dir, &c)).unwrap_or_default();
+        match launch::spawn_with(&exe, &start, &extra) {
             Ok(c) => {
                 self.child = Some(c);
                 self.message = Some((STARTING.into(), false));
@@ -1851,6 +1927,9 @@ impl App {
                 Err(_) => {}
             }
         });
+        ui.add_space(12.0);
+        ui.label(RichText::new("MOD ORGANIZER 2").small().strong().color(theme::GOLD_TEXT));
+        self.mo2_card(ui);
         ui.add_space(12.0);
         ui.label(RichText::new("PROGRAM").small().strong().color(theme::GOLD_TEXT));
         card(ui, |ui| {

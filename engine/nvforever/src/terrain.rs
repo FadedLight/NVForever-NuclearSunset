@@ -3090,7 +3090,7 @@ mod tests {
         for line in [
             "                if remaining == 0.0 {",
             "                if o == 0.0 {",
-            "                let a = saturate(o * raw[k + 1u].a);",
+            "                let a = o;",
             "                w[k + 1u] = a * remaining;",
             "                remaining *= 1.0 - a;",
             "            if w[0] != 0.0 {",
@@ -3117,7 +3117,10 @@ mod tests {
                 continue;
             }
             read[k + 1] = true;
-            let a = (o * alpha[k + 1]).clamp(0.0, 1.0);
+            // The painted opacity alone, as terrain.wesl (Nuclear Sunset note 46); `alpha` no
+            // longer weighs a share.
+            let _ = alpha[k + 1];
+            let a = o;
             w[k + 1] = a * remaining;
             remaining *= 1.0 - a;
         }
@@ -3152,7 +3155,7 @@ mod tests {
                     _ => next(),
                 };
             }
-            let paint: [f32; 6] = std::array::from_fn(|k| opacity[k].clamp(0.0, 1.0) * alpha[k + 1]);
+            let paint: [f32; 6] = std::array::from_fn(|k| opacity[k].clamp(0.0, 1.0));
             let (w, read) = antitiled_walk(opacity, alpha, n);
             assert_eq!(w, ordered_shares(paint, n), "case {case}");
             for k in 0..n {
@@ -3179,11 +3182,11 @@ mod tests {
         let (w, read) = antitiled_walk([0.6, 0.3, 1.0, 0.0, 0.0, 0.0], [1.0; 7], 3);
         assert_eq!(w, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
         assert_eq!(read, [false, false, false, true, false, false, false]);
-        // An alpha of 0 is only found by reading: the layer is read and shares nothing.
+        // A diffuse alpha of 0 does not hide a painted layer (the painted opacity alone, note 46).
         let mut alpha = [1.0; 7];
         alpha[2] = 0.0;
         let (w, read) = antitiled_walk([0.0, 1.0, 0.0, 0.0, 0.0, 0.0], alpha, 2);
-        assert!(read[2] && w[2] == 0.0 && read[0] && w[0] == 1.0);
+        assert!(read[2] && w[2] == 1.0 && !read[0] && w[0] == 0.0);
         // A tiny painted share survives (exact zeros skip, no epsilon).
         let (w, read) = antitiled_walk([1e-4, 0.0, 0.0, 0.0, 0.0, 0.0], [1.0; 7], 1);
         assert!(read[1] && w[1] > 0.0 && w[1] < 1e-3);
@@ -3622,7 +3625,7 @@ mod tests {
                         continue;
                     }
                     raw[k + 1] = l.0;
-                    let s = (o * raw[k + 1][3]).clamp(0.0, 1.0);
+                    let s = o;
                     wt[k + 1] = s * remaining;
                     remaining *= 1.0 - s;
                 }
@@ -3636,7 +3639,7 @@ mod tests {
                         continue;
                     }
                     raw[k + 1] = l.0;
-                    paint[k] = o * raw[k + 1][3];
+                    paint[k] = o;
                 }
                 wt = ordered_shares(paint, n);
             }
@@ -3675,7 +3678,9 @@ mod tests {
             if o == 0.0 {
                 continue;
             }
-            let share = o * texel[3];
+            // Folded overlays by their painted opacity alone (note 46); the separate blended
+            // layers past the folded ones still take their texture's alpha (overflow_mix).
+            let share = if is_folded { o } else { o * texel[3] };
             if share == 0.0 {
                 continue;
             }
@@ -3701,7 +3706,7 @@ mod tests {
             (None, false) => {
                 let mut colour = base_colour;
                 for l in &c.folded {
-                    let share = l.1.clamp(0.0, 1.0) * l.0[3];
+                    let share = l.1.clamp(0.0, 1.0);
                     for (x, v) in colour.iter_mut().zip(layer(l)) {
                         *x = *x * (1.0 - share) + v * share;
                     }
@@ -3714,7 +3719,7 @@ mod tests {
                     let alpha: [f32; 7] = std::array::from_fn(|i| if i == 0 { 1.0 } else { c.folded.get(i - 1).map_or(1.0, |l| l.0[3]) });
                     antitiled_walk(opacity, alpha, n).0
                 } else {
-                    let paint: [f32; 6] = std::array::from_fn(|k| c.folded.get(k).map_or(0.0, |l| l.1.clamp(0.0, 1.0) * l.0[3]));
+                    let paint: [f32; 6] = std::array::from_fn(|k| c.folded.get(k).map_or(0.0, |l| l.1.clamp(0.0, 1.0)));
                     ordered_shares(paint, n)
                 };
                 let f = match height {

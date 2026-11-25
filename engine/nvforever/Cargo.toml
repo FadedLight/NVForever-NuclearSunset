@@ -137,8 +137,8 @@ default = ["intro-video"]
 # as NVForever is).
 intro-video = ["nvf-play/intro-video"]
 # The developer aids of src/dev_aids.rs (the debug variables and tune files of the volumetric clouds
-# and the light in the air, `--preview-weather`), which tests and debug builds have anyway; not for release builds.
-dev-aids = []
+# and the light in the air, `--preview-weather`, nvf-play's `NVF_PLAY_TEST_SHOT_DIFF`), which tests and debug builds have anyway; not for release builds.
+dev-aids = ["nvf-play/dev-aids"]
 # Bevy's spans for the in-engine span profile (profile.rs, NVF_PLAY_TEST_PROFILE); not for
 # release builds.
 profile = ["bevy/trace", "fnv-phys/solver-timers"]

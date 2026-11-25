@@ -30,7 +30,8 @@
 //! - **the start strength** (the overall strength): the aid's value
 //!   when the aid asks for the light, else the settings row's Volumetric light strength
 //!   (medium_air_demand.rs `AirStrengthSetting`, 0 to 200 %); a move of the slider makes new
-//!   start values at once (medium_air.rs `TuneFollower::restart`; a tune file's keys still win).
+//!   start values at once (medium_air.rs `TuneFollower::restart`; a tune file's keys still win; in a
+//!   build without the developer aids the slider alone, `slider_tune`).
 //! - Sun shafts yield in the render world, per view, in a frame the light's composite drew
 //!   there (medium_air_compose.rs `AirComposedViews`, shafts.rs `shafts_skip`), not from
 //!   this main-world gate.
@@ -43,24 +44,28 @@
 //! With the light not wanted nothing runs but the check of the demand, and nothing is logged.
 
 use crate::fly::FlyCam;
-use crate::medium_air::{self, AirGateInput, AirGrid, AirPhase, AirTune, GateLog, NormedPhase, TuneFollower, ViewBounds};
+use crate::medium_air::{self, AirGateInput, AirGrid, AirPhase, AirTune, GateLog, NormedPhase, ViewBounds};
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+use crate::medium_air::TuneFollower;
 use crate::medium_air_demand::{AirDraws, AirOpen, AirStrengthSetting, AirWanted};
 use crate::medium_air_grid::AirCamera;
 use bevy::prelude::*;
 use std::f32::consts::PI;
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 use std::sync::LazyLock;
 
 /// The start tune (the start aids, as medium_air_grid.rs reads them, and the grid aid), the
 /// strength aid's value when it asks for the light, and the tune file's path, read once.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 struct LightAids {
     start: AirTune,
     /// `NVF_PLAY_DEBUG_MEDIUM_LIGHT`'s strength when the aid asks for the light
     /// (medium_air_demand.rs `wanted_from_aid`): it wins over the settings row's slider.
     aid_strength: Option<f32>,
-    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     path: Option<String>,
 }
 
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 static AIDS: LazyLock<LightAids> = LazyLock::new(|| {
     let var = crate::dev_aids::var;
     let start = AirTune {
@@ -72,20 +77,15 @@ static AIDS: LazyLock<LightAids> = LazyLock::new(|| {
             medium_air::debug_depth(var(medium_air::ENV_DEPTH).as_deref()),
         )
     };
-    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     let path = var(medium_air::ENV_TUNE).filter(|p| !p.trim().is_empty());
     let aid = var(medium_air::ENV_STRENGTH);
     let aid_strength = crate::medium_air_demand::wanted_from_aid(aid.as_deref()).then(|| medium_air::debug_strength(aid.as_deref()));
-    LightAids {
-        start,
-        aid_strength,
-        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
-        path,
-    }
+    LightAids { start, aid_strength, path }
 });
 
 /// The start strength: the aid's value when the aid asks for the light, else the settings
 /// row's slider [design].
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub fn start_strength(aid: Option<f32>, row: f32) -> f32 {
     aid.unwrap_or(row)
 }
@@ -103,7 +103,11 @@ impl Plugin for AirLightPlugin {
 #[derive(Default)]
 struct LightState {
     active: bool,
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     follower: Option<TuneFollower>,
+    /// The strength last drawn with (a build without the developer aids follows the slider alone).
+    #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+    strength: Option<f32>,
     /// When the tune file was last looked at (real seconds).
     #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     looked: Option<f64>,
@@ -167,6 +171,45 @@ fn hand_on((open_now, draws_now): Gates, open: bool, draws: bool) {
     }
 }
 
+/// The tune this frame: the start values with the strength of the aid or of the row's slider
+/// (`row`), made again when the slider moves, and the tune file, when given, parsed over them; its
+/// changes logged.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+fn followed_tune(state: &mut LightState, row: f32, now: f64) -> AirTune {
+    let aids = &*AIDS;
+    let start = aids.start.with_strength(start_strength(aids.aid_strength, row));
+    let follower = state.follower.get_or_insert_with(|| TuneFollower::new(start));
+    for line in follower.restart(start) {
+        info!("{line}");
+    }
+    // The tune file, at most every TUNE_POLL_SECONDS of real time.
+    if let Some(path) = aids.path.as_deref().filter(|_| medium_air::poll_due(state.looked, now)) {
+        let read = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"));
+        for line in follower.feed(read.as_deref().map_err(String::as_str)) {
+            info!("{line}");
+        }
+        state.looked = Some(now);
+    }
+    follower.tune()
+}
+
+/// The tune without the developer aids: the look's constants with the slider's strength (`row`),
+/// a move of it logged (the follower's words).
+#[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+fn slider_tune(state: &mut LightState, row: f32) -> AirTune {
+    let tune = AirTune::default().with_strength(row);
+    if state.strength.replace(tune.strength).is_some_and(|was| was != tune.strength) {
+        info!("volumetric medium: light in the air tune: STRENGTH={}", tune.strength);
+    }
+    tune
+}
+
+/// Whether what the "on" line states of the tune changed: without the developer aids only the
+/// strength can.
+fn tune_moved(was: &AirTune, now: &AirTune) -> bool {
+    if crate::dev_aids::ON { medium_air::tune_changed(was, now) } else { was.strength != now.strength }
+}
+
 /// Each frame: nothing while the light is not wanted (the state forgotten once); else the
 /// tune file, the share, the gate and the grid onto the main camera's `AirCamera`.
 #[allow(clippy::type_complexity)]
@@ -191,26 +234,12 @@ fn follow_light(
     };
     let state = &mut *state;
     state.active = true;
-    let aids = &*AIDS;
-    // The start values with the strength of the aid or of the row's slider, made again when
-    // the slider moves (the tune file, when given, still parses over them).
     let row = strength_row.map_or(crate::medium_air_demand::STRENGTH_DEFAULT, |s| s.0);
-    let start = aids.start.with_strength(start_strength(aids.aid_strength, row));
-    let follower = state.follower.get_or_insert_with(|| TuneFollower::new(start));
-    for line in follower.restart(start) {
-        info!("{line}");
-    }
     let now = time.elapsed_secs_f64();
-    // The tune file, at most every TUNE_POLL_SECONDS of real time.
     #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
-    if let Some(path) = aids.path.as_deref().filter(|_| medium_air::poll_due(state.looked, now)) {
-        let read = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"));
-        for line in follower.feed(read.as_deref().map_err(String::as_str)) {
-            info!("{line}");
-        }
-        state.looked = Some(now);
-    }
-    let tune = follower.tune();
+    let tune = followed_tune(state, row, now);
+    #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+    let tune = slider_tune(state, row);
     let aspect = match projection {
         Projection::Perspective(p) => p.aspect_ratio,
         _ => 16.0 / 9.0,
@@ -256,7 +285,7 @@ fn follow_light(
         // bounds moved (a weather fade, the hour, the view), looked at every 5 s at most.
         None if answer.is_ok() => {
             if let Some(told) = state.told {
-                if medium_air::tune_changed(&told.tune, &tune) {
+                if tune_moved(&told.tune, &tune) {
                     let phase = solved(&mut state.phase, tune.phase());
                     state.told = tell(&phase, bounds_of(&phase));
                 } else if bounds_due(told.looked, now) {

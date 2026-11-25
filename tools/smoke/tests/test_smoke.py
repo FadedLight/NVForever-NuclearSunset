@@ -693,7 +693,7 @@ class RequiresTests(unittest.TestCase):
         build does not read: engine/nvforever/src/dev_aids.rs) says which build it is for."""
         suite = load(HERE / "scenarios.toml")
         aids = ("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", "NVF_PLAY_DEBUG_MEDIUM", "NVF_PLAY_DEBUG_FAIR_SUN", "NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE",
-                "NVF_PLAY_DEBUG_SOLID_CORES")
+                "NVF_PLAY_DEBUG_SOLID_CORES", "NVF_PLAY_TEST_SHOT_DIFF")
         using = [s for s in suite.scenarios if any(k.startswith(aids) for k in s.env)]
         self.assertTrue(using)
         for s in using:

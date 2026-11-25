@@ -951,6 +951,7 @@ impl AirView {
     }
 
     /// The view's name as the aid and the tune file take it.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     pub fn name(self) -> &'static str {
         match self {
             AirView::None => "none",
@@ -1005,6 +1006,7 @@ impl AirOccluders {
     }
 
     /// The occluders' name as the aid and the tune file take it.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     pub fn name(self) -> &'static str {
         match self {
             AirOccluders::All => "all",
@@ -1258,6 +1260,7 @@ pub fn tune_changed(a: &AirTune, b: &AirTune) -> bool {
 
 /// The changed keys of `b` against `a`, as `NAME=value` in the tune file's spelling and
 /// order (`SHARE`, `DEPTH`, `GRID` print `auto` when cleared); "nothing" when none [design].
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub fn tune_diff(a: &AirTune, b: &AirTune) -> String {
     let mut parts: Vec<String> = Vec::new();
     let numbers = [
@@ -1313,28 +1316,24 @@ pub fn poll_due(last: Option<f64>, now: f64) -> bool {
     last.is_none_or(|t| now < t || now - t >= TUNE_POLL_SECONDS)
 }
 
-/// Follows the start values (the strength's slider) and, in a build with the developer aids
-/// (dev_aids.rs), the tune file: each read's text is parsed over the
+/// Follows the tune file (only with the developer aids, dev_aids.rs; without them the tune is the
+/// slider's alone, medium_air_light.rs `slider_tune`): each read's text is parsed over the
 /// **start** tune (so removing a line returns that key to its start value); a text seen before
 /// changes nothing; a missing or unreadable file is the start tune, said once until the file
 /// is read again [design].
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 #[derive(Clone, Debug)]
 pub struct TuneFollower {
     start: AirTune,
     tune: AirTune,
     /// The last read: its text, or `Err` while the file could not be read.
-    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     seen: Option<Result<String, ()>>,
 }
 
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 impl TuneFollower {
     pub fn new(start: AirTune) -> TuneFollower {
-        TuneFollower {
-            start,
-            tune: start,
-            #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
-            seen: None,
-        }
+        TuneFollower { start, tune: start, seen: None }
     }
 
     /// The tune now.
@@ -1344,7 +1343,6 @@ impl TuneFollower {
 
     /// One read of the file: its text, or the error's words. Returns the log lines to write
     /// (`volumetric medium: light in the air tune: ...`), none when nothing changed.
-    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     pub fn feed(&mut self, read: Result<&str, &str>) -> Vec<String> {
         let mut lines = Vec::new();
         let next = match read {
@@ -1381,13 +1379,10 @@ impl TuneFollower {
             return Vec::new();
         }
         self.start = start;
-        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
         let next = match &self.seen {
             Some(Ok(text)) => AirTune::parse(text, &self.start),
             _ => self.start,
         };
-        #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
-        let next = self.start;
         let mut lines = Vec::new();
         if tune_changed(&self.tune, &next) {
             lines.push(format!("volumetric medium: light in the air tune: {}", tune_diff(&self.tune, &next)));

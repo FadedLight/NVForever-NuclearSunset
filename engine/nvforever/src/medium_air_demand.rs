@@ -33,6 +33,7 @@ use bevy::prelude::*;
 use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
 /// The debug aid that asks for the light in the air (its value is the strength).
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub const AID: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT";
 
 /// Whether the light in the air is wanted (main world; false by default).
@@ -56,7 +57,9 @@ pub struct AirOpen(pub bool);
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub(crate) struct AirSupport(pub(crate) Option<bool>);
 
-/// Whether the debug aid [`AID`] asks for the light (read once at the start).
+/// Whether the debug aid [`AID`] asks for the light (read once at the start; only with the
+/// developer aids).
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 #[derive(Resource, Default, Clone, Copy, PartialEq, Debug)]
 pub struct AirAid(pub bool);
 
@@ -98,6 +101,7 @@ impl AirStrengthSetting {
 }
 
 /// Whether the aid's text `v` asks for the light: a finite number above 0.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub fn wanted_from_aid(v: Option<&str>) -> bool {
     v.and_then(|s| s.trim().parse::<f32>().ok()).is_some_and(|x| x.is_finite() && x > 0.0)
 }
@@ -113,8 +117,8 @@ pub fn granted(asked: bool, supported: impl FnOnce() -> Option<bool>) -> bool {
     asked && supported().unwrap_or(true)
 }
 
-/// Registers [`AirWanted`], [`AirAid`] and [`AirStrengthSetting`], reads the aid once at the
-/// start and follows the row (added by `MediumAirPlugin`).
+/// Registers [`AirWanted`] and [`AirStrengthSetting`], with the developer aids [`AirAid`] (the aid
+/// read once at the start), and follows the row (added by `MediumAirPlugin`).
 pub struct AirDemandPlugin;
 
 impl Plugin for AirDemandPlugin {
@@ -123,14 +127,15 @@ impl Plugin for AirDemandPlugin {
             .init_resource::<AirDraws>()
             .init_resource::<AirOpen>()
             .init_resource::<AirSupport>()
-            .init_resource::<AirAid>()
             .init_resource::<AirStrengthSetting>()
-            .add_systems(Startup, read_aid)
             .add_systems(PreUpdate, follow_demand);
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        app.init_resource::<AirAid>().add_systems(Startup, read_aid);
     }
 }
 
 /// Set [`AirAid`] from the aid; one log line when it asks for the light, none otherwise.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 fn read_aid(mut aid: ResMut<AirAid>) {
     let on = wanted_from_aid(crate::dev_aids::var(AID).as_deref());
     if on {
@@ -145,6 +150,7 @@ fn read_aid(mut aid: ResMut<AirAid>) {
 /// off), as far as the device allows ([`granted`]); nothing otherwise. One log line when the row
 /// asks for the light or stops asking, and one when the device cannot draw it.
 pub(crate) fn follow_demand(
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     aid: Res<AirAid>,
     graphics: Option<Res<crate::graphics::Graphics>>,
     device: Option<Res<RenderDevice>>,
@@ -154,7 +160,11 @@ pub(crate) fn follow_demand(
     mut row_was: Local<Option<bool>>,
 ) {
     let graphics_changed = graphics.as_ref().is_some_and(|g| g.is_changed());
-    if !aid.is_changed() && !graphics_changed {
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+    let (aid_changed, aid) = (aid.is_changed(), aid.0);
+    #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+    let (aid_changed, aid) = (false, false);
+    if !aid_changed && !graphics_changed {
         return;
     }
     let row = graphics.is_some_and(|g| g.volumetric_light);
@@ -162,7 +172,7 @@ pub(crate) fn follow_demand(
         info!("volumetric medium: light in the air {} (the Volumetric light row)", if row { "wanted" } else { "no longer wanted by the row" });
     }
     *row_was = Some(row);
-    let next = AirWanted(granted(wanted(row, aid.0), || {
+    let next = AirWanted(granted(wanted(row, aid), || {
         let support = support.as_mut()?;
         if support.0.is_none() {
             let (Some(device), Some(adapter)) = (device, adapter) else { return None };

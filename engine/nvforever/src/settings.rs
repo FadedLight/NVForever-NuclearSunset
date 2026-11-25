@@ -1434,8 +1434,11 @@ fn register_graphics(app: &mut App) {
     // wanted at a strength above 0 (they yield to it where it draws, shafts.rs): the game's page
     // alone, for the launcher's shared rules know no slider's value.
     nvf_play::settings::set_needs_in_game(app, "light-shafts", |w| {
-        use crate::medium_air_demand::{AirAid, AirStrengthSetting, AirWanted};
-        let aid = w.get_resource::<AirAid>().is_some_and(|a| a.0);
+        use crate::medium_air_demand::{AirStrengthSetting, AirWanted};
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        let aid = w.get_resource::<crate::medium_air_demand::AirAid>().is_some_and(|a| a.0);
+        #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+        let aid = false;
         shafts_status(w.get_resource::<AirWanted>().is_some_and(|a| a.0), aid, w.get_resource::<AirStrengthSetting>().copied().unwrap_or_default().0)
     });
     add_setting(app, Setting::slider(VOLUMETRIC_LIGHT_STRENGTH_KEY, GROUP_GRAPHICS, "Volumetric light strength", VOLUMETRIC_LIGHT_STRENGTH_NOTE, air_strength_slider()));

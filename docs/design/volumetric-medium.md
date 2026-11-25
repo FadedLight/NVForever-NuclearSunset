@@ -650,7 +650,7 @@ they turn the view by an aid),
 seen in the air, shafts where the air is lit and shade where a ridge, a building or a cloud
 stands between it and the sun. It is not a statement about the original's frames, never a
 parity item, and never to be used to explain a difference from them. Off by default and in
-every preset; a release build reads none of the aids below (dev_aids.rs), so there the row alone
+every preset; a release build without `dev-aids` reads none of the aids below (dev_aids.rs), so there the row alone
 switches it; started with it off, nothing is allocated, no pipeline is asked for, nothing is
 logged and the picture is as on main (medium_air_grid.rs, "Off means off"; tested). What is left with
 it off: the rows and their keys, the run conditions and a few checks a frame, the shaders' registered
@@ -1271,7 +1271,7 @@ clouds'). The light volume's reads and the mean pass are not measured on their o
 ### Debug aids, tune keys and log lines
 
 Developer aids, as the clouds' ("Debug aids" above): only in tests, in debug builds and in a build with the
-`dev-aids` feature (in engine/: `cargo build --release -p nvforever --features dev-aids`). A release build reads
+`dev-aids` feature (in engine/: `cargo build --release -p nvforever --features dev-aids`). A release build without `dev-aids` reads
 none of them, has no tune file follower and no reference line of the solid cores, and draws the light with the
 defaults given here. Read once at the start, usable in a played run:
 - `NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`: the switch (a finite number above 0) and the
@@ -1367,5 +1367,6 @@ with the Terrain shadows and Cloud shadows rows, 4x MSAA), `volumetric-light-taa
 depth), `volumetric-light-fsr`, `volumetric-light-night` (01:00: off with the night reason, no
 composite), `volumetric-light-off` (the row off: no line of the light at all), `volumetric-light-no-aids` (a release build
 ignores the aids), `volumetric-light-row` (the row alone, without the shadows' rows), `volumetric-light-switch` (off, on, off, on in play),
-`volumetric-light-picture` (the picture with and without it, measured), `volumetric-light-clouds` (with the clouds and their shadows), `volumetric-light-solid-cores`, and with
-`NVF_SMOKE_DEV_AIDS` set (an exe built with the feature) `-solid-cores-tank` and `-solid-cores-blend`.
+`volumetric-light-clouds` (with the clouds and their shadows), `volumetric-light-solid-cores`, and with
+`NVF_SMOKE_DEV_AIDS` set (an exe built with the feature) `-aid` (the light by its aid, the row off), `-picture` (the picture with and
+without it, measured), `-solid-cores-tank` and `-solid-cores-blend`.

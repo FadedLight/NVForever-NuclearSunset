@@ -3301,7 +3301,7 @@ mod tests {
             assert!(terrain.find(line).unwrap_or_else(|| panic!("{line}")) < shift, "{line}: before the shift");
         }
         assert!(terrain.contains("        in.uv += parallax_shift(in.instance_index, in.uv, in.world_position, calculate_tbn_mikktspace(in.world_normal, in.world_tangent), parallax_w, parallax_n, parallax_footprint);"));
-        assert!(terrain.contains("                let share = saturate(opacity[k]);"), "the ordinary blend by the march's shares");
+        assert!(terrain.contains("                @if(TERRAIN_PARALLAX) let share = saturate(opacity[k]);"), "the ordinary blend by the march's shares");
         assert!(terrain.contains("            @if(TERRAIN_PARALLAX) f = parallax_w;"), "the height blend by the march's weights");
         // The drawn reads: at the moved place with the plain place's gradients, base included.
         assert!(terrain.contains("            parallax_ddx = parallax_dx * exp2(view.mip_bias);"));

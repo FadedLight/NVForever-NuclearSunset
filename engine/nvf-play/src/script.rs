@@ -1047,7 +1047,7 @@ impl Runtime {
             .collect();
         self.skip.extend(self_talks);
         let r = match r {
-            Ok(done) => Ok(self.talk_after(from).unwrap_or(done)),
+            Ok(done) => Ok(self.talk_after_except(from, Some(target)).unwrap_or(done)),
             r => r,
         };
         self.snapshot_inventory();
@@ -1146,6 +1146,10 @@ impl Runtime {
     /// shown like a SayTo line and the player stays free. Returns [`ByHand::Talk`] when a
     /// conversation started, else [`ByHand::Greeted`] when a greeting was said.
     fn talk_after(&mut self, from: usize) -> Option<ByHand> {
+        self.talk_after_except(from, None)
+    }
+
+    fn talk_after_except(&mut self, from: usize, skip_actor: Option<FormId>) -> Option<ByHand> {
         let player = FormId::PLAYER_REF;
         let wanted: Vec<(usize, FormId)> = self
             .game
@@ -1153,10 +1157,9 @@ impl Runtime {
             .iter()
             .enumerate()
             .skip(from)
-            .filter(|(i, _)| !self.skip.contains(i))
             .filter_map(|(i, e)| match &e.kind {
                 EventKind::Activated { by, outcome: Some(o), .. } if *by == player => match script_events::activation_from_json(o)?.outcome {
-                    Outcome::Talk { actor } => Some((i, actor)),
+                    Outcome::Talk { actor } if skip_actor != Some(actor) => Some((i, actor)),
                     _ => None,
                 },
                 _ => None,

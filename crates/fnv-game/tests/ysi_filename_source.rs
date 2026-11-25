@@ -887,7 +887,7 @@ fn json_backed_tag_and_icon_traits_honor_overrides_tag_sharing_and_clearing() {
     );
 
     // Explicitly clearing a tag to "" suppresses the JSON tag without affecting other forms;
-    // with ySI.json loaded, untagged "icon" falls back to Misc_Unknown.dds (see crates/fnv-game/src/ysi_filename.rs).
+    // with ySI.json loaded, untagged "icon" falls back to Misc_Unknown.dds (see crates/fnv-game/src/nvse_small.rs and docs/spec-notes/ysi-filename.md).
     success(&mut g, "ySISetTrait \"tag\" \"\" OwnYsiItem");
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiItem)"),
@@ -1792,8 +1792,8 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
     let f = armor_and_mode2_fixture();
     let mut g = game(&f);
 
-    // "string" returns only the raw sorting tag (not "{tag} {name}"; see crates/fnv-game/src/ysi_filename.rs).
-    // Priority-25 weaponIsAutomatic=false (JSON bool; see crates/fnv-game/src/ysi_filename.rs) beats priority-20 (w01)
+    // "string" returns only the raw sorting tag (not "{tag} {name}"; see crates/fnv-game/src/nvse_small.rs and docs/spec-notes/ysi-filename.md).
+    // Priority-25 weaponIsAutomatic=false (JSON bool; see crates/fnv-game/src/ysi_filename.rs `bool_pred` and docs/spec-notes/ysi-filename.md) beats priority-20 (w01)
     // for non-auto weapons; verify JSON bool matching first, then restore clean (w01) config.
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiDirectGun)"),
@@ -1823,7 +1823,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
     );
     let mut g = game(&f);
 
-    // "string" is an exact alias for "tag" on both get and set (leaving siblings unchanged; see crates/fnv-game/src/ysi_filename.rs).
+    // "string" is an exact alias for "tag" on both get and set (leaving siblings unchanged; see crates/fnv-game/src/nvse_small.rs and docs/spec-notes/ysi-filename.md).
     assert_eq!(
         success(&mut g, "SetFunctionValue (ySIGetTrait \"tag\" OwnYsiReplGun)"),
         XVal::Str("(w01)".into())
@@ -1837,7 +1837,7 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str(String::new())
     );
 
-    // All 6 metadata names return "" on get and 0 (no-op) on set (see crates/fnv-game/src/ysi_filename.rs).
+    // All 6 metadata names return "" on get and 0 (no-op) on set (see crates/fnv-game/src/nvse_small.rs and docs/spec-notes/ysi-filename.md).
     for meta in ["template", "systemcolor", "category", "name", "tab", "count"] {
         assert_eq!(
             success(&mut g, &format!("SetFunctionValue (ySIGetTrait \"{meta}\" OwnYsiReplGun)")),

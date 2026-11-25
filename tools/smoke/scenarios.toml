@@ -5663,6 +5663,25 @@ expect = [
 ]
 
 [[scenario]]
+name = "new-game-walk-off"
+source = "#3046 (players' reports 0.8.0: player_stuck at the bed (2229, 2314) and the Vigor Tester (1857, 1858) in Doc Mitchell's house, 3 installs): a full new game, the opening's menus answered; VCG01 stage 55 gives back movement, the wake-up idle lets the player go beside the bed, and the movement keys walk the player off it (a --cell start runs the opening differently, PR #3195)"
+note = "the keys are held from 100 s, after stage 55 (about 70 s into the run on the owner's machine): forward 4 s, right 4 s, back 6 s; the player ends near (1703, 1977), about 620 units from the bed spot"
+areas = ["controls", "chargen"]
+paths = ["engine/nvf-play/src/control.rs", "engine/nvforever/src/reports/mod.rs", "engine/nvforever/src/player_body.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_MOVE = "100:1:0,104:0:0,106:0:1,110:0:0,112:-1:0,118:0:0" }
+args = ["--play", "--new-game", "--no-voice"]
+run_seconds = 130
+order = [[
+  "VCG01 stage 55 set",
+  { re = 'player view: a second after the idle the character stands at \((?P<n>\d+), 23\d\d, 7361\)', range = [2150, 2300], label = "let go beside the bed (the first reported spot)" },
+  "test aid: movement keys forward 1 right 0",
+]]
+expect = [
+  { re = 'physics: the player stepped up \d+ times, feet at \((?P<n>-?\d+), ', range = [-100000, 2100], label = "the player walked off the bed spot (x below 2100)" },
+  { re = "controls summary: .*held back: nothing", label = "no movement held back by the scripts" },
+]
+
+[[scenario]]
 name = "idles-opening"
 source = "CLAUDE.md: after idle animation changes (docs/spec-notes/idles.md §7), the opening"
 areas = ["idles"]

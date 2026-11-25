@@ -120,7 +120,7 @@ Probes in `catalogs/` target:
     no-hit output coordinates, `maxRange <= 0` / omitted default reach, and
     `collisionFlag` filtering across exterior terrain, actor, and interior floor
     geometry (1 batch, 3 probes: `w6_point_raycast`).
-  - `wave6d2_set_current_climate_return_zero.json` — JIP LN `SetCurrentClimate` returns `0` (1 batch, 1 probe: `w6d2_set_current_climate`).
+  - `wave6d2_set_current_climate_return_zero.json` — JIP LN `SetCurrentClimate` return value (`retSet != rCl2`; 1 batch, 1 probe: `w6d2_set_current_climate`).
 - `tests/test_nvse_harness.py` — offline stdlib `unittest` suite (no game
   install or captured logs required).
 

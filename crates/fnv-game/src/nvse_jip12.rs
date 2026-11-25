@@ -681,10 +681,10 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
             zero
         }
-        // The climate for now, unlocked; returns 0 while setting the climate [observed:
-        // `w6d2_18_force_set_current_climate_and_isnight`]. It holds while the player stays
-        // in the worldspace [decision: the page's "Bugs" note, the climate going back after
-        // about 7 seconds, is not followed].
+        // The climate for now, unlocked; does not return the climate set (`retSet != rCl2`,
+        // `setRet=0`) [observed: `w6d2_18_force_set_current_climate_and_isnight`]; returns 0
+        // [hypothesis]. It holds while the player stays in the worldspace [decision: the
+        // page's "Bugs" note, the climate going back after about 7 seconds, is not followed].
         "setcurrentclimate" => {
             let c = form(args, 0).filter(|&c| g.data.sig(g.unclone(c)) == Some(*b"CLMT"));
             g.other.jip12.forced_climate = None;

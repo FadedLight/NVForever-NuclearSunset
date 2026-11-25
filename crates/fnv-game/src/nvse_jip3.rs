@@ -324,18 +324,24 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let heading = dx.atan2(dy).to_degrees().rem_euclid(360.0);
             outputs(g, zero, &[pitch, heading])
         }
-        // `x y z pitch heading → x y z [flags] [range]`: where a cast from the point the way
-        // of the angles (degrees) first meets the scene; 0 for no hit [documented:
-        // GetPointRayCastPos; hypothesis: the second angle is the heading, the collision
-        // flags not told apart].
+        // `x y z rotX rotZ → x y z [flags] [range]`: where a cast from `(x, y, z)` along
+        // right-handed Euler `Rz(rotZ) · Rx(rotX) · +Y` (`[-sin(rotZ)·cos(rotX),
+        // cos(rotZ)·cos(rotX), sin(rotX)]`, i.e. `facing(-rotX, -rotZ)` — pitch positive
+        // up, yaw counter-clockwise from +Y) first meets the scene; returns 1 on hit and
+        // 0 on miss, writing the ray endpoint `to` on miss so callers measuring
+        // `GetVector3DDistance(out, origin)` observe `maxRange` rather than distance to
+        // world origin `(0, 0, 0)` [documented: GECK wiki GetPointRayCastPos; hypothesis:
+        // angle signs and miss endpoint inferred from public mod scripts B42 True Leaning
+        // (`ln_B42Leaning.txt`) and Aim Collision Indicator (`GameLoop.gek`), see
+        // `docs/spec-notes/jip-point-raycast.md`; collision flags not told apart].
         "getpointraycastpos" => {
             let o = [num(args, 0, 0.0) as f32, num(args, 1, 0.0) as f32, num(args, 2, 0.0) as f32];
-            let dir = facing((num(args, 3, 0.0) as f32).to_radians(), (num(args, 4, 0.0) as f32).to_radians());
+            let dir = facing(-(num(args, 3, 0.0) as f32).to_radians(), -(num(args, 4, 0.0) as f32).to_radians());
             let reach = Some(num(args, 6, 0.0) as f32).filter(|r| *r > 0.0).unwrap_or(RAY_REACH);
             let to = [o[0] + dir[0] * reach, o[1] + dir[1] * reach, o[2] + dir[2] * reach];
             match crate::ray::cast_hit(o, to, crate::ray::CastKind::World) {
                 Some(h) => outputs(g, XVal::Num(1.0), &[f64::from(h.point[0]), f64::from(h.point[1]), f64::from(h.point[2])]),
-                None => outputs(g, zero, &[0.0, 0.0, 0.0]),
+                None => outputs(g, zero, &[f64::from(to[0]), f64::from(to[1]), f64::from(to[2])]),
             }
         }
         // `xGlobal yGlobal zGlobal [offset] [flags] [node] [range]` and `[flags] [node]`:

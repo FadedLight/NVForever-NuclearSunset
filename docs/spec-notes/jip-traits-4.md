@@ -138,9 +138,9 @@ not decode yet.
   in older records), bits the schema names the same way. EMTMedicalBeep01: loop (4) 1,
   2D (6) 0. `SetSoundFlag` stores per-`SOUN` session bitmask overrides
   (`Game::sound_flags`, `Game::sound_flag`, `Game::set_sound_flag`,
-  `Game::sound_flags_override`) with `TempCloneForm` snapshotting and post-clone isolation
-  (`Game::snapshot_sound_flags`) [design; hypothesis: session-only lifetime and rejection
-  of fractional/out-of-range flag IDs and non-`SOUN` forms].
+  `Game::sound_flags_override`, `Game::snapshot_sound_flags`) [design] with
+  `TempCloneForm` snapshotting and post-clone isolation [hypothesis: also session-only
+  lifetime and rejection of fractional/out-of-range flag IDs and non-`SOUN` forms].
 
 ### 9.1 `TempCloneForm` SOUN aliases and engine sound overrides
 
@@ -149,14 +149,16 @@ not decode yet.
   original sound's `FNAM` path and `SNDD` traits. Session overrides via
   `SetSoundSourceFile` and `SetSoundTraitNumeric` apply to the target FormID without
   mutating the original.
+- [hypothesis] Pre-clone `SetSoundSourceFile` and `SetSoundTraitNumeric` (`0..=11`) edits
+  on an original or parent clone carry onto newly created `TempCloneForm` `SOUN` clones,
+  while post-clone edits on the original or parent clone stay isolated from
+  already-created clones (e.g., silencing an original `SOUN` with trait `3 = -99` after
+  cloning a playable copy).
 - [design] `TempCloneForm` snapshots the source form's active `SetSoundSourceFile` and
-  `SetSoundTraitNumeric` (`0..=12`) overrides onto the new clone at creation time
+  `SetSoundTraitNumeric` (`0..=11`) overrides onto the new clone at creation time
   (`Game::snapshot_sound_traits`), and `Game::sound_source_override` /
   `Game::sound_trait_override` read only the queried FormID's own entry before falling
-  back to the authored ESM `FNAM` / `SNDD` record. Pre-clone edits on an original or
-  parent clone carry onto newly created clones, while post-clone edits on the original
-  or parent clone stay isolated from already-created clones (e.g., silencing an original
-  `SOUN` with trait `3 = -99` after cloning a playable copy).
+  back to the authored ESM `FNAM` / `SNDD` record.
   `engine/nvf-play/src/world_sounds.rs` (`sync_script_sounds`) runs in `PlaySet::Sync`
   (before `SfxSet` resolves `PlaySound` requests): it materializes cloned `SOUN` entries
   in `sfx.forms.sounds` from their original's authored `Sound` with `edid = None`
@@ -168,10 +170,15 @@ not decode yet.
   authored and cloned `SOUN` entries, and restores mutated authored `SOUN`s while
   pruning all stale clones across sessions (including when a new session reuses a
   deterministic clone FormID such as `0x00FE_0000` for a non-`SOUN` form).
-- [hypothesis] Trait `12` (`priority`) is stored by `SetSoundTraitNumeric` / read by
-  `GetSoundTraitNumeric` in `fnv-game` but is not yet carried on `fnv_combat::fx::Sound`.
-  Clone-of-clone override snapshotting and original-game audio parity remain unqualified
-  against original-game captures.
+- [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
+  `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+  `w4c_b1_21_sound_and_diff_bounds` (`tools/capture/nvse/catalogs/wave4c_extenders.json`,
+  #3679): `SetSoundTraitNumeric 0x403C2 12 77` left `GetSoundTraitNumeric 0x403C2 12` at
+  `0` (`prio(0->0)|badSnd(0,0)|diff(3,9=3,-1=3)`); no DLL or source consulted] Trait `12`
+  is ignored/unwritable by `SetSoundTraitNumeric` in JIP LN 57.30, so NVForever only
+  stores `SetSoundTraitNumeric` overrides for traits `0..=11` (matching the traits carried
+  on `fnv_combat::fx::Sound`). Clone-of-clone override snapshotting and original-game audio
+  parity remain unqualified against original-game captures [hypothesis].
 
 ## 10. Game-state getters
 

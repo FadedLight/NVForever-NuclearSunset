@@ -4147,6 +4147,20 @@ order = [[
 ]]
 
 [[scenario]]
+name = "upright-talk-from-the-side"
+source = "#3446 (player reports, 0.8.1: NPCs lie flat for a moment as they are talked to; #2859, fixed by #2860: a turn clip's tilted accumulation root): Sunny Smiles is put 120 units to the player's side and talked to as she walks off to the saloon, the player 161° off her front, so her body turns round to face the player; a standing actor whose pelvis -> head line leans past 60° is logged (engine/nvforever/src/upright.rs) and none may"
+areas = ["dialogue", "locomotion"]
+paths = ["engine/nvforever/src/upright.rs", "engine/nvforever/src/locomotion.rs", "engine/nvf-assets/src/anim_play.rs", "engine/nvforever/src/dialogue_look.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT = "6:moveto:SunnyRef:player:120:0:0,9:activate:SunnyRef" }
+args = ["--cell", "Goodsprings", "--play", "--hour", "12", "--no-voice", "--no-messages"]
+run_seconds = 25
+expect = [
+  "dialogue: conversation with SunnyRef started",
+  { re = 'upright: 0 tips of standing actors seen', label = "nobody standing leans over" },
+]
+forbid = [{ re = 'upright: .* leans \d+° from upright while standing', label = "a standing actor lay over" }]
+
+[[scenario]]
 name = "force-greet"
 source = "CLAUDE.md: after changes to Dialogue packages (fnv-ai goal::talk, carry talk_step; docs/design/actor-behaviour.md §5.6)"
 areas = ["ai", "dialogue-packages"]

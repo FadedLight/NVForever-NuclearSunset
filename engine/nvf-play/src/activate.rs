@@ -415,12 +415,13 @@ impl TargetPicker<'_,'_,'_>{
     // The containers among the boxes give way to what lies inside them (#3351), activators
     // to an item lying in their box (the note on a radio, #3937), nothing else
     // (`pick::choose_inside`).
-    let base_data = |id: u32| sim.base_of(id).and_then(|b| sim.forms.get(b)).map(|f| &f.data);
-    let yields = |outer: u32, inner: u32| match base_data(outer) {
-        Some(BaseData::Container(_)) => true,
-        Some(BaseData::Activator) => matches!(base_data(inner), Some(BaseData::Item(_))),
-        _ => false,
+    let of_kind = |kind: fn(&BaseData) -> bool| -> std::collections::HashSet<u32> {
+        bounds.iter().map(|b| b.0).chain(hit.and_then(|h| h.form_id)).filter(|&id| sim.base_of(id).and_then(|b| sim.forms.get(b)).is_some_and(|f| kind(&f.data))).collect()
     };
+    let containers = of_kind(|d| matches!(d, BaseData::Container(_)));
+    let activators = of_kind(|d| matches!(d, BaseData::Activator));
+    let items = of_kind(|d| matches!(d, BaseData::Item(_)));
+    let yields = |outer: u32, inner: u32| containers.contains(&outer) || (activators.contains(&outer) && items.contains(&inner));
     let beds: std::collections::HashSet<u32> = match script.as_deref().and_then(|s| s.rt.as_ref()) {
         Some(rt) if furniture_seen => {
             let bed = |id: u32| sim.base_of(id).and_then(|b| rt.game.data.furniture.get(&b)).is_some_and(|f| f & fnv_game::package::furniture::SLEEP != 0);

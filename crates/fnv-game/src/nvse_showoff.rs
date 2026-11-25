@@ -487,8 +487,13 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
             let ok = !g.is_dead(a)
                 && g.extra.get(&a).is_some_and(|e| e.weapon_out)
                 && crate::functions::items::equipped_weapon(g, a).is_some_and(|w| weapon_has_jam_anim(g, w));
-            if ok && !g.showoff.force_jam_requests.contains(&a) && g.showoff.force_jam_requests.len() < MAX_FORCE_JAM_REQUESTS {
-                g.showoff.force_jam_requests.push(a);
+            if ok {
+                if !g.showoff.force_jam_requests.contains(&a) && g.showoff.force_jam_requests.len() < MAX_FORCE_JAM_REQUESTS {
+                    g.showoff.force_jam_requests.push(a);
+                }
+                let mut st = g.senses.anim.get(&a).cloned().unwrap_or_default();
+                st.action = Some(crate::anim_state::AnimAction::Jam);
+                g.set_anim_state(a, st);
             }
             XVal::Num(f64::from(u8::from(ok)))
         }

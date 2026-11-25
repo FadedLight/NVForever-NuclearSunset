@@ -321,7 +321,8 @@ fn force_weapon_jam_anim_interrupts_reload_blocks_firing_and_clears() {
     assert_eq!(app.world().resource::<Combat>().cycle.as_ref().unwrap().magazine, 3);
 
     // ForceJamAnim interrupts the reload immediately and enters Phase::Jammed
-    // (GetAnimAction == 9 via AnimAction::Jam, IsAnimPlayingEx 4 == 0, no reload event).
+    // (GetAnimAction == 9 via AnimAction::Jam, IsAnimPlayingEx 4 == 0, GetSequenceAnimGroup 4 == 200 JamA,
+    // and SetOnReloadWeaponEventHandler fires once on jam entry [observed 2026-11-24: w6t2_14]).
     assert_eq!(nvse_num(&mut app, "PlayerREF.ForceJamAnim"), 1.0);
     step_app(&mut app, 0.05);
     {
@@ -336,8 +337,9 @@ fn force_weapon_jam_anim_interrupts_reload_blocks_firing_and_clears() {
     assert_eq!(app.world().resource::<CombatStats>().jams, 1);
     assert_eq!(nvse_num(&mut app, "PlayerREF.GetAnimAction"), f64::from(AnimAction::Jam.code()));
     assert_eq!(nvse_num(&mut app, "PlayerREF.GetAnimAction"), 9.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.GetSequenceAnimGroup 4"), 200.0);
     assert_eq!(nvse_num(&mut app, "PlayerREF.IsAnimPlayingEx 4"), 0.0, "jam is not counted as reload by IsAnimPlayingEx 4");
-    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 1.0, "jam must not fire SetOnReloadWeaponEventHandler");
+    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 2.0, "jam entry fires SetOnReloadWeaponEventHandler once without double-firing on sync");
 
     // While jammed, pulling trigger or pressing reload does nothing, and re-calling
     // ForceWeaponJamAnim / ForceJamAnim returns 1 without restarting anim.jams.

@@ -90,10 +90,19 @@ ran.
   (`Game::take_force_jam_requests`). For the player, `nvf_play::combat::fire` interrupts
   any active reload or attack phase via `Cycle::jam` and increments `WeaponAnim::jams`
   (which `nvforever::player_body` plays on the reload layer, interrupting any active reload
-  clip) while reporting `AnimAction::Jam` (code `9` for `GetAnimAction`, while
-  `IsAnimPlayingEx 4` remains `0` and `SetOnReloadWeaponEventHandler` does not fire;
-  generalizing `Phase::Jammed -> AnimAction::Jam` (`9` instead of `13`) to natural vanilla
-  weapon-condition jams is [hypothesis]).
+  clip) while reporting `AnimAction::Jam` (code `9` for `GetAnimAction`, `IsAnimPlayingEx 4`
+  remains `0`, `GetSequenceAnimGroup 4` reads `200` `JamA`, and JIP's
+  `SetOnReloadWeaponEventHandler` fires on jam entry [observed 2026-11-24: Fallout: New
+  Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 + JohnnyGuitarNVSE 528 + ShowOffNVSE 184,
+  10 official base masters, `GSDocMitchellHouse` (`0x00103DF9`), isolated clean-room
+  staging copy, committed probe `w6t2_14_jip_on_reload_and_seq_anim_group`
+  (`tools/capture/nvse/catalogs/wave6c_jip_on_reload_and_seq_group.json`):
+  `PROBE|w6t2_14_jip_on_reload_and_seq_anim_group|fj=1,relHit=1,s0=0,s4(pre=24,t0=200,t1=200,cb=200)`;
+  no DLL or source consulted]; generalizing `Phase::Jammed -> AnimAction::Jam` (`9` instead
+  of `13`) to natural vanilla weapon-condition jams is [hypothesis]).
+  `ForceWeaponJamAnim` also enters `AnimAction::Jam` synchronously so immediate script
+  queries (`t0=200`) and the `SetOnReloadWeaponEventHandler` callback (`cb=200`) see the
+  jam state without double-firing when `nvf-play` syncs `AnimAction::Jam` [design].
   Repeated calls while `Cycle::jammed` is already true return `1` without restarting the
   active jam timer [design]. NPC jam animation playback remains [not built] (`nvf-play`
   models `Cycle` for the player only). No ShowOff DLL or source code was consulted.

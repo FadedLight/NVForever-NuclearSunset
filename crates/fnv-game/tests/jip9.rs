@@ -229,10 +229,21 @@ fn radio_volumes_fonts_colours_and_the_health_bar() {
     // Fonts: only types 1-8 and 10-89, and a file that is there.
     assert_eq!(n(&mut g, "SetFontFile 9 \"textures\\fonts\\x.fnt\""), 0.0);
     assert_eq!(n(&mut g, "SetFontFile 2 \"textures\\fonts\\no such file.fnt\""), 0.0);
-    // Colours, each part into 0-255.
+    // Integer channels wrap modulo 256 (u8 conversion) [observed: w4c_b1_15b_syscolor_cursor]
+    // and fractional channel inputs truncate toward zero [observed: w4h_10_set_system_color_fractional,
+    // PR #3803 / #3802].
     q(&mut g, "SetSystemColor 1 300 -5 12.4\nSetSystemColor 6 1 1 1");
-    assert_eq!(g.other.jip9.colours.get(&1), Some(&[255, 0, 12]));
+    assert_eq!(g.other.jip9.colours.get(&1), Some(&[44, 251, 12]));
     assert_eq!(g.other.jip9.colour_sets.len(), 1);
+    q(&mut g, "SetSystemColor 1 300 -10 128");
+    assert_eq!(g.other.jip9.colours.get(&1), Some(&[44, 246, 128]));
+    assert_eq!(n(&mut g, "GetSystemColor 1"), 2_946_688.0);
+    q(&mut g, "SetSystemColor 1 12.7 12.3 12.5");
+    assert_eq!(g.other.jip9.colours.get(&1), Some(&[12, 12, 12]));
+    assert_eq!(n(&mut g, "GetSystemColor 1"), f64::from(0x0C0C0C_u32));
+    q(&mut g, "SetSystemColor 1 13.5 0.4 254.6");
+    assert_eq!(g.other.jip9.colours.get(&1), Some(&[13, 0, 254]));
+    assert_eq!(n(&mut g, "GetSystemColor 1"), f64::from(0x0D00FE_u32));
     // The health bar's actor, as the engine tells it.
     assert_eq!(n(&mut g, "GetEnemyHealthTarget"), 0.0);
     g.other.jip9.enemy_target = Some(FormId(MARK));

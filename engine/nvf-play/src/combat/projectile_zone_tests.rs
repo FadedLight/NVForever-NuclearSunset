@@ -382,4 +382,49 @@ fn xtri23_projectile_zone_receives_onhit_for_hitscan_and_flying_without_stopping
     }
     assert_eq!(hits_of(&a, ZONE_FIRST), 1.0, "first zone fired");
     assert_eq!(hits_of(&a, ZONE_SECOND), 0.0, "second zone disabled by first zone's OnHit must not fire");
+
+    // 6. Re-enable ZONE_A and move it to Lane 3 (X = 800): shooting Lane 1 misses it,
+    // shooting Lane 3 fires its OnHit at the new pose.
+    {
+        let mut sim = a.world_mut().resource_mut::<SimState>();
+        sim.world.set_enabled(ZONE_A, true).unwrap();
+        sim.world.get(ZONE_A).unwrap().pos = [800.0, 200.0, 64.0];
+    }
+    a.world_mut().resource_scope(|world, mut script: Mut<ScriptState>| {
+        world.resource_scope(|world, mut sim: Mut<SimState>| {
+            let play = world.resource::<PlayWorld>();
+            let phys = world.resource::<PhysState>();
+            with_world(script.rt.as_mut().unwrap(), &mut sim, |rt| {
+                crate::script_trigger::update(rt, play, phys, None);
+            });
+        });
+    });
+    a.world_mut().write_message(ActorFire {
+        shooter: FormId::PLAYER_REF,
+        weapon: HITSCAN_GUN,
+        origin: [0.0, 0.0, 64.0],
+        aim: [0.0, 1.0, 0.0],
+        cone: 0.0,
+        muzzle: None,
+        harmless: false,
+        sure: None,
+    });
+    for _ in 0..4 {
+        step_app(&mut a, 0.05);
+    }
+    assert_eq!(hits_of(&a, ZONE_A), 2.0, "old pose no longer fires OnHit after ZONE_A moved");
+    a.world_mut().write_message(ActorFire {
+        shooter: FormId::PLAYER_REF,
+        weapon: HITSCAN_GUN,
+        origin: [800.0, 0.0, 64.0],
+        aim: [0.0, 1.0, 0.0],
+        cone: 0.0,
+        muzzle: None,
+        harmless: false,
+        sure: None,
+    });
+    for _ in 0..4 {
+        step_app(&mut a, 0.05);
+    }
+    assert_eq!(hits_of(&a, ZONE_A), 3.0, "moved ZONE_A fires OnHit at its new pose");
 }

@@ -197,6 +197,7 @@ fn equipped_items_and_armour() {
     let mut g = game(&f);
     q(&mut g, "player.AddItem TestHat 1\nplayer.EquipItem TestHat");
     assert_eq!(n(&mut g, "player.GetEquippedEx TestArmorList"), f64::from(HAT));
+    assert_eq!(n(&mut g, "player.TestEquippedSlots TestHat"), 1.0, "the currently equipped armor itself overlaps [observed: w6d2p3_52]");
     assert_eq!(n(&mut g, "player.TestEquippedSlots TestHelmet"), 1.0, "the hat slot is taken");
     assert_eq!(n(&mut g, "player.TestEquippedSlots TestGloves"), 0.0);
     assert_eq!((n(&mut g, "player.IsEquippedWeaponScoped"), n(&mut g, "player.IsEquippedWeaponSilenced")), (0.0, 0.0), "no weapon");

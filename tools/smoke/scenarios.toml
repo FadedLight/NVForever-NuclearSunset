@@ -7204,7 +7204,7 @@ run_seconds = 34
 expect = [
   "CheyenneREF listens to SunnyRef",
   { re = 'speech look: line [0-9A-F]+ over: SunnyRef has .* (?P<n>[+-]\d+)° off its front', range = [-5, 5], all = true, label = "each line over: SunnyRef has … off its front within a few degrees of 0" },
-  { re = 'speech look summary: 2 lines' },
+  { re = 'speech look summary: 3 lines' },
   # Line 1 is said to Cheyenne (she listens), line 2 to the player, line 3 to Cheyenne
   # with noTargetLookFlag 1, where the target is not made to look and the speaker still
   # turns (observer check 218, #3989): one "listens" line in all, and Sunny turns for all

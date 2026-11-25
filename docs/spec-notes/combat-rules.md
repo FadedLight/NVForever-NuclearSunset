@@ -971,6 +971,11 @@ Examples [observed, seed 1, skill 50, 100 HP target]:
     rates are untested; irregular frames were not tested separately.
 - **Blocking.** `damage::blocked` takes `block` (60 %) off a melee hit taken while
   blocking [design]. Nothing attacks the player yet; NPC melee (Layer 6 AI) will use it.
+  While the player holds Block with fists or a melee weapon (`MeleeInput::blocking`),
+  tapping or holding Attack starts no swing, sound, or hit unless the opt-in
+  `Power Attack From a Block` tweak (`bPowerAttackIfBlocking`, `instant_power`) is on
+  [observed: player report in #3753; design: mid-block input suppression and post-block
+  Scribe Counter timing pending an original-game capture].
 - **The body.** A power attack plays `{prefix}attackpower.kf` (`1hmattackpower.kf`,
   `h2hattackpower.kf`). Normal swings use the weapon's attack animation, falling back to
   its `_a` variant (`1hmattackright_a.kf`).

@@ -169,8 +169,8 @@ impl Game<'_> {
     }
 
     /// The crosshair came onto `r` (the engine's activation reach, `nvf-play`
-    /// activate.rs): filters the form and the base's form type [documented:
-    /// SetJohnnyOnCrosshairEventHandler].
+    /// activate.rs): filters the form and the base's form type code (e.g. `ACTI = 21`)
+    /// [documented: SetJohnnyOnCrosshairEventHandler, Form Type IDs].
     pub fn jg8_crosshair(&mut self, r: FormId) {
         if !self.jg8_listening(Ev::Crosshair) {
             return;
@@ -461,14 +461,19 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
             // The filters that are numbers (a limb, a level, an actor value code, an
             // emotion, a form type, the sleep/wait mode) keep 0 as a value; a 0 or
             // XMarker (0x3B) where a form goes (or a menu ID <= 0 for KeyboardSelection)
-            // is no filter [observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE
+            // is no filter. Live-observed ONLY for XMarker wildcard dispatch on
+            // SetOnReputationChangeEventHandler (`xm=1`) and XMarker + `21`
+            // registration/removal returning `0` on SetJohnnyOnCrosshairEventHandler
+            // (`xh(0,0)`) [observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE
             // 6.4.9 + JohnnyGuitarNVSE 528 + JIP LN 57.30, 10 official base masters,
             // GSDocMitchellHouse (`0x00103DF9`), isolated clean-room staging copy,
             // committed probe `w6t2p2_12_jg_reputation_and_crosshair_xmarker`
             // (`tools/capture/nvse/catalogs/wave6c_jg8_xmarker_wildcard.json`):
             // `PROBE|w6t2p2_12_jg_reputation_and_crosshair_xmarker|xh(0,0)|fame(n=0,rOk=0,ax=0,v=0.0)|inf(n=1,ax=1.08423e+09,v=3.0)|xm=1`;
-            // no DLL or source consulted; hypothesis: numeric 0 in a form slot also acts
-            // as wildcard].
+            // no DLL or source consulted]; applying XMarker wildcard to the remaining
+            // unprobed handlers (FailQuest, LimbGone, SeenData, ProcessLevel,
+            // NpcActorValue, GeneralSubtitle, RadioPostSound, TakeBackItem) and numeric 0
+            // in a form slot are [hypothesis].
             const XMARKER: u32 = 0x0000_003B;
             let numeric: &[usize] = match ev {
                 Ev::LimbGone | Ev::ProcessLevel | Ev::NpcActorValue | Ev::Crosshair => &[1],

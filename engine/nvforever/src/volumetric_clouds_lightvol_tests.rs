@@ -267,12 +267,12 @@ fn the_light_volumes_pipelines_are_asked_for_once_across_activations() {
     let mut gpu = lv::gpu::LvGpu::default();
     for views in [false, true, false] {
         for entry in ["tiles", "reference", "tiles"] {
-            gpu.1.want_trace(entry, views, || {
+            gpu.2.want_trace(entry, views, || {
                 asked.borrow_mut().push((entry, views));
                 id
             });
         }
-        gpu.1.want_producer(|| {
+        gpu.2.want_producer(|| {
             asked.borrow_mut().push(("producer", false));
             id
         });

@@ -46,5 +46,6 @@ mod tests {
             assert!(!text.contains(&read), "{name}: use crate::dev_aids::var");
         }
         assert!(!include_str!("sky.rs").contains(&[&read, "(\"NVF_PLAY_DEBUG_FAIR_SUN"].concat()));
+        assert!(!include_str!("cloud_shadows.rs").contains(&[&read, "(\"NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE"].concat()));
     }
 }

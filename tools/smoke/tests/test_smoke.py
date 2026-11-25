@@ -692,7 +692,7 @@ class RequiresTests(unittest.TestCase):
         """A scenario of the volumetric clouds that sets a developer aid (a debug variable a release
         build does not read: engine/nvforever/src/dev_aids.rs) says which build it is for."""
         suite = load(HERE / "scenarios.toml")
-        aids = ("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", "NVF_PLAY_DEBUG_MEDIUM", "NVF_PLAY_DEBUG_FAIR_SUN")
+        aids = ("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", "NVF_PLAY_DEBUG_MEDIUM", "NVF_PLAY_DEBUG_FAIR_SUN", "NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE")
         using = [s for s in suite.scenarios if any(k.startswith(aids) for k in s.env)]
         self.assertTrue(using)
         for s in using:

@@ -2781,14 +2781,14 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-clouds-no-aids"
-source = "[design, #3032] engine/nvforever/src/dev_aids.rs: the volumetric clouds' developer aids (debug variables and the tune file) are not in a release build. At Goodsprings at noon under NVBlackMountainWeather with the row on and aids of every reader set (the cloud source's start values and its tune file, the light volume's, the medium's, the turn, the fair sky's sun), a release exe starts and draws as without them: the values of its own start, one ray in nine, the light volume's own spacings, no line of an aid"
+source = "[design, #3032] engine/nvforever/src/dev_aids.rs: the volumetric clouds' developer aids (debug variables and the tune file) are not in a release build. At Goodsprings at noon under NVBlackMountainWeather with the row on and aids of every reader set (the cloud source's start values and its tune file, the light volume's, the medium's, the turn, the fair sky's sun, the cloud shadows' source), a release exe starts and draws as without them: the values of its own start, one ray in nine, the light volume's own spacings, no line of an aid"
 areas = ["renderer", "graphics", "weather"]
-paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS = "56", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW = "count", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT = "40000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_LIGHT_VOLUME_CELLS = "1000,8000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_MEDIUM_TURN = "60", NVF_PLAY_DEBUG_MEDIUM_TILE = "1", NVF_PLAY_DEBUG_MEDIUM_SCALE = "1", NVF_PLAY_DEBUG_MEDIUM_FRESH = "0.5", NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER = "linear", NVF_PLAY_DEBUG_FAIR_SUN = "size=40" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*", "engine/nvforever/src/cloud_shadows.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS = "56", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW = "count", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT = "40000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_LIGHT_VOLUME_CELLS = "1000,8000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_MEDIUM_TURN = "60", NVF_PLAY_DEBUG_MEDIUM_TILE = "1", NVF_PLAY_DEBUG_MEDIUM_SCALE = "1", NVF_PLAY_DEBUG_MEDIUM_FRESH = "0.5", NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER = "linear", NVF_PLAY_DEBUG_FAIR_SUN = "size=40", NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE = "weather" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
 note = "for a release exe: skipped with NVF_SMOKE_DEV_AIDS set (an exe built with --features dev-aids obeys the aids)."
 requires = ["!NVF_SMOKE_DEV_AIDS"]
-run_seconds = 20
+run_seconds = 40
 expect = [
   { re = 'volumetric clouds: on, slab -?\d+\.\.-?\d+ \(the cloud shadows. plane\), quality 28 ', label = "the volume is drawn at its own quality" },
   { text = "volumetric clouds: level Normal (far buffer scale 3, probe spacing x2)", count = 1, label = "the level's own scale" },
@@ -2798,12 +2798,14 @@ expect = [
   { re = 'volumetric clouds: light: two octaves \(.*, every colour bounded to 30000; weights: BACKSCATTER x1\.65, SUN x1\.30, LEVEL x1\.12, SUNCOLOUR 0\.00$', count = 1, label = "and the light's" },
   { re = 'volumetric clouds: light volume on \(near and far; near 128x128x25 at 500 across, far 128x128x25 at 4000 across, ', label = "the light volume's own spacings" },
   { text = "volumetric medium: history filter Adaptive", label = "the medium's own history filter" },
+  { re = 'cloud shadows: source the light volume \(', label = "the shadows read the light volume, not the source asked for" },
 ]
 forbid = [
   { text = "debug switch NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", label = "an aid of the cloud source, the light volume or the tune file was read" },
   { text = "debug switch NVF_PLAY_DEBUG_MEDIUM", label = "an aid of the medium was read" },
   { text = "tune file", label = "the tune file was looked for" },
   { text = "sky: fair sun aid", label = "the fair sky's sun aid was read" },
+  { text = "cloud shadows: source asked for", label = "the cloud shadows' source aid was read" },
 ]
 
 [[scenario]]
@@ -2829,6 +2831,71 @@ forbid = [
   { text = "failed to process shader", label = "the producer, the march module or the trace does not build with the light volume" },
   { re = 'pipeline \d+ (ready|failed) after \d+ ms: (medium_trace|nvf_cloud_light)\w*_views', label = "a view variant of the trace or the producer built though no view is asked for" },
   { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back with nothing changing (a false hand-back)" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-shadows"
+source = "[design, #3032 stage 2i] docs/design/graphics-enhanced.md §3.23 (Ground shadows from the light volume), engine/nvforever/src/sun_visibility.rs (CloudSourceInUse, volume_layout, CloudVolumeRoom), light_volume_reader.wesl and volumetric_clouds_lightvol.rs (LightVolumeReader): Cloud shadows with the Volumetric clouds row on, at Goodsprings at noon under NVBlackMountainWeather: the adapter's textures are counted once, the views take the light volume's arrays, and once the volumetric sky is shown and a level is complete the surfaces take their cloud shadows from the light volume, without a shader, pipeline or rendering error. The look is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/vendor/bevy_pbr/src/render/mesh.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
+run_seconds = 40
+expect = [
+  { text = "sun visibility: cloud on terrain off debug off", label = "Cloud shadows is on from the start" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", count = 1, label = "the adapter has room for the arrays, counted once" },
+  { re = 'cloud shadows: source the light volume \(', label = "the surfaces read the light volume (sun_visibility.rs)" },
+  { text = "volumetric medium: the trace read a completed near set of the light volume", label = "the light volume they read has finished sweeps" },
+]
+forbid = [
+  { re = 'pipeline \d+ failed after \d+ ms: ', label = "a pipeline failed" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the light volume in the receivers" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light volume in the receivers" },
+  { text = "failed to process shader", label = "a receiver's shader that does not build with the reader" },
+  { text = "failed and will not be tried again", label = "a receiver's pipeline that failed for good" },
+  { text = "panicked", label = "a panic with the shadows from the volume" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-shadows-switch"
+source = "[design, #3032 stage 2i] engine/nvforever/src/sun_visibility.rs (volume_layout, VolumeLayout, source_told): Cloud shadows on throughout, the Volumetric clouds row Off at the start, switched to Normal and Off again in play at Goodsprings at noon (two pauses of the settings page, NVF_PLAY_TEST_SETTINGS): before the first switch no pipeline has the light volume and no line names a source or counts the adapter's textures; each resume waits until the receivers' pipelines are ready, none pending; with the row on the receivers' pipelines with the light volume are asked for and the surfaces read it, with the row off again the source left is named once; no shader, pipeline or rendering error. A screenshot toward the ground in each of the three states, judged by how much of it is one colour (NVF_PLAY_TEST_SHOT_FLATNESS), shows that receivers are drawn (with their draws skipped the view is the sky and the clear colour); what the shadow is on them is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather", "settings"]
+paths = ["engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*", "engine/nvforever/src/cloud_shadows.rs", "engine/nvforever/src/settings.rs", "engine/vendor/bevy_pbr/src/render/mesh.rs", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PIPELINE_DEFS = "1", NVF_PLAY_TEST_LOOK = "8:270:-20", NVF_PLAY_TEST_SHOT_FLATNESS = "1", NVF_PLAY_TEST_SHOTS = "11:vcs_off_a.png,34:vcs_on_b.png,46:vcs_off_c.png", NVF_PLAY_TEST_PAUSE = "12:14,36:38", NVF_PLAY_TEST_SETTINGS = "13:volumetric-clouds=Normal,37:volumetric-clouds=Off" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "cloud-shadows"]
+run_seconds = 50
+expect = [
+  { text = "sun visibility: cloud on terrain off debug off", count = 1, label = "Cloud shadows on once, from the start to the end" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", count = 1, label = "the adapter's textures counted once, not before the row is on" },
+  { text = "cloud shadows: source the weather's layers (the Volumetric clouds row is off)", count = 1, label = "the source left when the row goes off, once; none named before it was on" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', count = 2, label = "each switch's resume waits for its pipelines" },
+  { re = 'vcs_(off_a|on_b|off_c)\.png: \d+ % of the view is one colour', count = 3, label = "a picture in each state was judged" },
+  { re = 'vcs_(?:off_a|on_b|off_c)\.png: (\d+) % of the view is one colour', range = [0, 60], all = true, label = "the ground is drawn in each state: before, with and after the light volume's layout" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: .*opaque_mesh_pipeline', label = "receivers are drawn with the weather's layout" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Normal", label = "the row switched on in play" },
+  { text = "cloud shadows: the light volume's arrays (bindings 45-46) are bound: ", label = "no light volume in a layout before" },
+  { re = 'pipeline \d+ shader-defs: .*NVF_CLOUD_VOLUME.*: .*opaque_mesh_pipeline', label = "the receivers' variant with the light volume asked for" },
+  { re = 'cloud shadows: source the light volume \(', label = "the surfaces read the light volume" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "the row switched off in play" },
+  { text = "cloud shadows: source the weather's layers (the Volumetric clouds row is off)", label = "back to the weather's layers" },
+], [
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Normal", label = "the row switched on" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', label = "its pipelines ready before play goes on" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "and switched off" },
+  { re = 'pause menu: resume after graphics change: pipelines waited [\d.]+ s, pending 0, capped false$', label = "the weather's pipelines ready again" },
+], [
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off", label = "switched off" },
+  { text = "volumetric clouds: light volume off (textures released)", label = "the light volume's textures go" },
+]]
+forbid = [
+  { re = 'pipeline \d+ failed after \d+ ms: ', label = "a pipeline failed over the switches" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error over the switches" },
+  { text = "Caught rendering error", label = "a rendering (validation) error over the switches" },
+  { text = "failed to process shader", label = "a shader of either layout that does not build" },
+  { text = "failed and will not be tried again", label = "a pipeline of either layout that failed for good" },
+  { text = "panicked", label = "a panic over the switches" },
 ]
 
 [[scenario]]

@@ -523,11 +523,22 @@ marked `NVForever sun visibility`, for nvforever's `sun_visibility.rs`:
   terrain map is `Rgba32Float`, which is filterable only with the optional
   `FLOAT32_FILTERABLE` feature, so nvforever reads it with `textureLoad` and never with
   the sampler; its stand-in while no map is uploaded is nvforever's own one-texel
-  `Rgba32Float` texture, not Bevy's fallback image.
+  `Rgba32Float` texture, not Bevy's fallback image. Bindings 45 and 46 (2026-11-20,
+  #3032 stage 2i M2), under the key bit `MeshPipelineViewLayoutKey::NVF_CLOUD_VOLUME`
+  (with `NVF_SUN_VISIBILITY` only; the component's `cloud_volume`): the volumetric
+  clouds' light volume, its near and far completed front sets (`light_near`,
+  `light_far`: filterable float 2D arrays, `R16Float`, sampled with 42), which the cloud
+  shadows read from the volume (nvforever `light_volume_reader.wesl`); nvforever's own
+  one-texel, two-layer stand-in when there is none. nvforever leaves `cloud_volume` off
+  while its Volumetric clouds row is off and on an adapter whose fragment stage has too few sampled textures for two more (the
+  weather-only layout, `sun_visibility.rs` `CloudVolumeRoom`). The entries 39-46 are
+  made by the public `nvf_sun_visibility_layout_entries`, which the tests read.
 - `src/render/mesh.rs`: `MeshPipelineKey::NVF_SUN_VISIBILITY`, `NVF_CLOUD_VISIBILITY` and
   `NVF_TERRAIN_VISIBILITY` (bits 25-27; the key's bit fields above them move up by three,
-  well below the base mesh key's bits from 58), set by `check_views_need_specialization`
-  from the same component, and the shader defs of the same names. The pipelines' layout
+  well below the base mesh key's bits from 58), and `NVF_CLOUD_VOLUME_VISIBILITY` (bit 29,
+  after the ambient occlusion's 28; shader def `NVF_CLOUD_VOLUME`), set by
+  `check_views_need_specialization` from the same component, and the shader defs of the
+  same names. The pipelines' layout
   key and the view's bind group are both read from that one component in the same frame,
   so they cannot disagree; the component is inserted, changed and removed only during
   extraction.

@@ -1119,12 +1119,13 @@ below cover them all.
   sunlight (by night its night light, from the moon), bright toward the sun, darker
   underneath, coloured by the weather's cloud colours, fading into the sky toward the
   horizon. Thick cloud hides the sun and the moon. The clouds follow the weather's cover,
-  drift and transitions. Cloud shadows on the ground come from the weather's flat layers, so they
-  do not match the clouds' shapes. High draws them into a buffer of two
+  drift and transitions, and Cloud shadows on the ground, where that row is on, are theirs while they
+  are drawn. High draws them into a buffer of two
   fifths of the render size, Normal a third, Performance a quarter; Normal and Performance
   also look for cloud along each ray at twice the spacing. A prototype. The water's
   reflection, the scope's lens and a mod's extra cameras keep the weather's flat clouds while
-  it is drawn. Off in every preset; not in the original. Outdoors only.
+  it is drawn. With Cloud shadows on, switching it rebuilds the world's material pipelines.
+  Off in every preset; not in the original. Outdoors only.
 - Shown as a list since 2026-11-23; an INI written while it was an on/off switch (`1`/`0`,
   true/false, on/off, yes/no) still loads as Normal or Off.
 - Command-line switches: `--graphics-only` (`volumetric-clouds` is Normal;

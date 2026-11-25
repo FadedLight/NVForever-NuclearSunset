@@ -419,8 +419,8 @@ pub(crate) fn env_alpha_mode(alpha_mode: AlphaMode, window: Option<bool>, aids: 
 /// - env: x the scale × the strength switch, y the [`MaskMode`], z and w the distances
 ///   of the fade ([`ENV_MAP_LOD1`], [`ENV_MAP_LOD2`]; both 0: no fade);
 /// - env_how: x the [`Axes`] code, y what scales the reflection (0 nothing, 1 the
-///   fragment's received light, 2 the scene light), z 1 for a window shape, w 1 on every
-///   reflecting shape, 2 where the reflection is taken at the vertex normal ([`EnvNormal`];
+///   fragment's received light, 2 the scene light), z 1 for a window shape, w 1 on a
+///   reflecting shape read at the shading normal, 2 on one read at the vertex normal ([`EnvNormal`];
 ///   the shader premultiplies a Premultiplied one by it, even where the
 ///   reflection has faded out or its strength is 0).
 pub(crate) fn env_uniforms(env: &ShapeEnv, mask: MaskMode, aids: &EnvAids) -> (Vec4, Vec4) {
@@ -727,9 +727,7 @@ mod tests {
         // Either side of the normal; a normal of no length is not sampled as NaN.
         near(lookup(v, shading, -vertex, 4.0, 2.0), lookup(v, shading, vertex, 4.0, 2.0));
         assert!(lookup(v, shading, Vec3::ZERO, 4.0, 2.0).is_finite());
-        let shader = include_str!("nif_material.wesl").replace("
-", "
-");
+        let shader = include_str!("nif_material.wesl").replace("\r\n", "\n");
         for line in [
             "let dir = env_lookup(pbr_input.V, pbr_input.N, pbr_input.world_normal, surface.env_how.x, surface.env_how.w);",
             "    var n = shading;\n    if mark > 1.5 {",

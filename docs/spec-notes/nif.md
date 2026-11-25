@@ -1613,7 +1613,7 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
 
   What the renderers draw (nvf_assets `env_map.rs`, `nif_spawn::shape_env`): a lit shape
   with Environment_Mapping, a slot-4 file that loads as a cube map and a scale above 0
-  reflects that cube the way window shapes do (previous bullet), whether or not the
+  reflects that cube (its lookup above; windows keep theirs), whether or not the
   window flag is set [design, #2841]. Shapes with the flag but no usable cube are drawn as
   before, as are unlit shapes [design: the wiki gives the scale to the lit shaders only],
   and so is object LOD block geometry (LOD_Building) without the window flag, which

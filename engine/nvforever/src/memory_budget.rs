@@ -636,9 +636,8 @@ fn watch_use(
     adapter: Option<Res<RenderAdapterInfo>>,
     mut budget: ResMut<MemoryBudget>,
     mut limits: ResMut<KeepLimits>,
-    mut corner: Option<ResMut<nvf_play::corner_messages::CornerMessages>>,
+    (mut corner, mut commands): (Option<ResMut<nvf_play::corner_messages::CornerMessages>>, Commands),
     mut last: Local<f64>,
-    mut commands: Commands,
 ) {
     let now = real.elapsed_secs_f64();
     if now - *last < f64::from(nvf_assets::release::SWEEP_SECS) {

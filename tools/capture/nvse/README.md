@@ -78,8 +78,8 @@ Probes in `catalogs/` target:
     write JSON and Markdown scoreboards.
   - `cite` — format copy-paste-ready clean-room `[observed: ...]` citations with
     the automated privacy gate.
-- `catalogs/` — 9 sanitized declarative console-only JSON catalogs (27 batches,
-  541 read-only probes total; all file-writing and `con_Save` probes excluded):
+- `catalogs/` — 10 sanitized declarative console-only JSON catalogs (28 batches,
+  552 read-only probes total; all file-writing and `con_Save` probes excluded):
   - `wave1_parity_probes.json` — Wave 1/2 parity probes covering xNVSE compound
     assignments & `dATan2`, JIP hit 3D direction/base damage/reticle limbs,
     ShowOff `OnFireWeapon` & `ForceWeaponJamAnim`, ShowOff objective/unholster
@@ -120,6 +120,14 @@ Probes in `catalogs/` target:
     no-hit output coordinates, `maxRange <= 0` / omitted default reach, and
     `collisionFlag` filtering across exterior terrain, actor, and interior floor
     geometry (1 batch, 3 probes: `w6_point_raycast`).
+  - `wave6_t2_observed_matches.json` — Wave 6 Tier 2 read-only console-only
+    probes confirming parity matches across yUI/ySI traits, ShowOff/JIP
+    `OnFireWeapon` god-mode split, `ShowOff:OnPreActivateInventoryItemAlt`,
+    `GetCalculatedActorSpread` anim types 8/9/2, `ApplyWeaponPoison`,
+    `DisableMuzzleFlashLights` exact `u32::MAX`, `ClearArmorAltTexture`,
+    `GetWeaponsForMod`, `GetNumActorsInRangeFromRef`, DDS texture headers,
+    `GetNiBound`, ShowOff Matrix edges, `GetInGrid`, and `GetActorTemplateFlag`
+    (1 batch, 11 probes: `w6_t2_observed_matches`).
 - `tests/test_nvse_harness.py` — offline stdlib `unittest` suite (no game
   install or captured logs required).
 

@@ -236,7 +236,10 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // GetActorTemplateFlag; observed: jip3a, six bases as the argument all 0; jip3b,
         // a placed PowderGangerVault19TEMPLATE reads 942 on the reference (its base is one
         // the game made, not the record, whose flags are 128) and 0 with the base given;
-        // hypothesis: references placed from the plugins read their record's flags].
+        // observed 2026-11-24: `w6t2_31_xnvse_items_ammo_rounds_and_ingrid`
+        // (`tools/capture/nvse/catalogs/wave6_t2_observed_matches.json`): `tf(ref=0,arg=0)`
+        // on untemplated Doc Mitchell ref/base; hypothesis: templated references placed
+        // from the plugins read their record's flags].
         "getactortemplateflag" => {
             if form(args, 1).is_some() {
                 return Some(Ok(zero));

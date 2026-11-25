@@ -105,12 +105,26 @@ post-handler destroyed re-check follow `ShowOff:OnPreActivate` via shared
     (`0::`) and five arguments `(rItemBase, rItemRef, bIsActivationNotPrevented, iKey,
     bEquipping)` carrying forward the sticky `allowed` state from the non-Alt pass.
 - Scripted `EquipItem` and `UseAidItem` (`Game::consume`) check
-  `Game::pre_activate_inventory_item_alt` when the actor carries the item.
+  `Game::pre_activate_inventory_item_alt` when the actor carries the item. For scripted
+  `Player.EquipItem`, original FNV fires `ShowOff:OnPreActivateInventoryItemAlt` only (not
+  non-Alt `ShowOff:OnPreActivateInventoryItem`), with calling reference `Player`, an
+  inventory reference as arg 2 (`IsReference == 1`), `bIsActivationNotPrevented == 1`,
+  `iKey == 0`, and `bEquipping == 1`, and both events register (`reg=1/1`) [observed:
+  2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), Fallout: New Vegas 1.4.0.525 + xNVSE
+  6.4.9 + ShowOffNVSE 184 + JIP LN 57.30 with the 10 official base masters, isolated
+  clean-room staging copy (read-only `PrintToConsole` probes; zero writes to game install
+  or Saves), committed probes `w6t2_02_showoff_pre_activate_inv_alt` and
+  `w6t2p2_02_pre_activate_inv_alt_allow_vs_omit`
+  (`tools/capture/nvse/catalogs/wave6_t2_observed_matches.json`):
+  `PROBE|w6t2_02_showoff_pre_activate_inv_alt|reg=1/1|eq=0,na=0,al=1,selfP=1,isRef=1,key=0,bEq=1|unAl=1,unBEq=1|vetoEq=0`
+  and
+  `PROBE|w6t2p2_02_pre_activate_inv_alt_allow_vs_omit|omit(eq=0,al=1,alw=1)|one(eq=0,al=2)|un(eq=0,al=2,bEq=1)|zero(eq=0)`;
+  zero DLL, PDB, or third-party source consulted].
 
 [design] Both helpers short-circuit with zero `temp_ref` allocation when no matching
 handler is registered, leaving unmodded vanilla behavior untouched. A per-`Game`
 re-entrancy guard (`ShowOffState::in_pre_activate_item`) prevents infinite recursion if
-a handler invokes `EquipItem` or `UseAidItem` from inside the callback. Exact original
-fourth/fifth integer encodings (`iKey`, `bEquipping`), scripted-vs-UI event split, and
-relative ordering between non-Alt and Alt handlers remain `[hypothesis]` pending
-original-game probe captures.
+a handler invokes `EquipItem` or `UseAidItem` from inside the callback. UI/hotkey
+activations (`iKey` `1..=8`), `bEquipping == 0` on unequip, `SetFunctionValue 0` veto
+outside char-gen, and relative ordering between non-Alt and Alt handlers remain
+`[hypothesis]` pending original-game probe captures.

@@ -173,14 +173,15 @@ class TestCatalogValidation(unittest.TestCase):
                 "wave4g_f2_extenders.json",
                 "wave4h_reconcile.json",
                 "wave6_point_raycast.json",
+                "wave6_t2_observed_matches.json",
             ],
         )
         self.assertFalse((nvse_harness.DEFAULT_CATALOG_DIR / "persistence_matrix.json").exists())
         errors, counts = nvse_harness.validate_catalogs(paths)
         self.assertEqual(errors, [], f"Catalog validation errors: {errors[:5]}")
-        self.assertEqual(counts["catalogs"], 9)
-        self.assertEqual(counts["probe_batches"], 27)
-        self.assertEqual(counts["probes"], 541)
+        self.assertEqual(counts["catalogs"], 10)
+        self.assertEqual(counts["probe_batches"], 28)
+        self.assertEqual(counts["probes"], 552)
         self.assertEqual(counts["persistence_items"], 0)
 
         # Verify Wave 1 parity probe IDs and corrected Wave 4A/4D/4E/4G/4H targeted probes are present verbatim.
@@ -217,6 +218,17 @@ class TestCatalogValidation(unittest.TestCase):
             "w6_01_point_raycast_angles",
             "w6_02_point_raycast_miss_and_range",
             "w6_03_point_raycast_collision_flags",
+            "w6t2_26_ysi_traits_set_get_and_metadata",
+            "w6t2p3_04_fire_god_melee",
+            "w6t2_02_showoff_pre_activate_inv_alt",
+            "w6t2p2_02_pre_activate_inv_alt_allow_vs_omit",
+            "w6t2p2_07_spread_anim_7_9_2_1_0",
+            "w6t2p2_27_jg10_apply_poison_and_muzzle_hex",
+            "w6t2_30_jg5_get_weapons_for_mod_and_armor_alt_tex",
+            "w6t2_08_showoff_equipped_weight_and_ally_temp",
+            "w6t2_23_jg_dds_texture_format_and_bounds",
+            "w6t2_32_showoff_matrix_edges_and_get_weapon_mod_flags",
+            "w6t2_31_xnvse_items_ammo_rounds_and_ingrid",
         ):
             self.assertIn(req_id, probes_by_id)
 

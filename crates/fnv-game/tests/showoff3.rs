@@ -444,3 +444,29 @@ fn weapon_flag_overrides_sync_getters_playability_and_equipment() {
     assert_eq!(g.weapon_flags1(FormId(HAT)), None);
     assert_eq!(g.num_field(FormId(HAT), "DNAM", "flags1"), 0.0);
 }
+
+#[test]
+fn is_base_form_accepts_temp_clone_forms_and_rejects_placed_refs() {
+    let f = fixture();
+    let mut g = game(&f);
+    dressed(&mut g);
+    // Authored base forms return 1.
+    assert_eq!(n(&mut g, "IsBaseForm TestGun"), 1.0);
+    assert_eq!(n(&mut g, "IsBaseForm TestList"), 1.0);
+    assert_eq!(n(&mut g, "IsBaseForm TestFactionA"), 1.0);
+    // TempCloneForm (0xFF base form) returns 1.
+    assert_eq!(
+        q(&mut g, "ref c\nlet c := TempCloneForm TestGun\nSetFunctionValue (IsBaseForm c)"),
+        XVal::Num(1.0)
+    );
+    // Placed player ref, PlaceAtMe 0xFF ref, and temp inventory ref return 0.
+    assert_eq!(n(&mut g, "IsBaseForm player"), 0.0);
+    assert_eq!(
+        q(&mut g, "ref r\nlet r := player.PlaceAtMe TestGun 1\nSetFunctionValue (IsBaseForm r)"),
+        XVal::Num(0.0)
+    );
+    assert_eq!(
+        q(&mut g, "ref ir\nlet ir := player.GetEquippedWeaponRef\nSetFunctionValue (IsBaseForm ir)"),
+        XVal::Num(0.0)
+    );
+}

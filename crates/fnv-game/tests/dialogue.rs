@@ -1232,8 +1232,8 @@ fn own_lines(f: &Fixture, topic: FormId, lines: &[FormId]) -> Vec<FormId> {
     lines.iter().copied().filter(|i| f.data.topics[&topic].contains(i)).collect()
 }
 
-/// [hypothesis] Info Index belongs to the listing quest, not the entire topic
-/// (docs/spec-notes/dialogue.md §1.2). [design] Each shared line goes in among its
+/// Info Index belongs to the listing quest, not the entire topic
+/// (see docs/spec-notes/dialogue.md §1.2). [design] Each shared line goes in among its
 /// listing quest's own lines; the own lines keep their stored order, so equal priorities
 /// try them as `lines_by_priority` does, and the Random pools follow that order as in a
 /// topic without shared lines (`GameData::lines_tried`).
@@ -1994,7 +1994,7 @@ fn a_farewell_survives_a_snapshot_and_runs_its_end_script_after_the_load() {
 }
 
 /// A conversation through a talking activator keeps a chosen Goodbye line in the
-/// conversation until it is over, as before [hypothesis, `Game::choose`]. The fixture
+/// conversation until it is over, as before (see `Game::choose`). The fixture
 /// has no talking activator: the conversation is given a present reference to go
 /// through.
 #[test]

@@ -106,7 +106,7 @@ fn handlers_hear_the_game() {
     q(&mut g, "let TestGlobal := 0\nSetJohnnyOnLimbGoneEventHandler 1 (begin function {ref rA, int iLimb}\nlet TestGlobal := TestGlobal + iLimb\nend) 0 0 1");
     g.dismember(FormId::PLAYER_REF, &[(1, false), (3, false)], None);
     assert_eq!(global(&mut g), 1.0);
-    // [hypothesis: SetOnReputationChangeEventHandler's (reputation, axis, value)].
+    // SetOnReputationChangeEventHandler's (reputation, axis, value) (see docs/spec-notes/ext-jg8.md).
     q(&mut g, "let TestGlobal := 0\nSetOnReputationChangeEventHandler 1 (begin function {ref rR, int iAxis, float fV}\nlet TestGlobal := fV\nend) 0 TestReputation");
     fnv_game::functions::reputation_store(&mut g, FormId(REPU), 0, 5.0);
     assert_eq!(global(&mut g), 5.0);

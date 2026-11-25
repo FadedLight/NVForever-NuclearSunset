@@ -256,17 +256,22 @@ TestNpcRef.KillActor PlayerREF
     assert_eq!(n(&mut g, r#"PlayerREF.AuxVarGetFlt "*d_fl_base""#), 0.0, "FormList of NPC_ base forms does not match (flst=0)");
     assert_eq!(n(&mut g, r#"PlayerREF.AuxVarGetFlt "*d_fl_ref""#), 1.0, "FormList of placed refs still matches");
 
-    // Unregistering an XMarker-registered handler with XMarker removes it.
+    // Unregistering an XMarker-registered handler with XMarker removes it; verify by
+    // spawning and killing a second actor so Dying genuinely dispatches again.
     q(
         &mut g,
         r#"
 ref h
+ref rNpc2
 let h := (begin function {ref rDead}
 PlayerREF.AuxVarSetFlt "*d_rm" 1
 end)
 SetJohnnyOnDyingEventHandler 1 h 0 XMarker
 SetJohnnyOnDyingEventHandler 0 h 0 XMarker
+let rNpc2 := TestNpcRef.PlaceAtMe TestNpcBase 1
+rNpc2.KillActor PlayerREF
 "#,
     );
-    assert_eq!(n(&mut g, r#"PlayerREF.AuxVarGetFlt "*d_rm""#), 0.0);
+    assert_eq!(n(&mut g, r#"PlayerREF.AuxVarGetFlt "*d_u""#), 2.0, "second actor kill must dispatch Dying");
+    assert_eq!(n(&mut g, r#"PlayerREF.AuxVarGetFlt "*d_rm""#), 0.0, "unregistered XMarker handler must not fire on second kill");
 }

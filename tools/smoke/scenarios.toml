@@ -13,7 +13,11 @@
 #   in [timed] are joined, others must agree). Only shares checked by running both ways
 #   are written here. `offset` moves a member's timed test aids in a shared run.
 # - `requires = ["VAR", …]`: the scenario is skipped unless these environment variables
-#   are set (NVIDIA's files: NVF_DLSS_DIR).
+#   are set (NVIDIA's files: NVF_DLSS_DIR); `"!VAR"` skips it when that one is set.
+# - NVF_SMOKE_DEV_AIDS=1 says the exe was built with the developer aids (`cargo build --release
+#   -p nvforever --features dev-aids`; engine/nvforever/src/dev_aids.rs): scenarios that set one
+#   of those aids require it, the one that checks a release build ignores them runs only
+#   without it.
 # - `front = true` (game scenarios): the runner holds the launch's window in front while it
 #   runs (tools/smoke/smoke/front.py, Windows), for checks that need the foreground (DLSS
 #   Frame Generation generates only there). Front launches, with the rest of their
@@ -2731,6 +2735,293 @@ forbid = [
   { text = "failed and will not be tried again", label = "a pipeline that failed for good" },
   { text = "apply_fog not as expected", label = "the haze's edit of Bevy's fog call not made" },
   { text = "the desert haze's shader edit is not in place", label = "the switch on without its shader edit" },
+]
+
+[[scenario]]
+name = "volumetric-clouds"
+source = "[design, #2991] docs/design/graphics-enhanced.md §3.23 (a prototype), engine/nvforever/src/volumetric_clouds.rs, volumetric_clouds.wesl and volumetric_clouds_march.wesl: started with --graphics-only volumetric-clouds at Goodsprings at noon under a pinned weather with cloud textures (NVBlackMountainWeather), the producer of cloud_shadows.rs composes the weather's layers for the volume (Cloud shadows stays off: the sun visibility's cloud variant never turns on), the volume is drawn outdoors with a cover, and its material pipeline compiles and is ready, without a shader, pipeline or rendering error. The row's key alone is the level Normal (a third of the render size, the support probed at twice the spacing: docs/design/volumetric-medium.md, The levels). The look and the cost are checked in pictures and frame times by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/cloud_shadows.rs", "engine/nvforever/src/medium*"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+run_seconds = 20
+expect = [
+  { re = 'graphics: light glow, volumetric clouds$', label = "the switch is on from the start and the graphics line names it" },
+  { text = "cloud shadows: layers", label = "the producer composed the weather's layers for the volume" },
+  { re = 'volumetric clouds: on, slab -?\d+\.\.-?\d+ \(the cloud shadows. plane\), quality \d+ ', label = "the volume is drawn: outdoors, with the weather's cover" },
+  { re = 'volumetric clouds: noise generated: base 128x128x128 R8 with 8 levels, erosion 32x32x32 RGBA8 with 6 levels, 2546541 bytes, \d+ workers, \d+ ms$', label = "#3032 stage 2b: the noise textures are generated once on the row's first activation (sizes, levels, bytes)" },
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "volumetric_clouds.wesl and its march module compile: the pipeline is ready" },
+  { text = "volumetric clouds: level Normal (far buffer scale 3, probe spacing x2)", count = 1, label = "the row's key alone is the level Normal" },
+  { re = 'loading screen phases: up .*the clouds \d', label = "the start's screen knew of the clouds before they were drawn" },
+  { text = "loading screen: the volumetric clouds were drawn behind it, every texel cast", count = 1, label = "the start's screen left with the clouds ready, not at its limit" },
+  { re = "volumetric medium: far buffer \\d+x\\d+ \\(a third of the main pass's render size\\), one ray in nine a frame into \\d+x\\d+", label = "#3032: the medium's buffer at a third is made (the default mode at Normal)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_trace_tiles_refined_pipeline', label = "the trace pass's tile entry compiles (the refined march's, the default since #3032 stage 2i M3)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_resolve_pipeline', label = "the reconstruction compiles" },
+  { text = "volumetric clouds: march: the refined march (the support probed every ", count = 1, label = "#3032: the march is named once, with its figures" },
+  { re = 'volumetric clouds: on, slab -?\d+\.\.-?\d+ \(the cloud shadows. plane\), quality \d+ \(the refined march: the support probed every 1920 units, ', label = "#3032 stage 2i M3: the volume is drawn by the refined march by default (1,600 units at that weather's amount, times the domain's 24,000 over 40,000, times the level Normal's 2)" },
+  { re = 'volumetric clouds: body: one flat base for every column; .*; WISP 0\.52 \(that read displaced up to 156 units a component, stretched at most 1\.32 times\)$', count = 1, label = "#3032: the body is named once, with its start WISP" },
+  { text = "volumetric clouds: start: SHAPE 1.00, EROSION 1.26, DENSITY x0.76 (start defaults: SHAPE 1.00, EROSION 1.26, DENSITY x0.76; ", label = "#3032: the body's keys start at the look accepted on 2026-11-23" },
+  { text = "volumetric clouds: start-only: HEIGHT 24000, PUFF 1.00, AIR 0.82, LIGHT_TAPS 2, REFINED_STRIDE 4, LIGHT_REUSE 1", label = "#3032: the start-only values are the accepted launch's" },
+  { re = 'volumetric clouds: light: two octaves \(.*, every colour bounded to 30000; weights: BACKSCATTER x1\.65, SUN x1\.30, LEVEL x1\.12, SUNCOLOUR 0\.00$', count = 1, label = "#3032: the light starts at the accepted look's values" },
+  { text = "volumetric medium: history filter Adaptive", label = "#3032: the medium's history filter" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready" },
+  { re = 'volumetric medium: far buffer \d+x\d+ written whole and volumetric_clouds_pipeline ready, the clouds drawn from it', label = "before the flat layers give way (never a frame with neither)" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the volume" },
+  { re = 'pipeline \d+ failed after \d+ ms: volumetric_clouds_pipeline', label = "the volume's pipeline failed (a shader that does not compile, or bindings that do not match)" },
+  { re = 'pipeline \d+ failed after \d+ ms: medium_', label = "a pipeline of the medium failed" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers with nothing changing (a false hand-back)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the volume on" },
+  { text = "failed to process shader", label = "a shader that does not build (the volume's or its march module)" },
+  { text = "sun visibility: cloud on", label = "the volume alone must not switch the cloud shadows' variant on" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-no-aids"
+source = "[design, #3032] engine/nvforever/src/dev_aids.rs: the volumetric clouds' developer aids (debug variables and the tune file) are not in a release build. At Goodsprings at noon under NVBlackMountainWeather with the row on and aids of every reader set (the cloud source's start values and its tune file, the light volume's, the medium's, the turn, the fair sky's sun), a release exe starts and draws as without them: the values of its own start, one ray in nine, the light volume's own spacings, no line of an aid"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS = "56", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW = "count", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT = "40000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_LIGHT_VOLUME_CELLS = "1000,8000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_MEDIUM_TURN = "60", NVF_PLAY_DEBUG_MEDIUM_TILE = "1", NVF_PLAY_DEBUG_MEDIUM_SCALE = "1", NVF_PLAY_DEBUG_MEDIUM_FRESH = "0.5", NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER = "linear", NVF_PLAY_DEBUG_FAIR_SUN = "size=40" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+note = "for a release exe: skipped with NVF_SMOKE_DEV_AIDS set (an exe built with --features dev-aids obeys the aids)."
+requires = ["!NVF_SMOKE_DEV_AIDS"]
+run_seconds = 20
+expect = [
+  { re = 'volumetric clouds: on, slab -?\d+\.\.-?\d+ \(the cloud shadows. plane\), quality 28 ', label = "the volume is drawn at its own quality" },
+  { text = "volumetric clouds: level Normal (far buffer scale 3, probe spacing x2)", count = 1, label = "the level's own scale" },
+  { re = "volumetric medium: far buffer \\d+x\\d+ \\(a third of the main pass's render size\\), one ray in nine a frame into \\d+x\\d+", label = "a third of the render size, one ray in nine" },
+  { text = "volumetric clouds: start: SHAPE 1.00, EROSION 1.26, DENSITY x0.76 (start defaults: SHAPE 1.00, EROSION 1.26, DENSITY x0.76; ", label = "the body's keys start at their own values" },
+  { text = "volumetric clouds: start-only: HEIGHT 24000, PUFF 1.00, AIR 0.82, LIGHT_TAPS 2, REFINED_STRIDE 4, LIGHT_REUSE 1", label = "and the start-only values" },
+  { re = 'volumetric clouds: light: two octaves \(.*, every colour bounded to 30000; weights: BACKSCATTER x1\.65, SUN x1\.30, LEVEL x1\.12, SUNCOLOUR 0\.00$', count = 1, label = "and the light's" },
+  { re = 'volumetric clouds: light volume on \(near and far; near 128x128x25 at 500 across, far 128x128x25 at 4000 across, ', label = "the light volume's own spacings" },
+  { text = "volumetric medium: history filter Adaptive", label = "the medium's own history filter" },
+]
+forbid = [
+  { text = "debug switch NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", label = "an aid of the cloud source, the light volume or the tune file was read" },
+  { text = "debug switch NVF_PLAY_DEBUG_MEDIUM", label = "an aid of the medium was read" },
+  { text = "tune file", label = "the tune file was looked for" },
+  { text = "sky: fair sun aid", label = "the fair sky's sun aid was read" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-light-volume"
+source = "[design, #3032 stage 2g, checkpoints B1 and B2] docs/design/graphics-enhanced.md §3.23 (the light volume), engine/nvforever/src/volumetric_clouds_lightvol.rs (gpu, LvSchedule), volumetric_clouds_lightvol.wesl (lv_produce), volumetric_clouds_march.wesl (vc_light_handoff, LIGHT_VOLUME): at Goodsprings at noon under NVBlackMountainWeather with the row on, the light volume turns on with its activation line (both levels, 128 x 128 x 25 (the 24,000-unit domain) at 500 and 4,000 across, two sets a level and their bytes, the write route, sweeps over 8 and 32 frames, two near taps by default), its producer and the trace's light-volume variant compile, and the trace draws, without a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+run_seconds = 20
+expect = [
+  { re = 'volumetric clouds: light volume on \(near and far; near 128x128x25 at 500 across, far 128x128x25 at 4000 across, 1000 up; 3\.1[23] MB in R16Float \(two sets a level\); write route: 2D array layers, one render pass a layer, top down; sweeps over 8 and 32 frames; 2 near taps; ', label = "the light volume turns on with its sizes, two sets, bytes, write route, spreads and taps" },
+  { re = 'pipeline \d+ ready after \d+ ms: nvf_cloud_light_producer_pipeline', label = "the producer compiles" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_trace_tiles_refined_pipeline_light_volume', label = "the trace's light-volume variant compiles" },
+  { re = 'volumetric medium: trace pass drawn \(', label = "the trace pass drew" },
+  { text = "volumetric medium: the trace read a completed near set of the light volume", label = "the trace drew with the near level's finished sweep (the fallback's trace reads no set)" },
+  { text = "volumetric medium: the trace read a completed far set of the light volume", label = "and with the far level's" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light volume" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|nvf_cloud_light|volumetric_clouds_pipeline)', label = "a pipeline of the light volume, the medium or the proxy failed" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the light volume" },
+  { text = "failed to process shader", label = "the producer, the march module or the trace does not build with the light volume" },
+  { re = 'pipeline \d+ (ready|failed) after \d+ ms: (medium_trace|nvf_cloud_light)\w*_views', label = "a view variant of the trace or the producer built though no view is asked for" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back with nothing changing (a false hand-back)" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-taa"
+source = "[design, #3032] engine/nvforever/src/medium.rs, medium_trace.wesl, medium_resolve.wesl: the volumetric medium's default mode under native TAA at a fixed 1280x720, the view standing still (the turn: volumetric-clouds-taa-turn), at the level High: the buffer at two fifths (512x288) and its 171x96 trace target are made, both passes' pipelines compile, the trace pass draws, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/taa.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--graphics-only", "volumetric-clouds-high,taa"]
+run_seconds = 20
+expect = [
+  { text = "volumetric clouds: level High (far buffer scale 2.5, probe spacing x1)", count = 1, label = "the level named is in force, the view still" },
+  { text = "volumetric medium: far buffer 512x288 (two fifths of the main pass's render size), one ray in nine a frame into 171x96", label = "two fifths of 1280x720, one ray per 3x3 tile, the view still" },
+  { text = "volumetric medium: trace pass drawn (512x288 buffer, render size 1280x720, one ray in nine into 171x96, reconstructed; view: 1 samples, jittered)", label = "both passes drew, at two fifths of the render size, on a single-sampled jittered view, the view still" },
+  { re = 'graphics: light glow, temporal anti-aliasing, volumetric clouds$', label = "TAA is the anti-aliasing in force (not the multisampling), the view still" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_resolve_pipeline', label = "the reconstruction compiles, the view still" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready, the view still" },
+  { text = "volumetric medium: far buffer 512x288 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way, the view still" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under TAA, the view still" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under TAA, the view still" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers under TAA (a false hand-back), the view still" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under TAA, the view still" },
+  { text = "failed to process shader", label = "a shader that does not build under TAA, the view still" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-taa-turn"
+source = "[design, #3032] engine/nvforever/src/medium.rs, medium_trace.wesl, medium_resolve.wesl: the volumetric medium's default mode under native TAA at a fixed 1280x720, with the view turning at 60 degrees a second (NVF_PLAY_DEBUG_MEDIUM_TURN) so the reprojection, the clamp and the cut test run, at the level High: the buffer at two fifths (512x288) and its 171x96 trace target are made, both passes' pipelines compile, the trace pass draws, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. The look of the turn is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/taa.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_TURN = "60" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--graphics-only", "volumetric-clouds-high,taa"]
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+run_seconds = 20
+expect = [
+  { text = "debug switch NVF_PLAY_DEBUG_MEDIUM_TURN: the view turns 60.0 degrees a second", label = "the turn aid is on" },
+  { text = "volumetric clouds: level High (far buffer scale 2.5, probe spacing x1)", count = 1, label = "the level named is in force" },
+  { text = "volumetric medium: far buffer 512x288 (two fifths of the main pass's render size), one ray in nine a frame into 171x96", label = "two fifths of 1280x720, one ray per 3x3 tile" },
+  { text = "volumetric medium: trace pass drawn (512x288 buffer, render size 1280x720, one ray in nine into 171x96, reconstructed; view: 1 samples, jittered)", label = "both passes drew, at two fifths of the render size, on a single-sampled jittered view" },
+  { re = 'graphics: light glow, temporal anti-aliasing, volumetric clouds$', label = "TAA is the anti-aliasing in force (not the multisampling)" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_resolve_pipeline', label = "the reconstruction compiles" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready" },
+  { text = "volumetric medium: far buffer 512x288 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under TAA" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under TAA" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers while turning under TAA (a false hand-back)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under TAA" },
+  { text = "failed to process shader", label = "a shader that does not build under TAA" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-fsr"
+source = "[design, #3032] engine/nvforever/src/medium.rs: the volumetric medium's default mode under FSR Quality at a fixed 1280x720 output (render size 853x480), the view standing still (the turn: volumetric-clouds-fsr-turn), at the level Performance: the buffer is a quarter of the render size, not the output's (214x120, trace 72x40), both passes' pipelines compile and draw, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. DLSS needs files a player supplies: no scenario"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/fsr.rs", "engine/nvforever/src/upscaler/**"]
+env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--fsr", "quality", "--graphics-only", "volumetric-clouds-performance"]
+run_seconds = 20
+expect = [
+  { text = "FSR dispatch active: 3.1.4, 853x480 -> 1280x720", label = "FSR Quality is in force, the view still" },
+  { text = "volumetric clouds: level Performance (far buffer scale 4, probe spacing x2)", count = 1, label = "the level named is in force, the view still" },
+  { text = "volumetric medium: far buffer 214x120 (a quarter of the main pass's render size), one ray in nine a frame into 72x40", label = "a quarter of FSR's render size, the view still" },
+  { text = "volumetric medium: trace pass drawn (214x120 buffer, render size 853x480, one ray in nine into 72x40, reconstructed; view: 1 samples, jittered)", label = "both passes drew at a quarter of FSR's render size, the view still" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready, the view still" },
+  { text = "volumetric medium: far buffer 214x120 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way, the view still" },
+]]
+forbid = [
+  { text = "FSR dispatch failed", label = "an FSR dispatch failed, the view still" },
+  { text = "FSR 3.1 unavailable", label = "FSR not available, the view still" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under FSR, the view still" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under FSR, the view still" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers under FSR (a false hand-back), the view still" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under FSR, the view still" },
+  { text = "failed to process shader", label = "a shader that does not build under FSR, the view still" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-fsr-turn"
+source = "[design, #3032] engine/nvforever/src/medium.rs: the volumetric medium's default mode under FSR Quality at a fixed 1280x720 output (render size 853x480), with the view turning at 60 degrees a second (NVF_PLAY_DEBUG_MEDIUM_TURN), at the level Performance: the buffer is a quarter of the render size, not the output's (214x120, trace 72x40), both passes' pipelines compile and draw, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. DLSS needs files a player supplies: no scenario"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/fsr.rs", "engine/nvforever/src/upscaler/**"]
+env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_TURN = "60" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--fsr", "quality", "--graphics-only", "volumetric-clouds-performance"]
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+run_seconds = 20
+expect = [
+  "FSR dispatch active: 3.1.4, 853x480 -> 1280x720",
+  { text = "volumetric clouds: level Performance (far buffer scale 4, probe spacing x2)", count = 1, label = "the level named is in force" },
+  { text = "volumetric medium: far buffer 214x120 (a quarter of the main pass's render size), one ray in nine a frame into 72x40", label = "a quarter of FSR's render size" },
+  { text = "volumetric medium: trace pass drawn (214x120 buffer, render size 853x480, one ray in nine into 72x40, reconstructed; view: 1 samples, jittered)", label = "both passes drew at a quarter of FSR's render size" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready" },
+  { text = "volumetric medium: far buffer 214x120 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way" },
+]]
+forbid = [
+  "FSR dispatch failed",
+  "FSR 3.1 unavailable",
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under FSR" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under FSR" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers while turning under FSR (a false hand-back)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under FSR" },
+  { text = "failed to process shader", label = "a shader that does not build under FSR" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-live-change"
+source = "[design, #3032] engine/nvforever/src/medium.rs: the volumetric medium's handover when the main view's mesh pipeline key changes in play: the row on at Goodsprings at noon, from the pause menu's settings page (NVF_PLAY_TEST_SETTINGS) first the Shadow filtering row switched to Fast, then the Cloud shadows row switched on (the sun visibility's bits), so bevy_pbr specialises the proxy again each time; each time the volume hands back to the flat layers with its reason (the view changed) right after the switch and before the proxy could be skipped, and takes over again once the new variant is ready; exactly two hand-backs in the run (so none before the first switch), without a rendering, shader or pipeline error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/graphics.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PAUSE = "12:21", NVF_PLAY_TEST_SETTINGS = "13:shadow-filter=0,17:cloud-shadows" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+run_seconds = 30
+expect = [
+  { re = 'volumetric medium: hand-back to the flat layers', count = 2, label = "exactly the two hand-backs of the two switches (none before the first)" },
+]
+order = [[
+  { re = 'volumetric medium: far buffer \d+x\d+ written whole and volumetric_clouds_pipeline ready, the clouds drawn from it', label = "the volume takes over first" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: shadow-filter=0", label = "the shadow filter switched in play" },
+  { text = "volumetric medium: hand-back to the flat layers: the view changed", label = "a hand-back for the shadow filter, with its reason" },
+  { re = 'volumetric medium: the volume takes over again \(1 hand-backs so far\)', label = "the volume back once the proxy's new variant is ready" },
+  { text = "test aid NVF_PLAY_TEST_SETTINGS: cloud-shadows", label = "Cloud shadows switched on in play (the sun visibility's bits)" },
+  { text = "volumetric medium: hand-back to the flat layers: the view changed", label = "a hand-back for Cloud shadows, with its reason" },
+  { re = 'volumetric medium: the volume takes over again \(2 hand-backs so far\)', label = "the volume back again" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error while the shadow filter changes under the volume" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed while the shadow filter changes" },
+  { text = "failed to process shader", label = "a shader that does not build while the shadow filter changes" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-level-change"
+source = "[design, 2026-11-23, #3032] docs/design/volumetric-medium.md (The levels), engine/nvforever/src/volumetric_clouds.rs (CloudLevel), medium.rs (scale_in_force, plan): the Volumetric clouds row's level changed in play at Goodsprings at noon from the pause menu's settings page (NVF_PLAY_TEST_SETTINGS), Normal to High to Performance at a fixed 1280x720: each change makes the far buffer again once at the level's scale (427x240, 512x288, 320x180), hands back to the flat layers once with its reason and takes over again, without a rendering, shader or pipeline error; then Off releases the buffer"
+areas = ["renderer", "graphics", "weather", "settings"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/settings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_PAUSE = "12:25", NVF_PLAY_TEST_SETTINGS = "13:volumetric-clouds=High,17:volumetric-clouds=Performance,21:volumetric-clouds=Off" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--graphics-only", "volumetric-clouds"]
+run_seconds = 30
+expect = [
+  { re = 'volumetric medium: far buffer \d+x\d+ \(', count = 3, label = "one buffer a level, each made once" },
+  { re = 'volumetric medium: hand-back to the flat layers: a new far buffer is being made', count = 2, label = "one hand-back a change, with its reason" },
+]
+order = [[
+  { text = "volumetric clouds: level Normal (far buffer scale 3, probe spacing x2)", label = "the row's key alone is the level Normal" },
+  { text = "volumetric medium: far buffer 427x240 (a third of the main pass's render size), one ray in nine a frame into 143x80", label = "a third of 1280x720" },
+  { text = "volumetric medium: far buffer 427x240 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "drawn at Normal" },
+  { text = "volumetric clouds: level High (far buffer scale 2.5, probe spacing x1)", label = "High chosen in play" },
+  { text = "volumetric medium: far buffer 512x288 (two fifths of the main pass's render size), one ray in nine a frame into 171x96", label = "two fifths of 1280x720" },
+  { text = "volumetric medium: far buffer 512x288 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "drawn at High" },
+  { text = "volumetric clouds: level Performance (far buffer scale 4, probe spacing x2)", label = "Performance chosen in play" },
+  { text = "volumetric medium: far buffer 320x180 (a quarter of the main pass's render size), one ray in nine a frame into 107x60", label = "a quarter of 1280x720" },
+  { text = "volumetric medium: far buffer 320x180 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "drawn at Performance" },
+  { text = "volumetric medium: far buffer released", label = "Off releases the buffer" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error while the level changes" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed while the level changes" },
+  { text = "failed to process shader", label = "a shader that does not build while the level changes" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-light-model"
+source = "[design, #3032 stage 2e L2] docs/design/graphics-enhanced.md §3.23, engine/nvforever/src/volumetric_clouds_light.rs and volumetric_clouds_light.wesl: the row on at Goodsprings at noon under a cloudy pinned weather with two of the light model's weights set at the start (NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE=2, _BACKSCATTER=0): the log names the default light (two octaves, the floor, the light from above and below) with the changed weights, and the volume's pipeline and the trace's compile with the light's leaf module and the uniform's light block, without a shader, pipeline or rendering error. The look is checked in pictures by hand"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium_trace.wesl"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_BACKSCATTER = "0" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+run_seconds = 20
+expect = [
+  { re = 'volumetric clouds: light: two octaves \(.*, every colour bounded to 30000; weights: OCTAVE x2\.00, BACKSCATTER x0\.00, SUN x1\.30, LEVEL x1\.12, SUNCOLOUR 0\.00$', count = 1, label = "the default light named once, with the two weights the start variables changed and the other start defaults against the designed 1" },
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's pipeline is ready" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_trace_tiles_refined_pipeline', label = "the trace's tile entry (the refined march's, the default since #3032 stage 2i M3) compiles with the light's leaf and block" },
+  { re = 'volumetric medium: far buffer \d+x\d+ written whole and volumetric_clouds_pipeline ready, the clouds drawn from it', label = "the clouds are drawn from the medium" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the light model" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed (the light's leaf or block does not match)" },
+  { text = "failed to process shader", label = "a shader that does not build (the light's leaf module)" },
 ]
 
 [[scenario]]

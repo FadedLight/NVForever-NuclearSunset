@@ -30,6 +30,7 @@ use crate::player_body::PlayerBody;
 use crate::sky::SkyState;
 use crate::ssao::{AoLevel, AO_CHOICES};
 use crate::upscaler::{DlssModel, UpscaleQuality, Upscaler, UpscalerChoice};
+use crate::volumetric_clouds::{CloudLevel, CLOUD_CHOICES};
 use crate::window_mode;
 use crate::world::Streamer;
 use crate::{Args, Overlay};
@@ -1199,6 +1200,13 @@ fn register_graphics(app: &mut App) {
         Setting { key: AO_KEY, group: GROUP_GRAPHICS, label: "Ambient occlusion", note: AO_NOTE, switches: "--graphics, --ambient-occlusion", get: |_| false, set: |_, _| {}, slider: None },
         ChoiceList { names: |_| AO_CHOICES.iter().map(|c| (*c).to_string()).collect(), chosen: ao_chosen, pick: take_ao, save: ao_chosen, load: take_ao, ask_keep: false },
     );
+    // Volumetric clouds: a list of Off and its levels [design, 2026-11-23: 7
+    // or fewer values]; the INI's older on/off still loads, on as Normal.
+    add_choice_list(
+        app,
+        Setting { key: CLOUDS_KEY, group: GROUP_GRAPHICS, label: "Volumetric clouds (experimental)", note: CLOUDS_NOTE, switches: "--graphics-only", get: |_| false, set: |_, _| {}, slider: None },
+        ChoiceList { names: |_| CLOUD_CHOICES.iter().map(|c| (*c).to_string()).collect(), chosen: clouds_chosen, pick: take_clouds, save: clouds_chosen, load: take_clouds, ask_keep: false },
+    );
     let switches: [Switch; 24] = [
         (
             "fine-shadows",
@@ -1500,6 +1508,38 @@ fn take_ao(world: &mut World, text: &str) -> bool {
     true
 }
 
+/// The Volumetric clouds row's key and note (volumetric_clouds.rs `CloudLevel`).
+const CLOUDS_KEY: &str = "volumetric-clouds";
+const CLOUDS_NOTE: &str = "The weather's clouds drawn with depth, lit by the sun: Off, or Performance, Normal or High, each finer and dearer than the last. A prototype. Not in the original.";
+
+/// The Volumetric clouds row's choice now: Off, or the level the clouds are drawn at.
+fn clouds_chosen(world: &World) -> String {
+    let g = world.resource::<Graphics>();
+    if g.volumetric_clouds { g.volumetric_clouds_level.name() } else { CLOUD_CHOICES[0] }.to_string()
+}
+
+/// The page's, the INI's and the test aids' Volumetric clouds: one of [`CLOUD_CHOICES`] (any
+/// case), or the row's older on/off as Normal and Off (it was never a slider, so no other
+/// number is read); false otherwise.
+fn take_clouds(world: &mut World, text: &str) -> bool {
+    let level = match text.trim() {
+        t if t.eq_ignore_ascii_case(CloudLevel::Performance.name()) => Some(CloudLevel::Performance),
+        t if t.eq_ignore_ascii_case(CloudLevel::Normal.name()) => Some(CloudLevel::Normal),
+        t if t.eq_ignore_ascii_case(CloudLevel::High.name()) => Some(CloudLevel::High),
+        t => match nvf_play::settings::parse_switch(t) {
+            Some(on) => on.then_some(CloudLevel::Normal),
+            None => return false,
+        },
+    };
+    let mut g = world.resource_mut::<Graphics>();
+    // Off keeps the level, as the Ambient occlusion row does.
+    let want = (level.is_some(), level.unwrap_or(g.volumetric_clouds_level));
+    if (g.volumetric_clouds, g.volumetric_clouds_level) != want {
+        (g.volumetric_clouds, g.volumetric_clouds_level) = want;
+    }
+    true
+}
+
 /// The Cloud shadows row's note (#2670; docs/design/sun-visibility.md): the label says the
 /// feature is experimental (as 3D scopes' says "(test)"), the note that its look is still
 /// being tuned (the relative rule, §7a, and the calibration, §8).
@@ -1517,7 +1557,7 @@ fn register_pipeline_waits(app: &mut App) {
         "anti-aliasing", "shadow-filter", "upscaler", "upscaler-quality", "ambient-occlusion",
         "fine-shadows", "bloom", "glow", "eye-adaptation", "neon-glow", "sharpen",
         "light-shafts", "water-reflections", "water-effects", "water-mirror", "sun-shadows", "grade",
-        "terrain-height-blend", "terrain-anti-tiling", "terrain-parallax", "cloud-shadows", "terrain-shadows", "heat-haze", MESH_BLEND_KEY, "distant-lights",
+        "terrain-height-blend", "terrain-anti-tiling", "terrain-parallax", "cloud-shadows", "terrain-shadows", "heat-haze", CLOUDS_KEY, MESH_BLEND_KEY, "distant-lights",
         // ALC shadows' first point and spot light shadow views specialize their passes.
         "light-shadows",
     ] {
@@ -3043,6 +3083,49 @@ dlss-model=Preset K
         assert_eq!(app.world().resource::<Graphics>().distant_objects, DistantObjects::Eight, "unchanged");
     }
 
+    /// The Volumetric clouds row is a list of Off and its levels: the choice sets the switch and
+    /// the level, Off keeps the level, and the INI's older on/off loads as Normal and Off.
+    #[test]
+    fn volumetric_clouds_are_a_list_of_off_and_the_levels() {
+        let _offer_probe = crate::dlss_download::TestOfferProbe::new(Some(false));
+        let mut app = rows_app();
+        let i = row(&app, CLOUDS_KEY);
+        let s = app.world().resource::<Settings>().list()[i];
+        assert_eq!((s.group, s.label, s.note, s.switches), (GROUP_GRAPHICS, "Volumetric clouds (experimental)", CLOUDS_NOTE, "--graphics-only"));
+        assert!(CLOUDS_NOTE.chars().count() <= 200 && CLOUDS_NOTE.ends_with("Not in the original."));
+        let list = app.world().resource::<Settings>().choices(i).expect("a list");
+        assert_eq!((list.names)(app.world()), ["Off", "Performance", "Normal", "High"]);
+        assert_eq!((list.chosen)(app.world()), "Off", "off at the start");
+        let state = |app: &App| {
+            let g = app.world().resource::<Graphics>();
+            (g.volumetric_clouds, g.volumetric_clouds_level)
+        };
+        for (name, level) in [("Performance", CloudLevel::Performance), ("High", CloudLevel::High), ("Normal", CloudLevel::Normal)] {
+            assert!(nvf_play::settings::pick(app.world_mut(), i, name));
+            assert_eq!((state(&app), (list.save)(app.world()).as_str()), ((true, level), name));
+        }
+        // The INI: the names in any case, the switch's older values.
+        for (text, want) in [
+            ("high", (true, CloudLevel::High)),
+            ("0", (false, CloudLevel::High)),
+            ("1", (true, CloudLevel::Normal)),
+            (" PERFORMANCE ", (true, CloudLevel::Performance)),
+            ("off", (false, CloudLevel::Performance)),
+            ("true", (true, CloudLevel::Normal)),
+            ("false", (false, CloudLevel::Normal)),
+            ("on", (true, CloudLevel::Normal)),
+            ("no", (false, CloudLevel::Normal)),
+            ("yes", (true, CloudLevel::Normal)),
+        ] {
+            assert!(take_clouds(app.world_mut(), text), "{text}");
+            assert_eq!(state(&app), want, "{text}");
+        }
+        for text in ["ultra", "0.5", "2", ""] {
+            assert!(!take_clouds(app.world_mut(), text), "{text}");
+        }
+        assert_eq!(state(&app), (true, CloudLevel::Normal), "a value not taken changes nothing");
+    }
+
     /// #2377: the command-line switches moved out of the notes into `Setting::switches`; each
     /// row of the Graphics tab still names the switches its note named, in the note's order
     /// (`--shadow-distance` of Longer sun shadows too: it was not "a part of" there), and no
@@ -3082,6 +3165,7 @@ dlss-model=Preset K
             ("light-shafts", &["--graphics"]),
             ("heat-haze", &["--graphics-only"]),
             ("desert-haze", &["--graphics", "--graphics-only"]),
+            ("volumetric-clouds", &["--graphics-only"]),
             ("aerial-perspective", &["--graphics", "--graphics-only"]),
             ("night-sky-detail", &["--graphics", "--graphics-only"]),
             ("distant-lights", &["--graphics", "--graphics-only"]),

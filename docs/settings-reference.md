@@ -1110,6 +1110,28 @@ below cover them all.
 - More: docs/design/graphics-enhanced.md
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `volumetric-clouds`: Volumetric clouds (experimental)
+
+- On the page: The weather's clouds drawn with depth, lit by the sun: Off, or Performance,
+  Normal or High, each finer and dearer than the last. A prototype. Not in the original.
+- In full: The weather's own cloud layers, as Cloud shadows composes them, become a
+  layer of cloud with thickness above the world, worked out per pixel: lit by the weather's
+  sunlight (by night its night light, from the moon), bright toward the sun, darker
+  underneath, coloured by the weather's cloud colours, fading into the sky toward the
+  horizon. Thick cloud hides the sun and the moon. The clouds follow the weather's cover,
+  drift and transitions. Cloud shadows on the ground come from the weather's flat layers, so they
+  do not match the clouds' shapes. High draws them into a buffer of two
+  fifths of the render size, Normal a third, Performance a quarter; Normal and Performance
+  also look for cloud along each ray at twice the spacing. A prototype. The water's
+  reflection, the scope's lens and a mod's extra cameras keep the weather's flat clouds while
+  it is drawn. Off in every preset; not in the original. Outdoors only.
+- Shown as a list since 2026-11-23; an INI written while it was an on/off switch (`1`/`0`,
+  true/false, on/off, yes/no) still loads as Normal or Off.
+- Command-line switches: `--graphics-only` (`volumetric-clouds` is Normal;
+  `volumetric-clouds-performance`, `volumetric-clouds-high`)
+- More: docs/design/graphics-enhanced.md §3.23, docs/design/volumetric-medium.md
+- Registered in `engine/nvforever/src/settings.rs`
+
 ### `light-shafts`: Sun shafts
 
 - On the page: On: sunlight streams past what stands in front of the sun, stronger the

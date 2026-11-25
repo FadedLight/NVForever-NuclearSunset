@@ -296,11 +296,9 @@ fn dds_texture(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: 
 fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, top_only: bool) -> Result<DecodedTexture, String> {
     let srgb = usage == TextureUsage::Color;
     let dds = Dds::parse(bytes).map_err(|e| e.to_string())?;
-    if dds.header.is_cubemap() {
-        return Err("cube map (not used by the viewer)".into());
-    }
-    let (w, h) = (dds.header.width, dds.header.height);
     let levels = if top_only { &dds.levels[0][..1] } else { &dds.levels[0][..] };
+    colour_shape_ok(&dds, levels.len() as u32)?;
+    let (w, h) = (dds.header.width, dds.header.height);
     // The GPU takes block formats only when the top level's sides are multiples of 4.
     let aligned = w % 4 == 0 && h % 4 == 0;
     // The colour space follows the role, never a DX10 header's `_SRGB` code (#2981,
@@ -434,6 +432,25 @@ fn dds_image_unguarded(bytes: &[u8], usage: TextureUsage, bc_supported: bool, to
 
 fn normal_byte(value: f32) -> u8 {
     ((value + 1.0) * 0.5 * 255.0).round() as u8
+}
+
+/// The shape a colour texture must have for this loader (and the cloud volume, which follows
+/// it: nvforever cloud_shadows.rs `volume_alpha_of`): a plain 2D texture, not a cube map; its
+/// sides within [`MAX_TEXTURE_SIDE`]; no more of its `mips` levels than its size allows (as
+/// [`checked_image`] checks them, before anything is decoded).
+pub fn colour_shape_ok(dds: &Dds, mips: u32) -> Result<(), String> {
+    if dds.header.is_cubemap() {
+        return Err("cube map (not used by the viewer)".into());
+    }
+    let (w, h) = (dds.header.width, dds.header.height);
+    if w == 0 || h == 0 || w > MAX_TEXTURE_SIDE || h > MAX_TEXTURE_SIDE {
+        return Err(format!("size {w}x{h} out of range (1 to {MAX_TEXTURE_SIDE})"));
+    }
+    let most = 32 - w.max(h).leading_zeros();
+    if mips == 0 || mips > most {
+        return Err(format!("{mips} mip levels for a {w}x{h} texture (at most {most})"));
+    }
+    Ok(())
 }
 
 /// The end of a texture path that asks for the file as a cube map ([`cube_path`]): the
@@ -1031,7 +1048,11 @@ pub struct AlphaMap {
 /// The top-level alpha of a DDS file. `None` for files that do not parse and for layouts
 /// without alpha.
 pub fn alpha_map(bytes: &[u8]) -> Option<AlphaMap> {
-    let dds = Dds::parse(bytes).ok()?;
+    alpha_map_of(&Dds::parse(bytes).ok()?)
+}
+
+/// [`alpha_map`] of a texture already parsed (one parse for the reader and its checks).
+pub fn alpha_map_of(dds: &Dds) -> Option<AlphaMap> {
     let top = *dds.levels.first()?.first()?;
     let (width, height) = (dds.header.width as usize, dds.header.height as usize);
     if width == 0 || height == 0 {

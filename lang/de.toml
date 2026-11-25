@@ -537,6 +537,9 @@ name = "Deutsch"
 # [design; engine/nvforever/src/heat_haze.rs] The Heat haze row (a prototype).
 "Heat haze (experimental)" = "Hitzeflimmern (experimentell)"
 "On: the far ground near the horizon shimmers slightly on hot, clear days, by the sun and the weather. A prototype. Not in the original." = "An: Der ferne Boden nahe dem Horizont flimmert an heißen, klaren Tagen leicht, je nach Sonne und Wetter. Ein Prototyp. Nicht im Original."
+# [design; engine/nvforever/src/volumetric_clouds.rs] The Volumetric clouds row (a prototype, #2991).
+"Volumetric clouds (experimental)" = "Volumetrische Wolken (experimentell)"
+"The weather's clouds drawn with depth, lit by the sun: Off, or Performance, Normal or High, each finer and dearer than the last. A prototype. Not in the original." = "Die Wolken des Wetters mit Tiefe gezeichnet, von der Sonne beleuchtet: Aus oder Leistung, Normal oder Hoch, jede Stufe feiner und teurer als die vorige. Ein Prototyp. Nicht im Original."
 # [design, #3146; engine/nvf-play/src/pause.rs] Why a settings row is greyed.
 "Greyed out: {why}" = "Ausgegraut: {why}"
 # [design, #3146; engine/nvf-play/src/lockpick.rs] Lockpicking: the refusals, the status line, the Force Lock button.

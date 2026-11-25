@@ -1,25 +1,30 @@
-//! The ray scene of a cell: its triangles and what a ray that light could take meets among them. It is the
-//! first part of a solver for a cell's bounce light (#3009, `docs/design/rtgi-solver.md`). Plain data in: no
-//! Bevy, no files, no GPU, no state between calls. The same input gives the same tree and the same hits on
-//! any number of threads.
+//! A cell's triangles, what a ray that light could take meets among them, and what the cell's lamps bounce off
+//! them to points in the air. These are the first parts of a solver for a cell's bounce light (#3009,
+//! `docs/design/rtgi-solver.md`). Plain data in and out: no Bevy, no files, no GPU, no state between calls. The
+//! same input gives the same result on any number of threads.
 //!
-//! [`prepare`] makes the scene once; `bvh`, `texture` and `trace` are its parts.
+//! [`prepare`] makes the ray scene once; `bvh`, `texture` and `trace` are its parts. [`reach()`] finds the points
+//! and their light, for one state of the light: `light` is the formula of the engine's light sum, `gather` the
+//! bounce light around a point, `grid` the points that can be reached.
 //!
 //! Space is Bevy's world in game units: y up, -z north. Colours are linear unless called display values.
 //!
-//! A floor, and what a ray from above it meets:
+//! A room with a lamp: what a ray meets on its floor, and the light in its air.
 //!
 //! ```
 //! use nvf_rtgi::*;
 //!
+//! // A box, 200 a side, open on no side; its surfaces are lit on either.
+//! let corner = |i: usize| [(i & 1) as f32 * 200.0 - 100.0, (i >> 1 & 1) as f32 * 200.0, (i >> 2 & 1) as f32 * 200.0 - 100.0];
+//! let sides = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
 //! let scene = SceneInput {
 //!     meshes: vec![Mesh {
-//!         positions: vec![[-100.0, 0.0, 100.0], [100.0, 0.0, 100.0], [100.0, 0.0, -100.0], [-100.0, 0.0, -100.0]],
-//!         indices: vec![0, 1, 2, 0, 2, 3],
+//!         positions: (0..8).map(corner).collect(),
+//!         indices: sides.iter().flat_map(|[a, b, c, d]| [*a, *b, *c, *a, *c, *d]).collect(),
 //!         ..Mesh::default()
 //!     }],
 //!     instances: vec![Instance { mesh: 0, material: 0, world_from_local: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]] }],
-//!     materials: vec![Material { base: [0.6, 0.5, 0.4, 1.0], ..Material::default() }],
+//!     materials: vec![Material { base: [0.6, 0.5, 0.4, 1.0], cull: Cull::None, double_sided: true, ..Material::default() }],
 //!     textures: Vec::new(),
 //! };
 //! let scene = prepare(scene, &SceneLimits::default(), 1, &|| false)?;
@@ -27,10 +32,20 @@
 //!
 //! let eye = V3::new(10.0, 64.0, 20.0);
 //! let hit = scene.transport(&Ray::new(eye, V3::new(0.0, -1.0, 0.0)), f32::INFINITY).unwrap();
-//! assert!(hit.front && !hit.hidden && hit.p.0[1].abs() < 1e-4);
+//! assert!(!hit.hidden && hit.p.0[1].abs() < 1e-4);
 //! assert!(hit.facing().0[1] > 0.999);
 //! assert!((hit.albedo(Lookup::Color)[0] - 0.6).abs() < 1e-5);
 //! assert!(scene.sees(hit.p, hit.facing(), eye));
+//!
+//! let light = LightState {
+//!     ambient: V3([0.3; 3]),
+//!     directionals: Vec::new(),
+//!     lamps: vec![Lamp { position: V3::new(30.0, 150.0, -20.0), display: V3([0.8; 3]), range: 300.0, cone: None }],
+//! };
+//! let reached = reach(&scene, &light, &[eye], &GatherConfig { rays: 64, ..GatherConfig::default() }, &|| false)?;
+//! assert!(reached.coverage.parts == 1 && reached.points.len() == 27);
+//! let [mean, ..] = reached.points[&[0, 1, 0]].moments.c;
+//! assert!(mean.0[0] > mean.0[2] && mean.0[2] > 0.0);
 //! # Ok::<(), Failed>(())
 //! ```
 
@@ -38,6 +53,11 @@
 
 mod bvh;
 mod failed;
+mod gather;
+mod grid;
+mod light;
+mod parallel;
+mod reach;
 mod scene;
 mod texture;
 mod trace;
@@ -45,6 +65,10 @@ mod vec3;
 
 pub use bvh::Ray;
 pub use failed::{Cancel, Failed, Reason};
+pub use gather::{Moments, Probe};
+pub use grid::{Coverage, Place};
+pub use light::{Cone, Directional, Lamp, LightState};
+pub use reach::{GatherConfig, GatherLimits, Reached, MOST_RAYS};
 pub use scene::{Cull, Instance, Level, Material, Mesh, SceneInput, Texture, Wrap};
 pub use texture::Lookup;
 pub use trace::{lift, Hit, PreparedScene, SceneLimits, SceneStats, MOST_THREADS};
@@ -54,6 +78,13 @@ pub use vec3::V3;
 /// is asked between pieces of the work, of a large tree on its threads too.
 pub fn prepare(scene: SceneInput, limits: &SceneLimits, threads: usize, cancel: Cancel) -> Result<PreparedScene, Failed> {
     failed::guarded(|| PreparedScene::of(scene, limits, threads, cancel))
+}
+
+/// The points of the air that `seeds`, places in the air, reach, and the bounce light around each. The seeds'
+/// order does not matter. `cancel` is asked before every point that is gathered, before every group of up to 64
+/// segments of one start, and now and then during the rest, on any thread.
+pub fn reach(scene: &PreparedScene, light: &LightState, seeds: &[V3], config: &GatherConfig, cancel: Cancel) -> Result<Reached, Failed> {
+    failed::guarded(|| Reached::of(scene, light, seeds, config, cancel))
 }
 
 #[cfg(test)]

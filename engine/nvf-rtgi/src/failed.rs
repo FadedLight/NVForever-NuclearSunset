@@ -36,6 +36,11 @@ pub fn go_on(cancel: Cancel) -> Result<(), Failed> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Reason {
+    NoSeeds,
+    /// No point of the grid is in the air and in sight of a seed.
+    NothingReached { seeds: usize },
+    /// More points would be gathered than the limit.
+    TooManyPoints { limit: usize },
     /// A number of the named input is not finite, or out of its range.
     Input(&'static str),
     /// More of the named than there may be.
@@ -45,6 +50,9 @@ pub enum Reason {
 impl fmt::Display for Reason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Reason::NoSeeds => write!(f, "no seeds"),
+            Reason::NothingReached { seeds } => write!(f, "no point of the grid is reached from {seeds} seeds"),
+            Reason::TooManyPoints { limit } => write!(f, "more than {limit} points"),
             Reason::Input(what) => write!(f, "a number of the {what} is out of its range"),
             Reason::TooMany { what, limit } => write!(f, "more than {limit} {what}"),
         }

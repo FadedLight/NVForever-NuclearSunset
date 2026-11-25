@@ -1753,10 +1753,7 @@ mod tests {
 
         // Simulate the render world completing the pre-UI RGBA capture on the next frame.
         let (w, h) = (32u32, 18u32);
-        let mut px = vec![0u8; (w * h * 4) as usize];
-        for chunk in px.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&[20, 180, 90, 255]);
-        }
+        let px = [20u8, 180, 90, 255].repeat((w * h) as usize);
         bridge.requested.store(0, Ordering::Release);
         bridge.tx.send(Shot { id: 1, w, h, bgra: false, px }).unwrap();
 
@@ -1817,20 +1814,14 @@ mod tests {
         world.resource_mut::<bevy::diagnostic::FrameCount>().0 = 60;
         take_shot(&mut world);
         assert_eq!(bridge.requested.load(Ordering::Acquire), 3);
-        let mut stale_px = vec![0u8; (w * h * 4) as usize];
-        for chunk in stale_px.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&[240, 10, 10, 255]);
-        }
+        let stale_px = [240u8, 10, 10, 255].repeat((w * h) as usize);
         bridge.tx.send(Shot { id: 2, w, h, bgra: false, px: stale_px }).unwrap();
         world.resource_mut::<bevy::diagnostic::FrameCount>().0 = 61;
         finish_writes(&mut world);
         // Save 3 is still waiting; the stale red shot (id 2) was rejected.
         assert_eq!(world.resource::<SaveWrites>().asked, Some((60, 3)));
         assert_eq!(world.resource::<SaveWrites>().waiting.len(), 1);
-        let mut fresh_px = vec![0u8; (w * h * 4) as usize];
-        for chunk in fresh_px.chunks_exact_mut(4) {
-            chunk.copy_from_slice(&[15, 45, 220, 255]);
-        }
+        let fresh_px = [15u8, 45, 220, 255].repeat((w * h) as usize);
         bridge.tx.send(Shot { id: 3, w, h, bgra: false, px: fresh_px }).unwrap();
         world.resource_mut::<bevy::diagnostic::FrameCount>().0 = 62;
         finish_writes(&mut world);

@@ -1568,7 +1568,7 @@ mod tests {
     #[test]
     fn what_the_load_restores_is_silent_and_a_real_change_beside_it_is_heard() {
         let (mut app, dropped_before, dropped_now) = objects_app();
-        let restored = |form_id| RefChanged { form_id, restored: true };
+        let restored = RefChanged::restored;
         // Picked up before the save, and picked up now, in the same frame.
         assert_eq!(hear(&mut app, &[restored(0x301), RefChanged::new(0x302)]), vec![UP]);
         // Dropped before the save, and dropped now.

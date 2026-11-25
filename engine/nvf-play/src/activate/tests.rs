@@ -248,7 +248,7 @@ fn a_restored_change_still_reaches_the_drawn_world() {
     app.update();
     assert_eq!(app.world().get::<Visibility>(stim), Some(&Visibility::Inherited));
     app.world_mut().resource_mut::<SimState>().world.activate(FormId::PLAYER_REF, FormId(STIM_REF)).unwrap();
-    app.world_mut().resource_mut::<Messages<RefChanged>>().write(RefChanged { form_id: STIM_REF, restored: true });
+    app.world_mut().resource_mut::<Messages<RefChanged>>().write(RefChanged::restored(STIM_REF));
     app.update();
     assert_eq!(app.world().get::<Visibility>(stim), Some(&Visibility::Hidden));
 }

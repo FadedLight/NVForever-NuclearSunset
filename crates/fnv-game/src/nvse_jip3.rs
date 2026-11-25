@@ -326,8 +326,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         }
         // `x0 y0 z0 x1 y1 z1 → pitch heading`: the angles, in degrees, of the way from the
         // first point to the second — pitch positive UP (`+Z`), heading counter-clockwise
-        // from north (`+Y`) in `(-180, 180]` (`E = -90`, `W = +90`, `S = +180`), the exact
-        // inverse of `GetPointRayCastPos` [documented: GetAnglesBetweenPoints; observed:
+        // from north (`+Y`) in `(-180, 180]` (`E = -90`, `W = +90`, `S = +180`), the right-handed Euler
+        // `Rz(heading) * Rx(pitch) * +Y` [documented: GetAnglesBetweenPoints; observed:
         // Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
         // `w6_t1_01_angles_between_points` (`tools/capture/nvse/catalogs/wave6_t1_jip_angles.json`,
         // `docs/spec-notes/jip-angles-ex.md`)].

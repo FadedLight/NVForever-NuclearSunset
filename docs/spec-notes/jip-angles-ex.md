@@ -15,8 +15,8 @@ consulted.
   - `resAngZ` (heading) is **counter-clockwise from north (`+Y`) in `(-180, 180]`**
     (`N = 0`, `E = -90`, `W = +90`, `S = +180`, `NE = -45`, `NW = +45`, `SE = -135`,
     `SW = +135`): `atan2(-dx, dy)` in degrees.
-  - This is the exact mathematical inverse of `GetPointRayCastPos`'s direction vector
-    `Rz(rotZ) * Rx(rotX) * +Y`.
+  - This decomposes the unit direction `Rz(resAngZ) * Rx(resAngX) * +Y` (pitch positive
+    up, heading counter-clockwise from `+Y`).
   - Coincident points `(50, 50, 50) -> (50, 50, 50)` overwrite both output variables with
     `(0.0, 0.0)` and return `0`.
   - Provenance: [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525 (`040020D0`) +
@@ -42,7 +42,7 @@ consulted.
     `(0, 0, 90) -> (0, 0, -90)`, `(30, 0, 90) -> (0, -30, -90)`, and
     `(25, 0, 315) -> (-18.25, 17.39, 42.19)`).
   - When called on an invalid/missing reference, output variables are preserved unchanged
-    and `0` is returned.
+    and `0` is returned [hypothesis: not probed in `w6_t1_02_angle_ex_and_heading`].
   - Provenance: [observed: 2026-11-24, same FNV 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30
     isolated clean-room staging run, `GSDocMitchellHouse` (`0x00103DF9`), `DocMitchellRef`
     (`0x00104C0F`), `GSDocMitchellHouseIntDoorREF` (`0x00103E61`), and `Player` rotated

@@ -4234,3 +4234,21 @@ capture setup, so every part of a check that needs an interior is still open.
      and note the lowest value at which it still reads 1. Then `SetDisposition` towards
      another actor at 100 with the player's at 0: does it read 1 (not towards the player
      only)?
+
+## Added 2026-11-25 (Trudy after the Powder Ganger ending, #3786)
+
+293. **After Ghost Town Gunfight ends on the Powder Gangers' side, does Trudy keep her
+     gunfight guard post, and what does GetQuestVariable read on a stopped quest?** (P2;
+     #3786, `crates/fnv-game/src/functions/quest.rs` `get_quest_variable`.) Ours
+     [observed: FalloutNV.esm]: `GSTrudyGunfightPackage` (0x00116810, Guard, weapon
+     drawn) runs while `GetQuestVariable VMS16 bTrudyHelp == 1` and
+     `GetQuestVariable VMS16 bGunFightStart == 1`; only stage 100 (Goodsprings wins) sets
+     `bGunFightStart` back to 0, stage 110 (the Powder Gangers' side) only calls
+     `StopQuest VMS16`. NVForever reads a stopped quest's variables as they were, so a
+     player who sided with the Powder Gangers finds Trudy standing guard outside with her
+     gun for good (report R-P5F7K9EB). In the original: (a) side with the Powder Gangers
+     with Trudy's help agreed, finish the fight, and wait a game day: where is Trudy and
+     is her weapon out (`prid` her, `GetCurrentAIPackage`)? (b) Then, in the console,
+     `GetQuestRunning VMS16`, `ShowQuestVars VMS16` (does bGunFightStart still read 1?),
+     and with Trudy selected `GetQuestVariable VMS16 bGunFightStart` if the console
+     takes it.

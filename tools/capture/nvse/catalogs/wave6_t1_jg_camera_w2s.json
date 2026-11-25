@@ -18,7 +18,8 @@
   ],
   "extender_versions": {
     "JohnnyGuitarNVSE": "528",
-    "lStewieAl Tweaks": "1005"
+    "lStewieAl Tweaks": "1005",
+    "JIP LN NVSE": "57.30 (5730)"
   },
   "batches": [
     {
@@ -26,7 +27,8 @@
       "title": "Wave 6 Tier 1 - JohnnyGuitar GetCameraTranslation & WorldToScreen",
       "extender": "xNVSE 6.4.9 + JohnnyGuitar 528",
       "required_plugins": [
-        "johnnyguitar.dll"
+        "johnnyguitar.dll",
+        "jip_nvse.dll"
       ],
       "default_wait_ticks": 1,
       "probes": [
@@ -35,7 +37,8 @@
           "bucket": "A",
           "extender": "JohnnyGuitarNVSE 528",
           "required_plugins": [
-            "johnnyguitar.dll"
+            "johnnyguitar.dll",
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,

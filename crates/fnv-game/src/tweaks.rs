@@ -711,6 +711,20 @@ pub struct Tweaks {
     /// `bArmorConditionLabel`: the body armour's condition row under the weapon's on the
     /// HUD (queried live by mods via `StewVal`/`StewieGetValue`).
     pub armor_condition: bool,
+    /// `bNoLockEncounterZoneLevels`: encounter zones do not freeze their level on first
+    /// visit; entering or querying a zone recomputes its level against the current player
+    /// level [documented: lStewieAl's Tweaks 10.05
+    /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
+    /// `[Tweaks]`: `; don't freeze the level of encounter zones when they are first
+    /// visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted].
+    pub no_lock_encounter_zone_levels: bool,
+    /// `bFasterSleepWait`: pass hours faster while waiting or sleeping [documented:
+    /// lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`)
+    /// `nvse_stewie_tweaks.ini` `[Tweaks]`: `; increase the hour countdown speed while
+    /// waiting or sleeping` / `bFasterSleepWait = 1`; no DLL or source consulted; design:
+    /// NVForever's `wait::FASTER_HOUR_SECONDS` pace while keeping `wait::HOUR_SECONDS`
+    /// unchanged when off].
+    pub faster_sleep_wait: bool,
 }
 
 /// The factor on a vendor's repair price under the Barter Affects Repair Costs tweak:
@@ -1116,6 +1130,8 @@ impl Default for Tweaks {
             prevent_switch_when_emptying_category: true,
             vendor_lists_both: false,
             armor_condition: false,
+            no_lock_encounter_zone_levels: false,
+            faster_sleep_wait: false,
         }
     }
 }

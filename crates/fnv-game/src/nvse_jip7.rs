@@ -1210,20 +1210,27 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             }
             zero
         }
-        // `ammo [form]`: left out, none [documented: SetAmmoProjectile, SetAmmoCasing].
-        // SetAmmoProjectile validates PROJ (following clones) when a form is given [hypothesis].
-        "setammoprojectile" | "setammocasing" => {
+        // `ammo [projectile]`: omitting the 2nd argument clears to 0; passing an explicit
+        // null ref (0) is a no-op leaving the current projectile unchanged [observed:
+        // w4g_11_ammo_clear_and_proj_delete, tools/capture/nvse/catalogs/wave4g_f2_extenders.json].
+        // A non-null 2nd argument must be a PROJ (following TempCloneForm clones) [hypothesis].
+        "setammoprojectile" => {
             if let Some(a) = ammo(g, form(args, 0)) {
-                let target = form(args, 1);
-                if name == "setammoprojectile" {
-                    if let Some(p) = target {
-                        if g.data.sig(g.unclone(p)) != Some(*b"PROJ") {
-                            return Some(Ok(zero));
-                        }
+                if args.len() < 2 {
+                    g.set_field(a, "DAT2", "projectile", XVal::Ref(0));
+                } else if let Some(p) = form(args, 1) {
+                    if g.data.sig(g.unclone(p)) == Some(*b"PROJ") {
+                        g.set_field(a, "DAT2", "projectile", XVal::Ref(p.0));
                     }
                 }
-                let path = if name == "setammoprojectile" { "projectile" } else { "consumed_ammo" };
-                g.set_field(a, "DAT2", path, XVal::Ref(target.map_or(0, |f| f.0)));
+            }
+            zero
+        }
+        // `ammo [form]`: left out, none [documented: SetAmmoCasing].
+        "setammocasing" => {
+            if let Some(a) = ammo(g, form(args, 0)) {
+                let target = form(args, 1);
+                g.set_field(a, "DAT2", "consumed_ammo", XVal::Ref(target.map_or(0, |f| f.0)));
             }
             zero
         }

@@ -830,7 +830,7 @@ pub const SECTIONS: &[Section] = &[
     group_section(
         "Menus",
         "Keys and Mouse",
-        &["tweak-key-repeat-accel", "tweak-key-repeat-delay", "tweak-key-repeat-mult", "tweak-key-repeat-delay-alt", "tweak-key-repeat-mult-alt", "tweak-horizontal-look"],
+        &["tweak-key-repeat-accel", "tweak-key-repeat-delay", "tweak-key-repeat-mult", "tweak-key-repeat-delay-alt", "tweak-key-repeat-mult-alt", "tweak-wasd-as-arrow-keys", "tweak-horizontal-look"],
     ),
     // Tweaks > Hotkeys.
     group_section("Hotkeys", "Hide HUD Key", &["tweak-hide-hud-ammo", "tweak-hide-hud-needs", "tweak-hide-hud-compass", "tweak-hide-hud-on-load", "tweak-hide-hud-sneak"]),

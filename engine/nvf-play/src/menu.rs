@@ -550,7 +550,13 @@ fn close_menu(
     }
 }
 
-fn menu_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, mut fresh: ResMut<FreshMenu>, mut out: MessageWriter<MenuInput>) {
+fn menu_keys(
+    keys: crate::pad::ActionButtons<KeyCode>,
+    active: Res<ActiveMenu>,
+    mut fresh: ResMut<FreshMenu>,
+    tweaks: Option<Res<crate::tweaks::TweakSettings>>,
+    mut out: MessageWriter<MenuInput>,
+) {
     let keys = keys.snapshot();
     use KeyCode::*;
     // The press that opened the menu is not one of its keys (see [`FreshMenu`]).
@@ -558,19 +564,20 @@ fn menu_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, 
         return;
     }
     let Some(m) = active.0.as_ref().filter(|m| m.mode != Mode::Inventory && m.quantity.is_none()) else { return };
+    let wasd = tweaks.as_ref().is_some_and(|t| t.game.wasd_as_arrow_keys);
     let shift = keys.any_pressed([ShiftLeft, ShiftRight]);
     let mut send = |c| {
         out.write(MenuInput(c));
     };
     // The original's letters for the buttons (barter: A accept, X exit; container: R
-    // take all, E exit).
+    // take all, E exit). Under bUseWASDAsArrowKeys, A/D switch columns in Barter too [design].
     let barter = matches!(m.mode, Mode::Barter(_));
     let close: &[KeyCode] = if barter { &[Escape, Tab, KeyX] } else { &[Escape, Tab, KeyE] };
     if keys.any_just_pressed(close.iter().copied()) {
         send(Command::Close);
         return;
     }
-    let (left, right) = if barter { (ArrowLeft, ArrowRight) } else { (KeyA, KeyD) };
+    let (left, right) = if barter && !wasd { (ArrowLeft, ArrowRight) } else { (KeyA, KeyD) };
     // The player's list is drawn at the left of the container and barter menus.
     let map = [
         ([ArrowUp, KeyW], Command::Up),
@@ -591,7 +598,7 @@ fn menu_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, 
         send(if shift { Command::Stack } else { Command::One });
     }
     match m.mode {
-        Mode::Barter(_) if keys.just_pressed(KeyA) => send(Command::Accept),
+        Mode::Barter(_) if !wasd && keys.just_pressed(KeyA) => send(Command::Accept),
         // The player's tweak: Shift with Take All stores everything instead [design: docs/design/tweaks.md].
         Mode::Container(_) if keys.just_pressed(KeyR) => send(if shift && m.store_all { Command::StoreAll } else { Command::TakeAll }),
         _ => {}
@@ -719,18 +726,28 @@ fn menu_mouse(
 }
 
 /// The "How many?" prompt's keys, while it is open (see the module's notes).
-fn quantity_keys(keys: crate::pad::ActionButtons<KeyCode>, active: Res<ActiveMenu>, mut held: ResMut<PromptKeys>, mut out: MessageWriter<MenuInput>) {
+fn quantity_keys(
+    keys: crate::pad::ActionButtons<KeyCode>,
+    active: Res<ActiveMenu>,
+    tweaks: Option<Res<crate::tweaks::TweakSettings>>,
+    mut held: ResMut<PromptKeys>,
+    mut out: MessageWriter<MenuInput>,
+) {
     let keys = keys.snapshot();
     use KeyCode::*;
     held.0 = active.0.as_ref().is_some_and(|m| m.quantity.is_some());
     if !held.0 {
         return;
     }
+    let wasd = tweaks.as_ref().is_some_and(|t| t.game.wasd_as_arrow_keys);
+    let ok: &[KeyCode] = if wasd { &[Enter, NumpadEnter, Space] } else { &[KeyA, Enter, NumpadEnter, Space] };
+    let left: &[KeyCode] = if wasd { &[ArrowLeft, KeyA] } else { &[ArrowLeft] };
+    let right: &[KeyCode] = if wasd { &[ArrowRight, KeyD] } else { &[ArrowRight] };
     let map = [
-        (&[KeyA, Enter, NumpadEnter, Space][..], Command::AmountOk),
+        (ok, Command::AmountOk),
         (&[KeyE, Escape][..], Command::AmountCancel),
-        (&[ArrowLeft][..], Command::AmountStep(-1)),
-        (&[ArrowRight][..], Command::AmountStep(1)),
+        (left, Command::AmountStep(-1)),
+        (right, Command::AmountStep(1)),
         (&[PageDown][..], Command::AmountStep(-model::QUANTITY_JUMP)),
         (&[PageUp][..], Command::AmountStep(model::QUANTITY_JUMP)),
         (&[Home][..], Command::Amount(1)),
@@ -1317,6 +1334,75 @@ mod wheel_hold_tests {
         assert!(app.world().resource::<WheelHold>().held(), "a jitter keeps the hold");
         step(&mut app, false, WHEEL_HOLD_TRAVEL);
         assert!(!app.world().resource::<WheelHold>().held());
+    }
+
+    #[test]
+    fn wasd_as_arrow_keys_switches_barter_columns_and_steps_quantity_only_when_enabled() {
+        let run_barter_key = |wasd: bool, key: KeyCode| -> Vec<Command> {
+            let mut app = App::new();
+            let m = MenuModel::test_empty(Mode::Barter(FormId(0x100)));
+            let mut tweaks = crate::tweaks::TweakSettings::default();
+            tweaks.game.wasd_as_arrow_keys = wasd;
+            let mut keys = ButtonInput::<KeyCode>::default();
+            keys.press(key);
+            app.insert_resource(keys)
+                .insert_resource(ActiveMenu(Some(m)))
+                .insert_resource(FreshMenu(false))
+                .insert_resource(tweaks)
+                .add_message::<MenuInput>()
+                .add_systems(Update, menu_keys);
+            app.update();
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<MenuInput>>()
+                .drain()
+                .map(|e| e.0)
+                .collect()
+        };
+
+        // Vanilla default (off): KeyA accepts in Barter; KeyD does not change column focus.
+        assert_eq!(run_barter_key(false, KeyCode::KeyA), vec![Command::Accept]);
+        assert!(run_barter_key(false, KeyCode::KeyD).is_empty());
+
+        // Enabled (bUseWASDAsArrowKeys): KeyA/KeyD switch Player/Container columns in Barter.
+        assert_eq!(run_barter_key(true, KeyCode::KeyA), vec![Command::Focus(Side::Player)]);
+        assert_eq!(run_barter_key(true, KeyCode::KeyD), vec![Command::Focus(Side::Container)]);
+
+        let run_qty_key = |wasd: bool, key: KeyCode| -> Vec<Command> {
+            let mut app = App::new();
+            let mut m = MenuModel::test_empty(Mode::Container(FormId(0x100)));
+            m.quantity = Some(model::Quantity {
+                cmd: Command::One,
+                side: Side::Player,
+                row: 0,
+                max: 5,
+                amount: 2,
+            });
+            let mut tweaks = crate::tweaks::TweakSettings::default();
+            tweaks.game.wasd_as_arrow_keys = wasd;
+            let mut keys = ButtonInput::<KeyCode>::default();
+            keys.press(key);
+            app.insert_resource(keys)
+                .insert_resource(ActiveMenu(Some(m)))
+                .insert_resource(PromptKeys(false))
+                .insert_resource(tweaks)
+                .add_message::<MenuInput>()
+                .add_systems(Update, quantity_keys);
+            app.update();
+            app.world_mut()
+                .resource_mut::<bevy::ecs::message::Messages<MenuInput>>()
+                .drain()
+                .map(|e| e.0)
+                .collect()
+        };
+
+        // Vanilla default (off): KeyA confirms Quantity; KeyD does nothing.
+        assert_eq!(run_qty_key(false, KeyCode::KeyA), vec![Command::AmountOk]);
+        assert!(run_qty_key(false, KeyCode::KeyD).is_empty());
+
+        // Enabled (bUseWASDAsArrowKeys): KeyA/KeyD step -1/+1 and Space confirms.
+        assert_eq!(run_qty_key(true, KeyCode::KeyA), vec![Command::AmountStep(-1)]);
+        assert_eq!(run_qty_key(true, KeyCode::KeyD), vec![Command::AmountStep(1)]);
+        assert_eq!(run_qty_key(true, KeyCode::Space), vec![Command::AmountOk]);
     }
 }
 

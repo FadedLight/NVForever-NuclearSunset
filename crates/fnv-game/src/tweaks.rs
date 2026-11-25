@@ -718,6 +718,14 @@ pub struct Tweaks {
     /// `[Tweaks]`: `; don't freeze the level of encounter zones when they are first
     /// visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted].
     pub no_lock_encounter_zone_levels: bool,
+    /// `bUseWASDAsArrowKeys`: use WASD as arrow keys and Space to accept across menus
+    /// where letter bindings otherwise take precedence (Barter columns, Quantity slider,
+    /// Sleep/Wait accept, Recipe filters/accept) [documented: lStewieAl's Tweaks 10.05
+    /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
+    /// `[Tweaks]`: `; allow use of WASD keys as arrows in menus, and space to accept` /
+    /// `bUseWASDAsArrowKeys = 1`; no DLL or source consulted; design: NVForever's own
+    /// per-menu key routing while keeping vanilla bindings unchanged when off].
+    pub wasd_as_arrow_keys: bool,
 }
 
 /// The factor on a vendor's repair price under the Barter Affects Repair Costs tweak:
@@ -1124,6 +1132,7 @@ impl Default for Tweaks {
             vendor_lists_both: false,
             armor_condition: false,
             no_lock_encounter_zone_levels: false,
+            wasd_as_arrow_keys: false,
         }
     }
 }

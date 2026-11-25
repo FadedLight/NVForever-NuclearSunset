@@ -1132,6 +1132,11 @@ impl MenuModel {
         self.refresh(world)
     }
 
+    #[cfg(test)]
+    pub(super) fn test_empty(mode: Mode) -> MenuModel {
+        Self::empty(mode, String::new())
+    }
+
     fn empty(mode: Mode, title: String) -> MenuModel {
         MenuModel {
             mode,

@@ -2307,6 +2307,8 @@ impl Plugin for TweaksPlugin {
         switch!(app, "power-armor-no-training", "Power Armor Without Training", "Power armor can be worn without Power Armor Training. (Stewie's Tweaks bPowerArmorNeedsNoTraining)", game.power_armor_needs_no_training);
         // ---- world ----
         switch!(app, "no-lock-encounter-zone-levels", "No Encounter Zone Level Lock", "Encounter zones recompute their level from the player's current level instead of freezing on first visit. (Stewie's Tweaks bNoLockEncounterZoneLevels)", game.no_lock_encounter_zone_levels);
+        // ---- menus ----
+        switch!(app, "wasd-as-arrow-keys", "WASD as Arrow Keys in Menus", "Use WASD as arrow keys and Space to accept across Barter, Quantity, Sleep/Wait, and Recipe menus. (Stewie's Tweaks bUseWASDAsArrowKeys)", game.wasd_as_arrow_keys);
     }
 }
 
@@ -3417,6 +3419,7 @@ mod tests {
         assert!(!t.breath_activate && !t.jump_ap_danger_only && !t.jump_without_enough_ap);
         assert!(!t.game.sync_categories && t.game.prevent_switch_when_emptying_category);
         assert!(!t.game.no_lock_encounter_zone_levels);
+        assert!(!t.game.wasd_as_arrow_keys);
         assert_eq!(t.sneak_run_ap_base, 0.0);
         assert_eq!(t.sneak_run_ap_endurance_mult, 0.0);
         assert_eq!(t.console_label(), "Console");
@@ -3539,6 +3542,7 @@ mod tests {
              bCritChanceIgnoresFireRate = 1\n\
              bMenuSearch = 1\n\
              bNoLockEncounterZoneLevels = 1\n\
+             bUseWASDAsArrowKeys = 1\n\
              iDateFormat = 2\n\
              [Critical Hits]\n\
              fCriticalDamageMult = 1.5\n",
@@ -3571,6 +3575,7 @@ mod tests {
             assert!(settings.game.crit_ignores_fire_rate);
             assert!(settings.game.menu_search);
             assert!(settings.game.no_lock_encounter_zone_levels);
+            assert!(settings.game.wasd_as_arrow_keys);
             assert_eq!(settings.date_style, 2);
             assert_eq!(settings.game.crit_damage_scale, 2.0);
         }
@@ -3583,11 +3588,15 @@ mod tests {
         assert!(final_settings.game.crit_ignores_fire_rate, "unmentioned modular key stays enabled");
         assert!(final_settings.game.menu_search, "unmentioned modular key stays enabled");
         assert!(final_settings.game.no_lock_encounter_zone_levels, "unmentioned modular key stays enabled");
+        assert!(final_settings.game.wasd_as_arrow_keys, "unmentioned modular key stays enabled");
         assert_eq!(final_settings.date_style, 2);
         // Toggling the registered switch in NVForever.ini overrides the modular INI back to off.
         let idx = app.world().resource::<crate::settings::Settings>().index("tweak-no-lock-encounter-zone-levels").unwrap();
         crate::settings::flip(app.world_mut(), idx);
         assert!(!app.world().resource::<TweakSettings>().game.no_lock_encounter_zone_levels, "UI switch toggles off");
+        let wasd_idx = app.world().resource::<crate::settings::Settings>().index("tweak-wasd-as-arrow-keys").unwrap();
+        crate::settings::flip(app.world_mut(), wasd_idx);
+        assert!(!app.world().resource::<TweakSettings>().game.wasd_as_arrow_keys, "UI switch toggles off");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -3806,7 +3806,10 @@ impl<'a> Game<'a> {
                 return Some(id);
             }
         }
-        let bytes = crate::mod_files::read_data_file(&key)?;
+        let Some(bytes) = crate::mod_files::read_data_file(&key) else {
+            tracing::warn!("compile script: {path}: not found as {key}");
+            return None;
+        };
         // UTF-8 when it is, else 8-bit text in this run's code page (#1439).
         let src = std::str::from_utf8(&bytes).map_or_else(|_| fnv_util::text::decode(&bytes), str::to_owned);
         let id = self.compile_source(&format!("CompileScript {path}"), src)?;
@@ -3858,7 +3861,9 @@ impl<'a> Game<'a> {
         };
         let c = fnv_script::compile::compile_mod_runtime(&src, &self.data.table, &GameEnv { g: self });
         if let Some(e) = c.errors().next() {
-            let what = format!("{what}: {}: {}", e.kind.replace('_', " "), e.detail);
+            let what = format!("{what}: line {}: {}: {}", e.line, e.kind.replace('_', " "), e.detail);
+            // In the log too: a mod's "problem compiling" box says nothing of why.
+            tracing::warn!("compile script: {what}");
             self.emit(EventKind::Skipped { unit: "CompileScript".into(), what });
             return None;
         }
@@ -8110,6 +8115,14 @@ impl Host for Exec<'_, '_> {
         }
         if self.game.temp_item(f).is_some() {
             return Some(*b"REFR");
+        }
+        // A script CompileScript made, or a lambda, is a script form while it lasts
+        // [documented: CompileScript returns "a reference to the compiled script";
+        // observed: Scaled Recurring Challenges' `ln_addHandler.txt` checks `IsFormValid`
+        // on it and showed "There was a problem compiling ScaledRecurringChallenges.gek"
+        // although it compiled, log nvforever-20261125-155050-8284.log].
+        if self.game.compiled_slots.contains_key(&form) || self.game.lambda_slots.contains_key(&form) {
+            return Some(*b"SCPT");
         }
         let f = self.game.unclone(f);
         // The player reference is no record of a plugin [documented: PlayerREF, 00000014].

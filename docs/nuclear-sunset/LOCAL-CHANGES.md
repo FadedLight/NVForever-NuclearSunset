@@ -399,3 +399,38 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
     owner's [observed: nvse.log in the stock game folder, "Engine Optimizations; version 100" and
     "HighResLocalMaps; version 12"], as yUI's 140 (change 3). Checked: the box is gone in
     `nvforever-20261125-152502-11852.log`.
+
+41. **Script Runner new-game and load files wait for the player's models**
+    (`engine/nvf-play/src/script.rs` `new_game_files`/`load_files`, `NEW_GAME_FILES_WAIT`;
+    `crates/fnv-game/src/nif_blocks.rs` `SceneMirror::watch`/`has_tree`). B42 Inertia's
+    `ln_B42Inertia.txt` asks `Player.GetNifScale "NeckController" 2` a frame after it runs;
+    the player's first-person tree had not been told yet (nor watched), the answer was 0 and
+    "B42 Inertia missing requirement! Install latest Compatibility Skeleton" showed [observed:
+    logs `nvforever-20261125-152502-11852.log` (new game) and `-155050-8284.log` (load); the
+    console asked the same in a loaded game and read 1, `-153358-7876.log`]. The player is
+    watched from the start, and the `ln_`/`gl_`/`gn_` files run once the first-person tree is
+    there (at most 300 frames). Checked: no B42 box after a new game (`-154352-15152.log`) or a
+    load (`-155959-14680.log`).
+
+42. **JohnnyGuitar.ini and nvse_config.ini through the merged Data**
+    (`crates/fnv-game/src/nvse_jg7.rs` `data_text`). GetJohnnyPatch read
+    `Data\NVSE\Plugins\JohnnyGuitar.ini` from the stock Data only; with `--mo2` it sits in a mod
+    folder (`bJIPFixes = 1`), so patch 8 read 0 and MCM Extender showed "Please enable the
+    following JohnnyGuitar patches: > JIP Fixes: 0 -> 1" [observed: `-154352-15152.log`].
+    Checked: `GetJohnnyPatch 8` = 1 at the console (`-155050-8284.log`), box gone.
+
+43. **A CompileScript result is a valid form** (`crates/fnv-game/src/game.rs` host
+    `form_sig`: compiled scripts and lambdas answer SCPT). Scaled Recurring Challenges checks
+    `IsFormValid` on CompileScript's result and showed "There was a problem compiling
+    ScaledRecurringChallenges.gek" although it compiled (the console's CompileScript gave a
+    form, `-155050-8284.log`). Also logged now: why a CompileScript file did not compile or
+    was not found (`compile script: ...`). Checked: box gone (`-155959-14680.log`).
+
+44. **The MO2 profile's FalloutCustom.ini is read** (`crates/fnv-install/src/mo2.rs`
+    `PROFILE_INIS`, after Fallout.ini and FalloutPrefs.ini). TTW's start check
+    `GetNumericIniSetting "bBackgroundLoadLipFiles:BackgroundLoad" == 0` showed
+    TTWBadINIMessage: the profile's Fallout.ini has 0, its FalloutCustom.ini 1 [observed: TTW's
+    script source in TaleOfTwoWastelands.esm; the profile's files]. Checked: fnv-install tests
+    pass; box gone after a load (`-160651-12920.log`). Left: NS's welcome pages, the 139-plugin
+    warning and Functional Post Game Ending's "overwritten by" notice, which the original shows
+    with this load order too [hypothesis for the last: a load-order conflict, owner's call].

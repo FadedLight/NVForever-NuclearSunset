@@ -7565,12 +7565,13 @@ run_seconds = 34
 expect = [
   "CheyenneREF listens to SunnyRef",
   { re = 'speech look: line [0-9A-F]+ over: SunnyRef has .* (?P<n>[+-]\d+)° off its front', range = [-5, 5], all = true, label = "each line over: SunnyRef has … off its front within a few degrees of 0" },
-  { re = 'speech look summary: 2 lines' },
+  { re = 'speech look summary: 3 lines' },
   # Line 1 is said to Cheyenne (she listens), line 2 to the player, line 3 to Cheyenne
-  # with noTargetLookFlag 1, which turns nobody (#2796): one "listens" line in all, and
-  # Sunny turns for two lines only.
+  # with noTargetLookFlag 1, where the target is not made to look and the speaker still
+  # turns (observer check 218, #3989): one "listens" line in all, and Sunny turns for all
+  # three lines.
   { re = 'listens to', count = 1, label = "no listens line for the last one (one listens line in all)" },
-  { re = 'speech look: SunnyRef says a line to', count = 2, label = "Sunny turns for lines 1 and 2, not for the flagged line 3 (#2796)" },
+  { re = 'speech look: SunnyRef says a line to', count = 3, label = "Sunny turns for all three lines, the flagged line 3 too (observer check 218, #3989)" },
   # All three lines start: the aid logs its call without an error only when the line is
   # being said (nvf-play script.rs ScriptAid::SayTo), and each start logs "script: … says".
   { re = 'test aid: script SayTo\("0x00104E85", "0x0010588E", "GREETING", false\)(?!:)', count = 1, label = "line 1 (to Cheyenne) starts" },

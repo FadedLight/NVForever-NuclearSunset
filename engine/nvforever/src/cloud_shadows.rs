@@ -120,7 +120,8 @@
 //!   module's strength and low-sun band) where it has data and from this module's layers elsewhere
 //!   ([`crate::sun_visibility::CloudSource`]). Nothing here changes for it: the layers' image, the
 //!   absolute cover and the plane are made as before; this module hands over only the strength and
-//!   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` ([`parse_source`]).
+//!   the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` ([`parse_source`];
+//!   dev_aids.rs: not in release builds).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -243,7 +244,7 @@ fn source_due(shadows: Res<CloudShadows>, graphics: Option<Res<crate::graphics::
 /// (neither changes in a run).
 fn hand_over_source(sink: Option<ResMut<crate::sun_visibility::SunVisibility>>) {
     let Some(mut sink) = sink else { return };
-    let value = std::env::var("NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE").ok();
+    let value = crate::dev_aids::var("NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE");
     let source = parse_source(value.as_deref());
     if value.is_some() {
         info!("cloud shadows: source asked for: {} (NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE)", source.name());

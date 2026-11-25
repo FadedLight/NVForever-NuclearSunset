@@ -4071,7 +4071,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     shadows move with the wind every frame and need no reprojection; a swap of fronts (every 8 frames
     near, 32 to 40 far) changes them only by the sun's progress, a weather fade's and the bend's tilt
     since the snapshot, and moves the guard bands by whole cells (the window is re-snapped per bake).
-  - Aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` (volumetric-medium.md,
+  - Developer aid (not in release builds, below) `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=weather|volume|auto|share|depth` (volumetric-medium.md,
     "Debug aids"); log line `cloud shadows: source ...` when the source in use changes while the
     Volumetric clouds row is on, and when it goes off. Smoke: `volumetric-clouds-shadows`. Tests:
     `volumetric_clouds_lightvol.rs` `reader_tests` (the bookkeeping, the windows against the trace's,

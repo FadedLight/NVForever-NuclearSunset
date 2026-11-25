@@ -45,7 +45,7 @@ Axes are Bevy's world axes (y up), units game units. In the shader
   the volumetric clouds' light volume's near and far front sets, and the uniform's `volume` and
   `light_volume` blocks (both in the shader's struct with bindings 45-46 alone): with the volumetric clouds on, K comes from the light volume where it has
   data (graphics-enhanced.md §3.23, "Ground shadows from the light volume"; mask bit 4, bit 8 for
-  the aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=volume`); with bit 4 clear K is the layers' as
+  the developer aid `NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE=volume`, not in release builds); with bit 4 clear K is the layers' as
   before, word for word. Bindings 45 and 46 are in the layout only with the cloud variant, while the
   Volumetric clouds row is on (`volume_layout`), on an
   adapter with room for them (`CloudVolumeRoom`, measured once, when they are first wanted, and logged in one

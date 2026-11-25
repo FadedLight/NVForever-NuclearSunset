@@ -2781,14 +2781,14 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-clouds-no-aids"
-source = "[design, #3032] engine/nvforever/src/dev_aids.rs: the volumetric clouds' developer aids (debug variables and the tune file) are not in a release build. At Goodsprings at noon under NVBlackMountainWeather with the row on and aids of every reader set (the cloud source's start values and its tune file, the light volume's, the medium's, the turn, the fair sky's sun), a release exe starts and draws as without them: the values of its own start, one ray in nine, the light volume's own spacings, no line of an aid"
+source = "[design, #3032] engine/nvforever/src/dev_aids.rs: the volumetric clouds' developer aids (debug variables and the tune file) are not in a release build. At Goodsprings at noon under NVBlackMountainWeather with the row on and aids of every reader set (the cloud source's start values and its tune file, the light volume's, the medium's, the turn, the fair sky's sun, the cloud shadows' source), a release exe starts and draws as without them: the values of its own start, one ray in nine, the light volume's own spacings, no line of an aid"
 areas = ["renderer", "graphics", "weather"]
-paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS = "56", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW = "count", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT = "40000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_LIGHT_VOLUME_CELLS = "1000,8000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_MEDIUM_TURN = "60", NVF_PLAY_DEBUG_MEDIUM_TILE = "1", NVF_PLAY_DEBUG_MEDIUM_SCALE = "1", NVF_PLAY_DEBUG_MEDIUM_FRESH = "0.5", NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER = "linear", NVF_PLAY_DEBUG_FAIR_SUN = "size=40" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--graphics-only", "volumetric-clouds"]
+paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/medium*", "engine/nvforever/src/cloud_shadows.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS = "56", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW = "count", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_OCTAVE = "2", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT = "40000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_LIGHT_VOLUME_CELLS = "1000,8000", NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_MEDIUM_TURN = "60", NVF_PLAY_DEBUG_MEDIUM_TILE = "1", NVF_PLAY_DEBUG_MEDIUM_SCALE = "1", NVF_PLAY_DEBUG_MEDIUM_FRESH = "0.5", NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER = "linear", NVF_PLAY_DEBUG_FAIR_SUN = "size=40", NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE = "weather" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
 note = "for a release exe: skipped with NVF_SMOKE_DEV_AIDS set (an exe built with --features dev-aids obeys the aids)."
 requires = ["!NVF_SMOKE_DEV_AIDS"]
-run_seconds = 20
+run_seconds = 40
 expect = [
   { re = 'volumetric clouds: on, slab -?\d+\.\.-?\d+ \(the cloud shadows. plane\), quality 28 ', label = "the volume is drawn at its own quality" },
   { text = "volumetric clouds: level Normal (far buffer scale 3, probe spacing x2)", count = 1, label = "the level's own scale" },
@@ -2798,12 +2798,14 @@ expect = [
   { re = 'volumetric clouds: light: two octaves \(.*, every colour bounded to 30000; weights: BACKSCATTER x1\.65, SUN x1\.30, LEVEL x1\.12, SUNCOLOUR 0\.00$', count = 1, label = "and the light's" },
   { re = 'volumetric clouds: light volume on \(near and far; near 128x128x25 at 500 across, far 128x128x25 at 4000 across, ', label = "the light volume's own spacings" },
   { text = "volumetric medium: history filter Adaptive", label = "the medium's own history filter" },
+  { re = 'cloud shadows: source the light volume \(', label = "the shadows read the light volume, not the source asked for" },
 ]
 forbid = [
   { text = "debug switch NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", label = "an aid of the cloud source, the light volume or the tune file was read" },
   { text = "debug switch NVF_PLAY_DEBUG_MEDIUM", label = "an aid of the medium was read" },
   { text = "tune file", label = "the tune file was looked for" },
   { text = "sky: fair sun aid", label = "the fair sky's sun aid was read" },
+  { text = "cloud shadows: source asked for", label = "the cloud shadows' source aid was read" },
 ]
 
 [[scenario]]

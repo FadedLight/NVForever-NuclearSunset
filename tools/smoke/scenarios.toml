@@ -12074,18 +12074,20 @@ name = "load-handoff-refused"
 source = "owner 2026-11-01 (#1357): a save that cannot be loaded opens the main menu with a message box saying why (the old run of a load no longer stays to fall back on) (engine/nvforever/src/handoff.rs, engine/nvforever/src/main.rs)"
 areas = ["save"]
 paths = ["engine/nvforever/src/handoff.rs", "engine/nvf-play/src/save.rs", "engine/nvf-play/src/main_menu.rs"]
-env = { NVFOREVER_HOME = "handoff-refused-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = '20:load C:\Windows\win.ini', NVF_PLAY_TEST_HANDOFF_EXIT = "1" }
+# The console's `load` only hands over for a file that is there (`p.exists()`), so it gets one
+# the run itself writes in its home: not a save, and the same path on Windows and Linux (#3488).
+env = { NVFOREVER_HOME = "handoff-refused-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = '20:load handoff-refused-home/settings-menu.json', NVF_PLAY_TEST_HANDOFF_EXIT = "1" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 messages = true  # its checks read message boxes: no --no-messages added (smoke/scenarios.py)
 run_seconds = 90
 ends = "test aid NVF_PLAY_TEST_HANDOFF_EXIT: the new run took over and its main menu is in"
 expect = [
-  { re = 'load: handing over to a new run with --load .*win\.ini', count = 1, label = "a new run starts for the load" },
-  { re = 'load: --load .*win\.ini.*; opening the main menu', count = 1, label = "the new run cannot load the file and opens the main menu" },
+  { re = 'load: handing over to a new run with --load .*settings-menu\.json', count = 1, label = "a new run starts for the load" },
+  { re = 'load: --load .*settings-menu\.json.*; opening the main menu', count = 1, label = "the new run cannot load the file and opens the main menu" },
   { re = 'handoff: window shown after [\d.]+ s$', label = "the new window is shown (not past the time limit)" },
   { re = 'load: the new run is up after [\d.]+ s; ending this one', label = "the old run ends" },
   { text = "the new run took over and its main menu is in; ending it", label = "the main menu is open" },
-  { re = 'load: message box not shown \(unattended run\): the save could not be loaded: --load .*win\.ini', count = 1, label = "the player is told why (the box itself is skipped in unattended runs)" },
+  { re = 'load: message box not shown \(unattended run\): the save could not be loaded: --load .*settings-menu\.json', count = 1, label = "the player is told why (the box itself is skipped in unattended runs)" },
 ]
 order = [[
   { re = 'handoff: window shown after [\d.]+ s$', label = "the new window shows" },
@@ -12097,8 +12099,10 @@ name = "load-bad-save-by-hand"
 source = "owner 2026-11-01 (#1357): a save given with --load that cannot be loaded opens the main menu with a message box saying why, instead of the game ending with an error (engine/nvforever/src/main.rs start_from_save)"
 areas = ["save"]
 paths = ["engine/nvforever/src/main.rs", "engine/nvforever/src/handoff.rs", "engine/nvf-play/src/main_menu.rs"]
+# The save is given as a path on both systems ("/" is a separator on Windows too), so the
+# save reader refuses it, not the bare-name check (which reads a backslash as a letter) (#3488).
 env = { NVFOREVER_HOME = "bad-save-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
-args = ["--play", "--load", 'C:\Windows\win.ini']
+args = ["--play", "--load", 'C:/Windows/win.ini']
 messages = true  # its checks read message boxes: no --no-messages added (smoke/scenarios.py)
 run_seconds = 12
 expect = [
@@ -27373,7 +27377,7 @@ name = "jip-raycast-points"
 source = "JIP's GetPointRayCastPos through the engine's physics (fnv_game::ray::cast_hit, the terrain included) and GetAnglesBetweenPoints, both writing script variables (the VM's out_call)"
 areas = ["scripts", "physics"]
 paths = ["crates/fnv-game/src/nvse_jip3.rs", "crates/fnv-game/src/ray.rs", "crates/fnv-script/src/vm.rs", "engine/nvf-play/src/script.rs"]
-env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "9:RunScriptSnippet 0 \"float fA%rfloat fX%rfloat fY%rfloat fZ%rlet fA := GetPointRayCastPos (player.GetPos X) (player.GetPos Y) ((player.GetPos Z) + 100) 90 0 fX fY fZ%rPrintC %qnvf ray down %%g %%.0f%q, fA, (((player.GetPos Z) + 100) - fZ)\";9.5:RunScriptSnippet 0 \"float fA%rfloat fB%rGetAnglesBetweenPoints 0 0 0 100 0 0 fA fB%rPrintC %qnvf between %%g %%g%q, fA, fB\";10:close" }
+env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "9:RunScriptSnippet 0 \"float fA%rfloat fX%rfloat fY%rfloat fZ%rlet fA := GetPointRayCastPos (player.GetPos X) (player.GetPos Y) ((player.GetPos Z) + 100) -90 0 fX fY fZ%rPrintC %qnvf ray down %%g %%.0f%q, fA, (((player.GetPos Z) + 100) - fZ)\";9.5:RunScriptSnippet 0 \"float fA%rfloat fB%rGetAnglesBetweenPoints 0 0 0 100 0 0 fA fB%rPrintC %qnvf between %%g %%g%q, fA, fB\";10:close" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 12
 expect = [

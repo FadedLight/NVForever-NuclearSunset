@@ -3655,6 +3655,35 @@ fn refresh_items_list_sets_one_shot_transient_request() {
 }
 
 #[test]
+fn set_delay_elapsed_returns_zero_and_updates_remaining_delay() {
+    // [observed 2026-11-24: w6t2_31_xnvse_items_ammo_rounds_and_ingrid -> del=0.00]
+    use fnv_script::vm::XVal;
+    let q_data = [vec![1u8, 0, 0, 0], 5.0f32.to_le_bytes().to_vec()].concat();
+    let quest = record(b"QUST", 0, 0x0000_0820, &[sub(b"EDID", z("TestDelayQuest")), sub(b"DATA", q_data)]);
+    let bytes = [tes4(), top(b"QUST", &quest)].concat();
+    let plugins = vec![Plugin::parse(&bytes, "DelayQuest.esm".into()).unwrap()];
+    let lo = LoadOrder::new(&plugins).unwrap();
+    let schema = schema();
+    let (table, j) = catalogue();
+    let forms = FormStore::build(&lo, &schema);
+    let refs = RefTable::build(&lo, &schema);
+    let data = GameData::build(&lo, &schema, table, &j, &refs);
+    let f = Fixture { data, forms, refs };
+    let mut g = game(&f);
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(&format!("Begin Function {{ }}\n{body}\nEnd\n"), Default::default()).unwrap()
+    };
+
+    // SetDelayElapsed returns 0.0 (not secs) and adjusts remaining delay.
+    assert_eq!(q(&mut g, "SetFunctionValue (SetDelayElapsed TestDelayQuest 2.5)"), XVal::Num(0.0), "SetDelayElapsed returns 0.0");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDelayElapsed TestDelayQuest)"), XVal::Num(2.5), "remaining delay updated to 2.5s");
+    assert_eq!(q(&mut g, "SetFunctionValue (SetDelayElapsed TestDelayQuest 0)"), XVal::Num(0.0), "SetDelayElapsed 0 returns 0.0");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDelayElapsed TestDelayQuest)"), XVal::Num(0.0), "remaining delay updated to 0.0s");
+    // Missing/null form returns 0.0 safely.
+    assert_eq!(q(&mut g, "SetFunctionValue (SetDelayElapsed 0 2.5)"), XVal::Num(0.0), "null quest returns 0.0");
+}
+
+#[test]
 fn queries_run_function_scripts_and_keep_what_they_change() {
     // The runner's `query` action (Game::run_query): JIP's auxiliary variables set by one
     // query are read by the next, and the saved ones are in the snapshot.

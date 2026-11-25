@@ -212,8 +212,10 @@ fn destination_name(sim: &SimState, index: &fnv_world::WorldIndex, door: FormId,
 }
 
 /// Resolve the body part location (`BodyLocation` enum, 0..=14) for an actor hit under
-/// the crosshair (`GetReticleTargetLimb`). Returns `None` (`-1` to scripts) for non-actors,
-/// gore, or actors without posed body parts [design: whole-capsule actors report -1].
+/// the crosshair (`GetReticleTargetLimb`). Returns `Some(0)` (Torso, default body
+/// location [design]) for single-capsule fallback actors (`fnv_phys::actors::WHOLE`) so
+/// scripts distinguish hitting an actor from a miss, and returns `None` (`-1` to scripts)
+/// for non-actors, misses, and detached gore pieces (`fnv_phys::gore::GORE_PART`).
 pub(crate) fn reticle_target_limb(
     owner: Owner,
     parts: Option<&crate::hitvol::ActorParts>,
@@ -225,7 +227,10 @@ pub(crate) fn reticle_target_limb(
     if part == crate::hitvol::WEAPON_PART {
         return Some(14);
     }
-    if part == fnv_phys::actors::WHOLE || part == fnv_phys::gore::GORE_PART {
+    if part == fnv_phys::actors::WHOLE {
+        return Some(0);
+    }
+    if part == fnv_phys::gore::GORE_PART {
         return None;
     }
     let data = parts?.data_of(form_id)?;
@@ -807,8 +812,12 @@ pub(crate) fn activate(
         }
     }
     // An actor shown by name only (hostile, or a creature with nothing to say): E does
-    // nothing (playtest list 4, item 19).
+    // nothing (playtest list 4, item 19) but open the perks' choices, if they offer any on
+    // it now (Robotics Expert's, #3479).
     if matches!(t.action, Action::Name | Action::Hostile) {
+        if crate::script::choices_by_hand(script.as_deref_mut(), &mut sim, t.form_id) {
+            return;
+        }
         info!("activate 0x{:08X} {}: nothing to do ({})", t.form_id, t.name, if t.action == Action::Hostile { "hostile" } else { "name only" });
         return;
     }

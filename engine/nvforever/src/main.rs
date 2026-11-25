@@ -24,12 +24,14 @@ macro_rules! eprintln {
 }
 
 mod activators;
+mod gpu_occlusion;
 mod fos_start;
 mod reports;
 mod native_crash;
 mod exit_watch;
 #[cfg(target_os = "linux")]
 mod native_crash_unix;
+mod camera_overlay;
 mod nif_mirror;
 mod nif_attachments;
 mod extra_camera;
@@ -78,9 +80,12 @@ mod fade;
 mod face_morphs;
 mod facegen;
 mod flashlight;
+mod flashlight_ini;
 mod eye_adapt;
 mod fog;
 mod haze;
+mod hdr;
+mod hdr_calibrate;
 mod aerial;
 mod fly;
 mod foot_ik;
@@ -1916,7 +1921,7 @@ fn main() -> AppExit {
                 ..default()
             }),
     )
-    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin))
+    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, hdr::HdrPlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)
@@ -1941,13 +1946,22 @@ fn main() -> AppExit {
     // Defaults snapshots this command-line/default choice before apply_stored reads the INI.
     .add_plugins(frame_gen::FrameGenPlugin(args.frame_generation.unwrap_or_default()))
     .add_plugins(blit_warm::BlitWarmPlugin)
+    // Bevy's GPU occlusion culling: the Graphics row Occlusion culling, read at the start
+    // (the test aid NVF_OCCLUSION_CULLING overrides it).
+    .add_plugins(gpu_occlusion::GpuOcclusionPlugin { read_ini: play.is_some() })
     // The driver's pipeline cache kept on disk (pipeline_disk_cache.rs).
     .add_plugins(pipeline_disk_cache::PipelineDiskCachePlugin)
     // Lights clustered on the CPU, Bevy's own fallback: its GPU clustering made about six
     // new GPU buffers a frame (10,235 in 30 s at night against 4,060 on the CPU), GPU
     // memory made and freed every frame behind the night stalls (#897; wgpu trace,
     // 2026-10-29).
+    // NVF_GPU_CLUSTERING=1: Bevy's GPU clustering, with its per-view buffers kept from frame
+    // to frame (bevy#25869 and bevy#26588 backported, engine/vendor/README.md).
     .add_systems(Startup, |mut clusters: ResMut<bevy::light::cluster::GlobalClusterSettings>| {
+        if std::env::var("NVF_GPU_CLUSTERING").is_ok_and(|v| v == "1") && clusters.gpu_clustering.is_some() {
+            info!("lights: clustered on the GPU (NVF_GPU_CLUSTERING=1)");
+            return;
+        }
         clusters.gpu_clustering = None;
         info!("lights: clustered on the CPU (GPU clustering made new buffers every frame)");
     })
@@ -2662,9 +2676,9 @@ fn setup(mut commands: Commands, start: Res<StartPose>) {
         // Water reads the depth of what lies behind it (water.rs).
         bevy::core_pipeline::prepass::DepthPrepass,
         // The world, the water (which the reflection camera leaves out), the player's
-        // first-person arms and seen body, and the impact decals (which need this
-        // camera's prepass).
-        bevy::camera::visibility::RenderLayers::from_layers(&[0, reflection::WATER_LAYER, sky::ARMS_LAYER, sky::BODY_LAYER, decals::DECAL_LAYER]),
+        // first-person arms and seen body, the impact decals (which need this
+        // camera's prepass), and JohnnyGuitar PreIS 3D camera overlays.
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, reflection::WATER_LAYER, sky::ARMS_LAYER, sky::BODY_LAYER, decals::DECAL_LAYER, camera_overlay::OVERLAY_PRE_IS_LAYER]),
     )).id();
     if start.play {
         commands.entity(cam).insert(nvf_play::PlayerCamera);

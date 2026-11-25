@@ -142,6 +142,7 @@ mod lights;
 mod limbs;
 mod lips;
 mod memory_budget;
+mod wine;
 mod gpu_poll;
 mod pilot;
 mod pipeline_gate;
@@ -1925,6 +1926,10 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     let startup = upscaler::UpscalerStartup::new(start_upscaler, std::env::var_os(upscaler::PRELOAD_ENV).as_deref(), upscaler::platform_supports_dlss(), dlss::bundle_present);
     app.insert_resource(startup);
     app.add_systems(Startup, move || info!("upscaler: {}", startup.describe()));
+    // A Windows build under Wine or Proton says so (#3493).
+    if let Some(v) = wine::version() {
+        app.add_systems(Startup, move || info!("{}", wine::describe(&v)));
+    }
     // The Frame generation choice this run starts with, by the row's rule (command line, then the
     // INI): DLSS Frame Generation stays loaded from the start only for a DLSS choice (dlss/).
     let start_frame_generation = {

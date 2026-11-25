@@ -173,14 +173,15 @@ class TestCatalogValidation(unittest.TestCase):
                 "wave4g_f2_extenders.json",
                 "wave4h_reconcile.json",
                 "wave6_point_raycast.json",
+                "wave6d1_showoff_xnvse_events_observed.json",
             ],
         )
         self.assertFalse((nvse_harness.DEFAULT_CATALOG_DIR / "persistence_matrix.json").exists())
         errors, counts = nvse_harness.validate_catalogs(paths)
         self.assertEqual(errors, [], f"Catalog validation errors: {errors[:5]}")
-        self.assertEqual(counts["catalogs"], 9)
-        self.assertEqual(counts["probe_batches"], 27)
-        self.assertEqual(counts["probes"], 541)
+        self.assertEqual(counts["catalogs"], 10)
+        self.assertEqual(counts["probe_batches"], 28)
+        self.assertEqual(counts["probes"], 558)
         self.assertEqual(counts["persistence_items"], 0)
 
         # Verify Wave 1 parity probe IDs and corrected Wave 4A/4D/4E/4G/4H targeted probes are present verbatim.
@@ -217,6 +218,23 @@ class TestCatalogValidation(unittest.TestCase):
             "w6_01_point_raycast_angles",
             "w6_02_point_raycast_miss_and_range",
             "w6_03_point_raycast_collision_flags",
+            "w6d1_05_dispatch_event_alt_arity_and_filters",
+            "w6d1_06_get_current_event_name_contexts",
+            "w6d1_09_on_drop_and_xnvse_on_add",
+            "w6d1p2_12_pre_scripted_multi_handler_veto_prio",
+            "w6d1p3_14_cap_destroyed_mutation",
+            "w6d1_16_showoff_on_pre_activate_vs_scripted",
+            "w6d1p3_30_unequip_items_trigger",
+            "w6d1_31_showoff_equipped_weight_minweight",
+            "w6d1_32_showoff_ally_enemy_temp_precedence",
+            "w6d1p2_33_matrix_and_quat_edges",
+            "w6d1_34_showoff_toggle_quest_msg_and_reset_int",
+            "w6d1p3_34_ext_cell_and_quat_neg",
+            "w6d1_36_showoff_calc_ap_cost_and_item_value",
+            "w6d1_37_showoff_vats_fast_travel_and_switches",
+            "w6d1_38_showoff_recoil_stagger_invis_combat_actors",
+            "w6d1_39_showoff_levelup_early_exit_and_spell_usage",
+            "w6d1_40_showoff_spread_anim_1_7_11_and_misc_states",
         ):
             self.assertIn(req_id, probes_by_id)
 

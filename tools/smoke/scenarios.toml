@@ -32035,14 +32035,14 @@ env = { NVF_PLAY_TEST_TILE_MENUS = "", NVFOREVER_HOME = "pipboy-items-hints-home
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--size", "1280x720"]
 run_seconds = 26
 expect = [
-  { re = 'pipboy hints: items Weapons: (Repair|Maintain) R\)( \(dim\))?, Mod X\)$', label = "Weapons: Repair, then Mod, nothing else" },
+  { re = 'pipboy hints: items Weapons: (Repair|Maintain) R\)( \(dim\))?, Modify X\)$', label = "Weapons: Repair, then Mod, nothing else" },
   { re = 'pipboy hints: items Apparel: (Repair|Maintain) R\)( \(dim\))?$', label = "Apparel: the repair hint alone" },
   { re = 'pipboy hints: items Aid: Repair R\) \(dim\)$', label = "Aid: Repair alone, dim" },
   { re = 'pipboy hints: items Misc: Repair R\) \(dim\)$', label = "Misc: Repair alone, dim" },
   { re = 'pipboy hints: items Ammo: Repair R\) \(dim\)$', label = "Ammo: Repair alone, dim" },
   { re = 'pipboy hints: items \w+: .*(Enter\)|Right Mouse\)|1-8\))', max = 0, label = "no equip, drop or hotkey hint with the keyboard" },
   { text = "pipboy hints: mod menu: Modify Enter) (dim), Exit E)", label = "the mod menu on the weapon's row: Mod dim, and Exit under it" },
-  { re = 'pipboy hints: mod menu: Mod Enter\)(?! \(dim), Exit E\)', label = "the mod menu on a mod: Mod bright" },
+  { re = 'pipboy hints: mod menu: Modify Enter\)(?! \(dim), Exit E\)', label = "the mod menu on a mod: Mod bright" },
   { re = 'pipboy items: 10mm Pistol Modify X\)(?! \(dim)', label = "the pistol's own Modify X) line, bright" },
 ]
 order = [["pipboy hints: items Weapons", "pipboy hints: items Aid", "pipboy hints: items Ammo", "pipboy hints: mod menu: Modify Enter) (dim), Exit E)"]]
@@ -32059,16 +32059,16 @@ run_seconds = 26
 expect = [
   { text = "controls: input device Controller", label = "the pause menu's settings aid sets the Input Device to Controller" },
   { text = "hints: Xbox labels", label = "the hints take the Xbox names before the Pip-Boy opens" },
-  { re = 'pipboy hints: items Weapons: (Equip|Unequip) A\), Drop X\), (Repair|Maintain) Y\)( \(dim\))?, Hotkey RB\), Mod LB\)$', label = "Weapons: Equip, Drop, Repair, Hotkey and Mod with their buttons, in the original's order" },
+  { re = 'pipboy hints: items Weapons: (Equip|Unequip) A\), Drop X\), (Repair|Maintain) Y\)( \(dim\))?, Hotkey RB\), Modify LB\)$', label = "Weapons: Equip, Drop, Repair, Hotkey and Mod with their buttons, in the original's order" },
   { re = 'pipboy hints: items Apparel: (Equip|Unequip) A\)( \(dim\))?, Drop X\)( \(dim\))?, (Repair|Maintain) Y\)( \(dim\))?, Hotkey RB\)$', label = "Apparel: the set without Mod" },
   { re = 'pipboy hints: items Aid: Use A\), Drop X\), Repair Y\) \(dim\), Hotkey RB\)$', label = "Aid: Use; Repair dim" },
   { re = 'pipboy hints: items Misc: Equip A\) \(dim\), Drop X\)( \(dim\))?, Repair Y\) \(dim\), Hotkey RB\) \(dim\)$', label = "Misc: Equip, Repair and Hotkey dim" },
   { re = 'pipboy hints: items Ammo: Equip A\) \(dim\), Drop X\), Repair Y\) \(dim\), Hotkey RB\) \(dim\)$', label = "Ammo: Equip, Repair and Hotkey dim" },
-  { text = "pipboy hints: mod menu: Mod A) (dim), Exit B)", label = "the mod menu on the weapon's row: Mod dim, and Exit under it" },
-  { re = 'pipboy hints: mod menu: Mod A\)(?! \(dim), Exit B\)', label = "the mod menu on a mod: Mod bright" },
-  { re = 'pipboy items: 10mm Pistol Mod LB\)(?! \(dim)', label = "the pistol's own Mod LB) line, bright" },
+  { text = "pipboy hints: mod menu: Modify A) (dim), Exit B)", label = "the mod menu on the weapon's row: Mod dim, and Exit under it" },
+  { re = 'pipboy hints: mod menu: Modify A\)(?! \(dim), Exit B\)', label = "the mod menu on a mod: Mod bright" },
+  { re = 'pipboy items: 10mm Pistol Modify LB\)(?! \(dim)', label = "the pistol's own Modify LB) line, bright" },
 ]
-order = [["controls: input device Controller", "pipboy hints: items Weapons", "pipboy hints: items Aid", "pipboy hints: items Ammo", "pipboy hints: mod menu: Mod A) (dim), Exit B)"]]
+order = [["controls: input device Controller", "pipboy hints: items Weapons", "pipboy hints: items Aid", "pipboy hints: items Ammo", "pipboy hints: mod menu: Modify A) (dim), Exit B)"]]
 
 [[scenario]]
 name = "pipboy-data-hints"
@@ -32259,7 +32259,7 @@ expect = [
   { re = 'tiles: MapMenu world map frames: [1-9]\d* from tiles, 0 by hand after a failed pass, 0 by hand with nothing prepared, \d+ by hand as the Pip-Boy came up or went down', count = 1, label = "with the Pip-Boy up no frame of the visit to the World Map was drawn by hand, the question boxes up or not: none after a failed pass, none with nothing prepared (frames as it rises or lowers are counted apart)" },
   { re = 'tiles: MapMenu Button\(.\) on its tiles', count = 0, label = "no tile of the page acted (the boxes were answered by keys here)" },
 ]
-order = [["tiles: MapMenu draws world map from tiles", { re = 'pipboy data: question box over the tiles \(2 answers\)' }, "pipboy map: custom marker placed at", { re = 'pipboy data: question box over the tiles \(3 answers\)' }, "pipboy map: custom marker removed", { re = 'fast travel: asks "Do you want to travel to Primm' }, 'fast travel: answered "No"', { re = 'tiles: MapMenu world map frames: ' }, "tiles: MapMenu draws quests from tiles"]]
+order = [["tiles: MapMenu draws world map from tiles", { re = 'pipboy data: question box over the tiles \(2 answers\)' }, "pipboy map: custom marker placed at", { re = 'pipboy data: question box over the tiles \(3 answers\)' }, "pipboy map: custom marker removed", { re = 'fast travel: asks "Travel to Primm' }, 'fast travel: answered "No"', { re = 'tiles: MapMenu world map frames: ' }, "tiles: MapMenu draws quests from tiles"]]
 
 [[scenario]]
 name = "tiles-data-world-pointer"

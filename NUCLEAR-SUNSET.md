@@ -40,9 +40,12 @@ upstream's `set_pipboy_layer`), the Mod List/Bug Log hold, `bughunt`, F8 Bug Log
 look. One lane moved: the emissive hold for ordinary lit emitters (#9) is now
 `emissive_rule.y` on lit shapes, because upstream uses `.w` as the authored-material mark.
 
-Checked in the cloud: `cargo check` of both workspaces, the root workspace tests and the
-engine tests named in the commit. **Not yet checked: a game run on the Nuclear Sunset
-install** (smoke test, Goodsprings and Megaton bug hunt).
+Checked in the cloud: `cargo check --all-targets` of both workspaces, and the tests of the
+root crates this merge touched (fnv-game, fnv-nif, fnv-collide, fnv-vfs, fnv-script,
+nvf-settings-layout, fnv-phys), all passing. The engine's own tests were cut short by the cloud
+machine's memory; a first run had 6 of about 6,000 failing, two of them fixed since (below).
+**Still to do on the PC: the engine tests, clippy, and a game run on the Nuclear Sunset install**
+(smoke test, Goodsprings and Megaton bug hunt).
 
 ## Release notes
 

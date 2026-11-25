@@ -908,7 +908,8 @@ pub(crate) fn shape_emissive_rule(props: &Props, alpha_mode: AlphaMode) -> Vec4 
         // `poolwasteland03.nif` pool surface, emissive (1.0, 0.88, 0.0) x 1 and no glow
         // map, drew as a neon yellow puddle far over its texture]. Neon and signs authored
         // over 1 keep their full light.
-        let ordinary = props.emissive_mult.unwrap_or(1.0) <= 1.0 && !props.animated_emissive && !props.external_emittance;
+        let glows = props.emissive.is_some_and(|e| e.iter().any(|&c| c > 0.0));
+        let ordinary = glows && props.emissive_mult.unwrap_or(1.0) <= 1.0 && !props.animated_emissive && !props.external_emittance;
         return Vec4::new(0.0, if ordinary { 1.0 } else { 0.0 }, 0.0, 0.0);
     }
     let cutout = props.alpha.is_some() && matches!(alpha_mode, AlphaMode::Mask(_));

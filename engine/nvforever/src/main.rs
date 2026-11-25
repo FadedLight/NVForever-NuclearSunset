@@ -93,6 +93,7 @@ mod fade;
 mod face_morphs;
 mod facegen;
 mod flashlight;
+mod flashlight_ini;
 mod eye_adapt;
 mod fog;
 mod haze;

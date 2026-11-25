@@ -971,7 +971,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 225] = [
+    const KNOWN: [(&str, &str); 226] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -1104,6 +1104,7 @@ mod android_profile_tests {
         ("light-shafts", "Graphics"),
         ("heat-haze", "Graphics"),
         ("desert-haze", "Graphics"),
+        ("volumetric-clouds", "Graphics"),
         ("aerial-perspective", "Graphics"),
         ("night-sky-detail", "Graphics"),
         ("distant-lights", "Graphics"),

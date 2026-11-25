@@ -131,6 +131,7 @@ impl FairSun {
 
     /// The aid's value; a key it does not name, or one that is no finite number, keeps its
     /// default (the low glare the high one's value).
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     fn parse(text: &str) -> FairSun {
         let mut f = Self::DEFAULT;
         let mut low = [None; 3];
@@ -156,7 +157,15 @@ impl FairSun {
         f
     }
 
+    /// [`FairSun::DEFAULT`], which a build without the developer aids (dev_aids.rs) always has.
+    #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+    #[inline]
+    const fn get() -> FairSun {
+        Self::DEFAULT
+    }
+
     /// The aid, read once; its absence is [`FairSun::DEFAULT`].
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     fn get() -> FairSun {
         static AID: std::sync::OnceLock<FairSun> = std::sync::OnceLock::new();
         *AID.get_or_init(|| {

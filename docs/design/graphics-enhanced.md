@@ -4061,7 +4061,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
 - **Debug aids** (variables `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_<KEY>`, `..._CLOUDS=<0..4>` for `DENSITY`;
   read once at the start; they do not make a run unattended). Developer aids: they exist only in tests, in
   debug builds and in a build with the `dev-aids` feature (engine/nvforever/src/dev_aids.rs; in engine/:
-  `cargo build --release -p nvforever --features dev-aids`). A release build reads none of them, has no tune
+  `cargo build --release -p nvforever --features dev-aids`). A release build without `dev-aids` reads none of them, has no tune
   file follower and starts from the values below; nor does it know `--preview-weather <EDID>` (with `--play
   --weather`: a fade to that weather and back), which it answers as any unknown option. The start values (`START_VALUES`,
   `START_LIGHT`, `START_WISP`; test `a_default_run_is_the_accepted_launch`) are the look judged by eye on
@@ -4097,7 +4097,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     (`NVF_PLAY_DEBUG_MEDIUM=reference`) for figures: the default mode blends them with the history.
   - Cloud shadows' `NVF_PLAY_DEBUG_CLOUD_SHADOW` (plane, repeat) and `NVF_PLAY_DEBUG_CLOUD_PHASE` (a frozen
     drift, for pictures) apply to the volume too; the medium's own aids are in §6.
-  - Smoke: `volumetric-clouds`, `-light-volume`, `-live-change`, `-level-change`, `-no-aids` (a release build
+  - Smoke: `volumetric-clouds`, `-light-volume`, `-taa`, `-fsr`, `-live-change`, `-level-change`, `-no-aids` (a release build
     ignores the aids); `-light-model`, `-taa-turn`, `-fsr-turn` with `NVF_SMOKE_DEV_AIDS` set (an exe built
     with the feature).
 - **The sun over the fair volume sky** [design; judged by eye from stills and a play test, 2026-11-24] (sky.rs

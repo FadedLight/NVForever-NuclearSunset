@@ -534,7 +534,7 @@ beside a 28-step march].
 
 Developer aids (engine/nvforever/src/dev_aids.rs): they exist only in tests, in debug builds and in a build
 with the `dev-aids` feature (in engine/: `cargo build --release -p nvforever --features dev-aids`). A release
-build reads none of these variables, has neither the tune file's follower nor the turn's system, and runs with
+build without `dev-aids` reads none of these variables, has neither the tune file's follower nor the turn's system, and runs with
 the defaults given here. Read once at the start, usable in a played run (they do not make a run unattended):
 - `NVF_PLAY_DEBUG_MEDIUM=reference`: the reference above.
 - `NVF_PLAY_DEBUG_MEDIUM_VIEW=fresh|age|history|clamped|distance`: the buffer shows, opaque
@@ -623,6 +623,7 @@ pass's render size), every pixel traced each
 frame (reference), ...`) when it is made or resized; `volumetric medium: trace pass drawn (...)`
 once; `volumetric medium: far buffer <w>x<h> written whole and volumetric_clouds_pipeline ready,
 the clouds drawn from it` when the flat layers give way; `volumetric medium: far buffer
-released`. Smoke: `volumetric-clouds` (Normal), `volumetric-clouds-taa-turn` (High),
-`volumetric-clouds-fsr-turn` (Performance), both with `NVF_SMOKE_DEV_AIDS` set (they turn the view by an aid),
+released`. Smoke: `volumetric-clouds` (Normal), `volumetric-clouds-taa` (High),
+`volumetric-clouds-fsr` (Performance), the same two turning with `NVF_SMOKE_DEV_AIDS` set (`-taa-turn`, `-fsr-turn`:
+they turn the view by an aid),
 `volumetric-clouds-level-change` (the three, in play).

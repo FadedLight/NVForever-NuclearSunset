@@ -842,7 +842,12 @@ fn fragment(
                     continue;
                 }
                 raw[k + 1u] = layer_diffuse_antitiled(k, in.instance_index, taps, fp);
-                let a = saturate(o * raw[k + 1u].a);
+                // The painted opacity alone, as the paths above: a landscape diffuse's alpha is
+                // not a blend mask [observed: Nuclear Sunset's DXT5 landscape textures carry
+                // other data there (about 0.41 in RockCanyonRubbleDirt01); FIXES.md [28],
+                // lost on this anti-tiling path in the 2026-11-25 upstream merge, where it
+                // left hard lines where one quadrant's base meets the neighbour's layer].
+                let a = o;
                 w[k + 1u] = a * remaining;
                 remaining *= 1.0 - a;
             }

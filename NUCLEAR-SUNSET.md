@@ -40,6 +40,9 @@ NVForever never writes into the game folder, the MO2 folders or `Documents\My Ga
 - Engine tests (6,106) and clippy on both workspaces pass on Windows.
 - Trees in Honest Hearts (Zion) no longer draw white, and one loading screen shows: DDS
   textures with an extra alpha flag beside DXT1/DXT5 are read (45).
+- No more hard straight lines where ground textures meet with **Terrain anti-tiling** on
+  (46), and the Goodsprings parking-lot road's collision is back in place (47): two of our
+  first-pass fixes that the upstream merge had dropped.
 
 ## Sync with upstream, 2026-11-25
 

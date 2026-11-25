@@ -445,3 +445,22 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
     textures failed]. Checked: new test `a_fourcc_with_the_alpha_pixels_bit_reads_as_its_fourcc`,
     fnv-dds 29 pass; Zion from above again: 0 "unsupported pixel format", textures failed 7
     → 1, the trees textured (`results\visual\dlc\fnv-honest-hearts-zion.png` vs `-before.png`).
+
+46. **Ground seams with "Terrain anti-tiling" on: change 28 put back on that path**
+    (`engine/nvforever/src/terrain.wesl`, the `TERRAIN_ANTI_TILING` block). Upstream's
+    anti-tiling path, new in the 2026-11-25 merge, weighed each layer by painted opacity ×
+    the diffuse's alpha, which change 28 had removed from the other paths; with anti-tiling
+    on (which turns the textures, the owner's "turned texture") Nuclear Sunset's DXT5
+    landscape textures left a hard straight line where one quadrant's base meets the
+    neighbour's layer (the owner's report, 2026-11-25). Found by checking every line our first
+    pass added against the merged code. Now the painted opacity alone. Checked:
+    `--cell Goodsprings --pos -71680,3072,9300 --pitch -89 --hour 12 --graphics-only
+    terrain-anti-tiling`, `results\visual\at2-gs-before.png` (a vertical line down the middle)
+    against `at2-gs-after.png` (blended; 51 % of sampled pixels changed).
+
+47. **Change 36 put back** (`crates/fnv-collide/src/nif.rs` `RawCollision::to_object`):
+    the bhkRigidBodyT translation takes HAVOK_SCALE only, not the node's scale; the merge had
+    kept upstream's `v * f`. Bug hunt Goodsprings again showed 00106B76
+    (SCOLParkingLotChunk03bSandy) Misaligned 1542 and CollisionTooBig 3922. Checked: fnv-collide
+    tests (the bhkRigidBodyT expectation back to 7 / -7) pass; bug hunt Goodsprings
+    Misaligned 1 → 0, CollisionTooBig 1 → 0.

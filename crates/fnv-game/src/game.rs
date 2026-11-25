@@ -1772,6 +1772,10 @@ pub struct Game<'a> {
     /// References Rotate turned or SetScale resized in the latest [`Game::tick`], for the
     /// engine to draw at their new angle and size. Not saved.
     pub turned: BTreeSet<FormId>,
+    /// The NPCs the save had seated, each with its furniture reference, for the engine to
+    /// put back on at once (`Game::stand_everyone_up`, #3991). Filled by a load, taken once
+    /// by the engine; not saved.
+    pub saved_seats: BTreeMap<FormId, FormId>,
     /// Actors whose OnStartCombat block was fired and whose OnCombatEnd was not yet
     /// (`Game::combat_blocks`). Saved with the combat states, so that a load runs no block
     /// for a fight already going [documented: GECK wiki event handler table, OnStartCombat
@@ -2797,6 +2801,7 @@ impl<'a> Game<'a> {
             teleported: BTreeSet::new(),
             rotations: BTreeMap::new(),
             turned: BTreeSet::new(),
+            saved_seats: BTreeMap::new(),
             cell_resets: Vec::new(),
             level_news: Vec::new(),
             resurrections: Vec::new(),

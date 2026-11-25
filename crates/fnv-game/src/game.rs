@@ -6533,10 +6533,18 @@ impl<'a> Game<'a> {
     /// script (0 begin, 1 end, 2 change) and the actor's OnPackageStart / OnPackageDone /
     /// OnPackageChange blocks.
     pub fn package_event(&mut self, actor: FormId, package: FormId, which: usize) {
-        let data = self.data;
         if which != 1 {
             self.extra.entry(actor).or_default().current_package = Some(package);
         }
+        self.run_package_event(actor, package, which);
+    }
+
+    /// Run a package's event hooks (result script, topic, idle, and actor script block)
+    /// without mutating `current_package`. Used by [`Game::set_package`] so an outgoing
+    /// package's Change script (`which == 2`) sees the already-updated `current_package`
+    /// and cannot re-enter itself via `EvaluatePackage`.
+    pub(crate) fn run_package_event(&mut self, actor: FormId, package: FormId, which: usize) {
+        let data = self.data;
         if let Some(Some(u)) = data.packages.get(&package).map(|p| p[which]) {
             self.emit(EventKind::ResultScript { unit: data.unit(u).key(), on: Some(actor) });
             self.run_result(u, RunCtx { self_ref: Some(actor), ..Default::default() });

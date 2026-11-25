@@ -24,10 +24,12 @@ the PR's. The branch's later head a6c8c7ec2 only merges main: `tweaks.rs` and
   groups' are a draft to review.
 - **Order in a category**: the lists first, then the switches, then the sliders, each by
   label. A row that only matters with another (its note says "With X", its label starts
-  "X:", a sub-option of X) comes right after that row, marked ↳ below. A choice drawn as a
-  slider (Perks per Level, Date Format, Console Key, …: `Slider::choice`) counts as a
-  slider: the page draws it with a meter [documented: `pause.rs`, the value cell]; the only
-  lists are the three sound lists (`sound_list!`).
+  "X:", a sub-option of X) comes right after that row, marked ↳ below. Choices with 7 or
+  fewer values (Perks per Level, Date Format, Companion Compass Colour, Place Name:
+  Distance) are dropdown lists alongside the three sound lists (`sound_list!`); choices
+  with more than 7 values (S.P.E.C.I.A.L. Points, Skill Points: Base, Steepest Walkable
+  Slope: `Slider::choice`) count as sliders: the page draws them with a meter [documented:
+  `pause.rs`, the value cell].
 
 **Rows whose INI key is not in the catalogue** (a sub-option's own key, or none), placed
 with the row they belong to:
@@ -62,7 +64,7 @@ Group (rows) › category (rows): row labels in the page's order.
 
 ### Gameplay (197)
 
-- **Character and Experience** (19): Free Wild Wasteland; Frenzied Kills Earn Experience; No Skill Tags; Own Skill Points Rule; ↳ Skill Points: Base; ↳ Skill Points: per Intelligence; Skills Capped by S.P.E.C.I.A.L.; ↳ Skill Cap Spares Tagged Skills; ↳ Skill Cap Base; ↳ Skill Cap Most; ↳ Skill Cap per Attribute Point; ↳ Skill Cap per Luck Point; Experience Earned; Experience for Keys; Experience for Passwords; Kill XP by Level; Level Cap; Perks per Level; S.P.E.C.I.A.L. Points
+- **Character and Experience** (19): Perks per Level; Free Wild Wasteland; Frenzied Kills Earn Experience; No Skill Tags; Own Skill Points Rule; ↳ Skill Points: Base; ↳ Skill Points: per Intelligence; Skills Capped by S.P.E.C.I.A.L.; ↳ Skill Cap Spares Tagged Skills; ↳ Skill Cap Base; ↳ Skill Cap Most; ↳ Skill Cap per Attribute Point; ↳ Skill Cap per Luck Point; Experience Earned; Experience for Keys; Experience for Passwords; Kill XP by Level; Level Cap; S.P.E.C.I.A.L. Points
 - **Movement and Jumping** (18): Armour Causes Sinking; Full Pace While Aiming; Jump Swims Upwards; Speed Scales the Jump; Action Points per Jump; ↳ Action Points per Jump: Only in Danger; ↳ Action Points per Jump: Jump Without Enough AP; Action Points per Second Running; Action Points per Second Sneak-Running; ↳ Sneak-Running AP: Endurance Factor; Agility Moves Faster; Agility Scales Jump Height; Backward Pace; Jumping on a Crippled Leg; Sideways Pace; Slow Breath Regen; Steepest Walkable Slope; Wading Pace
 - **Weapons and Reloading** (26): Aiming Draws the Weapon; Full Reload Swaps Ammo; Hold Breath Through a Scope; ↳ Held Breath: Activate Key; ↳ Held Breath AP; ↳ Held Breath Sway; Jams at Reload Pace; Mouse Wheel Changes Weapon; No Hotkeys While Reloading; No Jams in God Mode; NPCs Keep Spent Cases; Per-Bullet Looping Reloads; ↳ Per-Bullet Reloads: Most Queued; ↳ Per-Bullet Reloads: Rounds a Press; Power Attack From a Block; Ready Does Not Draw; Reload Only When Empty; Reload While Firing; Shots Spare Weapons; Spare the Blade on the Dead; Wheel Zooms Scopes; Melee Reach; Others' Weapon Volume; Scope Zoom Time; Semi-Auto Shot Queue; Your Weapon Volume
 - **V.A.T.S.** (7): Target Projectiles in V.A.T.S.; ↳ Target Projectiles: Mines Too; ↳ V.A.T.S. Ignores Non-Explosive Projectiles; ↳ V.A.T.S. Targets Your Own Projectiles; V.A.T.S. Drops Shots at a Lost Weapon; V.A.T.S. Hip Fire; V.A.T.S. Throwables Use Visibility
@@ -97,12 +99,12 @@ Group (rows) › category (rows): row labels in the page's order.
 ### HUD (76)
 
 - **Messages** (16): Critical Hit Messages Name the Limb; Discoveries in the Corner; Map Marker Added Names the Place; No Caps Added Line; No Dehydration Messages; No Location Banner; No Objective List; No Quest Failed Banner; No Sleep Deprivation Messages; No Unconscious Message; No XP Meter in Combat; Objectives on Arrival; ↳ Objectives on Arrival Gap (s); Quiet Experience; Quiet Karma; Item Added Line Time
-- **Compass and Place Names** (21): Compass Fades on the Left; Compass Pips Only in Danger; Compass: Only Mapped Places; Doors on the Compass; ↳ Doors on the Compass: Fade by Distance; ↳ Doors on the Compass: Reach Inside; ↳ Doors on the Compass: Reach Outside; Fade Pips by Distance; Fade Places by Distance; Foes in the Usual Colour; Nearest Unfound Place; Place Name on the HUD; ↳ Place Name: Only Places Found; ↳ Place Name: Distance; ↳ Place Name: Widest Angle; Quest Marker Height; Region Name on the HUD; Your Marker's Height; Companion Compass Colour; Quest Markers Within; Recently Dead on the Compass (s)
+- **Compass and Place Names** (21): Companion Compass Colour; Compass Fades on the Left; Compass Pips Only in Danger; Compass: Only Mapped Places; Doors on the Compass; ↳ Doors on the Compass: Fade by Distance; ↳ Doors on the Compass: Reach Inside; ↳ Doors on the Compass: Reach Outside; Fade Pips by Distance; Fade Places by Distance; Foes in the Usual Colour; Nearest Unfound Place; Place Name on the HUD; ↳ Place Name: Distance; ↳ Place Name: Only Places Found; ↳ Place Name: Widest Angle; Quest Marker Height; Region Name on the HUD; Your Marker's Height; Quest Markers Within; Recently Dead on the Compass (s)
 - **Crosshair** (6): Crosshair Down the Sights; Invisible Foes Stay Hidden; No Crosshair in First Person; No Crosshair in Third Person; No Crosshair While Reloading; No Red Crosshair
 - **Bars and Indicators** (19): Ammo Label Under the Count; Armor Condition on the HUD; ↳ Armor Condition: In the Weapon's Place; ↳ Armor Condition: Flashing Below; ↳ Armor Condition: Red Below; ↳ Armor Condition: Shown Below; Fatigue Indicator; Health Bars Count Buffs; Hide Grenade Indicator; Mark Objects About to Explode; More Precise RAD Meter; ↳ More Precise RAD Meter: Decimal Places; No Ammo Counter; No Crippled Limb Figure; No Indicator for Harmless Blasts; Flashing Weapon Condition Below; Red Action Point Bar Below; Red Health Bar Below; Red Weapon Condition Below
 - **Sneaking** (5): Detected by Whom; ↳ Detected by Whom: Names Shown; No Sneak Label; Shift to Talk While Sneaking; Sneak Label While Standing
 - **Prompts and Subtitles** (6): Hide Unknown Names; Mark Unvisited Doors; Show Use Password; Subtitles Name the Speaker; Water Sources Show H2O; Subtitle Distance
-- **Other** (3): Facial Hair for Women; No Hotkey Wheel; Date Format
+- **Other** (3): Date Format; Facial Hair for Women; No Hotkey Wheel
 
 ### Menus (99)
 

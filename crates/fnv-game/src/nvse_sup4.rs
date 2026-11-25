@@ -220,7 +220,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // `udf [frames] [removeOnLoad]`: the UDF `frames` frames later (1 to 1000, 1
         // without), on the calling reference; with removeOnLoad 0 it outlasts a load
         // [documented: the page's notes and examples]. A lambda does not outlast a load
-        // [hypothesis: as the extender's other kept callbacks, `Game::take_session`].
+        // (see docs/spec-notes/ext-sup4.md §1; `Game::take_session`).
         "callfunctionnextframe" => {
             let Some(f) = args.first().filter(|f| matches!(f, XVal::Ref(r) if *r != 0)).cloned() else { return Some(Ok(zero)) };
             let frames = num(args, 1, 1.0).clamp(1.0, 1000.0) as u64;

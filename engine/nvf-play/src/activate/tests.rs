@@ -13,6 +13,7 @@ use fnv_sim::refs::{Lock, PlacedRef, Teleport};
 use fnv_sim::{FormStore, RefTable, SimConfig, World};
 use fnv_world::{Cell, WorldIndex};
 
+mod creature_onactivate_tests;
 mod crosshair_bars_tests;
 mod crosshair_bed_item_tests;
 mod crosshair_prompt_tests;

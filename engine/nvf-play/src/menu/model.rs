@@ -1149,6 +1149,12 @@ impl MenuModel {
         self.refresh(world)
     }
 
+    /// Test-only empty inventory model for unit tests without a synthetic player plugin.
+    #[cfg(test)]
+    pub(crate) fn empty_inventory() -> MenuModel {
+        MenuModel::empty(Mode::Inventory, "Inventory".into())
+    }
+
     fn empty(mode: Mode, title: String) -> MenuModel {
         MenuModel {
             mode,

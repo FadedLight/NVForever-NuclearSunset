@@ -15,18 +15,24 @@
 //   relative form Vbar_c = clamp(1 + RAYS (Vbar - V_ref) / V_ref, SHADE, LIFT) (`relative_lit`,
 //   an artistic gain: average air unchanged, V_ref the clouds' mean or REF); the pixel's own
 //   phase applied once, p_eff = max(p, FLOOR) (`phase_floor`);
-// - the far blend t (`far_blend`): 1 for cleared depth, else smoothstep(0.6 x sky_from,
-//   sky_from, d) of the sample's radial distance;
+// - the sample's blend t (`sample_blend`) = t_d + (1 - t_d) g, t_d the far blend (`far_blend`):
+//   1 for cleared depth, else smoothstep(0.6 x sky_from, sky_from, d) of the sample's radial
+//   distance; g the fog blend (`fog_blend`): smoothstep(AIR_FOG_BLEND_FROM, 1, F_near), so a
+//   surface the fog covers is treated as the sky it stands against;
 // - one form for every sample (`blended_correction`, `compose_blended`): in display values
 //   Y'_new = Y' + corr_t x B_t, B_t = mix(C', Y', t), corr_t = max(k a F_near (Vbar_c x
 //   mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t), -min(F_near, 1)), k a the
 //   applied scale (phase2.z: the strength k, 0..2, the one overall scale, times the share a,
-//   medium_air.rs `applied_scale`), applied before the floor, F_near the
+//   medium_air.rs `applied_scale`; here also times the deck's share D of the clouds' mean,
+//   `air_deck_share`, once a pixel), applied before the floor, F_near the
 //   fog share at the sample's distance held to the grid's end (`near_share`); near samples are
 //   the additive world rule (budget C'), cleared depth the sky's multiplicative rule (budget
 //   Y') [documented: Bauer 2019, slide 62: the ray's lit fraction modulates the sky's own
-//   scattering], far terrain blends between them with no step;
-// - linear results held to 0..AIR_HDR_MAX per channel on every computed path.
+//   scattering], far and fogged terrain blends between them with no step;
+// - a gain (corr_t above 0) is held off bright pixels by the sky's share t: corr_t (1 - t h), h
+//   (`bright_hold`) the share of the gain that would not fit under AIR_BRIGHT_TO;
+// - the picture is read held to AIR_HDR_MAX and linear results are held to 0..AIR_HDR_MAX per
+//   channel on every computed path.
 // The pixel takes the mean of its samples' results; they share one volume lookup when their
 // view depths, held to the grid's end, lie within a quarter slice of each other
 // (`slices_agree`), each with its own F_near and t. A declared opaque-world approximation for
@@ -61,15 +67,17 @@ struct AirUniform {
     // The main pass's viewport: origin and size in pixels.
     viewport: vec4<f32>,
     // The grid pass's terrain map and Cloud shadows blocks (medium_air_grid.wesl; declared here
-    // to reach rays2 at the end; only cloud_mode.y is read: the clouds' mean transmittance, the
-    // flat image's from the CPU or, with the light volume, the grid's mean pass's).
+    // to reach rays2 at the end; of those only cloud_mode.yz are read:
+    // y the clouds' mean K for the reference, z the clouds' own mean transmittance for the deck's
+    // share (the flat layers' from the CPU or, with the light volume, the grid's mean pass's).
     terrain_uv: vec4<f32>,
     terrain: vec4<f32>,
     terrain_light: vec4<f32>,
     cloud_uv: vec4<f32>,
     cloud: vec4<f32>,
     cloud_mode: vec4<f32>,
-    // x: LIFT; y: the REF override (-1 for auto: the clouds' mean); z: SHADE; w unused.
+    // x: LIFT; y: the REF override (-1 for auto: the clouds' mean); z: SHADE; w: 1 while SHARE is
+    // set (the deck's share is then 1), else 0.
     rays2: vec4<f32>,
 }
 
@@ -90,12 +98,20 @@ const VIEW_LIT: u32 = 6u;
 const VIEW_RAYS: u32 = 7u;
 
 // medium_air.rs's constants (the tests compare them): the lit fraction's empty M, the display
-// transfer, the samples' agreement in slices, the far blend's start, the largest linear value
-// written (Rgba16Float's largest finite value is 65,504).
+// transfer, the samples' agreement in slices, the far blend's start, the fog blend's start, the
+// deck's share's ends, its least, the
+// bright hold's ends and the least excess it acts on, the largest linear value written (Rgba16Float's largest finite value is 65,504).
 const RATIO_EMPTY: f32 = 1e-9;
 const DISPLAY_GAMMA: f32 = 2.2;
 const AIR_AGREE_SLICES: f32 = 0.25;
 const SKY_TAPER_FROM: f32 = 0.6;
+const AIR_FOG_BLEND_FROM: f32 = 0.35;
+const AIR_DECK_FROM: f32 = 0.4;
+const AIR_DECK_TO: f32 = 0.85;
+const AIR_DECK_LEAST: f32 = 0.25;
+const AIR_BRIGHT_FROM: f32 = 0.5;
+const AIR_BRIGHT_TO: f32 = 0.76;
+const AIR_BRIGHT_LEAST: f32 = 1e-6;
 const AIR_HDR_MAX: f32 = 60000.0;
 // The delta view: mid grey plus the scalar times this (display values).
 const DELTA_GAIN: f32 = 4.0;
@@ -110,15 +126,18 @@ struct AirSample {
 }
 
 // What a pixel shares between its samples: its uv, its ray's length, the floored phase of its
-// ray (p_eff, applied once), the reference visibility, and the display values of its picture
-// and of the fog colour.
+// ray (p_eff, applied once), the reference visibility, the scale of its corrections (k a D), the
+// display values of its picture and of the fog colour, and each one's largest channel.
 struct AirPixel {
     uv: vec2<f32>,
     ray_len: f32,
     p_eff: f32,
     v_ref: f32,
+    scale: f32,
     src_d: vec3<f32>,
     fog_d: vec3<f32>,
+    src_peak: f32,
+    fog_peak: f32,
 }
 
 // The depth's sample count.
@@ -227,6 +246,18 @@ fn air_reference() -> f32 {
     return clamp(select(1.0, m, m > 0.0 && m < 1.0e30), 0.25, 1.0);
 }
 
+// The deck's share D of the correction (medium_air.rs `deck_share`): 1 while SHARE is set (rays2.w:
+// an absolute share), else AIR_DECK_LEAST + (1 - AIR_DECK_LEAST) x smoothstep(AIR_DECK_FROM,
+// AIR_DECK_TO, T), T the clouds' own mean transmittance for a light from straight above
+// (cloud_mode.z; 0 is an opaque deck).
+fn air_deck_share() -> f32 {
+    if air.rays2.w > 0.5 {
+        return 1.0;
+    }
+    let x = clamp((air.cloud_mode.z - AIR_DECK_FROM) / (AIR_DECK_TO - AIR_DECK_FROM), 0.0, 1.0);
+    return AIR_DECK_LEAST + (1.0 - AIR_DECK_LEAST) * (x * x * (3.0 - 2.0 * x));
+}
+
 // The relative lit fraction (medium_air.rs `relative_lit`): clamp(1 + RAYS x (Vbar - V_ref) /
 // V_ref, SHADE, LIFT): average air is 1, shadowed air falls toward SHADE, lit air rises up to
 // LIFT.
@@ -264,16 +295,37 @@ fn air_far_blend(s: AirSample) -> f32 {
     return x * x * (3.0 - 2.0 * x);
 }
 
+// The sample's blend t (medium_air.rs `sample_blend`): the far blend joined with the fog blend g
+// = smoothstep(AIR_FOG_BLEND_FROM, 1, F_near), t_d + (1 - t_d) g: one smooth union of the two, so
+// no slope breaks where they cross.
+fn air_sample_blend(t_distance: f32, f_near: f32) -> f32 {
+    let x = clamp((f_near - AIR_FOG_BLEND_FROM) / (1.0 - AIR_FOG_BLEND_FROM), 0.0, 1.0);
+    let g = x * x * (3.0 - 2.0 * x);
+    return t_distance + (1.0 - t_distance) * g;
+}
+
 // One sample's bounded scalar (medium_air.rs `blended_correction`): k a F_near (Vbar_c x
-// mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t) with k a = phase2.z (the
-// strength scales the whole correction), held to at least -min(F_near, 1) (shadow removes at
+// mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t) with k a = px.scale (phase2.z x the
+// deck's share: the strength and the deck scale the whole correction), held to at least -min(F_near, 1) (shadow removes at
 // most the budget share F_near, at any strength).
-fn air_correction(px: AirPixel, s: AirSample, vc: f32, t: f32) -> f32 {
-    let f_near = air_near_share(s.distance, px.ray_len);
+fn air_correction(px: AirPixel, f_near: f32, vc: f32, t: f32) -> f32 {
     let k = clamp(air.misc.w, 0.0, 1.0);
     let phase_t = mix(px.p_eff, mix(1.0, px.p_eff, k), t);
-    let corr = air.phase2.z * f_near * (vc * phase_t - 1.0) * mix(1.0, air.misc.z, t);
+    let corr = px.scale * f_near * (vc * phase_t - 1.0) * mix(1.0, air.misc.z, t);
     return max(corr, -min(f_near, 1.0));
+}
+
+// The bright hold h (medium_air.rs `bright_hold`): the share of a gain (display values, above 0) to
+// hold back from a pixel whose largest channel is `peak`: 0 while peak + gain is at most
+// AIR_BRIGHT_FROM; what is over it fits softly into the room left under AIR_BRIGHT_TO, over x room
+// / (over + room), so a brighter pixel under the sky's rule never comes out darker; 1 from AIR_BRIGHT_TO on (no room).
+fn air_bright_hold(peak: f32, gain: f32) -> f32 {
+    let over = gain - max(AIR_BRIGHT_FROM - peak, 0.0);
+    if !(over > AIR_BRIGHT_LEAST) {
+        return 0.0;
+    }
+    let room = max(AIR_BRIGHT_TO - max(peak, AIR_BRIGHT_FROM), 0.0);
+    return over / (over + room) * (over / gain);
 }
 
 // A linear colour held to 0..AIR_HDR_MAX per channel (every colour this pass computes).
@@ -281,19 +333,24 @@ fn air_held(c: vec3<f32>) -> vec3<f32> {
     return clamp(c, vec3<f32>(0.0), vec3<f32>(AIR_HDR_MAX));
 }
 
-// One sample's result (medium_air.rs `compose_blended`): xyz the composed linear colour,
-// max(Y' + delta, 0)^2.2 held with delta = corr_t x mix(C', Y', t); w its scalar corr_t. A
+// One sample's result (medium_air.rs `sample_blend`, `hold_bright`, `compose_blended`): xyz the composed
+// linear colour, max(Y' + delta, 0)^2.2 held with delta = corr_t x mix(C', Y', t); w its scalar corr_t,
+// the bright hold taken of it when above 0 (one scalar, so a hue keeps). A
 // sample with geometry holds delta per channel to at least -F_near x C' (the fog's own share of
 // the fog colour), so far terrain keeps its surface light at every t: Y' + delta >= (1 - f) S'
 // whenever F_near <= f. Cleared depth keeps the scalar bound.
 // The sky dome writes depth and is held as terrain is (a known limit: medium_air_compose.rs).
 fn air_result(px: AirPixel, s: AirSample, vc: f32) -> vec4<f32> {
-    let t = air_far_blend(s);
-    let c = air_correction(px, s, vc, t);
+    let f_near = air_near_share(s.distance, px.ray_len);
+    let t = air_sample_blend(air_far_blend(s), f_near);
+    var c = air_correction(px, f_near, vc, t);
+    if c > 0.0 {
+        c = c * (1.0 - t * air_bright_hold(px.src_peak, c * mix(px.fog_peak, px.src_peak, t)));
+    }
     let budget = mix(px.fog_d, px.src_d, vec3<f32>(t));
     var delta = c * budget;
     if !s.cleared {
-        delta = max(delta, -air_near_share(s.distance, px.ray_len) * px.fog_d);
+        delta = max(delta, -f_near * px.fog_d);
     }
     let shown = max(px.src_d + delta, vec3<f32>(0.0));
     return vec4<f32>(air_held(pow(shown, vec3<f32>(DISPLAY_GAMMA))), c);
@@ -305,7 +362,7 @@ fn air_result(px: AirPixel, s: AirSample, vc: f32) -> vec4<f32> {
 // share ONE volume lookup at the farthest of them: free of the samples' order, and its sums
 // hold all the fog in front of the nearer ones; otherwise (a
 // silhouette against farther ground) each sample looks up its own. Each sample takes its own
-// F_near and far blend from its own distance.
+// F_near and blend t from its own distance.
 fn air_pixel(px: AirPixel, pixel: vec2<i32>) -> vec4<f32> {
     let count = air_samples();
     var lo = min(air_sample_at(pixel, 0u, px.ray_len).view_depth, air.grid.w);
@@ -382,8 +439,12 @@ fn air_compose(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         px.ray_len = ray_len;
         px.p_eff = max(max(p, 0.0), air_floor());
         px.v_ref = air_reference();
-        px.src_d = pow(max(src.rgb, vec3<f32>(0.0)), vec3<f32>(1.0 / DISPLAY_GAMMA));
+        px.scale = air.phase2.z * air_deck_share();
+        // Held before the transfer: an infinity times a scalar of 0 would be no number.
+        px.src_d = pow(air_held(src.rgb), vec3<f32>(1.0 / DISPLAY_GAMMA));
         px.fog_d = pow(max(air.fog_colour.rgb, vec3<f32>(0.0)), vec3<f32>(1.0 / DISPLAY_GAMMA));
+        px.src_peak = max(px.src_d.r, max(px.src_d.g, px.src_d.b));
+        px.fog_peak = max(px.fog_d.r, max(px.fog_d.g, px.fog_d.b));
         let result = air_pixel(px, pixel);
         if code == VIEW_DELTA {
             return vec4<f32>(air_held(air_grey(0.5 + result.w * DELTA_GAIN)), 1.0);

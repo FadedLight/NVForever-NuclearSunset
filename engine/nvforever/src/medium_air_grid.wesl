@@ -78,8 +78,9 @@ struct AirUniform {
     // elevation from which the shadow starts (z) and at which it is whole (w).
     cloud: vec4<f32>,
     // x: 1 while the image is published and on the GPU (else K is 1); y: the mean of K over
-    // the pattern's repeat for the current light (the composite's, not read here; with the
-    // light volume the mean `air_cloud_mean` took is copied over it).
+    // the pattern's repeat for the current light (the composite's); z: the flat
+    // layers' own mean transmittance (the composite's); here both only the mean pass's fallbacks.
+    // With the light volume the two `air_cloud_mean` took are copied over y and z.
     cloud_mode: vec4<f32>,
 }
 
@@ -553,7 +554,7 @@ fn air_grid(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocat
     }
 }
 
-// The mean of K about the camera (the composite's reference visibility): the weather image's
+// The mean of K about the camera (the composite's reference visibility and deck's share): the weather image's
 // whole-pattern mean as the CPU has it (`cloud_mode.y`; 1 with the volume alone asked for, and
 // from the weather plane up, where `air_cloud_weather` is 1) over the uncovered share, plus the
 // covered share's own K (`air_volume_part`), both meant over 32 x 32 points 4,000 units apart
@@ -562,29 +563,34 @@ fn air_grid(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocat
 // (a 4,000-unit lattice aliases its pattern): with no coverage the result is the CPU's mean bit
 // for bit, under full coverage the volume's own mean alone, between them continuous. The two sums are
 // kept apart (a mean near 0 under a thick deck must not be lost against a bright fallback), and a
-// covered mean is held above 0, which the composite would take as no mean. Dispatched
-// once, before the grid, while the composite reads the automatic reference; its result is copied
-// over `cloud_mode.y` before the grid and the composite read the uniform.
+// covered mean is held above 0, which the composite would take as no mean. Beside it the clouds' own
+// mean transmittance for the deck's share. Dispatched
+// once, before the grid, while the composite reads the clouds' mean; its two numbers are copied
+// over `cloud_mode.yz` before the grid and the composite read the uniform.
 @if(AIR_LIGHT_VOLUME) const AIR_MEAN_SIDE: u32 = 32u;
 @if(AIR_LIGHT_VOLUME) const AIR_MEAN_STEP: f32 = 4000.0;
 @if(AIR_LIGHT_VOLUME) const AIR_MEAN_LEAST: f32 = 1e-6;
-@if(AIR_LIGHT_VOLUME) var<workgroup> air_mean_parts: array<vec2<f32>, 64>;
+// The deck's transmittance (medium_air.rs `AIR_DECK_UP`, `AIR_DECK_THIN`; the tests compare them).
+@if(AIR_LIGHT_VOLUME) const AIR_DECK_UP: f32 = 0.1;
+@if(AIR_LIGHT_VOLUME) const AIR_DECK_THIN: f32 = 1e-4;
+@if(AIR_LIGHT_VOLUME) var<workgroup> air_mean_parts: array<vec3<f32>, 64>;
 
 // The light volume's part of `air_clouds`' mix at P: x the covered share x the volume's K, y the
-// share left to the fallback (1 with no data or the light under the band's foot).
+// share left to the fallback (1 with no data or the light under the band's foot), z the covered
+// share x the clouds' own transmittance, with neither the strength nor the low-sun fade in it.
 @if(AIR_LIGHT_VOLUME)
-fn air_volume_part(P: vec3<f32>, L: vec3<f32>) -> vec2<f32> {
+fn air_volume_part(P: vec3<f32>, L: vec3<f32>) -> vec3<f32> {
     let up = L.y;
     if up <= air_volume.cloud.y {
-        return vec2<f32>(0.0, 1.0);
+        return vec3<f32>(0.0, 1.0, 0.0);
     }
     let r = lvr_optical_depth(light_near, light_far, cloud_sampler, air_volume.window, P, L);
     if r.y <= 0.0 {
-        return vec2<f32>(0.0, 1.0);
+        return vec3<f32>(0.0, 1.0, 0.0);
     }
     let k = saturate(1.0 - air_volume.cloud.x * (1.0 - exp(-r.x)));
     let faded = mix(1.0, k, smoothstep(air_volume.cloud.y, air_volume.cloud.z, up));
-    return vec2<f32>(r.y * faded, 1.0 - r.y);
+    return vec3<f32>(r.y * faded, 1.0 - r.y, r.y * exp(-r.x));
 }
 
 @if(AIR_LIGHT_VOLUME)
@@ -592,7 +598,7 @@ fn air_volume_part(P: vec3<f32>, L: vec3<f32>) -> vec2<f32> {
 fn air_cloud_mean(@builtin(local_invocation_id) id: vec3<u32>, @builtin(local_invocation_index) index: u32) {
     let origin = air.world_from_view[3].xyz;
     let other = select(air.cloud_mode.y, 1.0, air_volume.cloud.w > 0.5 || origin.y >= air.cloud.x);
-    var sum = vec2<f32>(0.0);
+    var sum = vec3<f32>(0.0);
     for (var j = 0u; j < 4u; j += 1u) {
         for (var i = 0u; i < 4u; i += 1u) {
             let cell = vec2<f32>(f32(id.x * 4u + i), f32(id.y * 4u + j));
@@ -603,13 +609,24 @@ fn air_cloud_mean(@builtin(local_invocation_id) id: vec3<u32>, @builtin(local_in
     air_mean_parts[index] = sum;
     workgroupBarrier();
     if index == 0u {
-        var total = vec2<f32>(0.0);
+        var total = vec3<f32>(0.0);
         for (var n = 0u; n < 64u; n += 1u) {
             total += air_mean_parts[n];
         }
         // x the covered K, y the uncovered share; a share of exactly 1 leaves `other` as it is.
         let mean = total / f32(AIR_MEAN_SIDE * AIR_MEAN_SIDE);
         let mixed = clamp(mean.x + mean.y * other, AIR_MEAN_LEAST, 1.0);
-        air_mean = vec4<f32>(select(other, mixed, mean.y < 1.0), 0.0, 0.0, 0.0);
+        // The deck (medium_air.rs `deck_transmittance`): the covered share's own transmittance for a
+        // light from straight above, the flat layers' over the rest, theirs alone bit for bit with
+        // no coverage. The power is of the mean, not of each point's depth before it: of clouds about as
+        // tall as wide a lower light meets more, and a point's power would keep an opaque one
+        // opaque (medium_air.rs says what was measured, and the limit: a broken deck without height).
+        var deck = air.cloud_mode.z;
+        if mean.y < 1.0 {
+            let covered = 1.0 - mean.y;
+            let above = pow(clamp(mean.z / covered, AIR_DECK_THIN, 1.0), clamp(air.light.y, AIR_DECK_UP, 1.0));
+            deck = covered * above + mean.y * air.cloud_mode.z;
+        }
+        air_mean = vec4<f32>(select(other, mixed, mean.y < 1.0), deck, 0.0, 0.0);
     }
 }

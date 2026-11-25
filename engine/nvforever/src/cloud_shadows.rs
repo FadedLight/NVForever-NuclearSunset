@@ -996,6 +996,32 @@ pub struct CoverInput {
     pub sets: Vec<u8>,
 }
 
+/// The flat layers' own mean transmittance, `Π (1 - mean alpha × weight)` over the drawn layers (each
+/// its texture's mean alpha and its weight on the dome): the mean of the absolute product over every
+/// offset of the layers against each other, so it does not move as they drift, and it has nothing of
+/// the image's clear percentile in it (uniform cover of any density is a fully lit image). 1 for
+/// none. The light in the air's deck's share reads it (medium_air_grid.rs `flat_deck`) [design,
+/// 2026-11-24].
+pub fn flat_transmittance(layers: impl Iterator<Item = (f32, f32)>) -> f32 {
+    layers.map(|(alpha, weight)| 1.0 - (alpha * weight).clamp(0.0, 1.0)).product()
+}
+
+/// The flat layers' deck ([`CloudShadowWork::deck`]): their own mean transmittance and the cloud plane's
+/// height (Bevy y), under which it stands.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlatDeck {
+    pub transmittance: f32,
+    pub plane_height: f32,
+}
+
+/// The mean of a texture's alpha (0..1), 0 for an empty one.
+fn mean_alpha(a: &[u8]) -> f32 {
+    if a.is_empty() {
+        return 0.0;
+    }
+    (a.iter().map(|&v| u64::from(v)).sum::<u64>() as f64 / (a.len() as f64 * 255.0)) as f32
+}
+
 /// Compose `layers` relative to the `pct` percentile of their product (absolute when
 /// `None`), the reference smoothed from `prev` (the last composition's, [`smoothed_reference`])
 /// and never above this map's own: a falling reference is taken at once, so cover that has
@@ -1184,8 +1210,9 @@ fn drift_direction(sky: &crate::sky::SkyState, direction_deg: Option<f32>) -> Ve
 // Systems
 // ---------------------------------------------------------------------------------------
 
-/// What a read of a cloud texture gives ([`load_alpha`]).
-type AlphaRead = (Option<Arc<[u8]>>, Option<bool>);
+/// What a read of a cloud texture gives ([`load_alpha`]): its alpha, the volume's look at it, the
+/// alpha's mean ([`mean_alpha`]; 0 with none).
+type AlphaRead = (Option<Arc<[u8]>>, Option<bool>, f32);
 
 /// A cloud texture's alpha: being read, or read (`None`: missing or without alpha).
 enum Alpha {
@@ -1288,6 +1315,10 @@ pub fn weather_replaced(old: WeatherSet, new: WeatherSet) -> bool {
 pub struct CloudShadowWork {
     image: Option<Handle<Image>>,
     alphas: HashMap<String, Alpha>,
+    /// The mean alpha of each texture read ([`mean_alpha`], worked out by the read).
+    alpha_means: HashMap<String, f32>,
+    /// The drawn layers' deck while Cloud shadows is on ([`CloudShadowWork::deck`]).
+    flat: Option<FlatDeck>,
     job: Option<Job>,
     /// What the image holds.
     shown: Option<Composed>,
@@ -1349,6 +1380,29 @@ pub struct CloudShadowWork {
 }
 
 impl CloudShadowWork {
+    /// The flat layers' own mean transmittance ([`flat_transmittance`]) and their plane while Cloud
+    /// shadows is on and the dome draws layers whose alpha is read: with the dome's own weights each
+    /// frame, so through a weather fade it goes from the one weather's to the other's as the dome's
+    /// layers do, with no smoothing and no composition behind it. While a texture of a fade is being
+    /// read the last one stays; a weather replaced at once and another worldspace clear it with the
+    /// output ([`CloudShadowWork::clear_output`]).
+    pub fn deck(&self) -> Option<FlatDeck> {
+        self.flat
+    }
+
+    /// [`CloudShadowWork::deck`] for the drawn `layers` this frame.
+    fn follow_deck(&mut self, layers: &[LayerInput], plane_height: f32, on: bool, loading: bool) {
+        if !on {
+            self.flat = None;
+            return;
+        }
+        if loading {
+            return;
+        }
+        let transmittance = flat_transmittance(layers.iter().filter_map(|l| Some((*self.alpha_means.get(&l.texture)?, l.weight))));
+        self.flat = Some(FlatDeck { transmittance, plane_height });
+    }
+
     /// Drop the image, the composition and what it showed, and publish `None` (the
     /// plumbing then gives a neutral cloud while the switch stays on).
     fn clear_output(&mut self, published: &mut CloudShadowPublished, images: &mut Assets<Image>) {
@@ -1357,6 +1411,7 @@ impl CloudShadowWork {
         }
         self.relative_shown = false;
         self.drop_absolute();
+        self.flat = None;
         self.job = None;
         self.shown = None;
         self.logged = None;
@@ -1493,6 +1548,7 @@ impl CloudShadowWork {
         self.clear_output(published, images);
         if !keep_alphas {
             self.alphas.clear();
+            self.alpha_means.clear();
             self.unreadable.clear();
             self.cover_refused = None;
             self.cover_pending = false;
@@ -1527,27 +1583,30 @@ fn alpha_of(alphas: &HashMap<String, Alpha>, path: &str) -> Option<Arc<[u8]>> {
 }
 
 /// Read and decode one cloud texture's alpha off the main thread; with it, for the `volume`
-/// alone, whether that can read it ([`volume_alpha_ok`]: it may look through the alpha).
+/// alone, whether that can read it ([`volume_alpha_ok`]: it may look through the alpha); and the
+/// alpha's mean.
 fn load_alpha(data: &GameData, path: &str, volume: bool) -> Task<AlphaRead> {
     let (data, path) = (data.clone(), path.to_string());
     nvf_assets::read_pool::read_pool().spawn(async move {
         let resolved = nvf_assets::texture::resolved_path(&path, |q| data.vfs.exists(q));
         let Some(bytes) = data.read(&resolved) else {
             debug!("cloud shadows: {path}: in no archive: no cover");
-            return (None, volume.then_some(false));
+            return (None, volume.then_some(false), 0.0);
         };
         // One parse for the alpha and the volume's checks.
         let Ok(dds) = fnv_dds::Dds::parse(&bytes) else {
             info!("cloud shadows: {path}: no alpha channel read: no cover");
-            return (None, volume.then_some(false));
+            return (None, volume.then_some(false), 0.0);
         };
         let map = nvf_assets::texture::alpha_map_of(&dds);
         let volume = volume.then(|| volume_alpha_of(&dds, map.as_ref()));
         let Some(map) = map else {
             info!("cloud shadows: {path}: no alpha channel read: no cover");
-            return (None, volume);
+            return (None, volume, 0.0);
         };
-        (Some(Arc::from(resample_alpha(&map.alpha, map.width, map.height))), volume)
+        let alpha = resample_alpha(&map.alpha, map.width, map.height);
+        let mean = mean_alpha(&alpha);
+        (Some(Arc::from(alpha)), volume, mean)
     })
 }
 
@@ -1630,6 +1689,7 @@ pub fn produce_cloud_shadows(
         work.alphas.entry(l.texture.clone()).or_insert_with(|| Alpha::Loading(load_alpha(&data, &l.texture, cover_on)));
     }
     work.alphas.retain(|path, _| layers.iter().chain(&prefetch).any(|l| &l.texture == path));
+    work.alpha_means.retain(|path, _| layers.iter().chain(&prefetch).any(|l| &l.texture == path));
     if cover_on {
         work.unreadable.retain(|path| layers.iter().chain(&prefetch).any(|l| &l.texture == path));
     }
@@ -1638,14 +1698,18 @@ pub fn produce_cloud_shadows(
             Alpha::Loading(task) => check_ready(task),
             // Read for Cloud shadows alone, and now the volume wants it: looked at for that too,
             // the shadows going on with what they have.
-            Alpha::Unchecked(None, _) if cover_on => Some((None, Some(false))),
+            Alpha::Unchecked(None, _) if cover_on => Some((None, Some(false), 0.0)),
             Alpha::Unchecked(_, task) if cover_on => check_ready(task.get_or_insert_with(|| load_alpha(&data, path, true))),
             _ => None,
         };
+        if let Some((Some(_), _, mean)) = &read {
+            // The first read's, as the alpha the shadows keep.
+            work.alpha_means.entry(path.clone()).or_insert(*mean);
+        }
         match read {
             None => {}
-            Some((alpha, None)) => *a = Alpha::Unchecked(alpha, None),
-            Some((read, Some(ok))) => {
+            Some((alpha, None, _)) => *a = Alpha::Unchecked(alpha, None),
+            Some((read, Some(ok), _)) => {
                 // What the shadows have stays theirs, also when the second read fails.
                 let alpha = if let Alpha::Unchecked(first, _) = a { first.take() } else { read };
                 if ok {
@@ -1693,6 +1757,7 @@ pub fn produce_cloud_shadows(
         }
         work.cover_refused = refused;
     }
+    work.follow_deck(&layers, ground + cal.plane_above_ground, shadows_on, loading);
     if !loading && layers.iter().all(|l| alpha_of(&work.alphas, &l.texture).is_none()) {
         // Kept: the textures are not read again while the weather stays.
         work.go_off("no cloud alpha", true, &mut published, &mut images);
@@ -1955,6 +2020,73 @@ mod tests {
 
     fn constant(a: u8) -> Option<Arc<[u8]>> {
         Some(Arc::from(vec![a; MAP_SIZE * MAP_SIZE]))
+    }
+
+    /// The flat layers' own transmittance: the mean of the absolute product over every offset of the
+    /// layers (here all 512 along a row, whole texels), free of the drift and of the image's reference
+    /// (uniform opaque cover: a fully lit image and 0 here); through a fade it goes from the one
+    /// weather's to the other's with the dome's weights, with no step.
+    #[test]
+    fn the_flat_transmittance_is_absolute_and_free_of_the_drift() {
+        assert_eq!(flat_transmittance(std::iter::empty()), 1.0);
+        assert_eq!(flat_transmittance([(1.0, 1.0), (0.2, 1.0)].into_iter()), 0.0);
+        assert!((flat_transmittance([(0.5, 1.0), (0.4, 0.5)].into_iter()) - 0.4).abs() < 1e-6);
+        assert_eq!(mean_alpha(&[]), 0.0);
+        assert!((mean_alpha(&[0, 255, 51, 204]) - 0.5).abs() < 1e-6);
+        // An opaque sheet: the relative image is all lit.
+        let opaque: Arc<[u8]> = Arc::from(vec![255u8; MAP_SIZE * MAP_SIZE]);
+        let sheet = compose_relative(&[ComposeLayer { alpha: Some(opaque.clone()), weight: 1.0, shift: [0.0; 2] }], Some(90.0), None);
+        assert!(sheet.texels.iter().all(|&t| t == 255) && flat_transmittance(std::iter::once((mean_alpha(&opaque), 1.0))) == 0.0);
+        // Two layers of stripes across U: the product's mean moves with their offset, its mean over
+        // the offsets is this.
+        let row = |x: usize, f: usize| if (x * f / MAP_SIZE).is_multiple_of(2) { 0.8f64 } else { 0.1 };
+        let mean = |f: usize| (0..MAP_SIZE).map(|x| row(x, f)).sum::<f64>() / MAP_SIZE as f64;
+        let product = |s: usize| (0..MAP_SIZE).map(|x| (1.0 - row(x, 4)) * (1.0 - row((x + s) % MAP_SIZE, 4))).sum::<f64>() / MAP_SIZE as f64;
+        assert!((product(0) - product(MAP_SIZE / 8)).abs() > 0.05, "the drift moves the product's mean");
+        let over = (0..MAP_SIZE).map(product).sum::<f64>() / MAP_SIZE as f64;
+        let flat = flat_transmittance([(mean(4) as f32, 1.0), (mean(4) as f32, 1.0)].into_iter());
+        assert!((f64::from(flat) - over).abs() < 1e-5, "{flat} {over}");
+        // The producer's: a thin weather's layer against a thick one's over a fade.
+        let mut work = CloudShadowWork::default();
+        // (The means as the reads leave them.)
+        work.alpha_means.insert("thin".into(), mean_alpha(&[51; 16]));
+        work.alpha_means.insert("thick".into(), mean_alpha(&[255; 16]));
+        let layers = |fade: f32| -> Vec<LayerInput> {
+            let now = weather([Some("thick"), None, None, None], [0; 4]);
+            let was = weather([Some("thin"), None, None, None], [0; 4]);
+            active_layers(&now, Some(&was), fade, [true; 4])
+        };
+        let mut last = None;
+        for i in 0..=100 {
+            let fade = i as f32 / 100.0;
+            work.follow_deck(&layers(fade), 900.0, true, false);
+            let deck = work.deck().expect("read");
+            assert_eq!(deck.plane_height, 900.0);
+            let t = deck.transmittance;
+            assert!((t - (1.0 - fade) * (1.0 - 0.2 * (1.0 - fade))).abs() < 1e-5, "{fade}: {t}");
+            assert!(last.is_none_or(|l: f32| l >= t && l - t < 0.013), "{fade}: {last:?} {t}");
+            last = Some(t);
+        }
+        // A read in flight keeps the last one; Cloud shadows off has none.
+        work.follow_deck(&layers(0.0), 900.0, true, true);
+        assert_eq!(work.deck().map(|d| d.transmittance), last);
+        // A fade turned round, or one that starts, keeps it; a weather replaced at once and another
+        // worldspace clear it, until the next layers are read.
+        let (mut published, mut images) = (CloudShadowPublished::default(), Assets::<Image>::default());
+        work.note_weather((1, Some(2)), &mut published, &mut images);
+        work.note_weather((2, Some(1)), &mut published, &mut images);
+        assert!(work.deck().is_some(), "an ordinary fade");
+        work.note_weather((3, None), &mut published, &mut images);
+        assert_eq!(work.deck(), None, "replaced at once");
+        work.follow_deck(&layers(0.0), 900.0, true, true);
+        assert_eq!(work.deck(), None, "still being read");
+        work.follow_deck(&layers(0.0), 900.0, true, false);
+        work.ground = Some((Some(7), 0.0));
+        assert!(work.note_world(Some(8), &mut published, &mut images));
+        assert_eq!(work.deck(), None, "another worldspace");
+        work.follow_deck(&layers(0.0), 900.0, true, false);
+        work.follow_deck(&layers(0.0), 900.0, false, false);
+        assert_eq!(work.deck(), None, "Cloud shadows off");
     }
 
     #[test]

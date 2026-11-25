@@ -444,7 +444,9 @@ Not built: a cross-fade between generations.
 
 ## What is not done
 
-What is open of the light in the air (stage 3: "The near grid and the light in the air" below), a second cloud layer, wind-blown
+What is open of the light in the air (stage 3: its own "Where we differ from the talk" and "Known limits" below; the white
+land in a hazy morning, the lifted overcast and the clipped bright clouds are no longer, "The composite" 6 and 8 and
+the deck's share in "The medium"), a second cloud layer, wind-blown
 dust, haze and fog as one medium (stage 4), clouds in front of terrain (the medium applied to
 world fragments), depth-aware ray placement (slide 55) and
 depth rejection in the clamp (slide 52: not needed while the buffer is sky only), the
@@ -877,12 +879,14 @@ all by default) [design]:
   1 with the volume alone and from the weather plane up, where the image shades nothing) times the
   mean uncovered share, plus the mean of `share x the volume's K`, at 32 x 32 points 4,000
   units apart about the camera (two sums, so a dark mean is not lost against a bright W; a covered
-  mean is held above 0, which the composite takes as no mean), and the result is copied over the uniform's `cloud_mode.y` before the
+  mean is held above 0, which the composite takes as no mean), and the result, with the clouds' own mean transmittance beside it ("The medium", the deck's share), is
+  copied over the uniform's `cloud_mode.yz` before the
   grid and the composite [design; the extent and spacing are our choice]. The image is never sampled
   on that lattice, which would alias its pattern: with no coverage the reference is W exactly (no
   step when a front arrives), under full coverage the volume's mean alone (tested with the checker).
-  The pass, the copy and the wait for its pipeline are left out where the composite does not read the
-  automatic reference: a fixed `REF`, the diagnostic views, `off`.
+  The pass, the copy and the wait for its
+  pipeline are left out where the composite reads neither number: both `REF` and `SHARE` fixed,
+  the diagnostic views, `off`.
 - *The Cloud shadows image*: the image while the Cloud shadows row publishes
   it, read as surfaces read it (sun_visibility.wesl `nvf_cloud_weather`): the ray from the
   point toward the light meets the cloud plane, K = 1 - strength x (1 - the image there), fading
@@ -936,8 +940,51 @@ screen modifiers and the horizon fade are in it), a the luma of the ambient's co
 `brightness / U`; the denominator taken as at least 0.001, so s falls with the direct light near
 black (medium_air.rs `scaled_share`, its module doc names sky.rs's fields) [design].
 `SHARE` overrides it; `a = clamp(s, 0, 1)` is the share alone. The strength k multiplies the
-whole correction: the shader's scalar is `k x a` (medium_air.rs `applied_scale`, the uniform's
-`phase2.z`), applied before the floor, so k 0 changes no pixel and the floor holds at any k.
+whole correction: the uniform's scalar is `k x a` (medium_air.rs `applied_scale`, `phase2.z`), applied
+before the floor, so k 0 changes no pixel and the floor holds at any k.
+
+**The deck's share** D: the weather's lights still name a direct part under a closed deck (an s of
+0.62 in an overcast noon, 0.65 in a fair one [hypothesis: the figures this was worked for on 2026-11-24;
+how they were read was not kept]), so the light lifted an overcast picture as a whole. The
+shader's scalar is `k x a x D`, `D = AIR_DECK_LEAST 0.25 + 0.75 x smoothstep(AIR_DECK_FROM 0.40,
+AIR_DECK_TO 0.85, T)`, once a
+pixel (medium_air.rs `deck_share`, medium_air_compose.wesl `air_deck_share`): what is added and what
+is taken are weakened alike, the sky's and the dome's too. T is the clouds' own mean transmittance for a
+light from straight above, in `cloud_mode.z` (the reference visibility reads the mean of K in y, which
+it is not: K carries the shadows' strength and their fade at a low sun, and the weather image is relative
+to its own clear percentile, so a closed deck and a clear sky can be the same image):
+- **The light volume's.** The mean pass sums `covered share x exp(-optical depth)` at its points beside K's parts,
+  with neither the strength nor the fade; over the covered share that is the mean along the light's
+  slanted way, and to the power of the light's height (held to 0.1..1) the one straight up: Beer's law
+  in the path's length, for a slanted way through the same clouds is 1 / up as long. It is taken as at
+  least 1e-4 (`AIR_DECK_THIN`), so an opaque deck stays closed at every height. **The power is of the points'
+  mean**, not of each point's depth before the mean (`exp(-depth x up)`): of clouds about as tall as they are
+  wide a lower light meets more, since their slanted shadows lengthen, and the gap fraction falls as that
+  same power; a point's own power keeps an opaque cloud opaque, so those longer shadows would read as more
+  cloud. In one clear weather the mean's power moved little with the hour (0.867, 0.879 and 0.893 at noon, 17:30
+  and 18:36, below; the share 1 at each), where the point's would read about 0.87 at noon and 0.7 at 18:36 [hypothesis: the same
+  stills; the second an estimate] [design, 2026-11-24].
+- **The flat layers'.** `Π (1 - mean alpha x weight)` over the layers the dome draws, of both weathers of a fade with
+  their weights on the dome (cloud_shadows.rs `flat_transmittance`): the absolute product's mean over every
+  offset of the layers, so it does not move as they drift, and over a fade it goes from the one weather's
+  to the other's with the dome's weights, frame by frame. While a new texture of a fade is read the last stays; a weather replaced at once and another
+  worldspace start from 1 until theirs are read. 1 with
+  Cloud shadows off, indoors, no layer's alpha read, and from the cloud plane up (known without the image); a 0
+  is an opaque deck.
+- **Between them** by the covered share, no step at the first sliver of coverage and nothing of either strength.
+  Both describe the same deck: where a low light's ways leave the volume's window, and under the
+  shadows' band where the volume is not read, the flat layers' stands for it (medium_air.rs
+  `deck_transmittance`) [design, 2026-11-24; tested].
+
+A first form took the smoothstep of the mean of K, which fell with the sun and took 8 to 20 % of a clear
+evening: in one clear weather it was 0.918 at
+noon (up 0.975), 0.869 at 17:30 (0.525) and 0.815 at 18:36 (0.306); the volume's T is 0.867, 0.879 and 0.893, D 1
+[hypothesis: read back from pairs of stills of 2026-11-24 with a development build, K turned into T by
+its strength of 0.6; the steps were not kept]. A closed deck keeps a quarter of the light for its breaks; with
+none left an overcast noon had no light at all [hypothesis: the same stills]. The CPU's
+share, the gate and the log's bounds are before D, so they are upper bounds (m may be known on
+the GPU alone). `SHARE` set is an absolute share: D is then 1 (`rays2.w`) [design, 2026-11-24;
+tested].
 
 **Weather mods.** Every input comes each frame from the camera's fog and the live sky; nothing is
 keyed to a weather. A fog the light cannot read (a non-finite field, far not beyond near, power
@@ -993,21 +1040,32 @@ medium_air_compose.rs `pixel_mirror` over medium_air.rs's functions):
    Light glow already draw the sun's aureole) [design]. g and CAP were chosen by eye: a first g 0.6 with
    cap 2.5 gave the hill toward a low sun a hazy glow with the near house clear [design: judged by eye, the
    same stills]; the defaults are lower since ("Debug aids, tune keys and log lines").
-5. **The far blend** t: 1 for cleared depth, else `smoothstep(0.6 S, S, d)`, S sky.rs
+5. **F_near** = F at `min(d, the grid's depth x the ray's length)`, analytic: never above the
+   sample's own share. *Follows from the fog.*
+6. **The blend** `t = t_d + (1 - t_d) g` between the world's rule (0) and the sky's (1), the same t
+   in the correction and in its budget (below). **The far blend** t_d: 1 for cleared depth, else
+   `smoothstep(0.6 S, S, d)`, S sky.rs
    `SKY_DEPTH_FROM` (157,500 units): 0 near, 1 for the sky, continuous in value and slope between,
    so far terrain (which lies beyond S too) reaches the sky's form with no step on a hillside
    [design]. The sky dome's samples have depth beyond S, so they
    reach t = 1 by their distance, as far terrain does; only cleared depth takes t = 1 as such.
-6. **F_near** = F at `min(d, the grid's depth x the ray's length)`, analytic: never above the
-   sample's own share. *Follows from the fog.*
-7. **One continuous form** in display values:
+   **The fog blend** `g = smoothstep(AIR_FOG_BLEND_FROM, 1, F_near)`: the world's rule adds F_near of
+   the fog colour's gain whatever the surface, while the sky's is weighted by SKY, so a plain or a
+   pylon the fog nearly covered stood out white against the sky behind it. With g a surface the fog
+   covers (F_near 1) takes exactly the dome's result, one the fog hardly covers keeps the world's
+   rule, and the union of the two blends has no break in slope where they cross [design, 2026-11-24;
+   tested]. The start, 0.35, is a start value to be set by stills: one near 1 only moves the white
+   band nearer, for at F_near 0.8 the additive rule already adds 0.8 of the gain [design, 2026-11-24].
+   F_near stops at the grid's end, so a surface beyond it in a fog that covers it only there has g
+   below 1 and part of the world's rule [design; known limits]. *The start is an artistic choice.*
+7. **One continuous form** in display values (`k a` with the deck's share D in it, "The medium"):
    `corr_t = max(k a F_near (Vbar_c x mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t), -min(F_near, 1))`,
    `delta = corr_t x mix(C', Y', t)` per channel, and for a sample with depth (not cleared)
    `delta = max(delta, -F_near x C')`; `Y'_new = Y' + delta`, `Y' = max(pixel, 0)^(1/2.2)`,
    `C' = max(fog colour, 0)^(1/2.2)`, the result `max(Y'_new, 0)^2.2` held to 0..60,000 per
    channel (medium_air_compose.wesl `air_result`). Near (t = 0) it is the additive world rule with
    the fog colour as the budget: what the fog put there is re-shaded. A sample with depth never
-   loses more than `F_near x C'` per channel at any far blend t [design; tested]. For a single-sampled fogged opaque fragment `Y' = (1 - f) S' + f C'` the
+   loses more than `F_near x C'` per channel at any blend t [design; tested]. For a single-sampled fogged opaque fragment `Y' = (1 - f) S' + f C'` the
    result is therefore never below `(1 - f) S'` per channel, far terrain included. Under MSAA
    every sample starts from the pixel's one resolved colour, so the floor holds against that
    colour, not against each sample's own surface: three unfogged white samples and one fully
@@ -1025,7 +1083,30 @@ medium_air_compose.rs `pixel_mirror` over medium_air.rs's functions):
    the direction and with the data, and distant terrain reaches beyond `SKY_DEPTH_FROM` [design; known limits].
    *SKY and SKYPHASE are artistic weights; the budget, the floors and the display space follow
    from the fog.*
-8. **The clamp**: every colour the pass computes, the debug views too, is held to 0..60,000 per
+8. **The bright hold**: a gain (`corr_t` above 0) on a pixel that is already bright pushed a lit
+   cloud past white. It becomes `corr_t (1 - t h)`: whole for the sky, none near, shadow untouched.
+   With y the largest channel of Y' and `gain = corr_t x mix(c, y, t)` (c the largest of C'),
+   `over = gain - max(AIR_BRIGHT_FROM - y, 0)`, `room = max(AIR_BRIGHT_TO - max(y,
+   AIR_BRIGHT_FROM), 0)` and `h = over / (over + room) x over / gain` (0 while over is at most 1e-6):
+   nothing is held back while the lifted value stays at or under `AIR_BRIGHT_FROM` 0.50, what is over it
+   is fitted into the room left under `AIR_BRIGHT_TO` 0.76, and a sky pixel at or over 0.76 gains nothing
+   (display values before tonemapping; medium_air.rs `bright_hold`, `hold_bright`). One scalar for the three channels, so a
+   hue keeps; the brightness is the pixel's resolved one for every MSAA sample, t the sample's own;
+   `delta` and `rays` show the held scalar. A brighter pixel never comes out darker under the sky's rule, and
+   a grey one nowhere, at any strength (tested at the Natural look and a stronger one, LIFT 2, CAP 2.5, SKY 0.3, SKYPHASE
+   0.2, at 200 %); between the two rules a strongly coloured pixel in a fog of another colour can lose a few
+   thousandths of a display value as it brightens, since the two largest channels are not the same one.
+   A fade of the gain over the input's own brightness between the two ends cannot hold that: the
+   stronger look's sky gains up to 0.96 of itself, which lifts 0.50 to 0.98 while 0.76 stays [design,
+   2026-11-24]. **Why the ends are so far under white**: the picture's grade comes after this pass and
+   brightens, by about 1.2 in an evening scene (a shown 210 of 255 was 0.68 before it), so white is
+   reached there at about 0.82; with the first ends, 0.70 and 0.95, 25 % of a bright cloud still
+   clipped (16 % with the light off, 30 % with no hold), and with 0.55 and 0.80 20 % [hypothesis: read back from stills of
+   2026-11-24 with a development build; the steps were not kept]. How much the grade brightens depends
+   on the scene and this pass does not know it, so the ends are a fixed heuristic, an artistic choice
+   [design, 2026-11-24].
+9. **The clamp**: the picture is read held to 60,000 per channel (an infinity times a scalar of 0
+   would be no number), and every colour the pass computes, the debug views too, is held to 0..60,000 per
    channel (`AIR_HDR_MAX`, inside `Rgba16Float`'s largest finite value 65,504 [documented: IEEE
    754 binary16]), so bloom and eye adaptation never meet an infinity, also under the extreme
    keys (tested) [design]. Every pixel inside the main pass's viewport
@@ -1036,7 +1117,7 @@ medium_air_compose.rs `pixel_mirror` over medium_air.rs's functions):
 resolved). When their view depths, held to the grid's end, lie within a quarter slice of each
 other, the samples share one volume lookup at the farthest of those depths (free of the samples'
 order, and its sums hold all the fog in front of the nearer ones); otherwise each sample looks up
-its own. Each sample still takes its own F_near and far blend from its own distance [design]. Each sample's
+its own. Each sample still takes its own F_near and blend from its own distance [design]. Each sample's
 correction is taken on the resolved colour, an edge approximation under a display-space blend,
 exact for none. Nothing needs multisampling on or off.
 
@@ -1044,7 +1125,8 @@ exact for none. Nothing needs multisampling on or off.
 values: `near pixels at most +<g1> x the fog colour, far pixels at most +<g2> x mix(fog colour,
 pixel, t), sky at most x<1 + gs> (display values; a snapshot for this weather, hour and view)`,
 with `g1 = (LIFT x most - 1) x k a x F`, g2 the largest over t of `(LIFT x mix(most, mix(1, most,
-SKYPHASE), t) - 1) x mix(1, SKY, t) x k a x F` (the far form's phase and weight at that t), and
+SKYPHASE), t) - 1) x mix(1, SKY, t) x k a x F` (the far form's phase and weight at that t; terrain
+in fog has a t above 0 too), and
 `gs = (LIFT x mix(1, most, SKYPHASE) - 1) x k a x F x SKY`; F is the share at the grid's end on
 the view's longest ray (the corner ray), so no pixel's F_near is above it: a conservative bound
 for the whole view [design]. The
@@ -1186,14 +1268,33 @@ another; `solid cores: removed (...)` when the light is no longer drawn; nothing
 
 - The fullscreen composite cannot know which fragments were fogged: the scope's image, some
   particles, the water's mix and emissive overlays take the correction of what the depth shows.
+- The deck's share knows the deck only while Cloud shadows is on (1 without). The flat layers' T leaves out the
+  dome's own fade towards the horizon and takes the layers as independent, and how well it agrees with the
+  volume's T for the same weather is not measured: where they differ, D moves as the light sinks and the
+  ways from the mean pass's points leave the volume's window (under a light height of about 0.1 [hypothesis:
+  from the window's size and the planet's curve; at 0.06 about half is left in the test's fixture]), and under
+  0.1 the volume's power is held, so a thin sheet reads somewhat thicker there. The volume's power of the
+  light's height fits an even sheet and clouds about as tall as wide. A broken deck without height, whose gaps no
+  slant closes, reads clearer at a low sun: half clear and half opaque, D is 0.35 with the light overhead and
+  1 at a height of 0.25 (a test states it). A closed deck's quarter is for its breaks and
+  is there without any [design, 2026-11-24].
+- The bright hold's ends are fixed while the grade after it depends on the scene: one that brightens more
+  may still clip a lit cloud, one that darkens is held sooner than it need be. It judges a pixel by its
+  resolved colour: at a silhouette under MSAA the mix of both
+  sides decides for each.
+- The fog blend reads the fog share at the grid's end at most (F_near): terrain beyond the end in a fog
+  that covers it only there keeps part of the world's additive rule.
 - Blended surfaces (water, glass, particles) get the light of what lies behind them; the solid texels
   of placed blended shapes do not ("Solid cores of blended shapes").
 - With the Mesh terrain blend row on, a converted shape's core has the plain material's colours, not the landscape's
   near the ground; the clone is drawn over it, so they show through at most 15 % of the colour there.
 - Desert haze: its veil has two colours; the light changes only the weather fog's `f x C'` term
   near the camera and leaves the haze's term alone; far away (t toward 1) the budget is the
-  pixel's own colour, so the haze is modulated only through it. Neither it nor aerial perspective is
-  tuned together with the light yet.
+  pixel's own colour, so the haze is modulated only through it. Neither it nor aerial perspective doubles
+  the light: with both on it adds to a picture what it adds without them, to 0.03 of 255 in the mean and 0.5
+  in any 20 x 20 block [observed, 2026-11-25: a development build of that day, Goodsprings, 1920x1080, a stronger look (LIFT 2, SHADE 0.85, RAYS 7, G 0.7, CAP 2.5, SKY 0.3, SKYPHASE 0.2), two views at
+  07:00, 12:21, 17:30 and 18:36 under NVWastelandClear, NVWastelandHazy (where both are off by their own rule) and
+  NVBlackMountainWeather; still sky, clouds' phase held]. Not looked at in a wide vista.
 - The dither is fixed: it stays with the screen while the view pans (the filter softens it; a
   temporal filter is its cure).
 - FSR's reactive mask compares the picture after the air with its opaque reference captured
@@ -1299,7 +1400,7 @@ defaults given here. Read once at the start, usable in a played run:
 | Key | Range | Default | What |
 |---|---|---|---|
 | `STRENGTH` | 0..2 | the aid's value, else the slider's (1 at 100 %) | the overall scale k of the applied correction |
-| `SHARE` | 0..1, `auto` | `auto` (s from the lights) | the sunlit share s |
+| `SHARE` | 0..1, `auto` | `auto` (s from the lights) | the sunlit share s; set, the deck's share is 1 |
 | `G` | 0..0.95 | 0.5 | the forward lobe |
 | `BACK`, `BACKWEIGHT` | -0.95..0.95, 0..1 | -0.3, 0 | the back lobe and its weight |
 | `CAP` | 1..8 | 1.5 | the upper limit of the phase's largest value |
@@ -1318,7 +1419,8 @@ defaults given here. Read once at the start, usable in a played run:
 
 The defaults are the Natural look, set by stills [design, 2026-11-24]. The earlier values (G 0.6, CAP 2.5,
 RAYS 6, LIFT 1.5, SKY 0.5, the same SHADE) drew the far plain and the pylons on the horizon of a hazy morning
-as white cut-outs and lifted noon and overcast air [hypothesis: stills of 2026-11-24 at Goodsprings, a
+as white cut-outs (the fog blend, "The composite" 6, takes those away at their cause) and lifted noon and
+overcast air (the deck's share, "The medium", is for the overcast whatever the values) [hypothesis: stills of 2026-11-24 at Goodsprings, a
 development build of that day; the steps were not kept]. The first values (RAYS 4, LIFT 1.75, SHADE 0.5,
 SKY 1) took shadowed air darker than the open haze by up to 24 levels of 255 and washed out the sky beside a
 low sun [hypothesis: about 50 runs of 2026-11-20 at Goodsprings with development builds of that day;
@@ -1354,7 +1456,7 @@ grid over the adapter's 3D limit, a failed pipeline, missing bindings). Pipeline
 **Tests**: unit tests of the pure maths beside it (the slice curve and its figures, froxel
 geometry round trips, the fog share against fog.rs and under synthetic extreme weathers, the
 phase's sphere mean and cap, the sums and the lookup, the lit fraction, the relative form, the
-floor and the bounds, the far blend's continuity, the gate and its log, the tune file); CPU
+floor and the bounds, the far and fog blends' continuity, the deck's share, the bright hold, the gate and its log, the tune file); CPU
 mirrors of the shaders' loops (`column_mirror_at`, `lookup_mirror`, `pixel_mirror`, the filter's;
 the grid's walks against a reference of the column written apart from them, for every slice count)
 with numerical fixtures (an unobstructed sun fully lit between columns, MSAA samples with their

@@ -22,18 +22,23 @@
 //! ([`relative_lit`]), applies the pixel's own phase once (p_eff, [`phase_floor`]), takes the
 //! fog share F_near analytically at the pixel's distance held to the grid's end
 //! ([`near_share`]) and applies **one continuous form** in display values for every sample
-//! ([`far_blend`], [`blended_correction`], [`compose_blended`]):
+//! ([`far_blend`], [`sample_blend`], [`blended_correction`], [`compose_blended`]):
 //!
 //! `Y'_new = Y' + corr_t x B_t`, `B_t = mix(C', Y', t)`,
 //! `corr_t = max(k a F_near (Vbar_c x mix(p_eff, mix(1, p_eff, SKYPHASE), t) - 1) x mix(1, SKY, t), -min(F_near, 1))`,
 //!
 //! t = 0 for near world samples (the additive world rule, the fog colour C' as the budget), 1
 //! for cleared depth (the sky's multiplicative rule: the pixel's own display value Y' as the
-//! budget), a smoothstep between 0.6 x sky.rs `SKY_DEPTH_FROM` and it for far terrain, so no
-//! distance has a step; a = clamp(s, 0, 1), the sunlit share alone ([`effective_share`], s
+//! budget), a smoothstep between 0.6 x sky.rs `SKY_DEPTH_FROM` and it for far terrain
+//! ([`far_blend`]), joined with a smoothstep of F_near from `AIR_FOG_BLEND_FROM` to 1
+//! ([`fog_blend`]: a surface the fog covers takes the rule of the sky it stands against), so no
+//! distance and no fog has a step; a = clamp(s, 0, 1), the sunlit share alone ([`effective_share`], s
 //! from [`scaled_share`]); k = STRENGTH, the one overall scale of the correction, 0..=2 (the
 //! settings row's slider, 0 to 200 %, or the aid; [`applied_scale`] packs k x a), applied
-//! before the floor, so k 0 changes nothing and the floor holds at any k; the result held to
+//! before the floor, so k 0 changes nothing and the floor holds at any k; on the GPU that scale is
+//! times the deck's share D of the clouds' own mean transmittance ([`deck_share`]: under a closed deck
+//! the fog's light is mostly the sky's, whatever the lights' share says); a gain is held off pixels that
+//! are already bright by the sky's share t of it ([`hold_bright`]); the result held to
 //! 0..=[`AIR_HDR_MAX`] in linear light. For a fogged
 //! opaque fragment `Y' = (1 - f) S' + f C'` the result is never below `(1 - f) S'` per
 //! channel near (shadow loses at most the budget share F_near of B_t).
@@ -70,9 +75,10 @@
 //!
 //! The GPU half (`medium_air_grid.wesl`, `medium_air_compose.wesl`) mirrors
 //! [`AirCurve::depth_at`], [`AirCurve::coord`], [`fog_share`], [`NormedPhase::phase`],
-//! [`column_nm`], [`sums_at`], [`lit_fraction`], [`relative_lit`], [`phase_floor`],
-//! [`near_share`], [`far_blend`], [`blended_correction`], [`compose_blended`] and
-//! [`slices_agree`] (the far form is the sky's modulation: the ray's lit fraction modulates
+//! [`column_nm`], [`sums_at`], [`lit_fraction`], [`relative_lit`], [`deck_transmittance`],
+//! [`deck_share`], [`phase_floor`],
+//! [`near_share`], [`far_blend`], [`sample_blend`], [`blended_correction`], [`bright_hold`],
+//! [`hold_bright`], [`compose_blended`] and [`slices_agree`] (the far form is the sky's modulation: the ray's lit fraction modulates
 //! the sky's own light [documented: Bauer 2019, slide 62]); [`pack`] fills the uniform's
 //! groups. The mirrors only tests call are `#[cfg(test)]`; the composite's pixel as a whole is
 //! mirrored in medium_air_compose.rs (`pixel_mirror`).
@@ -111,9 +117,56 @@ pub const DISPLAY_GAMMA: f32 = 2.2;
 /// The far blend ([`far_blend`]) starts at this share of the sky's distance [design]. Mirrored in the composite.
 #[cfg(test)]
 pub const SKY_TAPER_FROM: f32 = 0.6;
+/// The fog blend ([`fog_blend`]) starts at this fog share F_near and is whole at a share of 1.
+/// The additive world rule adds F_near of the fog colour's own gain whatever the surface, so a
+/// silhouette the fog nearly covered outshone the sky behind it, whose rule is weighted by SKY; a
+/// start near 1 would only move that band nearer the camera (at F_near 0.8 the rule already adds
+/// 0.8 of the gain) [design, 2026-11-24: a start value, to be set by stills]. Mirrored in the composite.
+#[cfg(test)]
+pub const AIR_FOG_BLEND_FROM: f32 = 0.35;
+#[cfg(test)]
+const _: () = assert!(AIR_FOG_BLEND_FROM > 0.0 && AIR_FOG_BLEND_FROM < 1.0);
+/// The clouds' mean transmittance ([`deck_transmittance`]) at and below which the deck's share
+/// ([`deck_share`]) is `AIR_DECK_LEAST`, and at and above which it is 1 [design, 2026-11-24].
+/// Mirrored in the composite.
+#[cfg(test)]
+pub const AIR_DECK_FROM: f32 = 0.40;
+#[cfg(test)]
+pub const AIR_DECK_TO: f32 = 0.85;
+/// The deck's share under a closed deck: a quarter is left for its breaks, where the light was gone
+/// with none [design, 2026-11-24]. Mirrored in the composite.
+#[cfg(test)]
+pub const AIR_DECK_LEAST: f32 = 0.25;
+/// The least light height (the sine of its elevation) [`deck_transmittance`] takes [design,
+/// 2026-11-24]. Mirrored in the grid shader's mean pass.
+#[cfg(test)]
+pub const AIR_DECK_UP: f32 = 0.1;
+/// The least transmittance it raises to a power: at the least height it is just under
+/// `AIR_DECK_FROM`, so an opaque deck is one at every height [design, 2026-11-24]. Mirrored in the grid
+/// shader's mean pass.
+#[cfg(test)]
+pub const AIR_DECK_THIN: f32 = 1e-4;
+#[cfg(test)]
+const _: () = assert!(AIR_DECK_FROM < AIR_DECK_TO && AIR_DECK_TO <= 1.0);
+/// The bright hold ([`bright_hold`]): the display value (before tonemapping) up to which a gain may
+/// lift a pixel's largest channel untouched, and the one no gain lifts the sky past. Under white by a
+/// margin, since the picture's grade comes after this pass and brightens: by about 1.2 in an evening
+/// scene, where white was reached at about 0.82 and an end of 0.95 left clouds clipping. How much
+/// depends on the scene; the two are a fixed heuristic [design, 2026-11-24: set by stills;
+/// docs/design/volumetric-medium.md, "The composite" 8]. Mirrored in the composite.
+#[cfg(test)]
+pub const AIR_BRIGHT_FROM: f32 = 0.50;
+#[cfg(test)]
+pub const AIR_BRIGHT_TO: f32 = 0.76;
+#[cfg(test)]
+const _: () = assert!(AIR_BRIGHT_FROM < AIR_BRIGHT_TO);
+/// An excess over [`AIR_BRIGHT_FROM`] at or below this is left alone (far under a display level; no
+/// division of nothings). Mirrored in the composite.
+#[cfg(test)]
+pub const AIR_BRIGHT_LEAST: f32 = 1e-6;
 /// The composite's sample agreement: a pixel's depth samples share one volume tap when their
 /// view depths, held to the grid's end, lie within this share of a slice of each other
-/// ([`slices_agree`]); each sample still takes its own fog share and far blend [design]. Mirrored in the composite.
+/// ([`slices_agree`]); each sample still takes its own fog share and blend [design]. Mirrored in the composite.
 #[cfg(test)]
 pub const AIR_AGREE_SLICES: f32 = 0.25;
 /// The largest linear value the composite writes, per channel, on every path: inside
@@ -645,7 +698,7 @@ pub fn near_share(distance: f32, grid_end_distance: f32, fog: AirFog) -> f32 {
 /// taken at the nearest ([`AirCurve::slice_width`]). The volume's value moves by less than a
 /// quarter of a slice's change across them. Samples beyond the grid's end, cleared depth
 /// included (its view depth is the grid's end), all read the end's value and agree. Only the
-/// lookup is shared: each sample still takes its own F_near and far blend. True for no samples [design].
+/// lookup is shared: each sample still takes its own F_near and blend. True for no samples [design].
 #[cfg(test)]
 pub fn slices_agree(view_depths: &[f32], curve: &AirCurve, within: f32) -> bool {
     let held = |z: f32| z.min(curve.depth);
@@ -711,6 +764,50 @@ pub fn reference_visibility(reference: Option<f32>, cloud_mean: f32) -> f32 {
     }
 }
 
+/// The clouds' own mean transmittance for a light from straight above, T, with part of the sky in the
+/// light volume: `t_vol` the mean of exp(-optical depth) along the light's slanted way over the covered
+/// points (neither the shadows' strength nor their low-sun fade is in it, as both are in K), `covered`
+/// the covered share, `t_flat` the flat layers' (medium_air_grid.rs `flat_deck`), which has no way and
+/// no light in it. By Beer's law in the path's length a slanted way through the same clouds is 1 / up times
+/// as long, so the volume's is `max(t_vol, AIR_DECK_THIN)^up`, `up` the height of the unit direction
+/// to the light (the uniform's `light.y`; `follow_air` packs the sun light's back, world y up) held
+/// to `AIR_DECK_UP`..=1, NaN as 1. The power is of the points' mean, not of each point's depth before
+/// the mean: of clouds about as tall as they are wide the slanted light meets more the lower it
+/// stands (the gap fraction falls as the same power of 1 / up), while a point's power keeps an opaque
+/// cloud opaque, and what the longer shadows cover would read as more cloud: one clear weather's
+/// mean along the light, taken so, was 0.867, 0.879 and 0.893 at noon, 17:30 and 18:36, where each
+/// point's own power would give about 0.87 at noon and 0.7 at 18:36 [hypothesis: read back from stills of 2026-11-24
+/// with a development build; the steps were not kept]. The known limit is a broken deck without
+/// height, whose gaps no slant closes: it reads clearer at a low sun (half clear, half opaque, D is
+/// 0.35 overhead and 1 at a height of 0.25). The two are mixed by the covered share. Both describe the same deck, so the share
+/// does not change with who covers it: at a low light the ways leave the volume's window, under the
+/// shadows' band the volume is not read. The mean pass takes it (medium_air_grid.wesl `air_cloud_mean`)
+/// [design, 2026-11-24].
+#[cfg(test)]
+pub fn deck_transmittance(t_vol: f32, covered: f32, t_flat: f32, up: f32) -> f32 {
+    let up = if up.is_nan() { 1.0 } else { up.clamp(AIR_DECK_UP, 1.0) };
+    covered * t_vol.clamp(AIR_DECK_THIN, 1.0).powf(up) + (1.0 - covered) * t_flat
+}
+
+/// The deck's share D of the correction: `AIR_DECK_LEAST` + the rest x the smoothstep of the clouds' own
+/// transmittance T (the uniform's `cloud_mode.z`: [`deck_transmittance`], or the flat layers' alone; a
+/// 0 is an opaque deck; the reference visibility keeps the mean of K) from
+/// `AIR_DECK_FROM` to `AIR_DECK_TO`, once a pixel, times the applied
+/// scale ([`applied_scale`]), so it weakens what is added and what is taken alike, the sky's too.
+/// The sunlit share s ([`scaled_share`]) is taken of the weather's lights, which under a closed deck
+/// still name a direct part, while the air's light there is mostly the deck's own: the light lifted
+/// an overcast picture as a whole. 1 while the tune's `SHARE` is set
+/// (`share_set`: an absolute share, a diagnostic). The gate, the log's bounds and [`pack`] are
+/// before it: upper bounds [design, 2026-11-24].
+#[cfg(test)]
+pub fn deck_share(transmittance: f32, share_set: bool) -> f32 {
+    if share_set {
+        return 1.0;
+    }
+    let x = ((transmittance - AIR_DECK_FROM) / (AIR_DECK_TO - AIR_DECK_FROM)).clamp(0.0, 1.0);
+    AIR_DECK_LEAST + (1.0 - AIR_DECK_LEAST) * (x * x * (3.0 - 2.0 * x))
+}
+
 /// The relative lit fraction: `Vbar_c = clamp(1 + RAYS x (Vbar - V_ref) / V_ref, SHADE,
 /// LIFT)`: air as lit as the weather's average (Vbar = V_ref) is exactly 1 whatever RAYS is
 /// (unchanged), shadowed air falls toward SHADE and lit air rises up to LIFT (1..=3: how far
@@ -752,6 +849,29 @@ pub fn far_blend(distance: f32, cleared: bool, sky_from: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// The fog blend g of a sample: the smoothstep of its fog share F_near ([`near_share`]) from
+/// `AIR_FOG_BLEND_FROM` to 1: 0 where the surface shows through the fog, 1 where the fog covers
+/// it, value and slope continuous at both ends [design, 2026-11-24]. A NaN share gives 0.
+#[cfg(test)]
+pub fn fog_blend(f_near: f32) -> f32 {
+    if f_near.is_nan() {
+        return 0.0;
+    }
+    let x = ((f_near - AIR_FOG_BLEND_FROM) / (1.0 - AIR_FOG_BLEND_FROM)).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// A sample's blend t between the world's rule and the sky's: the far blend t_d ([`far_blend`])
+/// joined with the fog blend g ([`fog_blend`]) as `t_d + (1 - t_d) g`: never below either, 1 when
+/// either is, and, unlike the larger of the two, with no break in slope where they cross. The same
+/// t goes into the correction and the budget, so a surface the fog covers wholly (F_near 1) takes
+/// exactly the result the sky dome behind it takes; at and below `AIR_FOG_BLEND_FROM` it is the far
+/// blend alone [design, 2026-11-24].
+#[cfg(test)]
+pub fn sample_blend(t_distance: f32, f_near: f32) -> f32 {
+    t_distance + (1.0 - t_distance) * fog_blend(f_near)
+}
+
 /// WGSL's `mix(x, y, t)`, written as the shader computes it: `x (1 - t) + y t` (exact at t 0
 /// and 1 for finite x and y).
 #[cfg(test)]
@@ -775,6 +895,44 @@ pub fn blended_correction(vbar_c: f32, p_eff: f32, sky_phase: f32, a: f32, f_nea
     let phase_t = mix(p_eff, mix(1.0, p_eff, k), t);
     let corr = a * f_near * (vbar_c * phase_t - 1.0) * mix(1.0, sky, t);
     corr.max(-f_near.min(1.0))
+}
+
+/// The bright hold h: the share of a gain (display values) to hold back from a pixel whose largest
+/// channel is `peak`. Nothing while `peak + gain` is at most `AIR_BRIGHT_FROM`; the part over it
+/// ("over") is fitted into the room left under `AIR_BRIGHT_TO`, counted from the larger of `peak` and
+/// `AIR_BRIGHT_FROM`, as `over x room / (over + room)`: a small excess passes nearly whole, a large
+/// one never fills the room, and from `AIR_BRIGHT_TO` on there is no room and h is 1. So with the
+/// hold whole the pixel comes out at most at the larger of `peak` and `AIR_BRIGHT_TO`, and a
+/// brighter input is never a darker output whatever the gain's strength: with R the room and o the
+/// excess, the output's slope above `AIR_BRIGHT_FROM` is `1 - o^2 / (o + R)^2` plus the gain's own,
+/// neither below 0, and below it R is fixed and the output rises with o.
+///
+/// It looks at the lifted value, not at the input's brightness alone: a fade of the gain over an
+/// input between the same ends cannot be monotonic at the stronger look's 200 % (a gain of up to 0.96
+/// of the sky lifts 0.55 to 1.08, which a 0.80 left alone is darker than) [design, 2026-11-24; tested].
+#[cfg(test)]
+pub fn bright_hold(peak: f32, gain: f32) -> f32 {
+    let over = gain - (AIR_BRIGHT_FROM - peak).max(0.0);
+    if over.is_nan() || over <= AIR_BRIGHT_LEAST {
+        return 0.0;
+    }
+    let room = (AIR_BRIGHT_TO - peak.max(AIR_BRIGHT_FROM)).max(0.0);
+    over / (over + room) * (over / gain)
+}
+
+/// One sample's scalar with the bright hold: a gain (`corr` above 0) becomes `corr x (1 - t h)`, h
+/// ([`bright_hold`]) taken of the gain on the pixel's largest channel, `corr x mix(fog_peak, peak,
+/// t)` (`peak` and `fog_peak` the largest channels of Y' and C'). One scalar for the three channels,
+/// so a hue keeps; whole for the sky (t 1), none near (t 0: the world's rule is as it was), and
+/// shadow (`corr` at most 0) is untouched. Between, the output is the t-weighted mean of the two
+/// outputs, each rising with the pixel's brightness, so it rises too [design, 2026-11-24].
+#[cfg(test)]
+pub fn hold_bright(corr: f32, peak: f32, fog_peak: f32, t: f32) -> f32 {
+    if corr > 0.0 {
+        corr * (1.0 - t * bright_hold(peak, corr * mix(fog_peak, peak, t)))
+    } else {
+        corr
+    }
 }
 
 /// The one form's composite: per channel
@@ -887,7 +1045,8 @@ pub fn effective_share(s: f32, share_override: Option<f32>) -> f32 {
 /// effective share a ([`effective_share`], 0..=1), so 0..=2. It multiplies the whole
 /// correction before the floor (`corr_t' = k x corr_t`, [`blended_correction`] takes it as its
 /// `a`): k 0 changes no pixel, k 2 doubles every correction and the floor
-/// `-min(F_near, 1)` still holds. Carried in the uniform's `phase2.z` [design].
+/// `-min(F_near, 1)` still holds. Carried in the uniform's `phase2.z`; the composite multiplies it
+/// by the deck's share ([`deck_share`]) [design].
 pub fn applied_scale(strength: f32, a: f32) -> f32 {
     let k = if strength.is_nan() { 0.0 } else { strength.clamp(AIR_STRENGTHS.0, AIR_STRENGTHS.1) };
     let a = if a.is_nan() { 0.0 } else { a.clamp(0.0, 1.0) };
@@ -1094,7 +1253,8 @@ pub struct AirTune {
     /// The light's strength, the one overall scale of its correction ([`applied_scale`]),
     /// 0..=2 (0 off; 1 the look as tuned).
     pub strength: f32,
-    /// The sunlit share s, overriding [`scaled_share`] when set, 0..=1 (`SHARE`).
+    /// The sunlit share s, overriding [`scaled_share`] when set, 0..=1 (`SHARE`); the deck's share
+    /// ([`deck_share`]) is then 1.
     pub share: Option<f32>,
     /// The forward lobe's g, 0..=0.95 (`G`; a forward lobe, never a back one: that is
     /// `BACK`'s).
@@ -1110,7 +1270,7 @@ pub struct AirTune {
     /// The grid's depth, overriding the start aid when set, 1,000..=200,000.
     pub depth: Option<f32>,
     /// SKY: the weight of the far form (`mix(1, SKY, t)` in [`blended_correction`]: cleared
-    /// depth takes it whole, far terrain by its far blend), 0..=1, default 0.25. Only ever a
+    /// depth takes it whole, far or fogged terrain by its blend t), 0..=1, default 0.25. Only ever a
     /// weight: above 1 it amplified what shadow takes past the fog light a pixel was given.
     pub sky_weight: f32,
     /// SKYPHASE: how much of the phase a sky sample's modulation takes
@@ -1485,25 +1645,26 @@ pub fn corner_ray_len(proj_x: f32, proj_y: f32) -> f32 {
 /// The whole view's bounds of the light, in display values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewBounds {
-    /// Near pixels (t = 0): at most `+near x C'`, `near = (LIFT x most - 1) x a x F`.
+    /// Near pixels the fog hardly covers (t = 0): at most `+near x C'`, `near = (LIFT x most - 1) x a x F`.
     pub near: f32,
-    /// Far pixels (0 < t < 1): at most `+far x mix(C', Y', t)` (their budget), `far` the
+    /// Far or fogged pixels (0 < t < 1): at most `+far x mix(C', Y', t)` (their budget), `far` the
     /// largest over t of `(LIFT x mix(most, mix(1, most, SKYPHASE), t) - 1) x mix(1, SKY, t)
     /// x a x F` (the shader's phase and weight at that t).
     pub far: f32,
-    /// The sky and anything at t = 1: at most `x (1 + sky)` on the pixel's own display value,
+    /// The sky and anything at t = 1 (terrain the fog covers too): at most `x (1 + sky)` on the pixel's own display value,
     /// `sky = (LIFT x mix(1, most, SKYPHASE) - 1) x a x F x SKY`.
     pub sky: f32,
 }
 
-/// The far blend's steps over which [`ViewBounds::far`] takes its largest factor (t = 0 and 1
+/// The blend's steps over which [`ViewBounds::far`] takes its largest factor (t = 0 and 1
 /// included) [design].
 const BOUND_T_STEPS: u32 = 64;
 
 /// The whole view's bounds of the light ([`ViewBounds`]), with F the fog share at the grid's
 /// end on the view's longest ray (`grid.depth x corner`, [`corner_ray_len`]; F does not fall
 /// with distance for any fog, so no pixel's F_near is above it) and `a` the applied scale
-/// k x a ([`applied_scale`]: the strength scales every bound). Vbar_c <= LIFT and p_eff <=
+/// k x a ([`applied_scale`]: the strength scales every bound; before the deck's share and the
+/// bright hold, which only lower it). Vbar_c <= LIFT and p_eff <=
 /// most (FLOOR <= 1 <= most); each factor is 0 when it is not above 1 (shadow only takes,
 /// never adds). A snapshot: F follows the weather's fog and the view's projection, s the hour
 /// [design].
@@ -1514,7 +1675,7 @@ pub fn view_bounds(grid: &AirGrid, phase: &NormedPhase, a: f32, tune: &AirTune, 
     let k = tune.sky_phase.clamp(0.0, 1.0);
     let sky_weight = tune.sky_weight.clamp(0.0, 1.0);
     let far_phase = 1.0 + (most - 1.0) * k;
-    // The factor at far blend t, as the shader applies the phase and the weight there.
+    // The factor at blend t, as the shader applies the phase and the weight there.
     let at = |t: f32| (lift * (most * (1.0 - t) + far_phase * t) - 1.0).max(0.0) * (1.0 - t + sky_weight * t) * a * f;
     let far = (0..=BOUND_T_STEPS).map(|i| at(i as f32 / BOUND_T_STEPS as f32)).fold(0.0f32, f32::max);
     ViewBounds { near: at(0.0), far, sky: at(1.0) }
@@ -2207,8 +2368,8 @@ mod tests {
     #[test]
     fn the_light_chain_keeps_the_floor() {
         // Column sums -> the lookup -> the lit fraction -> the relative lit fraction -> F_near
-        // -> the one form, for real fogs and near world samples (t = 0) in front of, at and
-        // beyond the grid's end: the floor (1 - f) S' holds for any RAYS, SHADE, LIFT, FLOOR.
+        // -> the fog blend -> the one form, for real fogs and world samples nearer than the far
+        // blend's start (t_d = 0, t = g) in front of, at and beyond the grid's end: the floor (1 - f) S' holds for any RAYS, SHADE, LIFT, FLOOR.
         let phase = AirTune::default().phase().normed();
         let gamma = |v: f32| v.max(0.0).powf(1.0 / 2.2);
         let colour = Vec3::new(0.8, 0.7, 0.6);
@@ -2232,8 +2393,9 @@ mod tests {
                             // a is the applied scale: up to strength 2 x share 1 = 2.
                             for (s, a) in [(0.0f32, 1.0f32), (0.5, 0.35), (4.0, 1.0), (0.0, 2.0), (0.5, applied_scale(2.0, 0.6)), (4.0, 2.0)] {
                                 let yd = Vec3::splat((1.0 - f) * gamma(s)) + cd * f;
-                                let c = blended_correction(vc, phase_floor(p, floor), 0.0, a, f_near, 1.0, 0.0);
-                                let out = compose_blended(yd.powf(2.2), c, colour, 0.0, Some(f_near)).powf(1.0 / 2.2);
+                                let t = sample_blend(0.0, f_near);
+                                let c = blended_correction(vc, phase_floor(p, floor), 0.0, a, f_near, 1.0, t);
+                                let out = compose_blended(yd.powf(2.2), c, colour, t, Some(f_near)).powf(1.0 / 2.2);
                                 let floor_d = (1.0 - f) * gamma(s);
                                 assert!(out.min_element() >= floor_d - 1e-5 * yd.max_element().max(1.0), "{fog:?} {d} {which} {p}: {out} < {floor_d}");
                             }
@@ -2328,6 +2490,133 @@ mod tests {
         // mix as WGSL computes it: exact at its ends.
         assert_eq!(mix(0.3, 7.0, 0.0), 0.3);
         assert_eq!(mix(0.3, 7.0, 1.0), 7.0);
+    }
+
+    /// The deck's share: its least up to its start (an opaque deck's 0 among it), 1 from its end, the
+    /// smoothstep's 0.104 and 1/2 of the rest at a fifth and half of the way, monotone and continuous;
+    /// with `SHARE` set it is 1.
+    #[test]
+    fn the_deck_share_follows_the_clouds_transmittance() {
+        let at = |x: f32| AIR_DECK_FROM + x * (AIR_DECK_TO - AIR_DECK_FROM);
+        let rest = |s: f32| AIR_DECK_LEAST + (1.0 - AIR_DECK_LEAST) * s;
+        assert_eq!(deck_share(0.0, false), AIR_DECK_LEAST);
+        assert_eq!(deck_share(AIR_DECK_FROM, false), AIR_DECK_LEAST);
+        assert_eq!((deck_share(AIR_DECK_TO, false), deck_share(1.0, false)), (1.0, 1.0));
+        // x^2 (3 - 2x): 0.04 x 2.6 = 0.104, 0.5.
+        assert!((deck_share(at(0.2), false) - rest(0.104)).abs() < 1e-5);
+        assert!((deck_share(at(0.5), false) - rest(0.5)).abs() < 1e-5);
+        let mut last = AIR_DECK_LEAST;
+        for i in 0..=1_000 {
+            let d = deck_share(i as f32 / 1_000.0, false);
+            assert!((AIR_DECK_LEAST..=1.0).contains(&d) && d + 1e-6 >= last && d - last <= 1.5 * 0.001 / (AIR_DECK_TO - AIR_DECK_FROM) + 1e-6, "{i}: {last} -> {d}");
+            last = d;
+        }
+        for t in [0.0f32, 0.3, 1.0] {
+            assert_eq!(deck_share(t, true), 1.0, "SHARE set, {t}");
+        }
+    }
+
+    /// The volume's transmittance taken to a light from straight above, and its mix with the flat
+    /// layers': one clear weather at three hours is one share, Beer's law exactly for a sheet, an
+    /// opaque deck closed at every height, the covered share's weights, the height held.
+    #[test]
+    fn the_decks_transmittance_is_the_vertical_one() {
+        // The mean along the light at 12:21, 17:30 and 18:36 (heights 0.975, 0.525, 0.306), as read
+        // back on 2026-11-24 (K at strength 0.6 turned into T): 0.867, 0.879 and 0.893, the share 1.
+        for (t, up, above) in [(0.8633f32, 0.975f32, 0.8665f32), (0.7817, 0.525, 0.8787), (0.6917, 0.306, 0.8933)] {
+            let deck = deck_transmittance(t, 1.0, 0.0, up);
+            assert!((deck - above).abs() < 1e-3, "{t} {up}: {deck}");
+            assert_eq!(deck_share(deck, false), 1.0, "{t} {up}");
+        }
+        for up in [0.1f32, 0.25, 0.6, 1.0] {
+            assert!((deck_transmittance((-0.4f32 / up).exp(), 1.0, 1.0, up) - (-0.4f32).exp()).abs() < 1e-5, "{up}");
+        }
+        for up in [-1.0f32, 0.0, 0.05, 0.1, 0.5, 1.0] {
+            assert_eq!(deck_share(deck_transmittance(0.0, 1.0, 0.0, up), false), AIR_DECK_LEAST, "opaque, {up}");
+        }
+        assert!((deck_transmittance(0.25, 0.5, 0.9, 0.5) - 0.7).abs() < 1e-6, "half the root of 0.25, half the flat 0.9");
+        assert_eq!(deck_transmittance(0.25, 0.0, 0.9, 0.5), 0.9, "none covered: the flat layers' alone");
+        // The known limit: a broken deck without height, half clear and half opaque, whose mean is 0.5
+        // whatever the light's height, reads clearer at a low sun: D 0.345 overhead (x 0.222, 0.126
+        // of the rest), 0.999 at 0.25 (0.5^0.25 = 0.841).
+        assert!((deck_share(deck_transmittance(0.5, 1.0, 0.0, 1.0), false) - 0.345).abs() < 1e-3);
+        assert!((deck_share(deck_transmittance(0.5, 1.0, 0.0, 0.25), false) - 0.999).abs() < 1e-3);
+        assert_eq!(deck_transmittance(0.5, 1.0, 0.0, f32::NAN), 0.5);
+        assert_eq!(deck_transmittance(0.5, 1.0, 0.0, 0.0), deck_transmittance(0.5, 1.0, 0.0, AIR_DECK_UP));
+    }
+
+    /// The bright hold: none while the lifted pixel stays at or under its start, all of the gain
+    /// from its end on, between them the excess fitted into the room (hand figures), in 0..=1,
+    /// and never a lift past the end.
+    #[test]
+    fn the_bright_hold_fits_the_gain_under_its_end() {
+        let (from, to) = (AIR_BRIGHT_FROM, AIR_BRIGHT_TO);
+        for peak in [0.0f32, 0.3, from - 0.2] {
+            assert_eq!(bright_hold(peak, 0.1), 0.0);
+        }
+        for gain in [0.01f32, 0.2, 5.0] {
+            assert_eq!(bright_hold(to, gain), 1.0);
+            assert_eq!(bright_hold(40.0, gain), 1.0);
+        }
+        // At the start itself an excess as large as the room (to - from) keeps half.
+        let room = to - from;
+        assert!((bright_hold(from, room) - 0.5).abs() < 1e-6);
+        // Halfway up, room / 2 left, a gain of twice that room: 2 / 3 held back.
+        assert!((bright_hold(from + 0.5 * room, room) - 2.0 / 3.0).abs() < 1e-5);
+        // Below the start by a room, a gain of two rooms: the excess is one room, half of it held
+        // back: a quarter of the gain.
+        assert!((bright_hold(from - room, 2.0 * room) - 0.25).abs() < 1e-5);
+        for i in 0..=150 {
+            let peak = i as f32 / 100.0;
+            for gain in [0.0f32, 1e-7, 1e-4, 0.05, 0.3, 1.0, 8.0, 400.0] {
+                let h = bright_hold(peak, gain);
+                assert!((0.0..=1.0).contains(&h), "{peak} {gain}: {h}");
+                assert!(peak + gain * (1.0 - h) <= peak.max(to) + 1e-4_f32.max(gain * 1e-6), "{peak} {gain}: {h}");
+            }
+        }
+        assert_eq!(bright_hold(0.0, 0.0), 0.0);
+        assert_eq!(bright_hold(f32::NAN, 0.3), bright_hold(from, 0.3), "no number reads as the start");
+        // The sample's scalar: none of it near, shadow untouched.
+        assert_eq!(hold_bright(0.8, 2.0, 1.0, 0.0), 0.8);
+        assert_eq!(hold_bright(-0.8, 2.0, 1.0, 1.0), -0.8);
+        assert_eq!(hold_bright(0.8, 2.0, 1.0, 1.0), 0.0);
+        assert!((hold_bright(0.8, 2.0, 1.0, 0.5) - 0.4).abs() < 1e-6);
+    }
+
+    /// The fog blend: 0 up to its start, 1/2 halfway, 1 at a full share, monotone, flat at both
+    /// ends; joined with the far blend it is never below either, exactly the far blend while the
+    /// fog is thin, 1 when either is 1, and continuous.
+    #[test]
+    fn the_fog_blend_joins_the_far_blend() {
+        let from = AIR_FOG_BLEND_FROM;
+        assert_eq!(fog_blend(0.0), 0.0);
+        assert_eq!(fog_blend(from), 0.0);
+        assert!((fog_blend(0.5 * (from + 1.0)) - 0.5).abs() < 1e-5);
+        assert_eq!(fog_blend(1.0), 1.0);
+        assert_eq!(fog_blend(1.5), 1.0);
+        assert_eq!(fog_blend(f32::NAN), 0.0);
+        // Flat at both ends: a hundredth of the way in, at most 3 x 1e-4 from the end's value.
+        let step = 0.01 * (1.0 - from);
+        assert!(fog_blend(from + step) < 3.1e-4 && fog_blend(1.0 - step) > 1.0 - 3.1e-4);
+        let mut last = 0.0f32;
+        for i in 0..=200 {
+            let g = fog_blend(i as f32 / 200.0);
+            // The smoothstep's slope is at most 1.5 per unit of x.
+            assert!(g + 1e-6 >= last && g - last <= 1.5 * 0.005 / (1.0 - from) + 1e-6, "{i}: {last} -> {g}");
+            last = g;
+        }
+        for i in 0..=20 {
+            let t_d = i as f32 / 20.0;
+            assert_eq!(sample_blend(t_d, 0.5 * from), t_d, "thin fog: the far blend alone");
+            assert!((sample_blend(t_d, 1.0) - 1.0).abs() < 1e-6, "{t_d}");
+            assert_eq!(sample_blend(1.0, t_d), 1.0);
+            for j in 0..=20 {
+                let f = j as f32 / 20.0;
+                let t = sample_blend(t_d, f);
+                assert!(t <= 1.0 + 1e-6 && t >= t_d - 1e-6 && t >= fog_blend(f) - 1e-6, "{t_d} {f}: {t}");
+            }
+        }
+        assert_eq!(sample_blend(0.0, 1.0), 1.0);
     }
 
     #[test]
@@ -2565,7 +2854,7 @@ mod tests {
     }
 
     /// A sample with geometry keeps its surface light at every
-    /// far blend t. One case, one channel: S' 1, C' 0, f = F_near = 0.5, a = SKY = t
+    /// blend t. One case, one channel: S' 1, C' 0, f = F_near = 0.5, a = SKY = t
     /// = 1, full shadow: Y' = 0.5 stays exactly 0.5 (it was 0.25 at SHADE 0 and 0.375 at SHADE
     /// 0.5); a bright surface in a dark fog (S' 2, C' 0.1, f = F_near = 0.4, strength 2) never
     /// goes below (1 - f) S' = 1.2 at t 0, 0.5 and 1; cleared depth keeps the scalar bound (the

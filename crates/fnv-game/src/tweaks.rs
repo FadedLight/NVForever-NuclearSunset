@@ -718,9 +718,17 @@ pub struct Tweaks {
     /// `[Tweaks]`: `; don't freeze the level of encounter zones when they are first
     /// visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted].
     pub no_lock_encounter_zone_levels: bool,
-    /// `bUseWASDAsArrowKeys`: use WASD as arrow keys and Space to accept across menus
-    /// where letter bindings otherwise take precedence (Barter columns, Quantity slider,
-    /// Sleep/Wait accept, Recipe filters/accept) [documented: lStewieAl's Tweaks 10.05
+    /// `bFasterSleepWait`: pass hours faster while waiting or sleeping [documented:
+    /// lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`)
+    /// `nvse_stewie_tweaks.ini` `[Tweaks]`: `; increase the hour countdown speed while
+    /// waiting or sleeping` / `bFasterSleepWait = 1`; no DLL or source consulted; design:
+    /// NVForever's `wait::FASTER_HOUR_SECONDS` pace while keeping `wait::HOUR_SECONDS`
+    /// unchanged when off].
+    pub faster_sleep_wait: bool,
+    /// `bUseWASDAsArrowKeys`: add WASD as arrow keys and Space to accept across menus
+    /// where letter bindings otherwise take precedence (Barter columns/accept, Quantity
+    /// slider, Sleep/Wait accept, Recipe filters/accept) while keeping arrow keys intact
+    /// [documented: lStewieAl's Tweaks 10.05
     /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
     /// `[Tweaks]`: `; allow use of WASD keys as arrows in menus, and space to accept` /
     /// `bUseWASDAsArrowKeys = 1`; no DLL or source consulted; design: NVForever's own
@@ -1132,6 +1140,7 @@ impl Default for Tweaks {
             vendor_lists_both: false,
             armor_condition: false,
             no_lock_encounter_zone_levels: false,
+            faster_sleep_wait: false,
             wasd_as_arrow_keys: false,
         }
     }

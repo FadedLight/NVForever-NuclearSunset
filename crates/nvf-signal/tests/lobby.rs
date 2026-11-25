@@ -657,6 +657,8 @@ fn relay_through_a_helper_across_nats() {
                         pair => panic!("no path for {pair:?}"),
                     },
                     Action::PathLost => panic!("path lost for {:?}", (me, other)),
+                    // No NAT kinds given: no birthday punch.
+                    Action::OpenSockets { .. } | Action::CloseSockets { .. } => {}
                 }
             }
         }

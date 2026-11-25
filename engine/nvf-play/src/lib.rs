@@ -108,6 +108,9 @@ pub mod companion_wheel;
 pub mod caravan;
 pub mod challenges;
 pub mod poker;
+pub mod flourish;
+pub mod casino_hud;
+pub mod poker_tables;
 pub mod menu;
 pub mod menu_shapes;
 pub mod mod_log;
@@ -540,7 +543,8 @@ impl Plugin for PlayPlugin {
             .add_plugins(difficulty::DifficultyPlugin)
             .add_plugins(tweaks::TweaksPlugin)
             .add_plugins(hardcore::HardcorePlugin)
-            .add_plugins((ui_colour::UiColourPlugin, language::LanguagePlugin));
+            .add_plugins((ui_colour::UiColourPlugin, language::LanguagePlugin))
+            .add_plugins((casino_hud::CasinoHudPlugin, flourish::FlourishPlugin, poker_tables::PokerTablesPlugin));
         test_aid::setup(app);
         stress::setup(app);
         settings::setup(app);

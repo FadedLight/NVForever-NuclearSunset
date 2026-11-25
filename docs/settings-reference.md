@@ -112,6 +112,12 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
   bright square. Off: detection is the original's. Not in the original (#2688).
 - Registered in `engine/nvf-play/src/sound_cover.rs`
 
+### `poker-tables`: Poker tables
+
+- On the page: On: a few of the Strip casinos' blackjack tables become poker tables. Off:
+  every table plays blackjack, as in the original.
+- Registered in `engine/nvf-play/src/poker_tables.rs`
+
 ## Gameplay › V.A.T.S.
 
 ### `vats-style`: V.A.T.S. style
@@ -561,6 +567,13 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
 - On the page: On: two bars under the sneak word show how lit you are and how much noise you
   make, as detection counts them. Not in the original.
 - Registered in `engine/nvf-play/src/sneak_gauges.rs`
+
+### `caravan-tips`: Caravan tips
+
+- On the page: On: the Caravan table says what the chosen card does and why a card can't be
+  played, and the menu has a Tips button. Off: only the game's short messages. Not in
+  the original.
+- Registered in `engine/nvf-play/src/caravan.rs`
 
 ### `dynamic-crosshair`: Dynamic crosshair
 

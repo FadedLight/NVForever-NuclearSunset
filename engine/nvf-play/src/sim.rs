@@ -112,6 +112,10 @@ impl SimState {
     /// (SetActorFullName, [`fnv_game::Game::script_name`]) comes first: it renames every
     /// reference of the base [documented: GECK wiki SetActorFullName].
     pub fn ref_name<'s>(&'s self, game: Option<&'s fnv_game::Game<'_>>, form_id: u32) -> Option<&'s str> {
+        // NVForever's poker tables (blackjack tables in the plugins).
+        if crate::poker_tables::is_poker_table(self, FormId(form_id)) {
+            return Some(crate::poker_tables::NAME);
+        }
         let base = self.base_of(form_id)?;
         let shown = self.shown_base(game, base, form_id);
         let renamed = game.and_then(|g| g.script_name(base).or_else(|| g.script_name(shown)));

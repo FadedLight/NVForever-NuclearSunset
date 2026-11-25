@@ -4798,6 +4798,7 @@ dependencies = [
  "nvf-dlss-files",
  "nvf-play",
  "png",
+ "rapier3d",
  "rayon",
  "rfd",
  "serde_json",

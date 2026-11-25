@@ -91,6 +91,11 @@ fn parts(places: &BTreeSet<Place>, links: &BTreeSet<[Place; 2]>, cancel: Cancel)
     Ok(out)
 }
 
+/// About what a tree of `n` entries of `each` bytes holds: its nodes are two thirds full.
+pub fn tree(n: usize, each: usize) -> usize {
+    n.saturating_mul(each).saturating_mul(3) / 2
+}
+
 /// What the points of a grid are gathered with.
 pub struct Work<'a> {
     pub world: &'a PreparedScene,
@@ -126,11 +131,13 @@ pub struct Grid<'a> {
     directions: Vec<V3>,
     bounds: Option<(V3, V3)>,
     made: BTreeMap<Place, Probe>,
+    /// Of the last flood.
+    links: usize,
 }
 
 impl<'a> Grid<'a> {
     pub fn new(work: Work<'a>) -> Grid<'a> {
-        Grid { directions: directions(work.rays), bounds: work.world.bounds(), made: BTreeMap::new(), work }
+        Grid { directions: directions(work.rays), bounds: work.world.bounds(), made: BTreeMap::new(), links: 0, work }
     }
 
     fn point(&self, at: Place) -> V3 {
@@ -156,6 +163,16 @@ impl<'a> Grid<'a> {
     /// All there are, in the order of their places.
     pub fn made(&self) -> impl Iterator<Item = (&Place, &Probe)> {
         self.made.iter()
+    }
+
+    /// About what the points and the directions hold.
+    pub fn bytes(&self) -> usize {
+        tree(self.made.len(), size_of::<(Place, Probe)>()) + self.directions.capacity() * size_of::<V3>()
+    }
+
+    /// About what the last flood held beside them: each link once as it is and once from either end.
+    pub fn flood_bytes(&self) -> usize {
+        tree(self.links, size_of::<[Place; 2]>()) + self.links.saturating_mul(size_of::<[Place; 2]>()) + tree(self.made.len(), size_of::<(Place, Vec<Place>)>() + 2 * size_of::<Place>())
     }
 
     fn inside(&self, at: Place) -> bool {
@@ -219,6 +236,7 @@ impl<'a> Grid<'a> {
             }
         }
         let Flood { reached, links, .. } = out;
+        self.links = links.len();
         let sizes = parts(&reached, &links, self.work.cancel)?;
         let along = |min: f32, max: f32| ((max / space).floor() - (min / space).ceil() + 1.0).max(0.0) as usize;
         let in_bounds = self.bounds.map_or(0, |(min, max)| (0..3).map(|k| along(min[k], max[k])).fold(1, usize::saturating_mul));

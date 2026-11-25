@@ -1,4 +1,4 @@
-//! Three-component vectors and the sRGB transfer.
+//! Three-component vectors, the sRGB transfer and the luminance.
 
 use std::ops::{Add, Index, Mul, Neg, Sub};
 
@@ -121,6 +121,11 @@ pub fn srgb_to_linear(c: f32) -> f32 {
     } else {
         ((c + 0.055) / 1.055).powf(2.4)
     }
+}
+
+/// The Rec. 709 weighted sum.
+pub fn luminance(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 }
 
 #[cfg(test)]

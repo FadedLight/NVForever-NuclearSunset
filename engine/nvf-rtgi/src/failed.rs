@@ -1,5 +1,6 @@
 //! Why there is no result.
 
+use crate::grid::Place;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,6 +46,12 @@ pub enum Reason {
     Input(&'static str),
     /// More of the named than there may be.
     TooMany { what: &'static str, limit: usize },
+    /// The texture would be larger than a side may be.
+    TooLarge { dimensions: [u32; 3] },
+    /// The texture would take more bytes than the limit.
+    TooManyBytes { bytes: u64, limit: u64 },
+    /// The light at a point is not in a half float's range.
+    OutOfRange { at: Place },
 }
 
 impl fmt::Display for Reason {
@@ -55,6 +62,9 @@ impl fmt::Display for Reason {
             Reason::TooManyPoints { limit } => write!(f, "more than {limit} points"),
             Reason::Input(what) => write!(f, "a number of the {what} is out of its range"),
             Reason::TooMany { what, limit } => write!(f, "more than {limit} {what}"),
+            Reason::TooLarge { dimensions } => write!(f, "{dimensions:?} points: the texture would be too large"),
+            Reason::TooManyBytes { bytes, limit } => write!(f, "a texture of {bytes} bytes, {limit} may be"),
+            Reason::OutOfRange { at } => write!(f, "the light at {at:?} is not in a half float's range"),
         }
     }
 }

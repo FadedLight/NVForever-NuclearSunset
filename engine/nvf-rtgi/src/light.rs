@@ -181,6 +181,11 @@ impl<'a> Lights<'a> {
         Ok(Lights { grid: Grid::new(&state.lamps, MOST_ENTRIES, cancel)?, state })
     }
 
+    /// Of the table.
+    pub fn bytes(&self) -> usize {
+        (self.grid.start.capacity() + self.grid.lamps.capacity()) * size_of::<u32>()
+    }
+
     /// The lamps that may reach `p` (those of its cell), in order.
     pub fn near(&self, p: V3) -> impl Iterator<Item = &Lamp> {
         self.grid.at(p).iter().map(|i| &self.state.lamps[*i as usize])
@@ -329,7 +334,7 @@ pub mod tests {
     fn what_is_refused() {
         let state = |n| LightState { lamps: vec![lamp(UP, 0.0); n], ..LightState::default() };
         let why = |s: &LightState, cancel: Cancel| Lights::new(s, cancel).err();
-        assert!(Lights::new(&state(MOST_LAMPS), &|| false).is_ok());
+        assert!(Lights::new(&state(MOST_LAMPS), &|| false).is_ok_and(|l| l.bytes() > 4 * MOST_LAMPS));
         assert_eq!(why(&state(MOST_LAMPS + 1), &|| false), Some(Failed::Unavailable(Reason::TooMany { what: "lights", limit: MOST_LAMPS })));
         assert_eq!(why(&state(1), &|| true), Some(Failed::Cancelled));
         assert_eq!(why(&LightState { ambient: V3([f32::NAN; 3]), ..state(1) }, &|| false), Some(Failed::Unavailable(Reason::Input("light"))));

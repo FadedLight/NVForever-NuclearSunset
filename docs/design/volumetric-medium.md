@@ -597,7 +597,7 @@ the defaults given here. Read once at the start, usable in a played run (they do
 - `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE=<file>` (#3032 stage 2e, L1): the cloud source's aids
   tuned live from a `NAME=value` file, looked at at most every 0.5 s of real time while the row is
   on (live: `SHAPE`, `EROSION`, `DENSITY`, `STEPS`, `TYPE`, `VIEW`, `WISP`, the light's weights,
-  `SUNCOLOUR`, `NIGHTPULL`, `MOONFORWARD` and `MOONBACK`; start-only: `HEIGHT`, `HORIZON`).
+  `SUNCOLOUR`, `NIGHTPULL`, `MOONFORWARD`, `MOONBACK` and `MOONCAP`; start-only: `HEIGHT`, `HORIZON`).
   Each change of the effective values counts as a sky jump for the history (dropped
   once), so paired pictures after an edit start from fresh rays. A key the file does not set (a
   deleted line included) takes its start value: its start variable, else its start default
@@ -612,7 +612,7 @@ the defaults given here. Read once at the start, usable in a played run (they do
 - `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_` `SHAPE`, `EROSION`, `STEPS`, `TYPE`, `HEIGHT`, `HORIZON`, `WISP`,
   `PUFF`, `AIR`, `REFINED_STRIDE`, `LIGHT_REUSE` and the light's `OCTAVE`, `BACKSCATTER`, `UPPER`, `LOWER`,
   `GROUND`, `FORWARD`, `SUN`, `LEVEL`, `OCCLUDE`, `POWDER`, `SUNCOLOUR` (alias `SUNCOLOR`),
-  `NIGHTPULL`, `MOONFORWARD`, `MOONBACK`, and
+  `NIGHTPULL`, `MOONFORWARD`, `MOONBACK`, `MOONCAP`, and
   `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS=<0..4>` (`DENSITY`): the cloud source's start values, ranges and meanings
   are graphics-enhanced.md §3.23, "Debug aids". The cloud source's light is the source's own business:
   the medium's seam (`MediumRay` in, `MediumSample` out) and its history do not see it. The wisps' phases
@@ -952,9 +952,9 @@ with the stepped hour's sun is needed), the moon at and under it where the clima
 (`Climate::has_moon`), and nothing otherwise: the gate is then closed. At the horizon the light's
 illuminance, so the share, is 0 on both sides, and the change of source cannot show (tested). The share is the same `d / (d + a)`, so
 the moon's share of the sun's strength and MoonlightNVSE.ini's factor come with the illuminance, once. The moon's
-constants are the day's unless set (`MoonTune`, `AirTune::lit_by`): the strength's factor `MOON_STRENGTH` (1) times
-the aid's or the slider's strength, and `MOON_RAYS`, `MOON_LIFT`, `MOON_SHADE`, `MOON_G`, `MOON_CAP`, `MOON_SKY`,
-`MOON_SKYPHASE`. By day none of them is read (tested: the same uniform bit for bit). The clouds follow
+constants are its own (`MoonTune`, `AirTune::lit_by`; [design], the contributor's pick from stills, 2026-11-25): the strength's factor
+`MOON_STRENGTH` (1) times the aid's or the slider's strength, rays 8, lift 1.6, shade 0.4, phase g 0.7, cap 3, sky 0.3, sky phase 0.15
+(`MOON_RAYS`, `MOON_LIFT`, `MOON_SHADE`, `MOON_G`, `MOON_CAP`, `MOON_SKY`, `MOON_SKYPHASE`); each `auto` is the day's. By day none of them is read (tested: the same uniform bit for bit). The clouds follow
 their own clock, the sky's stepped hour (graphics-enhanced.md §3.23, "By moonlight"): the two are not joined.
 
 **The deck's share** D: the weather's lights still name a direct part under a closed deck (an s of
@@ -1317,8 +1317,9 @@ another; `solid cores: removed (...)` when the light is no longer drawn; nothing
   depth texel itself is the right one) [design; deferred].
 - Night without a moon is off ("The moonlight", under "The medium").
 - The moonlight's shafts come from what its light is hidden by: the one near shadow cascade of the night, the terrain map (which
-  follows the light's own direction, the moon's too) and the clouds. How strongly they show past an
-  occluder is not measured. The bright hold, the moon's disc, the Strip's lamps, the Sun shafts' yield in
+  follows the light's own direction, the moon's too) and the clouds. They are faint: by 22:00 and 04:00 in clear weather at
+  Goodsprings a cloud's shadow streak and a pole's shadow show by a few levels of 255; the open air changes by at most 1.5 [observed:
+  NVForever runs, 2026-11-25, 1920x1080]. The bright hold, the moon's disc, the Strip's lamps, the Sun shafts' yield in
   the first degrees after sunset (they end at 2 degrees under the horizon, and give way to the moonlit air from
   its first frame) and FSR are not looked at by night.
 - A halo round the moon in the sky (`MOON_SKYPHASE`) multiplies the sky's own light (the composite's far
@@ -1435,7 +1436,7 @@ defaults given here. Read once at the start, usable in a played run:
 | `FILTER` | 0, 1 | 1 | the 3 x 3 filter pass |
 | `VIEW`, `OCCLUDERS` | as the aids | none, all | |
 | `MOON_STRENGTH` | 0..2 | 1 | by moonlight: the factor on the strength (the product held to 2) |
-| `MOON_RAYS`, `MOON_LIFT`, `MOON_SHADE`, `MOON_G`, `MOON_CAP`, `MOON_SKY`, `MOON_SKYPHASE` | as the day's, `auto` | `auto` (the day's) | by moonlight, in place of the day's |
+| `MOON_RAYS`, `MOON_LIFT`, `MOON_SHADE`, `MOON_G`, `MOON_CAP`, `MOON_SKY`, `MOON_SKYPHASE` | as the day's, `auto` | 8, 1.6, 0.4, 0.7, 3, 0.3, 0.15 | by moonlight, in place of the day's (`auto`: the day's) |
 
 The defaults are the Natural look, set by stills [design, 2026-11-24]. The earlier values (G 0.6, CAP 2.5,
 RAYS 6, LIFT 1.5, SKY 0.5, the same SHADE) drew the far plain and the pylons on the horizon of a hazy morning

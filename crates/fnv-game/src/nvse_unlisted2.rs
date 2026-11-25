@@ -408,9 +408,10 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         | "inititemfilter" | "initminimap" | "updateminimap" | "reloadcharcontroller" | "reloadcloudtextures"
         | "resetclouds" | "executescript" | "showlevelupmenuex" | "ccctaskpackageflags" | "gettranslatedpos" | "getworldmapposmults"
         | "transformworldtolocal" => XVal::Num(0.0),
-        // 1 in a fresh New Game session until a save is loaded, 0 in a loaded save
-        // [observed: rest1.isnewgame 0 in a loaded save; `sup_12_is_new_game`
-        // (`wave4a_extenders.json`), see docs/spec-notes/ext-unlisted-rest.md §5].
+        // 1 in a fresh New Game session and 0 in a loaded save [observed: rest1.isnewgame 0
+        // in a loaded save; `sup_12_is_new_game` (`wave4a_extenders.json`), see
+        // docs/spec-notes/ext-unlisted-rest.md §5]; clearing from 1 to 0 when a save is
+        // loaded mid-session ("until a save is loaded") remains [hypothesis] (§5).
         "isnewgame" => XVal::Num(f64::from(u8::from(g.other.unlisted2.new_game))),
         _ => return None,
     };

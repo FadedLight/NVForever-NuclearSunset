@@ -206,9 +206,10 @@ impl Game<'_> {
 }
 
 /// The form type code of a base form's record type, for SetInteractionDisabledType: the
-/// numbering GetIsUsedItemType and RemoveAllTypedItems take, with NPC_ 42 and CREA 43
-/// [observed: `jip_46_interaction_disabled_type_npc` (`wave4a_extenders.json`), see
-/// docs/spec-notes/jip-ui-9.md §3].
+/// numbering GetIsUsedItemType and RemoveAllTypedItems take, with NPC_ 42 [observed:
+/// `jip_46_interaction_disabled_type_npc` (`wave4a_extenders.json`), see
+/// docs/spec-notes/jip-ui-9.md §3] and CREA 43 [hypothesis: the same numbering continued,
+/// as `functions::furniture` has it].
 pub fn type_code(sig: &[u8; 4]) -> Option<i32> {
     match sig {
         b"NPC_" => Some(42),

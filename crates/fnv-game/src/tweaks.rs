@@ -718,6 +718,15 @@ pub struct Tweaks {
     /// `[Tweaks]`: `; don't freeze the level of encounter zones when they are first
     /// visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted].
     pub no_lock_encounter_zone_levels: bool,
+    /// `fCraftedItemHealthPct`: fixed percent condition (`0.0..=100.0`; `0.0` disables
+    /// the override and preserves vanilla crafting) of crafted weapons and armour
+    /// [documented: lStewieAl's Tweaks 10.05
+    /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
+    /// `[Tweaks]`: `; set the condition of the items returned from crafting (default is
+    /// 80%)` / `fCraftedItemHealthPct = 80.000000`; no DLL or source consulted; design:
+    /// off at `0.0` by default so unmodded vanilla crafting stays unchanged, clamped to
+    /// `0.01..=1.0`, and `bRepairScalesCraftingCondition` keeps precedence when enabled].
+    pub crafted_item_health_pct: f32,
 }
 
 /// The factor on a vendor's repair price under the Barter Affects Repair Costs tweak:
@@ -732,6 +741,19 @@ pub fn barter_repair_factor(discount: f32, barter: f32) -> f32 {
 /// docs/design/tweaks.md; the tweak names no formula, this one is ours].
 pub fn crafted_condition(repair: f32) -> f32 {
     0.5 + repair.clamp(0.0, 100.0) / 200.0
+}
+
+/// Effective condition (`0.01..=1.0`) for a crafted weapon or armour, or `None` for
+/// vanilla full condition. `bRepairScalesCraftingCondition` takes precedence over
+/// `fCraftedItemHealthPct`; `0.0` or non-finite leaves vanilla crafting unchanged [design].
+pub fn crafted_output_condition(tweaks: &Tweaks, repair: f32) -> Option<f32> {
+    if tweaks.repair_scales_crafting {
+        return Some(crafted_condition(repair));
+    }
+    if tweaks.crafted_item_health_pct.is_finite() && tweaks.crafted_item_health_pct > 0.0 {
+        return Some((tweaks.crafted_item_health_pct / 100.0).clamp(0.01, 1.0));
+    }
+    None
 }
 
 impl crate::game::Game<'_> {
@@ -1124,6 +1146,7 @@ impl Default for Tweaks {
             vendor_lists_both: false,
             armor_condition: false,
             no_lock_encounter_zone_levels: false,
+            crafted_item_health_pct: 0.0,
         }
     }
 }
@@ -1147,5 +1170,24 @@ mod tests {
         assert_eq!(crafted_condition(100.0), 1.0);
         assert_eq!(crafted_condition(130.0), 1.0);
         assert_eq!(crafted_condition(-5.0), 0.5);
+    }
+
+    #[test]
+    fn crafted_output_condition_honors_default_pct_and_repair_precedence() {
+        let mut t = Tweaks::default();
+        assert_eq!(crafted_output_condition(&t, 50.0), None, "default 0% leaves vanilla crafting unchanged");
+
+        t.crafted_item_health_pct = 80.0;
+        assert_eq!(crafted_output_condition(&t, 50.0), Some(0.8));
+
+        t.crafted_item_health_pct = 0.25;
+        assert_eq!(crafted_output_condition(&t, 50.0), Some(0.01), "clamped above zero");
+
+        t.crafted_item_health_pct = 150.0;
+        assert_eq!(crafted_output_condition(&t, 50.0), Some(1.0), "clamped to 100%");
+
+        t.crafted_item_health_pct = 80.0;
+        t.repair_scales_crafting = true;
+        assert_eq!(crafted_output_condition(&t, 50.0), Some(0.75), "Repair scaling keeps precedence");
     }
 }

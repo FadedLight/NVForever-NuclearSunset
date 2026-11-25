@@ -44,7 +44,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 299,
+          "spec_line": 307,
           "functions_tested": [
             "ShowOff:OnPOVChange",
             "ToggleFirstPerson",

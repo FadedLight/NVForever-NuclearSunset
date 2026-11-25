@@ -77,8 +77,17 @@ masters (FalloutNV.esm + 9 DLC/pack masters), probes
 `so_31_pre_scripted_activate_args_veto` and `so_31b_pre_scripted_activate_noveto` on a
 placed Bottle Cap (`0xF`) in Doc Mitchell's house, no DLL or source consulted]
 Dispatched by `Game::activate` for scripted `Activate` calls (`ActMode::Default` and
-`ActMode::Block`), after `OnActivate` observers and destroyed checks and before the
-`OnActivate` block or default action. The activated reference is the calling reference
+`ActMode::Block`) BEFORE xNVSE `OnActivate` observers and before destroyed-target
+refusal, and before the `OnActivate` block or default action: vetoing in
+`ShowOff:OnPreScriptedActivate` suppresses `OnActivate`, and a pre-destroyed door still
+dispatches `ShowOff:OnPreScriptedActivate` [observed: 2026-11-24, Fallout: New Vegas
+1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, `GSDocMitchellHouse` (`0x00103DF9`), 10
+official base masters,
+`tools/capture/nvse/catalogs/wave6d1_pre_scripted_activate_order.json` probes
+`w6d1p2_11_on_activate_and_pre_scripted_order` (`ord=S:PRE,|caps=0->0`),
+`w6d1p3_11_on_activate_noveto` (`ord0=S:PRE,ACT,|ord1=S:PRE,ACT,|act(s0=1,sR=0,a1=1,a2=1)`),
+and `w6d1_14_pre_scripted_destroyed_mutation` (`preDest=1`); no binary, DLL, PDB, or
+third-party source consulted]. The activated reference is the calling reference
 (`this` / `0::`, `mThis=1`), and the three arguments are `(rActivator,
 bRunOnActivateBlock, bIsActivationNotPrevented)`: `Activate Player 0` passes
 `(Player, 0, 1)` and `Activate Player 1` passes `(Player, 1, 1)`, while returning

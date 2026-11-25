@@ -390,6 +390,51 @@ fn scripted_activate_dispatches_showoff_on_pre_scripted_activate_with_flag_and_v
 }
 
 #[test]
+fn scripted_activate_runs_pre_scripted_before_on_activate_and_on_pre_destroyed() {
+    // 1. Unvetoed scripted Activate runs ShowOff:OnPreScriptedActivate BEFORE OnActivate,
+    // and OnActivate receives GetSelfAlt == 0.
+    let f = fixture(true);
+    let mut g = game(&f);
+    query(
+        &mut g,
+        r#"SetEventHandlerAlt "ShowOff:OnPreScriptedActivate" (Begin Function {ref actor, int blockFlag, int allowed}
+SetModLocalData "ord.seq" ((GetModLocalData "ord.seq") * 10 + 1)
+End)
+SetEventHandler "OnActivate" (Begin Function {ref obj, ref actor}
+SetModLocalData "ord.seq" ((GetModLocalData "ord.seq") * 10 + 2)
+if eval (GetSelfAlt == 0)
+SetModLocalData "ord.self_zero" 1
+endif
+End)"#,
+    );
+    let trader = target(&mut g, "owned.trader");
+    g.activate(FormId::PLAYER_REF, trader, ActMode::Block).unwrap();
+    assert_eq!(num(&mut g, "ord.seq"), 12.0, "PreScriptedActivate (1) must run before OnActivate (2)");
+    assert_eq!(num(&mut g, "ord.self_zero"), 1.0, "OnActivate must have GetSelfAlt == 0");
+    no_errors(&g);
+
+    // 2. Vetoing ShowOff:OnPreScriptedActivate suppresses OnActivate completely.
+    let f2 = fixture(true);
+    let mut g2 = game(&f2);
+    query(
+        &mut g2,
+        r#"SetEventHandlerAlt "ShowOff:OnPreScriptedActivate" (Begin Function {ref actor, int blockFlag, int allowed}
+SetModLocalData "ord.pre" 1
+SetFunctionValue 0
+End)
+SetEventHandler "OnActivate" (Begin Function {ref obj, ref actor}
+SetModLocalData "ord.act" 1
+End)"#,
+    );
+    let trader2 = target(&mut g2, "owned.trader");
+    let res = g2.activate(FormId::PLAYER_REF, trader2, ActMode::Block).unwrap();
+    assert_eq!(res["result"], "prevented");
+    assert_eq!(num(&mut g2, "ord.pre"), 1.0);
+    assert_eq!(num(&mut g2, "ord.act"), 0.0, "veto must skip OnActivate");
+    no_errors(&g2);
+}
+
+#[test]
 fn inventory_item_preactivation_dispatches_base_and_alt_with_veto_and_script_equip_cancel() {
     let mut bytes = tes4();
     bytes.extend(top(

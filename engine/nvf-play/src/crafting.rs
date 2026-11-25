@@ -204,6 +204,8 @@ pub(crate) struct RowView {
     pub(crate) label: String,
     /// Can be made now.
     pub(crate) ready: bool,
+    /// Resolved ySI tag/icon/template for this recipe's representative item (`None` when ySI is inactive).
+    pub(crate) ysi: Option<fnv_game::ui_ysi::YsiItemDisplay>,
 }
 
 /// Everything the menu shows: drawn again when it changes.
@@ -227,6 +229,8 @@ pub(crate) struct View {
     pub(crate) skill_record: Option<String>,
     /// The ingredient, its name, have, need.
     pub(crate) ingredients: Vec<(FormId, String, u32, u32)>,
+    /// Resolved ySI display per ingredient row (parallel to `ingredients`, empty when ySI is inactive).
+    pub(crate) ingredient_ysi: Vec<Option<fnv_game::ui_ysi::YsiItemDisplay>>,
     pub(crate) weight: Option<f32>,
     pub(crate) value: Option<i32>,
     /// The first output's picture and effects.
@@ -343,7 +347,27 @@ pub(crate) fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, open: &O
         let mut listed: Vec<(&RecipeDef, bool)> = all.into_iter().filter(|r| filter.is_none_or(|f| r.subcategory == Some(f))).map(|r| (r, lacks(rt, r).is_empty())).collect();
         listed.sort_by_key(|&(_, ready)| !ready);
         let shown: Vec<&RecipeDef> = listed.iter().map(|l| l.0).collect();
-        let rows: Vec<RowView> = listed.iter().map(|&(r, ready)| RowView { recipe: r.form, label: label(r), ready }).collect();
+        let ysi_on = rt.game.ysi_active();
+        let rows: Vec<RowView> = listed
+            .iter()
+            .map(|&(r, ready)| {
+                let ysi = if ysi_on {
+                    // [design] Breakdown recipes (1 ingredient, >1 outputs) show the
+                    // ingredient's icon; other recipes show the first output's icon,
+                    // falling back to the recipe form itself.
+                    let rep = if r.ingredients.len() == 1 && r.outputs.len() > 1 {
+                        r.ingredients.first().map(|x| x.0)
+                    } else {
+                        r.outputs.first().map(|x| x.0)
+                    }
+                    .unwrap_or(r.form);
+                    rt.game.ysi_item_display(rep)
+                } else {
+                    None
+                };
+                RowView { recipe: r.form, label: label(r), ready, ysi }
+            })
+            .collect();
         let selected = open.selected.min(rows.len().saturating_sub(1));
         let subcategory = filter.map(|_| subs[open.filter - 1].0.clone());
         let title = match filter {
@@ -355,7 +379,12 @@ pub(crate) fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, open: &O
         let made_at = chosen.and_then(|r| r.category).and_then(|c| data.recipe_categories.get(&c)).map_or_else(String::new, |c| c.name.clone());
         let skill = chosen.and_then(|r| r.skill).map(|(av, level)| (skill_name(av).to_string(), fnv_game::functions::actor_value_capped(&mut rt.game, FormId::PLAYER_REF, av).max(0.0).floor() as u32, level));
         let skill_record = chosen.and_then(|r| r.skill).map(|(av, _)| fnv_game::chargen::skill_name(&rt.game, av));
-        let ingredients = chosen.map(|r| r.ingredients.iter().map(|&(i, n)| (i, name(i), have(rt, i).max(0) as u32, recipe_count(n))).collect()).unwrap_or_default();
+        let ingredients: Vec<(FormId, String, u32, u32)> = chosen.map(|r| r.ingredients.iter().map(|&(i, n)| (i, name(i), have(rt, i).max(0) as u32, recipe_count(n))).collect()).unwrap_or_default();
+        let ingredient_ysi = if ysi_on {
+            ingredients.iter().map(|(id, _, _, _)| rt.game.ysi_item_display(*id)).collect()
+        } else {
+            Vec::new()
+        };
         let item = chosen.and_then(|r| r.outputs.first()).and_then(|o| match forms.get(o.0).map(|b| &b.data) {
             Some(fnv_sim::forms::BaseData::Item(it)) => Some((it.weight, it.value, it.icon.clone())),
             _ => None,
@@ -363,7 +392,7 @@ pub(crate) fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, open: &O
         let (weight, value, icon) = item.map_or((None, None, None), |i| (i.0, i.1, i.2));
         let first = keep_in_view(open.first, selected, rows.len(), ROWS);
         let filtered = known - rows.len();
-        View { title, rows, filters: subs.len(), subcategory, filtered, selected, first, made_at, skill, skill_record, ingredients, weight, value, icon, effects: None, quantity: open.quantity, labels: crate::pad::labels() }
+        View { title, rows, filters: subs.len(), subcategory, filtered, selected, first, made_at, skill, skill_record, ingredients, ingredient_ysi, weight, value, icon, effects: None, quantity: open.quantity, labels: crate::pad::labels() }
     })
 }
 
@@ -737,9 +766,21 @@ fn spawn(commands: &mut Commands, look: &RecipeLook, v: &View, words: &[String; 
             for (k, (i, r)) in v.rows.iter().enumerate().skip(v.first).take(ROWS).enumerate() {
                 let (line, fill) = highlight_colors();
                 let chosen = i == v.selected;
+                let tint = if r.ready { bright } else { amber(NOT_READY) };
+                let row_icon = r
+                    .ysi
+                    .as_ref()
+                    .and_then(|d| d.icon.as_deref())
+                    .and_then(|path| {
+                        let full = format!("textures\\{}", path.trim_start_matches("textures\\").trim_start_matches("Textures\\"));
+                        data.and_then(|d| crate::interface::texture(&full, d, images, bc)).map(|x| x.0)
+                    });
                 let node = Node { border: UiRect::all(u(LINE)), ..at(ITEMS_AT.x + 5.0, LIST_TOP + k as f32 * ROW, BOX_WIDTH - 15.0 - ROWS_BAR_W, ROW) };
                 m.spawn((Button, RecipeButton::Row(i), node, BorderColor::all(if chosen { line } else { Color::NONE }), BackgroundColor(if chosen { fill } else { Color::NONE }))).with_children(|row| {
-                    text(row, &look.row, &r.label, 40.0, 6.0, if r.ready { bright } else { amber(NOT_READY) });
+                    if let Some(img) = row_icon {
+                        row.spawn((at(10.0, 14.0, 24.0, 24.0), ImageNode { color: tint, ..ImageNode::new(img) }));
+                    }
+                    text(row, &look.row, &r.label, 40.0, 6.0, tint);
                 });
             }
             // The scroll bar, right of the rows, when they do not all fit (owner's request
@@ -790,9 +831,22 @@ fn spawn(commands: &mut Commands, look: &RecipeLook, v: &View, words: &[String; 
                 }
                 text(b, &look.title, "Ingredients", 50.0, 238.0, bright);
                 let mut y = 298.0;
-                for (_, name, have, need) in &v.ingredients {
+                for (idx, (_, name, have, need)) in v.ingredients.iter().enumerate() {
                     let ok = have >= need;
-                    y += wrapped(b, &look.row, &format!("{name} ({have}/{need})"), 110.0, y, 340.0, if ok { bright } else { amber(NOT_READY) }) + 8.0;
+                    let tint = if ok { bright } else { amber(NOT_READY) };
+                    if let Some(img) = v
+                        .ingredient_ysi
+                        .get(idx)
+                        .and_then(|d| d.as_ref())
+                        .and_then(|d| d.icon.as_deref())
+                        .and_then(|path| {
+                            let full = format!("textures\\{}", path.trim_start_matches("textures\\").trim_start_matches("Textures\\"));
+                            data.and_then(|d| crate::interface::texture(&full, d, images, bc)).map(|x| x.0)
+                        })
+                    {
+                        b.spawn((at(78.0, y + 2.0, 24.0, 24.0), ImageNode { color: tint, ..ImageNode::new(img) }));
+                    }
+                    y += wrapped(b, &look.row, &format!("{name} ({have}/{need})"), 110.0, y, 340.0, tint) + 8.0;
                 }
             });
             // Accept and Exit [observed: "Accept  A)", "Exit  X)"].
@@ -983,7 +1037,7 @@ pub fn report_progress_fixture(step: usize) -> RecipeMenu {
     }
     o.drawn = Some(View {
         title: String::new(),
-        rows: (0..20).map(|i| RowView { recipe: FormId(100 + i), label: format!("Synthetic recipe {i}"), ready: true }).collect(),
+        rows: (0..20).map(|i| RowView { recipe: FormId(100 + i), label: format!("Synthetic recipe {i}"), ready: true, ysi: None }).collect(),
         filters: 1,
         subcategory: None,
         filtered: 0,
@@ -993,6 +1047,7 @@ pub fn report_progress_fixture(step: usize) -> RecipeMenu {
         skill: None,
         skill_record: None,
         ingredients: vec![(FormId(43), "Synthetic ingredient".into(), if step >= 6 { 2 } else { 3 }, 1)],
+        ingredient_ysi: Vec::new(),
         weight: None,
         value: None,
         icon: None,

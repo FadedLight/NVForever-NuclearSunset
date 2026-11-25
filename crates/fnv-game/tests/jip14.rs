@@ -275,6 +275,10 @@ fn anim_sequence_frequency_semantics_and_sanitization() {
     assert_eq!(g.anim_frequency(acti, "Idle"), None);
 
     // Exact sequence name (case-insensitive) takes precedence over "*"; alias works too.
+    // Querying "*" literally returns -1.0 both before and after SetAnimSequenceFrequency "*"
+    // [observed: w4c_b1_22_sound3d_anim_freq].
+    assert_eq!(n(&mut g, "StatRef.GetAnimSequenceFrequency \"*\""), -1.0);
+    assert_eq!(n(&mut g, "StatRef.GetAnimSeqFreq \"*\""), -1.0);
     q(&mut g, "StatRef.SetAnimSeqFreq \"FoRwArD\" 2.25");
     assert_eq!(g.anim_frequency(stat, "forward"), Some(2.25));
     assert_eq!(g.anim_frequency(stat, "FORWARD"), Some(2.25));

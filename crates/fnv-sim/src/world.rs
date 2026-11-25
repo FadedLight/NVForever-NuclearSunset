@@ -610,6 +610,10 @@ pub struct World<'a> {
     /// Pick Locks Even With Key tweak and Shift are on (NVForever's tweaks,
     /// docs/design/tweaks.md); not saved.
     player_ignores_keys: bool,
+    /// Encounter zones do not freeze their level on first visit (`bNoLockEncounterZoneLevels`,
+    /// set by the game layer, [`World::set_no_lock_encounter_zone_levels`]) [design:
+    /// docs/design/tweaks.md]; not saved.
+    pub(crate) no_lock_encounter_zone_levels: bool,
     /// Encounter zones entered and their levels (`crate::zones`).
     pub(crate) zone_levels: BTreeMap<FormId, u16>,
     /// SetZoneRespawns: zone → whether it respawns, over its "Never Resets" flag.
@@ -686,6 +690,7 @@ impl<'a> World<'a> {
             power_armor_training: false,
             player_equips_broken: false,
             player_ignores_keys: false,
+            no_lock_encounter_zone_levels: false,
             zone_levels: BTreeMap::new(),
             zone_respawns: BTreeMap::new(),
             ref_levels: BTreeMap::new(),
@@ -744,6 +749,16 @@ impl<'a> World<'a> {
     /// Whether the player's carried key is left unused on a lock ([`World::activate`]).
     pub fn set_player_ignores_keys(&mut self, on: bool) {
         self.player_ignores_keys = on;
+    }
+
+    /// Whether encounter zones avoid freezing their level on first visit
+    /// (`bNoLockEncounterZoneLevels`; not saved) [design: docs/design/tweaks.md].
+    pub fn set_no_lock_encounter_zone_levels(&mut self, on: bool) {
+        self.no_lock_encounter_zone_levels = on;
+    }
+
+    pub fn no_lock_encounter_zone_levels(&self) -> bool {
+        self.no_lock_encounter_zone_levels
     }
 
     pub fn power_armor_training(&self) -> bool {

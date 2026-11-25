@@ -45,7 +45,9 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
   JSON error body: a client treats any 429 as "wait `Retry-After` seconds, then retry" and does
   not parse the body. The Worker's own limit (10 a minute on lookups and creates) is
   approximate per location and only a soft first check; its 429 is the JSON error body
-  `rate_limited` with `Retry-After: 60`. The stand-in has no limit.
+  `rate_limited` with `Retry-After: 60`. One lobby also answers at most one info lookup a
+  second (#3795 section 5), whoever asks; past that, the same JSON body with `Retry-After: 1`.
+  The stand-in has no limit.
 
 ### `GET /v1/lobbies/{code}/ws`: the lobby socket
 
@@ -62,14 +64,14 @@ Every non-2xx answer has the body `{"error": "<code>", "message": "<text for the
 | `accept` | host | `peer`, `candidates` | Let this guest in. My candidates so far. |
 | `decline` | host | `peer`, `reason` | Turn this guest away. |
 | `candidates` | either | `peer` (host only, optional), `candidates` | Found more (trickle). From the host, no `peer` means every accepted guest. |
-| `connected` | guest | `path` | My path is up (`direct`, `lan`, `relay`). For the host's lobby screen. |
+| `connected` | guest | `path` | My path is up: `direct`, `lan`, `relay` (through another guest) or `hosted-relay` (through `nvf-relay`), at most 16 characters. For the host's lobby screen; only `direct` and `lan` make the guest a helper. |
 | `reconnect` | guest | none | My path was lost. Start the checks again. |
 | `relay_ask` | guest | `helper`, `candidates` | I can't reach the host: ask that guest to relay for me. These are my candidates, for its checks. |
 | `relay_answer` | guest | `for`, `accept`, `reason`, `candidates` | My answer to `for`'s request. Accepting, I send my candidates. Refusing, `reason` is `off`, `busy` or `no_direct_path`. |
 | `bye` | either | none | Leaving. From the host, this ends the lobby. |
 
-A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx","addr":"203.0.113.5:47960"}`, or
-`"[2001:db8::5]:47960"` for IPv6. A receiver skips kinds it does not know.
+A candidate is `{"kind":"host"|"mapped"|"srflx"|"prflx"|"relay","addr":"203.0.113.5:47960"}`, or
+`"[2001:db8::5]:47960"` for IPv6. `relay` is a relay a player hosts (`nvf-relay`, issue #3880). A receiver skips kinds it does not know.
 
 ## Socket messages, service to game
 
@@ -128,6 +130,20 @@ guest to guest and the host takes no part in it.
 - Only memory: the code, the secret, the keys, the sockets and the candidates in flight.
 - No database rows, no stored objects, invocation logs off.
 - The client's IP is used only for the rate limit.
+
+## Self-hosting
+
+[design: #3795 section 6, "Self-hosting", and goal G8]
+
+`crates/nvf-signal-server` runs the stand-in (`crates/nvf-signal`, the same rules as the
+Worker) as a server on one TCP port: `nvf-signal-server --listen 0.0.0.0:8787`. Players set
+`NVF_COOP_SIGNAL=http://that-machine:8787`.
+- It speaks plain HTTP and `ws://`, with no TLS. On the internet, put a TLS proxy in front.
+- Codes and secrets come from the operating system's random source. The stand-in's seeded
+  generator is for tests only: its outputs give its state away.
+- It has no rate limit and keeps nothing on disk.
+- It also serves section 12's offline smoke test: two games and the server on one PC, no
+  internet.
 
 ## Example
 

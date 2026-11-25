@@ -112,8 +112,15 @@ type-check filters on them [documented: User-Defined Event].
 - **Session only**: handlers are not saved; they last for the session, so scripts
   register them again when a session starts (GetGameRestarted) [documented:
   SetEventHandler].
-- Registering the same handler twice with the same filters: open (for
-  SetEventHandlerAlt, duplicates run twice, §4).
+- Registering the same handler twice with identical event, filters, and priority is
+  deduplicated and returns `0` on the duplicate call for both `SetEventHandler` and
+  `SetEventHandlerAlt`, firing once per dispatch [observed: 2026-11-24, Fallout: New
+  Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, `GSDocMitchellHouse` (`0x00103DF9`),
+  10 official base masters,
+  `tools/capture/nvse/catalogs/wave6d1_set_event_handler_dedup.json` probe
+  `w6d1_03_set_event_handler_dups_and_bounds`:
+  `PROBE|w6d1_03_set_event_handler_dups_and_bounds|std=1,0,n=1|alt=1,0,n=1|prio=0,1,1,0,0|arr=1,n=1`;
+  no binary, DLL, PDB, or third-party source consulted].
 
 ## 4. SetEventHandlerAlt (xNVSE 6.2.8)
 
@@ -125,8 +132,9 @@ type-check filters on them [documented: User-Defined Event].
 - **Cleared on every load**, unlike SetEventHandler's session lifetime: "all" handlers
   set with this function are flushed when a game is loaded [documented:
   SetEventHandlerAlt].
-- **Not for plugin (LN) events.** Several registrations of the same function are
-  allowed and each runs. Priority as §3.
+- **Not for plugin (LN) events.** Duplicate registrations with identical event, handler,
+  filters, and priority return `0` and fire once (contra the wiki note) [observed:
+  `w6d1_03_set_event_handler_dups_and_bounds`, `alt=1,0,n=1`]. Priority as §3.
 - **How filters match** (xNVSE 6.2.8) [documented: New xNVSE Event Filtering System]:
   - a number must equal the dispatched number; for a user-defined event a numeric filter
     is a float; a plugin's event may declare an int filter, which floors the value;

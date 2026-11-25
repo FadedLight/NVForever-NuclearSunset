@@ -4102,10 +4102,32 @@ impl<'a> Game<'a> {
                         // SetEventHandlerAlt: index 0 the calling reference, 1–15 the
                         // arguments [documented: SetEventHandlerAlt].
                         (_, XVal::Num(i)) if alt && (0.0..=15.0).contains(i) => {
-                            self.ext.retain(&v);
                             h.filters.push((*i as usize, v));
                         }
                         _ => return Ok(XVal::Num(0.0)),
+                    }
+                }
+                // Deduplicate identical (event, func, priority, filters) registrations
+                // for both SetEventHandler and SetEventHandlerAlt [observed: 2026-11-24,
+                // Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30,
+                // GSDocMitchellHouse (0x00103DF9), 10 official base masters,
+                // `tools/capture/nvse/catalogs/wave6d1_set_event_handler_dedup.json`
+                // probe `w6d1_03_set_event_handler_dups_and_bounds`:
+                // `PROBE|w6d1_03_set_event_handler_dups_and_bounds|std=1,0,n=1|alt=1,0,n=1|prio=0,1,1,0,0|arr=1,n=1`;
+                // no DLL, PDB, or third-party source consulted].
+                if self.handlers.iter().any(|e| {
+                    e.event == h.event
+                        && e.func == h.func
+                        && e.priority == h.priority
+                        && e.alt == h.alt
+                        && e.filters.len() == h.filters.len()
+                        && e.filters.iter().all(|f| h.filters.contains(f))
+                }) {
+                    return Ok(XVal::Num(0.0));
+                }
+                if alt {
+                    for (_, v) in &h.filters {
+                        self.ext.retain(v);
                     }
                 }
                 self.ext.retain(&h.func);

@@ -3505,6 +3505,48 @@ fn event_handlers_are_set_dispatched_filtered_and_removed() {
 }
 
 #[test]
+fn set_event_handler_and_alt_deduplicate_identical_registrations() {
+    use fnv_script::vm::XVal;
+    let f = udf_fixture();
+    let mut g = game(&f);
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(&format!("ref cb\nint r1\nint r2\nint r3\nBegin Function {{ }}\n{body}\nEnd\n"), Default::default()).unwrap()
+    };
+    // SetEventHandler: duplicate returns 0 and dispatches once.
+    assert_eq!(
+        q(
+            &mut g,
+            "let cb := (Begin Function {int x}
+               let TestGlobal := TestGlobal + x
+             End)
+             let r1 := SetEventHandler \"W6Dup\" cb
+             let r2 := SetEventHandler \"W6Dup\" cb
+             DispatchEventAlt \"W6Dup\" 1
+             SetFunctionValue (r1 * 10 + r2)",
+        ),
+        XVal::Num(10.0)
+    );
+    assert_eq!(g.world.global(FormId(0x0000_0800)).unwrap(), 1.0);
+    // SetEventHandlerAlt: duplicate with identical filter returns 0 and dispatches once;
+    // distinct priority is accepted.
+    assert_eq!(
+        q(
+            &mut g,
+            "let cb := (Begin Function {int x}
+               let TestGlobal := TestGlobal + x
+             End)
+             let r1 := SetEventHandlerAlt \"W6DupAlt\" cb 1::5
+             let r2 := SetEventHandlerAlt \"W6DupAlt\" cb 1::5
+             DispatchEventAlt \"W6DupAlt\" 5
+             let r3 := SetEventHandlerAlt \"W6DupAlt\" cb 1::5 \"priority\"::2
+             SetFunctionValue (r1 * 100 + r2 * 10 + r3)",
+        ),
+        XVal::Num(101.0)
+    );
+    assert_eq!(g.world.global(FormId(0x0000_0800)).unwrap(), 6.0);
+}
+
+#[test]
 fn get_game_loaded_and_restarted_are_true_once_per_script() {
     // [documented: GetGameLoaded; GetGameRestarted] once per script after a load / per
     // session; a session's SetEventHandler registrations carry over a load.

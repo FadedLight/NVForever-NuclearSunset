@@ -416,6 +416,14 @@ impl Game<'_> {
         std::mem::take(&mut self.showoff.force_jam_requests)
     }
 
+    /// Whether `actor` has a queued `ForceWeaponJamAnim` / `ForceJamAnim` request not yet
+    /// consumed by `nvf_play::combat::fire`, so post-script animation sync preserves
+    /// `AnimAction::Jam` without clobbering it back to `None`/`Reload` and double-firing
+    /// `SetOnReloadWeaponEventHandler`.
+    pub fn has_pending_force_jam(&self, actor: FormId) -> bool {
+        self.showoff.force_jam_requests.contains(&actor)
+    }
+
     /// The stop handlers of an aux timer that ran out or was stopped with its event: each
     /// gets the timer's name and its owner [documented: SetOnAuxTimerStopHandler; observed:
     /// showoff1, once when a 0.1 s timer ran out and once on AuxTimerStop 1, the owner the

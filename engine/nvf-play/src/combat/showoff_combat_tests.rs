@@ -302,8 +302,8 @@ fn force_weapon_jam_anim_interrupts_reload_blocks_firing_and_clears() {
     app.world_mut().resource_mut::<PlayerControl>().trigger = false;
     step_app(&mut app, 0.2);
 
-    // Register JIP SetOnReloadWeaponEventHandler to confirm reload fires once (on reload),
-    // not again when ForceJamAnim enters AnimAction::Jam (GetAnimAction == 9).
+    // Register JIP SetOnReloadWeaponEventHandler to confirm it fires once on reload
+    // and once when ForceJamAnim enters AnimAction::Jam (2 total, no double-fire on sync).
     run_nvse(
         &mut app,
         "SetOnReloadWeaponEventHandler (Begin Function {ref rW}\n\
@@ -361,6 +361,80 @@ fn force_weapon_jam_anim_interrupts_reload_blocks_firing_and_clears() {
     app.world_mut().resource_mut::<PlayerControl>().trigger = true;
     step_app(&mut app, 0.05);
     assert_eq!(app.world().resource::<CombatStats>().shots, 2, "weapon fires again after jam clears");
+}
+
+#[test]
+fn force_weapon_jam_anim_survives_post_script_anim_sync_without_double_reload_event() {
+    let mut app = bridge_app();
+    run_nvse(
+        &mut app,
+        "SetOnReloadWeaponEventHandler (Begin Function {ref rW}\n\
+           PlayerREF.AuxVarSetFlt \"*jip_reload\" 1 -1\n\
+         End) 1 PlayerREF",
+    );
+
+    // 1. From idle drawn weapon: ForceWeaponJamAnim queues pending jam and fires once.
+    assert_eq!(nvse_num(&mut app, "PlayerREF.ForceWeaponJamAnim"), 1.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 1.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.GetAnimAction"), f64::from(AnimAction::Jam.code()));
+
+    // Simulate post-script animation sync (AnimStatePlugin::tell / bridge_player_anim_state)
+    // running before combat::fire consumes force_jam_requests.
+    {
+        let mut had = true;
+        app.world_mut().resource_scope(|world, mut script: Mut<ScriptState>| {
+            world.resource_scope(|world, mut sim: Mut<SimState>| {
+                let combat = world.resource::<Combat>();
+                let anim = world.resource::<WeaponAnim>();
+                with_world(script.rt.as_mut().unwrap(), &mut sim, |rt| {
+                    assert!(rt.game.has_pending_force_jam(FormId::PLAYER_REF));
+                    bridge_player_anim_state(&mut rt.game, combat, anim, false, false, None, 0.016, &mut had);
+                });
+            });
+        });
+    }
+    assert_eq!(nvse_num(&mut app, "PlayerREF.GetAnimAction"), f64::from(AnimAction::Jam.code()));
+    assert_eq!(nvse_num(&mut app, "PlayerREF.GetSequenceAnimGroup 4"), 200.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 1.0);
+
+    // Next frame: combat::fire consumes force_jam_requests -> enters Phase::Jammed without re-firing.
+    step_app(&mut app, 0.05);
+    assert!(app.world().resource::<Combat>().cycle.as_ref().unwrap().jammed());
+    assert_eq!(nvse_num(&mut app, "PlayerREF.GetAnimAction"), f64::from(AnimAction::Jam.code()));
+    assert_eq!(
+        nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""),
+        1.0,
+        "SetOnReloadWeaponEventHandler must fire strictly once across ForceWeaponJamAnim -> anim sync -> combat::fire"
+    );
+
+    // 2. Let jam finish, start a reload (+1), then ForceWeaponJamAnim (+1), run pre-fire sync, then step_app.
+    step_app(&mut app, 1.5);
+    assert!(!app.world().resource::<Combat>().cycle.as_ref().unwrap().jammed());
+    app.world_mut().resource_mut::<PlayerControl>().reload = true;
+    step_app(&mut app, 0.05);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 2.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.ForceWeaponJamAnim"), 1.0);
+    assert_eq!(nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""), 3.0);
+    {
+        let mut had = true;
+        app.world_mut().resource_scope(|world, mut script: Mut<ScriptState>| {
+            world.resource_scope(|world, mut sim: Mut<SimState>| {
+                let combat = world.resource::<Combat>();
+                let anim = world.resource::<WeaponAnim>();
+                with_world(script.rt.as_mut().unwrap(), &mut sim, |rt| {
+                    assert!(rt.game.has_pending_force_jam(FormId::PLAYER_REF));
+                    bridge_player_anim_state(&mut rt.game, combat, anim, false, false, None, 0.016, &mut had);
+                });
+            });
+        });
+    }
+    step_app(&mut app, 0.05);
+    assert!(app.world().resource::<Combat>().cycle.as_ref().unwrap().jammed());
+    assert_eq!(
+        nvse_num(&mut app, "PlayerREF.AuxVarSize \"*jip_reload\""),
+        3.0,
+        "reload + pending-jam sync + combat::fire must not double/triple-fire reload handler"
+    );
 }
 
 #[test]

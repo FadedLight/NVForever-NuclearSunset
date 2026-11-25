@@ -1716,7 +1716,7 @@ pub fn uniform(i: &VolumeInputs) -> CloudVolumeUniform {
         slab: Vec4::new(finite(i.plane_height), domain, source_range(horizon, i.above_ground, domain), horizon),
         march: Vec4::new(step_near(i.steps), LIGHT_STEPS as f32, non_negative(i.density), LIGHT_THRESHOLD),
         reach: Vec4::new(LIGHT_REACH, shell_radius(horizon, i.above_ground), STOP_TRANSMITTANCE, RAY_BUDGET as f32),
-        phase: Vec4::new(G_FORWARD, G_BACK, BACK_WEIGHT, PHASE_CAP),
+        phase: Vec4::new(G_FORWARD, G_BACK, BACK_WEIGHT, i.light_aids.phase_cap(crate::volumetric_clouds_light::night_share(i.sky.elevation))),
         light_dir: dir.extend(unit(i.light_strength)),
         light: lit.light.extend(0.0),
         map: Vec4::new(uv_scale(i.uv_scale.x), uv_scale(i.uv_scale.y), 0.0, 0.0),

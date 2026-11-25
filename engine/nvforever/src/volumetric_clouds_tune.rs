@@ -30,7 +30,7 @@
 //! file, nothing that looks for one, and the values of its start.
 
 use crate::volumetric_clouds::{debug_type, debug_view, CloudAids, CloudType, CloudView, MAX_DEBUG_DENSITY, MAX_STEPS, MIN_STEPS};
-use crate::volumetric_clouds_light::{try_night_pull, try_share, try_weight, LightWeight, LIGHT_WEIGHTS, MOON_BACK_VAR, MOON_FORWARD_VAR, NIGHT_PULL_VAR, SUN_COLOR_VAR, SUN_COLOUR_VAR};
+use crate::volumetric_clouds_light::{try_moon_cap, try_night_pull, try_share, try_weight, LightWeight, LIGHT_WEIGHTS, MOON_BACK_VAR, MOON_CAP_VAR, MOON_FORWARD_VAR, NIGHT_PULL_VAR, SUN_COLOR_VAR, SUN_COLOUR_VAR};
 use crate::volumetric_clouds_wisp::try_wisp;
 use bevy::prelude::*;
 use std::path::{Path, PathBuf};
@@ -58,6 +58,7 @@ impl CloudAids {
                 light.night_pull = o.night_pull.unwrap_or(light.night_pull);
                 light.moon_forward = o.moon_forward.or(light.moon_forward);
                 light.moon_back = o.moon_back.or(light.moon_back);
+                light.moon_cap = o.moon_cap.or(light.moon_cap);
                 for (w, v) in LightWeight::ALL.into_iter().zip(o.weights) {
                     if let Some(v) = v {
                         light.weights[w.index()] = v;
@@ -102,6 +103,8 @@ pub enum TuneKey {
     /// set; volumetric_clouds_light.rs `LightAids::phase_weight`); start unset.
     MoonForward,
     MoonBack,
+    /// `MOONCAP`: the phase's cap by moonlight, 0 to 16 (the day's unless set); starts unset.
+    MoonCap,
     /// `WISP`: the wisps' strength, 0 to 4 (#3032 stage 2h, W2); starts at 0.52.
     Wisp,
     Height,
@@ -109,7 +112,7 @@ pub enum TuneKey {
 }
 
 impl TuneKey {
-    pub const ALL: [TuneKey; 23] = [
+    pub const ALL: [TuneKey; 24] = [
         TuneKey::Shape,
         TuneKey::Erosion,
         TuneKey::Density,
@@ -130,6 +133,7 @@ impl TuneKey {
         TuneKey::NightPull,
         TuneKey::MoonForward,
         TuneKey::MoonBack,
+        TuneKey::MoonCap,
         TuneKey::Wisp,
         TuneKey::Height,
         TuneKey::Horizon,
@@ -149,6 +153,7 @@ impl TuneKey {
             TuneKey::NightPull => "NIGHTPULL",
             TuneKey::MoonForward => "MOONFORWARD",
             TuneKey::MoonBack => "MOONBACK",
+            TuneKey::MoonCap => "MOONCAP",
             TuneKey::Wisp => "WISP",
             TuneKey::Height => "HEIGHT",
             TuneKey::Horizon => "HORIZON",
@@ -169,6 +174,7 @@ impl TuneKey {
             TuneKey::NightPull => NIGHT_PULL_VAR,
             TuneKey::MoonForward => MOON_FORWARD_VAR,
             TuneKey::MoonBack => MOON_BACK_VAR,
+            TuneKey::MoonCap => MOON_CAP_VAR,
             TuneKey::Wisp => "NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_WISP",
             TuneKey::Height => "NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HEIGHT",
             TuneKey::Horizon => "NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_HORIZON",
@@ -239,6 +245,7 @@ pub struct TuneOverrides {
     pub night_pull: Option<f32>,
     pub moon_forward: Option<f32>,
     pub moon_back: Option<f32>,
+    pub moon_cap: Option<f32>,
     pub wisp: Option<f32>,
 }
 
@@ -283,6 +290,7 @@ pub fn parse_tune(text: &str) -> ParsedTune {
             TuneKey::NightPull => set(&mut o.night_pull, try_night_pull(value)),
             TuneKey::MoonForward => set(&mut o.moon_forward, try_weight(value)),
             TuneKey::MoonBack => set(&mut o.moon_back, try_weight(value)),
+            TuneKey::MoonCap => set(&mut o.moon_cap, try_moon_cap(value)),
             TuneKey::Wisp => set(&mut o.wisp, try_wisp(value)),
             TuneKey::Height | TuneKey::Horizon => false,
         };
@@ -296,6 +304,7 @@ pub fn parse_tune(text: &str) -> ParsedTune {
                 TuneKey::Weight(_) | TuneKey::MoonForward | TuneKey::MoonBack | TuneKey::Wisp => "a number (held to 0..4)",
                 TuneKey::SunColour => "a number (held to 0..1)",
                 TuneKey::NightPull => "a number (held to 0..2)",
+                TuneKey::MoonCap => "a number (held to 0..16)",
                 TuneKey::Height | TuneKey::Horizon => "start-only",
             };
             p.bad.push((line.to_string(), format!("{} wants {form}", key.short())));
@@ -331,6 +340,7 @@ fn describe(start: &CloudAids, now: &CloudAids) -> String {
         (TuneKey::NightPull, start.light.night_pull() != now.light.night_pull()),
         (TuneKey::MoonForward, start.light.moon_forward != now.light.moon_forward),
         (TuneKey::MoonBack, start.light.moon_back != now.light.moon_back),
+        (TuneKey::MoonCap, start.light.moon_cap != now.light.moon_cap),
     ]
     .into_iter()
     .chain(LightWeight::ALL.into_iter().map(|w| (TuneKey::Weight(w), start.light.weight(w) != now.light.weight(w))))

@@ -694,7 +694,7 @@ fn objects(
     // Read every frame, so a take flagged while the container menu is open is not left to
     // sound a later frame after it closes.
     let took = crate::quick_loot::took_this_frame() | menu_open;
-    for &RefChanged { form_id: id, restored } in changed.read() {
+    for &RefChanged { form_id: id, restored, .. } in changed.read() {
         let Some(s) = sim.world.peek(FormId(id)) else { continue };
         if !ws.forms.items.contains_key(&s.base) {
             continue;

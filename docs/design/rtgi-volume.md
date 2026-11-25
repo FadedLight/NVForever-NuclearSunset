@@ -118,9 +118,9 @@ Each extraction makes a plan of it (`rtgi_volume/plan.rs`, a pure function) and 
 (`gpu.rs`), before anything is specialised:
 
 - **First bind** of a visit: only under the loading screen of a start or a travel, until it first
-  settles, and only with a world camera whose view is drawn in that frame. The screen waits for pipelines that were asked for, so those of what is loaded, in range
-  and not culled are asked for while it is up. A request that comes later waits for the next visit,
-  in the stock light. What comes into view later asks for its pipeline then and is skipped until it
+  settles, and only with a world camera whose view is drawn in that frame. The screen waits for
+  pipelines that were asked for, so those of what is loaded, in range and not culled are asked for
+  while it is up. A request that comes later waits for the next visit, in the stock light. What comes into view later asks for its pipeline then and is skipped until it
   is ready, as any other.
 - **Another texture of the same visit** (empty to solved, a newer result): at any time, as it changes
   no key and no pipeline. An older result than what is bound is dropped, whatever it is.
@@ -150,8 +150,8 @@ when:
 - the fragment stage of the fullest pipeline has more sampled textures, samplers or uniform buffers
   than the device allows. That pipeline is the view's fullest layout (`fullest_view_key`, with the
   tonemapping's table, the contact shadows' uniform and the three bindings, without the light
-  volume's arrays while they are off), 2 textures, 2 samplers and 4 uniform buffers of the mesh, and the most that a material drawn
-  in that view has. Binding arrays count against other limits;
+  volume's arrays while they are off), 2 textures, 2 samplers and 4 uniform buffers of the mesh, and
+  the most that a material drawn in that view has. Binding arrays count against other limits;
 - rgba16float cannot be filtered, sampled or written;
 - a side is larger than the device allows, or the texture than 32 MiB. An old and a new one may then
   be there side by side: 128 MiB of payload for one replacement, the staging copy and the main

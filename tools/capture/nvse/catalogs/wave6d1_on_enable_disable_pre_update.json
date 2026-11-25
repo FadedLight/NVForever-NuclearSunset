@@ -119,10 +119,9 @@
         {
           "id": "w6d1p2_07_on_enable_tick",
           "bucket": "A",
-          "extender": "xNVSE 6.4.9",
+          "extender": "xNVSE 6.4.9 + JIP LN 57.30",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,

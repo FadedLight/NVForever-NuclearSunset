@@ -336,8 +336,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         }
         // ---- packages ----
         // Stuck: a package the actor could not reach is set aside now
-        // (`Game::block_package`) [hypothesis: NVForever's form of "unable to find a
-        // path"].
+        // (`Game::block_package`; see docs/spec-notes/jip-actors-11.md §1).
         "gettargetunreachable" => {
             let now = g.world.calendar().map(|c| c.days_passed).unwrap_or(0.0);
             yes(subject.and_then(|r| g.extra.get(&r)).is_some_and(|e| e.package_blocked.values().any(|&u| u > now)))
@@ -386,7 +385,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             reff(b.filter(|&b| matches!(g.data.sig(b).as_ref(), Some(b"LVLN" | b"LVLC"))))
         }
         // The light at the actor as the last detection round measured it, 0-100
-        // [documented: the range]; 0 for an actor not measured [hypothesis].
+        // [documented: the range]; 0 for an actor not measured (see docs/spec-notes/jip-actors-11.md §2).
         "getactorlightamount" => XVal::Num(subject.and_then(|r| g.other.jip11.light.get(&r).copied()).unwrap_or(0.0)),
         // The movement flags [documented: the bit table]. Jumping, flying, falling and
         // sliding are not known game-side: 0 [decision: spec note §6].
@@ -428,8 +427,8 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             };
             reff(e)
         }
-        // `effect [baseForm]`: an object effect or actor effect [hypothesis: anything
-        // else refused]; 1 when set [documented].
+        // `effect [baseForm]`: an object effect or actor effect (anything else refused;
+        // see docs/spec-notes/jip-actors-11.md §2); 1 when set [documented].
         "setactorunarmedeffect" => {
             let Some(e) = form(args, 0).filter(|&e| matches!(g.data.sig(e).as_ref(), Some(b"ENCH" | b"SPEL"))) else { return Some(Ok(zero)) };
             let Some(b) = form(args, 1).or_else(|| subject.and_then(|r| crate::functions::base_of(g, r))) else { return Some(Ok(zero)) };
@@ -445,7 +444,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // JIP LN 57.30, 2026-11-24, `w6_t1_05_velocities_jip`
         // (`tools/capture/nvse/catalogs/wave6_t1_jip_velocities.json`, `jip-actors-11.md`
         // §2): `act0=1(0.0,0.0,0.0)|act1=1(0.0,0.0,0.0)`]; the actor is followed from now
-        // on, as GetActorVelocity follows it, so the first call reads 0 [hypothesis].
+        // on, as GetActorVelocity follows it, so the first call reads 0 (see docs/spec-notes/jip-actors-11.md §2).
         // Note: `Vm::out_call` strips output params `[0, 1, 2]` before dispatch, so
         // optional `getLocal` arrives at `args[0]`.
         "getactorvelocityalt" => {
@@ -618,9 +617,8 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // Whether the actor's last hit got past its DT [documented: in its OnHit].
         "getarmourpenetrated" => yes(subject.and_then(|r| g.other.jip11.penetrated.get(&r).copied()).unwrap_or(false)),
         // ---- factions ----
-        // `faction rank [baseActor]`: the base's rank, for the session [documented;
-        // hypothesis: not saved]; a rank below 0 takes the base out [hypothesis: as
-        // SetFactionRank].
+        // `faction rank [baseActor]`: the base's rank, for the session [documented];
+        // a rank below 0 takes the base out (see docs/spec-notes/jip-actors-11.md §5).
         "setbasefactionrank" => {
             let (Some(f), Some(rank)) = (form(args, 0), num(args, 1)) else { return Some(Ok(zero)) };
             let Some(b) = form(args, 2).or_else(|| subject.and_then(|r| crate::functions::base_of(g, r))) else { return Some(Ok(zero)) };
@@ -660,8 +658,8 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             let record = g.data.need_stages.values().flatten().find(|s| s.stage == st).map(|s| s.spell);
             reff(record.and_then(|sp| g.stage_spell(st, sp)))
         }
-        // `stage [effect]`: no effect leaves the stage without one [hypothesis]; the
-        // player gets the new one at the next change of stage [hypothesis].
+        // `stage [effect]`: no effect leaves the stage without one; the player gets the
+        // new one at the next change of stage (see docs/spec-notes/jip-actors-11.md §5).
         "sethardcorestageeffect" => {
             let Some(st) = form(args, 0).filter(|&st| g.data.need_stages.values().flatten().any(|s| s.stage == st)) else { return Some(Ok(zero)) };
             let e = form(args, 1).filter(|&e| g.data.sig(e) == Some(*b"SPEL"));

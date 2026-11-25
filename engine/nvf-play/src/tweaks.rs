@@ -95,7 +95,7 @@ pub struct TweakSettings {
     pub no_reputation_messages: bool,
     /// `bDisableExplosionInFaceIMOD`: a nearby explosion does not blur the screen.
     pub no_explosion_blur: bool,
-    /// `bRemoveSneakLabel`: no [HIDDEN] / [DETECTED] label while sneaking.
+    /// `bRemoveSneakLabel`: no [UNSEEN] / [SPOTTED] label while sneaking.
     pub no_sneak_label: bool,
     /// `bVatsExitKey`: a right click ends a kill camera.
     pub kill_cam_exit_key: bool,

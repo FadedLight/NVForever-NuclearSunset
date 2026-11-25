@@ -12473,7 +12473,7 @@ run_seconds = 25
 expect = [
   { re = 'pipboy items: 10mm Pistol selected: .*dps: None', label = "no DPS card on the ITEMS page" },
   { re = 'pipboy items: 10mm Pistol selected: .*badge: Some\("[^"]*weap_skill_icon_sm_arms\.dds"\), skill_req: Some\(\d+\)', label = "the Guns badge and the skill the pistol needs" },
-  { re = 'pipboy items: 10mm Pistol Mod X\)', label = "Mod X) for a weapon with mod slots" },
+  { re = 'pipboy items: 10mm Pistol Modify X\)', label = "Modify X) for a weapon with mod slots" },
   "pipboy repair: clicked row 1",
   { re = 'pipboy repair: 10mm Pistol [34]0% with 10mm Pistol [34]0% -> \d+% \(Repair \d+\)', label = "the click on the chosen part repairs the pistol" },
 ]
@@ -12659,7 +12659,7 @@ args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 messages = true  # its checks read message boxes: no --no-messages added (smoke/scenarios.py)
 run_seconds = 25
 expect = [
-  { re = 'pipboy items: 10mm Pistol Mod X\)(?! \(dim)', label = "Mod X) bright: the player carries a mod that fits" },
+  { re = 'pipboy items: 10mm Pistol Modify X\)(?! \(dim)', label = "Modify X) bright: the player carries a mod that fits" },
   { re = 'pipboy mod: open 10mm Pistol \(flags 0\): 10mm Pistol Extended Mags \(slot 1\)', label = "X lists the extended magazines for slot 1" },
   { text = "pipboy: menu code 1061", label = "MenuMode 1061 while the mod menu is open" },
   { re = 'pipboy mod: 10mm Pistol \+ 10mm Pistol Extended Mags \(slot 1, flags 1\)', label = "attaching sets the slot's flag" },
@@ -12677,7 +12677,7 @@ env = { NVF_PLAY_TEST_TILE_MENUS = "", NVFOREVER_HOME = "pipboy-right-click-drop
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 run_seconds = 21
 expect = [
-  { re = 'pipboy items: 10mm Pistol Mod X\)', label = "the pistol's Mod X) shows: a weapon with mod slots" },
+  { re = 'pipboy items: 10mm Pistol Modify X\)', label = "the pistol's Modify X) shows: a weapon with mod slots" },
   { text = "test aid: pipboy clicked the screen", label = "the right click lands on the screen" },
   { re = 'menu: Drop: Dropped 10mm Pistol x1', label = "the right click drops the pistol" },
   { text = "pipboy mod: open", count = 0, label = "the mod menu stays closed" },
@@ -32041,11 +32041,11 @@ expect = [
   { re = 'pipboy hints: items Misc: Repair R\) \(dim\)$', label = "Misc: Repair alone, dim" },
   { re = 'pipboy hints: items Ammo: Repair R\) \(dim\)$', label = "Ammo: Repair alone, dim" },
   { re = 'pipboy hints: items \w+: .*(Enter\)|Right Mouse\)|1-8\))', max = 0, label = "no equip, drop or hotkey hint with the keyboard" },
-  { text = "pipboy hints: mod menu: Mod Enter) (dim), Exit E)", label = "the mod menu on the weapon's row: Mod dim, and Exit under it" },
+  { text = "pipboy hints: mod menu: Modify Enter) (dim), Exit E)", label = "the mod menu on the weapon's row: Mod dim, and Exit under it" },
   { re = 'pipboy hints: mod menu: Mod Enter\)(?! \(dim), Exit E\)', label = "the mod menu on a mod: Mod bright" },
-  { re = 'pipboy items: 10mm Pistol Mod X\)(?! \(dim)', label = "the pistol's own Mod X) line, bright" },
+  { re = 'pipboy items: 10mm Pistol Modify X\)(?! \(dim)', label = "the pistol's own Modify X) line, bright" },
 ]
-order = [["pipboy hints: items Weapons", "pipboy hints: items Aid", "pipboy hints: items Ammo", "pipboy hints: mod menu: Mod Enter) (dim), Exit E)"]]
+order = [["pipboy hints: items Weapons", "pipboy hints: items Aid", "pipboy hints: items Ammo", "pipboy hints: mod menu: Modify Enter) (dim), Exit E)"]]
 
 [[scenario]]
 name = "pipboy-items-hints-pad"

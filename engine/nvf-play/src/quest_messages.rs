@@ -547,7 +547,7 @@ mod tests {
         let (l, t) = fonts();
         let p = layout(&QuestNotice::Added("Come Fly With Me".into()), &l, &t);
         let Piece::Text { set, title: false, from } = &p[0] else { panic!("{p:?}") };
-        assert_eq!((set.line.glyphs.len(), set.x, set.base, *from), (10, TEXT_X, LABEL_BASE, 0.0));
+        assert_eq!((set.line.glyphs.len(), set.x, set.base, *from), (8, TEXT_X, LABEL_BASE, 0.0));
         // One piece a letter, coming from left to right.
         assert_eq!(p.len(), 1 + 13);
         let letters: Vec<(u8, f32, f32)> = p[1..]

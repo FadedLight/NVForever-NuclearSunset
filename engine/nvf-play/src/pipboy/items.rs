@@ -1154,8 +1154,8 @@ mod tests {
         let keys_misc_ammo: Vec<_> = [Category::Misc, Category::Ammo].map(|tab| shown(&page_hints(tab, Some(&misc(tab)), ("Repair", false), false, false))).into();
         let keys_empty = shown(&page_hints(Category::Weapons, None, ("Repair", false), false, true));
 
-        assert_eq!(weapons, [hint("Equip A)", false), hint("Drop X)", false), hint("Repair Y)", false), hint("Hotkey RB)", false), hint("Mod LB)", false)]);
-        assert_eq!(bare, ("Repair", true, "Mod", true, false));
+        assert_eq!(weapons, [hint("Equip A)", false), hint("Drop X)", false), hint("Repair Y)", false), hint("Hotkey RB)", false), hint("Modify LB)", false)]);
+        assert_eq!(bare, ("Repair", true, "Modify", true, false));
         assert_eq!(apparel, [hint("Unequip A)", false), hint("Drop X)", false), hint("Maintain Y)", true), hint("Hotkey RB)", false)]);
         assert_eq!(aid, [hint("Use A)", false), hint("Drop X)", false), hint("Repair Y)", true), hint("Hotkey RB)", false)]);
         assert_eq!(book, "Use");
@@ -1166,14 +1166,14 @@ mod tests {
         assert!(quest);
         assert_eq!(empty, (5, true), "an empty Weapons tab: all five controller hints, all dim");
 
-        assert_eq!(keys_weapons, [hint("Repair R)", false), hint("Mod X)", false)]);
-        assert_eq!(keys_bare, [hint("Repair R)", true), hint("Mod X)", true)]);
+        assert_eq!(keys_weapons, [hint("Repair R)", false), hint("Modify X)", false)]);
+        assert_eq!(keys_bare, [hint("Repair R)", true), hint("Modify X)", true)]);
         assert_eq!(keys_apparel, [hint("Maintain R)", true)]);
         assert_eq!(keys_aid, [hint("Repair R)", true)]);
         for h in &keys_misc_ammo {
             assert_eq!(h, &[hint("Repair R)", true)]);
         }
-        assert_eq!(keys_empty, [hint("Repair R)", true), hint("Mod X)", true)]);
+        assert_eq!(keys_empty, [hint("Repair R)", true), hint("Modify X)", true)]);
     }
 
     /// Five hints 46 apart from the Repair button's place end above the figures' highest
@@ -1263,7 +1263,7 @@ mod tests {
         let aid = Info { value: Some("675".into()), effects: Some("HP +40".into()), ..Info::default() };
         let t = info_tiles(&aid);
         assert_eq!(t[0].value, "--");
-        assert_eq!((t[2].title.as_str(), t[2].rect.min.y), ("EFFECTS", h));
+        assert_eq!((t[2].title.as_str(), t[2].rect.min.y), ("Effects", h));
         // Armour: effects under the condition row.
         let armour = Info { condition: Some(1.0), beside: Some("Medium".into()), effects: Some("AGL -1".into()), ..Info::default() };
         assert_eq!(info_tiles(&armour).last().map(|t| t.rect.min.y), Some(2.0 * h));

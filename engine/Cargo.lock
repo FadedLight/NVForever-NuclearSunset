@@ -4797,6 +4797,7 @@ dependencies = [
  "nvf-assets",
  "nvf-dlss-files",
  "nvf-play",
+ "nvf-rtgi",
  "png",
  "rayon",
  "rfd",

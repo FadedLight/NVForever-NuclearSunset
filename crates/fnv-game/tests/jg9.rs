@@ -217,7 +217,7 @@ fn markers_moves_and_told_values() {
         XVal::Str("0 111 222 333".into()),
         "headless with no sky preserves variables"
     );
-    // FOV: the INI's defaults without a SetCameraFOV [hypothesis there: 75 and 55].
+    // FOV: the INI's defaults without a SetCameraFOV (75 and 55; see docs/spec-notes/ext-jg9.md).
     assert_eq!(n(&mut g, "player.GetPlayerCamFOV 0"), 75.0);
     assert_eq!(n(&mut g, "player.GetPlayerCamFOV 1"), 55.0);
     assert_eq!(n(&mut g, "player.GetPlayerCamFOV 2"), 55.0, "first person until the engine tells");

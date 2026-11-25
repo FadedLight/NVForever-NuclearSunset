@@ -97,7 +97,8 @@ callbacks keep `allowed = 1`, explicit `SetFunctionValue 0` sets a sticky veto t
 updated `allowed` value (`F0(0)` runs while `F1` is skipped), and `SetDestroyed 1` inside
 a void callback prevents pickup (`afterMut=0,afterPre=0`). [hypothesis] Regular hand
 activation (`ActMode::Hand`) continues to dispatch `ShowOff:OnPreActivate` and never
-fires `ShowOff:OnPreScriptedActivate`.
+fires `ShowOff:OnPreScriptedActivate`; snapshot array-filter retention follows
+`ShowOff:OnPreActivate` via shared `Game::dispatch_pre_event`.
 
 ### `ShowOff:OnPreActivateInventoryItem` and `ShowOff:OnPreActivateInventoryItemAlt`
 

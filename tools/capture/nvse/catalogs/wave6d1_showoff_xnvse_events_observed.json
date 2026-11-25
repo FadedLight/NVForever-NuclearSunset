@@ -36,8 +36,7 @@
           "bucket": "A",
           "extender": "xNVSE 6.4.9",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,
@@ -45,7 +44,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-events.md",
-          "spec_line": 130,
+          "spec_line": 169,
           "functions_tested": [
             "DispatchEventAlt",
             "SetEventHandlerAlt"
@@ -341,7 +340,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/preactivation-events.md",
-          "spec_line": 56,
+          "spec_line": 86,
           "functions_tested": [
             "ShowOff:OnPreScriptedActivate",
             "SetDestroyed"
@@ -718,7 +717,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 269,
+          "spec_line": 272,
           "functions_tested": [
             "ToggleQuestMessages",
             "ResetInteriorAlt",
@@ -808,7 +807,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 234,
+          "spec_line": 235,
           "functions_tested": [
             "GetCalculatedAPCost",
             "GetCalculatedItemValue"
@@ -856,7 +855,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 228,
+          "spec_line": 229,
           "functions_tested": [
             "GetVATSTargetable",
             "GetPCHasScriptedFastTravelOverride",
@@ -921,7 +920,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 230,
+          "spec_line": 232,
           "functions_tested": [
             "ForceRecoilAnim",
             "ForceHitStaggerReaction",
@@ -1011,7 +1010,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 218,
+          "spec_line": 119,
           "functions_tested": [
             "ShowSkillMenu",
             "GetLevelUpMenuCurrentPage",

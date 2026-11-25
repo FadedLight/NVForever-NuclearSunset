@@ -46,7 +46,7 @@ order (and the targets of the `"first"`/`"second"` filters, §3).
 | OnClose, OnOpen | the reference | the same reference | |
 | OnCombatEnd | target (actor) | ender (actor) | |
 | OnDeath | killed (actor) | killer (actor) | |
-| OnDrop | dropper | the dropped world reference | fires with `GetSelfAlt == 0`, `(dropper, worldRef)` [observed: `w6d1_09_on_drop_and_xnvse_on_add`: `drp(n=1,a1P=1,a2Ref=1,sP=0,s0=1)`]; not when moving items between containers in the inventory menu, unlike the OnDrop block |
+| OnDrop | dropper | the dropped world reference | fires with `GetSelfAlt == 0`, `(dropper, worldRef)` [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_showoff_xnvse_events_observed.json` probe `w6d1_09_on_drop_and_xnvse_on_add`: `drp(n=1,a1P=1,a2Ref=1,sP=0,s0=1)`; no DLL, PDB, or third-party source consulted]; not when moving items between containers in the inventory menu, unlike the OnDrop block |
 | OnHit | target (any reference) | attacker: an actor, or the projectile when the target is not an actor and the weapon is not melee/unarmed | runs **before damage**, unlike the OnHit block |
 | OnHitWith | target | weapon (base form) | runs before damage |
 | OnLoad | the reference | the same | |
@@ -166,7 +166,7 @@ form, string, array), and an optional calling reference the handlers run on. Ret
 success flag. A handler may take **fewer** parameters than the event sends, so an event
 can add arguments later without breaking older handlers. SetEventHandlerAlt suits it
 best, since it can filter each argument by index [documented: DispatchEventAlt, pasted by the owner from geckwiki.com, 2026-10-25].
-Returns `1`, runs handlers declaring fewer or more parameters than sent (extra params default to 0), matches `0::baseForm` against a placed calling reference, matches string filters case-insensitively, and reflects live `ar_Append` mutations to an array filter [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_showoff_xnvse_events_observed.json` probe `w6d1_05_dispatch_event_alt_arity_and_filters`: `PROBE|w6d1_05_dispatch_event_alt_arity_and_filters|ret=1/1|arity(0=1,3=1,selfDoc=1)|flt=1,1,2`; no binary, DLL, PDB, or third-party source consulted].
+Returns `1`, runs handlers declaring fewer or more parameters than sent, matches `0::baseForm` against a placed calling reference, matches string filters case-insensitively, and reflects live `ar_Append` mutations to an array filter [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_showoff_xnvse_events_observed.json` probe `w6d1_05_dispatch_event_alt_arity_and_filters`: `PROBE|w6d1_05_dispatch_event_alt_arity_and_filters|ret=1/1|arity(0=1,3=1,selfDoc=1)|flt=1,1,2`; no binary, DLL, PDB, or third-party source consulted]; extra declared parameters default to 0 [hypothesis].
 
 **GetCurrentEventName** (returns a string): inside a SetEventHandler-style handler, the
 name of the event being handled, so one function can serve several events

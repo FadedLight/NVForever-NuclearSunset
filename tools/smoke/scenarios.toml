@@ -340,7 +340,7 @@ source = "#2754 (an 8 GB card at 1440p held 7,037 of its 6,844 MB budget and sta
 areas = ["renderer", "graphics"]
 paths = ["engine/nvforever/src/memory_budget.rs", "engine/nvforever/src/graphics.rs"]
 # Goodsprings on foot holds about 1,070 MB at 2048 maps and 4x (2026-11-25), under 95 % of the test aid's 1,150 MB, so nothing is lowered until the settings page sets 4096 maps and 8x (anti-aliasing 0.5 is the fourth of seven choices); those take it over, and each step follows while it stays over.
-env = { NVFOREVER_HOME = "gpu-shed-home", NVF_PLAY_TEST_VRAM_MB = "1150", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "3:4", NVF_PLAY_TEST_SETTINGS = "3.3:shadow-resolution=4096,3.6:anti-aliasing=0.5" }
+env = { NVF_PLAY_TEST_VRAM_MB = "1150", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "3:4", NVF_PLAY_TEST_SETTINGS = "3.3:shadow-resolution=4096,3.6:anti-aliasing=0.5" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--sun-shadows", "--size", "1920x1080"]
 run_seconds = 45
 expect = [

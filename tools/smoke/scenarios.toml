@@ -11610,7 +11610,7 @@ source = "owner 2026-10-15: save and load (docs/design/save-load.md): the first 
 areas = ["save"]
 paths = ["engine/nvf-play/src/save.rs", "engine/nvf-play/src/pause.rs", "crates/fnv-save/", "crates/fnv-game/src/game.rs", "crates/fnv-sim/src/world.rs"]
 # The console waits past the add-on packs' message boxes (each held 0.3 s), which run to about 13 s.
-env = { NVFOREVER_HOME = "save-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "20:player.additem Stimpak 7;20.5:player.getitemcount Stimpak;21:0010A202.disable;21.5:player.setav luck 9;22:save smoke-roundtrip;23:saves;24:coc GSProspectorSaloonInterior;32:autosave;33:close", NVF_PLAY_TEST_PAUSE = "34:39.5", NVF_PLAY_TEST_PAUSE_MENU = "34.5:save,36:load,37:down,38:up,38.5:back" }
+env = { NVFOREVER_HOME = "save-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "20:player.additem Stimpak 7;20.5:player.getitemcount Stimpak;21:0010A202.disable;21.5:player.setav luck 9;22:save smoke-roundtrip;23:saves;24:coc GSProspectorSaloonInterior;32:autosave;33:close", NVF_PLAY_TEST_PAUSE = "34:39.5", NVF_PLAY_TEST_PAUSE_MENU = "34.5:save,35:pick,36:load,37:down,38:up,38.5:back" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700"]
 run_seconds = 41
 expect = [

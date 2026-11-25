@@ -11588,7 +11588,7 @@ expect = [
   { re = 'save: not now', count = 0, label = "no save is refused" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf answered box\|Ok" >> ran' },
+  { re = 'console: MessageBoxEx "nvf answered box\|Ok" >> 0' },
   { re = 'script: menu 1001 .*answered' },
   { re = 'save: wrote .*nvf-after-box\.nvfsave' },
 ]]
@@ -18031,7 +18031,7 @@ timeout = 180
 order = [[
   { re = '''sky: the camera's far plane at (?!32123\b)(?P<n>\d+) units \(the cell's fog clip distance\)''', range = [500, 100000], label = "ordinary cold camera clipping is present and differs from the authored target" },
   { re = 'console: lighting-smoke template (?!00000000\b)[0-9A-Fa-f]{8}$', label = "the donor cell resolves a non-null LoadOrder template" },
-  { text = 'console: SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite) >> ran', label = "the real console compiles the template assignment" },
+  { text = 'console: SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite) >> 0', label = "the real console compiles the template assignment" },
   { re = 'console: lighting-smoke positive clip 32123(?:\.0+)?$', label = "the selected template trait getter sees the authored positive clip" },
   { re = 'console: lighting-smoke inherit 1(?:\.0+)?$', label = "clip inheritance is enabled" },
   { text = "console: Travelling to Goodsprings", label = "leave through the real console travel path" },
@@ -20162,7 +20162,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:s
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 14
 expect = [
-  { re = 'console: set TimeScale to 10 \+ 2 \* 10 >> ran', label = "the expression line is compiled and run" },
+  { re = 'console: set TimeScale to 10 \+ 2 \* 10 >> 30', label = "the expression line is compiled and run" },
   { re = 'console: GetGlobalValue >> 30\.00', label = "the global holds the expression's value" },
 ]
 
@@ -26469,7 +26469,7 @@ expect = [
   { re = 'ui: game strings: [1-9]\d* read, 1 without text', label = "the six menus' game strings all have text but sModffects, empty in the original too: the load order, then NVForever's labels (T10, menu-xml.md §2.4)" },
   { re = 'script: print "nvf hud depth -?\d+(?:\.\d+)?"', label = "GetUIFloat prints the HUD file's depth" },
   { re = 'script: print "nvf hud depth -999(?:\.0+)?"', count = 0, label = "the HUD depth exists" },
-  { re = 'console: SetUIFloat "HUDMainMenu/depth" 37 >> ran', label = "the console compiles and runs SetUIFloat" },
+  { re = 'console: SetUIFloat "HUDMainMenu/depth" 37 >> 1', label = "the console compiles and runs SetUIFloat" },
   { re = 'script: print "nvf hud set 37"', label = "GetUIFloat reads the written depth on a later frame" },
 ]
 
@@ -26486,7 +26486,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:S
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 16
 expect = [
-  { re = 'console: SetUIFloatGradual "HUDMainMenu/depth" 0 100 2 >> ran', label = "the console compiles and runs SetUIFloatGradual" },
+  { re = 'console: SetUIFloatGradual "HUDMainMenu/depth" 0 100 2 >> 1', label = "the console compiles and runs SetUIFloatGradual" },
   { re = 'script: print "nvf gradual mode 0"', label = "the change runs half a second in (mode 0)" },
   { re = 'script: print "nvf gradual 100 -1"', label = "after its two seconds the depth is 100 and nothing changes it" },
 ]
@@ -26539,7 +26539,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:I
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--size", "1280x800"]
 run_seconds = 16
 expect = [
-  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> ran', label = "the console compiles and runs InjectUIComponent" },
+  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> 1', label = "the console compiles and runs InjectUIComponent" },
   { re = 'tiles: HUDMainMenu: 1 mod tiles drawn \(3 items\)', label = "the injected box, its picture and its text draw once the console closes", known_failing = "bench install 2026-11-12: the owner put Just Assorted Mods's loose menus/prefabs/J*/ files in the game's Data, which every run includes in HUDMainMenu (7 more mod tiles: JBT, JDC, JHI, JHM, JLM, JVO, JWH); main the same" }
 ]
 forbid = [
@@ -26674,7 +26674,7 @@ env = { NVF_PLAY_TEST_TILE_MENUS = "HUDMainMenu", NVF_PLAY_TEST_GOTO = "1:-68375
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--size", "1280x800"]
 run_seconds = 22
 expect = [
-  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> ran', label = "the console compiles and runs InjectUIComponent" },
+  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> 1', label = "the console compiles and runs InjectUIComponent" },
   { re = 'tiles: pointer over HUDMainMenu/NVFSmokeButton \(id 7\), mouseover 1', count = 1, label = "the pointer finds the target hotrect and writes its mouseover" },
   { re = 'tiles: clicked HUDMainMenu/NVFSmokeButton \(id 7\) by the pointer, clicked 1', count = 1, label = "a press clicks it" },
   { re = 'tiles: clicked HUDMainMenu/NVFSmokeButton \(id 7\) by key O, clicked 1', count = 1, label = "the O key clicks the tile the menu's _PCButton_O names" },
@@ -26796,7 +26796,7 @@ expect = [
   { re = 'script: print "nvf message closed -999"', label = "the closed menu is absent" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf lifetime\|Ok" >> ran' },
+  { re = 'console: MessageBoxEx "nvf lifetime\|Ok" >> 0' },
   { re = 'ui: built MessageMenu \(menus\\[^,]+\.xml, [1-9]\d* tiles\)' },
   { re = 'script: print "nvf message width -?\d+(?:\.\d+)?"' },
   "ui: dropped MessageMenu",
@@ -26828,7 +26828,7 @@ expect = [
   { re = 'ui: dropped MessageMenu', label = "the answered box drops its tiles" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf tiles box\|Yes\|No" >> ran' },
+  { re = 'console: MessageBoxEx "nvf tiles box\|Yes\|No" >> 0' },
   { re = 'tiles: MessageMenu drawn from tiles: "nvf tiles box"' },
   { re = 'tiles: MessageMenu button 1 picked on its tiles' },
   { re = 'script: menu 1001 .*answered \(button 1\)' },

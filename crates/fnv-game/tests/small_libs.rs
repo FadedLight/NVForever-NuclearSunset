@@ -968,7 +968,7 @@ bPreventSwitchWhenEmptyingCategory=9\n";
     // bRestoreLockedDoorSound always true (NVForever already plays DRSLocked on refused locks).
     let defaults = fnv_game::tweaks::Tweaks::default();
     g.bind_stewie_stat_settings(&defaults);
-    assert_eq!(q(&mut g, "SetFunctionValue (GetPluginVersion \"lStewieAl's Tweaks\")"), n(945.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (GetPluginVersion \"lStewieAl's Tweaks\")"), n(960.0));
     for name in ["StewVal", "StewieGetValue"] {
         assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bSynchronizeContainerCategories:Tweaks\")")), n(0.0));
         assert_eq!(q(&mut g, &format!("SetFunctionValue ({name} \"bPreventSwitchWhenEmptyingCategory:Synchronized Container Categories\")")), n(1.0));

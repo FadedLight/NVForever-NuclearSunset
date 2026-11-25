@@ -62,7 +62,7 @@ order (and the targets of the `"first"`/`"second"` filters, §3).
 | OnLockBroken, OnLockpickSuccess, OnLockpickBroken | — | the object | |
 | OnTerminalHacked, OnTerminalHackFailed | — | the terminal | |
 | OnRepair | — | the repaired inventory item; then the repairer and the repair kind (0 normal, 1 vendor) | four arguments |
-| OnDisable, OnEnable | — | the reference | |
+| OnDisable, OnEnable | the reference | `0` | both fire PRE-update (`GetDisabled == 0` inside `OnDisable`, `GetDisabled == 1` inside `OnEnable`) with `GetSelfAlt == 0` and `(ref, 0)` [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, ShowOffNVSE 184, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_on_enable_disable_pre_update.json` probes `w6d1_07_on_enable_on_disable_args` (`dis(n1=1,n2=1,sOk=0,a1Ok=1,a2z=1,inDis=0)`) and `w6d1p2_07_on_enable_tick` (`en(n1=1,n2=1,s0=1,sR=0,a1R=1,a2z=1,inDis=1)`); no DLL, PDB, or third-party source consulted] |
 
 "—" means the table gives no first argument; how many arguments those handlers take:
 open.

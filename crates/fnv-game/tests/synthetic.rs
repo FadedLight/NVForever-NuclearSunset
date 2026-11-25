@@ -3505,6 +3505,47 @@ fn event_handlers_are_set_dispatched_filtered_and_removed() {
 }
 
 #[test]
+fn on_disable_and_on_enable_fire_pre_update_with_null_self() {
+    use fnv_script::vm::XVal;
+    let f = fixture();
+    let mut g = game(&f);
+    g.new_game();
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(
+            &format!("int afterDis\nint afterEn\nBegin Function {{ }}\n{body}\nEnd\n"),
+            Default::default(),
+        )
+        .unwrap()
+    };
+    let res = q(
+        &mut g,
+        "set TestGlobal to 0
+         SetEventHandler \"OnDisable\" (Begin Function {ref r, int z}
+           if eval (GetSelfAlt == 0) && (r == TestActivatorREF) && (z == 0) && (r.GetDisabled == 0)
+             let TestGlobal := TestGlobal + 1
+           endif
+         End)
+         SetEventHandler \"OnEnable\" (Begin Function {ref r, int z}
+           if eval (GetSelfAlt == 0) && (r == TestActivatorREF) && (z == 0) && (r.GetDisabled == 1)
+             let TestGlobal := TestGlobal + 10
+           endif
+         End)
+         TestActivatorREF.Disable 0
+         let afterDis := TestActivatorREF.GetDisabled
+         TestActivatorREF.Enable 0
+         let afterEn := TestActivatorREF.GetDisabled
+         SetFunctionValue (afterDis * 10 + afterEn)",
+    );
+    assert!(
+        !g.events.iter().any(|e| matches!(e.kind, fnv_game::trace::EventKind::ScriptError { .. })),
+        "unexpected script error: {:?}",
+        g.events
+    );
+    assert_eq!(res, XVal::Num(10.0));
+    assert_eq!(g.world.global(FormId(GLOBAL)).unwrap(), 11.0);
+}
+
+#[test]
 fn get_game_loaded_and_restarted_are_true_once_per_script() {
     // [documented: GetGameLoaded; GetGameRestarted] once per script after a load / per
     // session; a session's SetEventHandler registrations carry over a load.

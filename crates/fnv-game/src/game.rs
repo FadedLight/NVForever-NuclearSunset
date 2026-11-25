@@ -4742,12 +4742,15 @@ impl<'a> Game<'a> {
         let ended: Vec<FormId> = self.script_looks.fading_out.iter().filter(|(_, &until)| until <= now).map(|(&r, _)| r).collect();
         for r in ended {
             self.script_looks.fading_out.remove(&r);
+            let was = self.world.get(r).is_ok_and(|s| s.enabled());
+            if was {
+                // The extender's OnDisable, matching plain Disable's PRE-update timing and
+                // null calling reference [hypothesis: not separately observed for a faded
+                // disable].
+                self.dispatch_event("OnDisable", vec![fnv_script::vm::XVal::Ref(r.0), fnv_script::vm::XVal::Num(0.0)], None);
+            }
             if self.world.set_enabled(r, false).is_ok() {
                 self.script_looks.disabled_after_fade.push(r);
-                // The extender's OnDisable, as a plain Disable sends it, now that the
-                // reference is disabled [hypothesis: the event follows the state
-                // GetDisabled reads; not observed for a faded disable].
-                self.dispatch_event("OnDisable", vec![fnv_script::vm::XVal::Ref(r.0), fnv_script::vm::XVal::Num(0.0)], Some(r));
             }
         }
         // `MoveToMarkerWithFade` moves whose fade out has ended.

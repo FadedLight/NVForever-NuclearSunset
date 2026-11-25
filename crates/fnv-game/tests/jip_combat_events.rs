@@ -707,3 +707,36 @@ fn get_reticle_target_limb_tracks_actor_limb_max_range_and_clear() {
     g.senses.reticle = None;
     assert_eq!(q(&mut g, "SetFunctionValue (GetReticleTargetLimb)"), XVal::Num(-1.0));
 }
+
+#[test]
+fn jip_xmarker_wildcard_applies_only_to_critical_hit() {
+    let f = fixture();
+    let mut g = game(&f);
+    q(
+        &mut g,
+        r#"SetOnHealthDamageEventHandler (Begin Function {float dmg, ref src}
+             PlayerREF.AuxVarSetFlt "*xm_hd" ((PlayerREF.AuxVarGetFlt "*xm_hd") + 1)
+           End) 1 XMarker
+           SetOnHealthDamageEventHandler (Begin Function {float dmg, ref src}
+             PlayerREF.AuxVarSetFlt "*ex_hd" ((PlayerREF.AuxVarGetFlt "*ex_hd") + 1)
+           End) 1 PlayerREF
+           SetOnAnimActionEventHandler (Begin Function {int act}
+             PlayerREF.AuxVarSetFlt "*xm_aa" ((PlayerREF.AuxVarGetFlt "*xm_aa") + 1)
+           End) 1 XMarker 0
+           SetOnCrippledLimbEventHandler (Begin Function {int limb}
+             PlayerREF.AuxVarSetFlt "*xm_cl" ((PlayerREF.AuxVarGetFlt "*xm_cl") + 1)
+           End) 1 XMarker
+           SetOnUseAidItemEventHandler (Begin Function {ref it}
+             PlayerREF.AuxVarSetFlt "*xm_ai" ((PlayerREF.AuxVarGetFlt "*xm_ai") + 1)
+           End) 1 XMarker"#,
+    );
+    g.jip_event("healthdamage", Some(FormId::PLAYER_REF), vec![XVal::Num(-5.0), XVal::Ref(0)]);
+    g.jip_event("animaction", Some(FormId::PLAYER_REF), vec![XVal::Num(0.0)]);
+    g.jip_event("crippledlimb", Some(FormId::PLAYER_REF), vec![XVal::Num(2.0)]);
+    g.jip_event("useaiditem", Some(FormId::PLAYER_REF), vec![XVal::Ref(PISTOL)]);
+    assert_eq!(aux_flt(&mut g, "*ex_hd", 0), 1.0, "exact PlayerREF filter fires");
+    assert_eq!(aux_size(&mut g, "*xm_hd"), 0.0, "XMarker must not wildcard healthdamage");
+    assert_eq!(aux_size(&mut g, "*xm_aa"), 0.0, "XMarker must not wildcard animaction");
+    assert_eq!(aux_size(&mut g, "*xm_cl"), 0.0, "XMarker must not wildcard crippledlimb");
+    assert_eq!(aux_size(&mut g, "*xm_ai"), 0.0, "XMarker must not wildcard useaiditem");
+}

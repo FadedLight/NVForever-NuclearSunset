@@ -25,6 +25,17 @@ page below].
   For AnimAction and PlayGroup, an **empty** form list means any actor [documented:
   SetOnAnimActionEventHandler, SetOnPlayGroupEventHandler]. For FireWeapon the filter
   is optional; left out, it means any actor [documented: SetOnFireWeaponEventHandler].
+  `XMarker` (`0x0000003B`) is a wildcard only for `SetOnCriticalHitEventHandler` (where
+  `0` is refused) and does **not** wildcard `SetOnHealthDamageEventHandler`,
+  `SetOnUseAidItemEventHandler`, `SetOnAnimActionEventHandler`, or
+  `SetOnCrippledLimbEventHandler` [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525,
+  xNVSE 6.4.9, JIP LN 57.30, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base
+  masters, `tools/capture/nvse/catalogs/wave6d1_jip_xmarker_wildcard_scope.json` probes
+  `w6d1_21_jip_health_damage_filters_dups_rem` (`dup=1,fl=0,xm=0,emp=0,amt=-5.0`),
+  `w6d1_22_jip_use_aid_item_filters` (`b=1,fl=0,xm=0,emp=0|sP=1,a1S=1`),
+  `w6d1_24_jip_anim_action_and_play_group` (`draw(1,0,0)|jam(1,1,0)|pg=1(v=24)`), and
+  `w6d1_25_jip_crippled_limb_and_note_added` (`crip(n=1,xm=0,limb=2,sP=1)|note(n=1,s0=1,sP=0,ok=1)`);
+  no binary, DLL, PDB, or third-party source consulted].
 - SetOnQuestStageEventHandler returns success 0/1. The others return nothing
   [documented: their pages].
 - **Lifetime.** SetOnRagdollEventHandler's registrations are flushed on every game

@@ -74,10 +74,12 @@ mod volumetric_clouds;
 mod volumetric_clouds_light;
 mod volumetric_clouds_lightvol;
 mod volumetric_clouds_model2;
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 mod volumetric_clouds_tune;
 mod volumetric_clouds_wisp;
 mod alert;
 mod anim_sounds;
+mod dev_aids;
 mod cpu_placement;
 mod crash;
 mod events_log;
@@ -217,6 +219,7 @@ mod night_sky;
 mod start_times;
 mod sun_visibility;
 mod weather_fx;
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 mod weather_preview;
 mod limping;
 mod sneaking;
@@ -349,7 +352,9 @@ struct Args {
     /// weather system's rolls, docs/spec-notes/world.md §6; the parity lab's frames pin it).
     #[arg(long)]
     weather: Option<String>,
-    /// During play, fade to this weather Editor ID, hold it briefly, then fade back to --weather.
+    /// During play, fade to this weather Editor ID, hold it briefly, then fade back to --weather
+    /// (a developer aid, dev_aids.rs: a release build does not know the option).
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     #[arg(long, requires_all = ["play", "weather"], conflicts_with = "still_sky")]
     preview_weather: Option<String>,
     /// Seed of the weather rolls (default: a fixed one, so every run rolls the same).
@@ -2392,6 +2397,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     }
     if play.is_some() {
         app.add_systems(Update, (script_weather, worldspace::script_sky, sky::fade_cadence, sky_follows_game, sky::sync_weather_fog, sky::sync_weather_visuals).chain().before(sky::update_sky));
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
         if let Some(target) = &args.preview_weather {
             weather_preview::install(&mut app, target);
         }
@@ -2686,7 +2692,12 @@ fn start_days(day: Option<f32>, sky_day: Option<f32>, plugins: Option<f32>) -> (
 /// values, in both the `--flag value` and `--flag=value` forms), for the run that takes
 /// over a load (handoff.rs).
 fn restart_args(args: &[String]) -> Vec<String> {
-    const VALUED: [&str; 14] = ["--load", "--load-refused", "--cell", "--pos", "--heading", "--pitch", "--hour", "--weather", "--preview-weather", "--world", "--eye-height", "--size", "--window-at", "--handoff"];
+    const VALUED: &[&str] = &[
+        "--load", "--load-refused", "--cell", "--pos", "--heading", "--pitch", "--hour", "--weather",
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        "--preview-weather",
+        "--world", "--eye-height", "--size", "--window-at", "--handoff",
+    ];
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {

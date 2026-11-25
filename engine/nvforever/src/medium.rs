@@ -48,7 +48,8 @@
 //! same frame. A frame the render world alone cannot draw leaves an image that has had a whole
 //! write as it was (one frame of last frame's clouds), and clears one that never had.
 //!
-//! Debug aids (read at the start, usable in a played run): `NVF_PLAY_DEBUG_MEDIUM=reference`,
+//! Debug aids (dev_aids.rs: not in release builds; read at the start, usable in a played run):
+//! `NVF_PLAY_DEBUG_MEDIUM=reference`,
 //! `NVF_PLAY_DEBUG_MEDIUM_VIEW=fresh|age|history|clamped|distance` ([`DebugView`]),
 //! `NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER=linear|cubic|adaptive` (history interpolation; adaptive by default),
 //! `NVF_PLAY_DEBUG_MEDIUM_FRESH=<0..1>` ([`FRESH_SHARE`]), `NVF_PLAY_DEBUG_MEDIUM_TURN=<degrees
@@ -188,6 +189,7 @@ pub const SKY_CLOCK_STEP: f32 = 1.0 / 120.0;
 /// game clock's update and the sky's; a wait or sleep is hours, far beyond it].
 pub const CLOCK_SLACK: f32 = 2.0;
 /// The most `NVF_PLAY_DEBUG_MEDIUM_TURN` turns the view, degrees a second.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub const MAX_TURN: f32 = 720.0;
 /// The default mode's published image is the main pass's render size divided by this at the row's
 /// level High, rounded up (2.5, two fifths, the look judged by eye on 2026-11-23; 2, half,
@@ -272,6 +274,7 @@ pub fn debug_fresh(value: Option<&str>) -> f32 {
 
 /// `NVF_PLAY_DEBUG_MEDIUM_TURN`: degrees a second, held to ±[`MAX_TURN`]; unset, unreadable or 0
 /// is none.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub fn debug_turn(value: Option<&str>) -> Option<f32> {
     value.and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite() && *v != 0.0).map(|v| v.clamp(-MAX_TURN, MAX_TURN))
 }
@@ -313,9 +316,9 @@ fn side_of(side: u32) -> u32 {
     side.clamp(1, 3)
 }
 
-static MODE: std::sync::LazyLock<MediumMode> = std::sync::LazyLock::new(|| debug_mode(std::env::var("NVF_PLAY_DEBUG_MEDIUM").ok().as_deref()));
-static VIEW: std::sync::LazyLock<DebugView> = std::sync::LazyLock::new(|| debug_view(std::env::var("NVF_PLAY_DEBUG_MEDIUM_VIEW").ok().as_deref()));
-static FRESH: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_fresh(std::env::var("NVF_PLAY_DEBUG_MEDIUM_FRESH").ok().as_deref()));
+static MODE: std::sync::LazyLock<MediumMode> = std::sync::LazyLock::new(|| debug_mode(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM").as_deref()));
+static VIEW: std::sync::LazyLock<DebugView> = std::sync::LazyLock::new(|| debug_view(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_VIEW").as_deref()));
+static FRESH: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_fresh(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_FRESH").as_deref()));
 /// The sampler and the confidence assigned to history after transport across texels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HistoryFilter {
@@ -332,19 +335,20 @@ fn history_filter(value: Option<&str>) -> HistoryFilter {
     }
 }
 
-static HISTORY_FILTER: std::sync::LazyLock<HistoryFilter> = std::sync::LazyLock::new(|| history_filter(std::env::var("NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER").ok().as_deref()));
+static HISTORY_FILTER: std::sync::LazyLock<HistoryFilter> = std::sync::LazyLock::new(|| history_filter(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_HISTORY_FILTER").as_deref()));
 /// The far buffer's mode for this run (`NVF_PLAY_DEBUG_MEDIUM`).
 pub fn medium_mode() -> MediumMode {
     *MODE
 }
 
-static FRESH_MOVING: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_fresh_moving(std::env::var("NVF_PLAY_DEBUG_MEDIUM_FRESH_MOVING").ok().as_deref()));
-static OFFSETS: std::sync::LazyLock<RayOffsets> = std::sync::LazyLock::new(|| debug_offsets(std::env::var("NVF_PLAY_DEBUG_MEDIUM_OFFSETS").ok().as_deref()));
-static CLAMP: std::sync::LazyLock<HistoryClamp> = std::sync::LazyLock::new(|| debug_clamp(std::env::var("NVF_PLAY_DEBUG_MEDIUM_CLAMP").ok().as_deref()));
-static CLAMP_K_SET: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_clamp_k(std::env::var("NVF_PLAY_DEBUG_MEDIUM_CLAMP_K").ok().as_deref()));
-static TURN: std::sync::LazyLock<Option<f32>> = std::sync::LazyLock::new(|| debug_turn(std::env::var("NVF_PLAY_DEBUG_MEDIUM_TURN").ok().as_deref()));
-static SCALE_AID: std::sync::LazyLock<Option<f64>> = std::sync::LazyLock::new(|| debug_scale(std::env::var("NVF_PLAY_DEBUG_MEDIUM_SCALE").ok().as_deref()));
-static TILE: std::sync::LazyLock<u32> = std::sync::LazyLock::new(|| debug_tile(std::env::var("NVF_PLAY_DEBUG_MEDIUM_TILE").ok().as_deref()));
+static FRESH_MOVING: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_fresh_moving(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_FRESH_MOVING").as_deref()));
+static OFFSETS: std::sync::LazyLock<RayOffsets> = std::sync::LazyLock::new(|| debug_offsets(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_OFFSETS").as_deref()));
+static CLAMP: std::sync::LazyLock<HistoryClamp> = std::sync::LazyLock::new(|| debug_clamp(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_CLAMP").as_deref()));
+static CLAMP_K_SET: std::sync::LazyLock<f32> = std::sync::LazyLock::new(|| debug_clamp_k(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_CLAMP_K").as_deref()));
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+static TURN: std::sync::LazyLock<Option<f32>> = std::sync::LazyLock::new(|| debug_turn(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_TURN").as_deref()));
+static SCALE_AID: std::sync::LazyLock<Option<f64>> = std::sync::LazyLock::new(|| debug_scale(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_SCALE").as_deref()));
+static TILE: std::sync::LazyLock<u32> = std::sync::LazyLock::new(|| debug_tile(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_TILE").as_deref()));
 
 /// The default mode's tile side for this run (`NVF_PLAY_DEBUG_MEDIUM_TILE`).
 pub fn medium_tile() -> u32 {
@@ -1332,8 +1336,9 @@ impl Plugin for MediumPlugin {
                     .after(crate::ssao::follow_projection)
                     .before(bevy::asset::AssetEventSystems),
             )
-            .add_systems(PostUpdate, hold_loading_screen.after(follow_medium))
-            .add_systems(Update, turn_aid.run_if(|| TURN.is_some()));
+            .add_systems(PostUpdate, hold_loading_screen.after(follow_medium));
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        app.add_systems(Update, turn_aid.run_if(|| TURN.is_some()));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         let (a, b, c, d) = (gate.clone(), gate.clone(), gate.clone(), gate.clone());
         render_app
@@ -1915,7 +1920,7 @@ pub fn debug_tally(value: Option<&str>) -> bool {
     value.is_some_and(|v| v.trim() == "1")
 }
 
-static TALLY_EVERY: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| debug_tally(std::env::var("NVF_PLAY_DEBUG_MEDIUM_TALLY").ok().as_deref()));
+static TALLY_EVERY: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| debug_tally(crate::dev_aids::var("NVF_PLAY_DEBUG_MEDIUM_TALLY").as_deref()));
 
 /// Upload an exact float phase. The 64 offset turns take four phases each at side 2 and
 /// nine at side 3. Every clipped-tile corner cycle divides its respective upload period.
@@ -2597,6 +2602,7 @@ fn publish_verdict(mut history: ResMut<MediumHistory>, link: Res<MediumLink>) {
 /// `NVF_PLAY_DEBUG_MEDIUM_TURN`: the view turned at a constant rate (degrees a second, positive
 /// to the right), the player's heading in a played run, the free camera's yaw in the viewer,
 /// so pictures and cost runs of the reconstruction can be taken mid-turn. Unset: not added.
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 fn turn_aid(time: Res<Time>, player: Option<ResMut<nvf_play::player::Player>>, mut fly: Query<&mut FlyCam>, mut told: Local<bool>) {
     let Some(rate) = *TURN else { return };
     if !*told {

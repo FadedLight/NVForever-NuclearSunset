@@ -532,7 +532,10 @@ beside a 28-step march].
 
 ## Debug aids
 
-Read once at the start, usable in a played run (they do not make a run unattended):
+Developer aids (engine/nvforever/src/dev_aids.rs): they exist only in tests, in debug builds and in a build
+with the `dev-aids` feature (in engine/: `cargo build --release -p nvforever --features dev-aids`). A release
+build reads none of these variables, has neither the tune file's follower nor the turn's system, and runs with
+the defaults given here. Read once at the start, usable in a played run (they do not make a run unattended):
 - `NVF_PLAY_DEBUG_MEDIUM=reference`: the reference above.
 - `NVF_PLAY_DEBUG_MEDIUM_VIEW=fresh|age|history|clamped|distance`: the buffer shows, opaque
   over the sky: `fresh` green where a ray was cast this frame, grey where the texel was rebuilt
@@ -607,7 +610,8 @@ Read once at the start, usable in a played run (they do not make a run unattende
   are graphics-enhanced.md §3.23, "Debug aids". The cloud source's light is the source's own business:
   the medium's seam (`MediumRay` in, `MediumSample` out) and its history do not see it. The wisps' phases
   are the base noise's, so they do not drift against the body and the reprojection is unaffected.
-  Smoke: `volumetric-clouds` checks the defaults.
+  Smoke: `volumetric-clouds` checks the defaults, `volumetric-clouds-no-aids` that a release build ignores the
+  aids.
 - `NVF_PLAY_DEBUG_MEDIUM_TILE=<1|2|3>`: one ray per tile of this side a frame (3); 1 casts every
   texel every frame through the history. Any other value is 3 (4 is not built). No effect in the
   reference mode.
@@ -620,4 +624,5 @@ frame (reference), ...`) when it is made or resized; `volumetric medium: trace p
 once; `volumetric medium: far buffer <w>x<h> written whole and volumetric_clouds_pipeline ready,
 the clouds drawn from it` when the flat layers give way; `volumetric medium: far buffer
 released`. Smoke: `volumetric-clouds` (Normal), `volumetric-clouds-taa-turn` (High),
-`volumetric-clouds-fsr-turn` (Performance), `volumetric-clouds-level-change` (the three, in play).
+`volumetric-clouds-fsr-turn` (Performance), both with `NVF_SMOKE_DEV_AIDS` set (they turn the view by an aid),
+`volumetric-clouds-level-change` (the three, in play).

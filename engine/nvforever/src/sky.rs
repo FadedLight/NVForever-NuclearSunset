@@ -160,7 +160,7 @@ impl FairSun {
     fn get() -> FairSun {
         static AID: std::sync::OnceLock<FairSun> = std::sync::OnceLock::new();
         *AID.get_or_init(|| {
-            let Ok(text) = std::env::var("NVF_PLAY_DEBUG_FAIR_SUN") else { return Self::DEFAULT };
+            let Some(text) = crate::dev_aids::var("NVF_PLAY_DEBUG_FAIR_SUN") else { return Self::DEFAULT };
             let f = Self::parse(&text);
             info!("sky: fair sun aid: {f:?}");
             f

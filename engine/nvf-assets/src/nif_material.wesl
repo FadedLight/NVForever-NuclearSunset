@@ -168,6 +168,30 @@ import nvf_assets::nif_surface_bindings::{NifSurface, nif_surface, standard_mate
     return clamp(sum, vec3(0.0), vec3(1.0));
 }
 
+// The direction the cube is read in (env_map.rs `lookup`, its CPU mirror): the view reflected
+// about the interpolated normal (`mark` 2) or the shading normal (1), turned as `axes` says
+// (env_map.rs Axes). Which side the normal faces does not matter: reflect(I, N) is
+// reflect(I, -N). An interpolated normal of no length (a vertex stores none, or opposing ones
+// meet) falls back to the view direction, so nothing that is not finite is sampled.
+@if(!PREPASS_PIPELINE && !NIF_SURFACE_BLEND) fn env_lookup(v: vec3<f32>, shading: vec3<f32>, interpolated: vec3<f32>, axes: f32, mark: f32) -> vec3<f32> {
+    var n = shading;
+    if mark > 1.5 {
+        let squared = dot(interpolated, interpolated);
+        n = select(v, interpolated * inverseSqrt(max(squared, 1e-12)), squared > 1e-12);
+    }
+    let r = reflect(-v, n);
+    if axes > 3.5 {
+        return vec3(r.x, -r.z, r.y);
+    } else if axes > 2.5 {
+        return vec3(r.x, r.y, r.z);
+    } else if axes > 1.5 {
+        return vec3(r.x, -r.y, -r.z);
+    } else if axes > 0.5 {
+        return vec3(-r.x, r.y, -r.z);
+    }
+    return vec3(r.x, r.y, -r.z);
+}
+
 // Main-pass geometry uses the render viewport, which can be smaller than the
 // display attachment when FSR is enabled. Transmission remains a full-size texture.
 @if(!PREPASS_PIPELINE) fn frag_coord_to_uv(fc: vec2<f32>) -> vec2<f32> {
@@ -884,7 +908,7 @@ fn nif_fragment(
         @if(!PREPASS_PIPELINE && !TONEMAP_IN_SHADER && !BLEND_MULTIPLY) out.color = vec4(hot_light(out.color.rgb, hot_e), out.color.a);
         // Environment map (nif_material.rs NifSurface::env, env_how; docs/spec-notes/nif.md
         // §6 "Window glass and environment maps", "Environment maps on other shapes"): the
-        // cube read in the view direction reflected about the normal, × the scale × the
+        // cube read in the view direction reflected about the normal (`env_lookup`), × the scale × the
         // mask × the distance fade, added to the lit colour. The game is Z-up and the
         // cube's faces are laid out Y-up: the game-space direction (x, y, z) is looked up
         // as (x, z, y), which from Bevy's Y-up world space (x, z, -y of the game) is
@@ -919,21 +943,7 @@ fn nif_fragment(
             out.color = vec4(select(out.color.rgb, out.color.rgb * out.color.a, premultiplied), out.color.a);
         }
         @if(!NIF_SURFACE_BLEND) if surface.env.x > 0.0 && env_fade > 0.0 {
-            // env_how.w 2: the interpolated normal (turned to the viewer on a two-sided
-            // shape), 1: the normal-mapped one (env_map.rs EnvNormal).
-            let env_n = select(pbr_input.N, normalize(pbr_input.world_normal), surface.env_how.w > 1.5);
-            let r = reflect(-pbr_input.V, env_n);
-            var dir = vec3(r.x, r.y, -r.z);
-            let axes = surface.env_how.x;
-            if axes > 3.5 {
-                dir = vec3(dir.x, dir.z, dir.y);
-            } else if axes > 2.5 {
-                dir = vec3(dir.x, dir.y, -dir.z);
-            } else if axes > 1.5 {
-                dir = vec3(dir.x, -dir.y, dir.z);
-            } else if axes > 0.5 {
-                dir = vec3(-dir.x, dir.y, dir.z);
-            }
+            let dir = env_lookup(pbr_input.V, pbr_input.N, pbr_input.world_normal, surface.env_how.x, surface.env_how.w);
             var mask = 1.0;
             @if(VERTEX_UVS_A) if surface.env.y > 0.5 && surface.env.y < 1.5 {
                 mask = env_mask_texel(in.instance_index, (standard_material(in.instance_index).uv_transform * vec3(in.uv, 1.0)).xy);

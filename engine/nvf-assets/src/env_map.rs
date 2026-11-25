@@ -473,6 +473,25 @@ pub fn scene_light(ambient: Vec3, ambient_alpha: f32, directional: &[Vec3], expo
     sum.clamp(Vec3::ZERO, Vec3::ONE)
 }
 
+/// The direction the cube is read in, in Bevy's axes as sent to the sampler; the CPU mirror of
+/// nif_material.wesl's `env_lookup`: `v` towards the viewer, `shading` the normal-mapped normal,
+/// `interpolated` the vertex one, `axes` and `mark` as in `NifSurface::env_how` x and w.
+pub fn lookup(v: Vec3, shading: Vec3, interpolated: Vec3, axes: f32, mark: f32) -> Vec3 {
+    let n = match mark > 1.5 {
+        true if interpolated.length_squared() > 1e-12 => interpolated / interpolated.length(),
+        true => v,
+        false => shading,
+    };
+    let r = -v - 2.0 * n.dot(-v) * n;
+    match axes {
+        a if a > 3.5 => Vec3::new(r.x, -r.z, r.y),
+        a if a > 2.5 => r,
+        a if a > 1.5 => Vec3::new(r.x, -r.y, -r.z),
+        a if a > 0.5 => Vec3::new(-r.x, r.y, -r.z),
+        _ => Vec3::new(r.x, r.y, -r.z),
+    }
+}
+
 /// How a shape without the window flag is drawn with its environment map, for the
 /// model's log line (model.rs): the cube, the scale, the mask and the blend.
 pub(crate) fn describe(cube: &str, material: &crate::nif_material::NifMaterial) -> String {
@@ -683,6 +702,44 @@ mod tests {
         let lit_windows = EnvAids { light_window: EnvLight::Scene, light: EnvLight::Off, ..d };
         assert_eq!(env_uniforms(&env(true, false), MaskMode::Full, &lit_windows).1.y, 2.0);
         assert_eq!(env_uniforms(&env(false, false), MaskMode::Full, &lit_windows).1.y, 0.0);
+    }
+
+    /// The default lookups (#4392): another shape reads the cube at the interpolated normal in
+    /// the game's axes, a window at the shading normal in #2669's. Each half alone gives a third
+    /// direction, so undoing either fails. The shader's function is the mirror's, line by line.
+    #[test]
+    fn the_lookup_takes_the_vertex_normal_and_the_game_axes() {
+        let d = EnvAids::default();
+        // Seen from above a floor whose normal map tilts it by 45 degrees.
+        let (v, vertex, shading) = (Vec3::Y, Vec3::Y, Vec3::new(0.0, 1.0, 1.0).normalize());
+        let at = |window: bool, aids: &EnvAids| {
+            let (_, how) = env_uniforms(&env(window, false), MaskMode::Full, aids);
+            lookup(v, shading, vertex, how.x, how.w)
+        };
+        let near = |a: Vec3, b: Vec3| assert!((a - b).length() < 1e-5, "{a} is not {b}");
+        near(at(false, &d), Vec3::Z);
+        near(at(true, &d), Vec3::NEG_Z);
+        near(at(false, &EnvAids { axes: Axes::Base, ..d }), Vec3::Y);
+        near(at(false, &EnvAids { normal: EnvNormal::Mapped, ..d }), Vec3::NEG_Y);
+        // The game-space direction as it is: Bevy's (x, y, z) is the game's (x, -z, y).
+        let r = Vec3::new(0.6, 0.0, 0.8);
+        near(lookup(r, r, r, 4.0, 2.0), Vec3::new(0.6, -0.8, 0.0));
+        // Either side of the normal; a normal of no length is not sampled as NaN.
+        near(lookup(v, shading, -vertex, 4.0, 2.0), lookup(v, shading, vertex, 4.0, 2.0));
+        assert!(lookup(v, shading, Vec3::ZERO, 4.0, 2.0).is_finite());
+        let shader = include_str!("nif_material.wesl").replace("
+", "
+");
+        for line in [
+            "let dir = env_lookup(pbr_input.V, pbr_input.N, pbr_input.world_normal, surface.env_how.x, surface.env_how.w);",
+            "    var n = shading;\n    if mark > 1.5 {",
+            "n = select(v, interpolated * inverseSqrt(max(squared, 1e-12)), squared > 1e-12);",
+            "let r = reflect(-v, n);",
+            "if axes > 3.5 {\n        return vec3(r.x, -r.z, r.y);",
+            "    return vec3(r.x, r.y, -r.z);\n}",
+        ] {
+            assert_eq!(shader.matches(line).count(), 1, "the shader's lookup: {line}");
+        }
     }
 
     /// The log line's words for a shape without the window flag.

@@ -1490,7 +1490,7 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
     observer-checks.md 249].
     The reflection does not depend on the lights, so the pane shows from its dark side
     too.
-  - Cube axes: the game is Z-up; a cube map's faces are laid out for a Y-up lookup (+Y
+  - Cube axes (window shapes; the others since #4392: next entry): the game is Z-up; a cube map's faces are laid out for a Y-up lookup (+Y
     the third face). The lookup direction is the game-space reflection (x, y, z) taken as
     (x, z, y) [hypothesis: unverified against the original; on a blurry 32-texel cube it
     only places the streaks].
@@ -1632,9 +1632,9 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
   has none), but the engine may switch PPLighting shapes with parallax and a cube to it
   at run time, flipping their cube [hypothesis]; one more reading for observer
   check 273. Choices, each tagged, with the observer check that would settle it:
-  - Strength and view: the cube read along the view reflected about the normal-mapped
-    normal (world-fixed, which fits the bright patches observed), × the scale × the mask,
-    added to the lit colour, as for windows [hypothesis for the lookup, the strength and
+  - Strength and view: the cube read along the view reflected about the interpolated
+    normal (#4392, "The lookup" above; the normal-mapped one before; world-fixed, which fits the bright patches observed), × the scale × the mask,
+    added to the lit colour [hypothesis for the lookup, the strength and
     the scale; observer check 271]. By day L (next bullet) is at most 1, so the default
     can only dim the strength-1 term, while the fit asks for up to 8.5 times the term on
     some objects (a Sarsaparilla bottle): the day strength is **open** and deliberately left at 1.
@@ -1653,8 +1653,9 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
     (`NVF_PLAY_DEBUG_ENV_LIGHT_WINDOW=scene` scales them too). Views without the world
     view's display-value lights (the minigame views) keep the term unscaled.
   - No slot-5 mask: full strength [hypothesis; observer check 272].
-  - Cube orientation: the same lookup as window shapes, (x, z, y) of the game-space
-    reflection [hypothesis: the wiki says the two differ by a flip; observer check 273].
+  - Cube orientation: the game-space reflection (x, y, z) as it is; window shapes take it as
+    (x, z, y) [hypothesis: #4392, "The lookup" above; the wiki says the two differ by a flip;
+    observer check 273].
   - A blended shape without the window flag keeps its blend, so its reflection is
     weighted by its alpha like the rest of its colour; window shapes stay premultiplied
     (#2462) [hypothesis, the conservative choice: hair, cell fades, blended cut-outs and
@@ -1683,7 +1684,7 @@ quaternions [documented: nif.xml hkQuaternion vs Quaternion].
 
   Debug switches `NVF_PLAY_DEBUG_ENV_*` vary each of these from the same build, for
   comparing frames with the original's (`env_map.rs` module docs: strength, no-mask rule,
-  orientation per set, blend per set, light per set (scene light, none, or a
+  orientation per set, normal per set, blend per set, light per set (scene light, none, or a
   received-light stand-in), the distance fade (off unless set), and
   `NVF_PLAY_DEBUG_ENV_NON_WINDOW=0` for
   #2462's set alone). The model log names each model's reflecting shapes without the

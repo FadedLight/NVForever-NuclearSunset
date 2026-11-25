@@ -204,36 +204,39 @@ fn a_removal_holds_in_the_player_model_it_was_made_in() {
 fn get_point_ray_cast_pos_uses_right_handed_angles_and_writes_endpoint_on_miss() {
     use fnv_game::ray::{with_caster, CastKind, Hit};
     with_game(|g| {
-        let captured: std::cell::RefCell<Vec<([f32; 3], [f32; 3])>> = Default::default();
+        type CastLog = Vec<([f32; 3], [f32; 3], CastKind)>;
+        let captured: std::cell::RefCell<CastLog> = Default::default();
         let miss_caster = |from: [f32; 3], to: [f32; 3], kind: CastKind| -> Option<Hit> {
-            assert_eq!(kind, CastKind::World);
-            captured.borrow_mut().push((from, to));
+            captured.borrow_mut().push((from, to, kind));
             None
         };
         with_caster(&miss_caster, || {
-            // Near world origin (0, 0, 100): a miss must return 0 and write the ray
-            // endpoint `origin + dir * maxRange` so GetVector3DDistance equals maxRange.
+            // Near world origin (0, 0, 100): an open-sky miss returns 1 and overwrites
+            // pre-seeded output variables with `origin + dir * maxRange` [observed: w6_01, w6_02].
             // Cardinal directions: 0 = +Y (North), -90 = +X (East), +90 = -X (West),
-            // -180 = -Y (South); pitch -90 = -Z (Down), +90 = +Z (Up).
+            // 180 = -Y (South); pitch -90 = -Z (Down), +90 = +Z (Up); diagonal (30, -90)
+            // confirms Rz(rotZ) * Rx(rotX) * +Y.
             let cases: &[(f64, f64, [f64; 3])] = &[
                 (0.0, 0.0, [0.0, 300.0, 100.0]),
                 (0.0, -90.0, [300.0, 0.0, 100.0]),
                 (0.0, 90.0, [-300.0, 0.0, 100.0]),
-                (0.0, -180.0, [0.0, -300.0, 100.0]),
+                (0.0, 180.0, [0.0, -300.0, 100.0]),
                 (-90.0, 0.0, [0.0, 0.0, -200.0]),
                 (90.0, 0.0, [0.0, 0.0, 400.0]),
-                (-30.0, 0.0, [0.0, 300.0 * 30.0_f64.to_radians().cos(), 100.0 - 150.0]),
+                (45.0, 0.0, [0.0, 300.0 * 45.0_f64.to_radians().cos(), 100.0 + 300.0 * 45.0_f64.to_radians().sin()]),
+                (-45.0, 0.0, [0.0, 300.0 * 45.0_f64.to_radians().cos(), 100.0 - 300.0 * 45.0_f64.to_radians().sin()]),
+                (30.0, -90.0, [300.0 * 30.0_f64.to_radians().cos(), 0.0, 100.0 + 150.0]),
             ];
             for &(rx, rz, exp) in cases {
                 let res = query(
                     g,
                     &format!(
-                        "float fX\nfloat fY\nfloat fZ\nint ok = GetPointRayCastPos 0 0 100 {rx} {rz} fX fY fZ 19 300\n\
+                        "float fX = 111\nfloat fY = 222\nfloat fZ = 333\nint ok = GetPointRayCastPos 0 0 100 ({rx}) ({rz}) fX fY fZ 19 300\n\
                          OwnedRefA.AuxVarSetFlt \"*rx\" fX\nOwnedRefA.AuxVarSetFlt \"*ry\" fY\nOwnedRefA.AuxVarSetFlt \"*rz\" fZ\n\
                          OwnedRefA.AuxVarSetFlt \"*rd\" (GetVector3DDistance fX fY fZ 0 0 100)\nSetFunctionValue ok"
                     ),
                 );
-                assert_eq!(res, XVal::Num(0.0), "miss at ({rx}, {rz}) must return 0");
+                assert_eq!(res, XVal::Num(1.0), "open-sky miss at ({rx}, {rz}) returns 1 (observed w6_01/w6_02)");
                 let got = ["*rx", "*ry", "*rz"].map(|k| match query(g, &format!("SetFunctionValue (OwnedRefA.AuxVarGetFlt \"{k}\")")) {
                     XVal::Num(n) => n,
                     other => panic!("{k}: {other:?}"),
@@ -248,6 +251,63 @@ fn get_point_ray_cast_pos_uses_right_handed_angles_and_writes_endpoint_on_miss()
                 }
                 let XVal::Num(dist) = query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rd\")") else { panic!("distance") };
                 assert!((dist - 300.0).abs() < 1e-2, "angles ({rx}, {rz}) miss distance: {dist}");
+            }
+            assert!(captured.borrow().iter().all(|(_, _, k)| *k == CastKind::CameraClearance), "flag 19 maps to CameraClearance");
+
+            // Explicit maxRange = 0 yields origin (reach = 0, no physics cast); explicit -1 casts
+            // backward 1 unit; omitted maxRange (8-arg and 9-arg) defaults to 50_000 [observed: w6_02].
+            captured.borrow_mut().clear();
+            let r0 = query(
+                g,
+                "float fX = 111\nfloat fY = 222\nfloat fZ = 333\nint ok = GetPointRayCastPos 10 20 100 90 0 fX fY fZ 19 0\n\
+                 OwnedRefA.AuxVarSetFlt \"*rx\" fX\nOwnedRefA.AuxVarSetFlt \"*ry\" fY\nOwnedRefA.AuxVarSetFlt \"*rz\" fZ\nSetFunctionValue ok",
+            );
+            assert_eq!(r0, XVal::Num(1.0));
+            assert!(captured.borrow().is_empty(), "maxRange=0 must not invoke zero-length cast");
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rx\")"), XVal::Num(10.0));
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*ry\")"), XVal::Num(20.0));
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rz\")"), XVal::Num(100.0));
+
+            let rn1 = query(
+                g,
+                "float fX = 111\nfloat fY = 222\nfloat fZ = 333\nint ok = GetPointRayCastPos 10 20 100 90 0 fX fY fZ 19 (-1)\n\
+                 OwnedRefA.AuxVarSetFlt \"*rz\" fZ\nSetFunctionValue ok",
+            );
+            assert_eq!(rn1, XVal::Num(1.0));
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rz\")"), XVal::Num(99.0));
+
+            let rom9 = query(
+                g,
+                "float fX = 111\nfloat fY = 222\nfloat fZ = 333\nint ok = GetPointRayCastPos 10 20 100 90 0 fX fY fZ 19\n\
+                 OwnedRefA.AuxVarSetFlt \"*rz\" fZ\nSetFunctionValue ok",
+            );
+            assert_eq!(rom9, XVal::Num(1.0));
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rz\")"), XVal::Num(50_100.0));
+
+            let rom8 = query(
+                g,
+                "float fX = 111\nfloat fY = 222\nfloat fZ = 333\nint ok = GetPointRayCastPos 10 20 100 90 0 fX fY fZ\n\
+                 OwnedRefA.AuxVarSetFlt \"*rz\" fZ\nSetFunctionValue ok",
+            );
+            assert_eq!(rom8, XVal::Num(1.0));
+            assert_eq!(query(g, "SetFunctionValue (OwnedRefA.AuxVarGetFlt \"*rz\")"), XVal::Num(50_100.0));
+
+            // collisionFlag routing [observed: w6_03]: 0/1/6/-1/omitted -> World; 8/19 -> CameraClearance.
+            captured.borrow_mut().clear();
+            for (flag, expected_kind) in [
+                (0, CastKind::World),
+                (1, CastKind::World),
+                (6, CastKind::World),
+                (-1, CastKind::World),
+                (8, CastKind::CameraClearance),
+                (19, CastKind::CameraClearance),
+            ] {
+                query(
+                    g,
+                    &format!("float fX\nfloat fY\nfloat fZ\nGetPointRayCastPos 0 0 100 (-90) 0 fX fY fZ ({flag}) 300"),
+                );
+                let got_kind = captured.borrow().last().unwrap().2;
+                assert_eq!(got_kind, expected_kind, "collisionFlag {flag}");
             }
         });
 

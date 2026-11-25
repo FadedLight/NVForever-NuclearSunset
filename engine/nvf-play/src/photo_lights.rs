@@ -389,8 +389,8 @@ impl PhotoLights {
             Row::Hue => format!("{:.0}", l.hue),
             Row::Saturation => format!("{:.0}%", l.saturation * 100.0),
             Row::Brightness => format!("{:.0}%", l.brightness * 50.0),
-            // The Focus text's scale (1 unit = 1.428 cm [hypothesis], photo_mode.rs).
-            Row::Range => format!("{:.1} m", l.range * 0.01428),
+            // The Focus text's scale (`UNITS_PER_METRE`, the map's).
+            Row::Range => format!("{:.1} m", l.range / crate::pipboy::data::model::UNITS_PER_METRE),
             Row::Width => format!("{:.0}", l.width),
             Row::Direction => format!("{:+.0}", l.yaw),
             Row::Tilt => format!("{:+.0}", l.pitch),

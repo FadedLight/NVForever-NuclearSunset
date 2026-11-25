@@ -195,9 +195,6 @@ const GRIDS: [&str; 2] = ["Off", "Thirds"];
 /// The Focus slider's far end in game units, reached on a curve so near distances get
 /// the finer steps [design].
 pub const FOCUS_FAR: f32 = 8000.0;
-/// Centimetres per game unit, for the Focus text [hypothesis: the Creation Kit wiki gives
-/// 1 unit = 1.428 cm for Bethesda's games of this engine family; not checked for New Vegas].
-const CM_PER_UNIT: f32 = 1.428;
 
 impl Setting {
     pub const ALL: [Setting; 14] = [
@@ -393,7 +390,7 @@ impl PhotoSettings {
             Setting::Focus => match focus_units(self.get(s)) {
                 None => "Auto".into(),
                 Some(u) => {
-                    let m = u * CM_PER_UNIT / 100.0;
+                    let m = u / crate::pipboy::data::model::UNITS_PER_METRE;
                     if m < 10.0 {
                         format!("{m:.1} m")
                     } else {

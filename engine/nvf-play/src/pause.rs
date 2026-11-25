@@ -433,9 +433,10 @@ pub(crate) fn tick_play_clock(virt: Res<Time<Virtual>>, real: Res<Time<Real>>, l
     }
 }
 
-/// Pause the virtual clock while the picture is held ([`picture_held`]), or while the
-/// console's free camera holds the world (`crate::free_cam`, mode 1), and let it run
-/// again after. Nothing else pauses it.
+/// Pause the virtual clock while the picture is held ([`picture_held`]), while the
+/// console's free camera holds the world (`crate::free_cam`, mode 1), or while photo mode
+/// does (`crate::photo_mode`, which stands the picture still), and let it run again after.
+/// Nothing else pauses it.
 fn freeze_picture(
     mode: Res<MenuPause>,
     paused: Res<Paused>,

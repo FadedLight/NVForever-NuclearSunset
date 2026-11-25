@@ -184,6 +184,12 @@ const AIRBORNE_LAND: f32 = 0.35;
 /// controller's step height, the drop it walks down without leaving the ground; the
 /// original's rule is not documented (physics.md §6.4.2)].
 const FALL_GAP: f32 = 24.0;
+/// A landing counts (its log line, its clip, the view's dip) only after the body fell
+/// faster than this in the flight, units/s: on a car wreck's roof a player was logged
+/// "landed at 0 units/s" after time off the ground with no fall at all (player report
+/// R-BRQX496D, #3611), and the landing clip and dip that followed bobbed the view
+/// [engineering choice: real landings in that report were 144 to 442 units/s].
+const LAND_MIN_FALL: f32 = 30.0;
 /// Turning on the spot faster than this (radians per second) plays a turn clip
 /// [engineering choice].
 const TURN_RATE: f32 = 1.0;
@@ -728,6 +734,10 @@ struct Rig {
     /// kNVSE's replacement files for this view ([`apply_anim_overrides`]): a clip's file
     /// name, in lower case, to the replacement's path under meshes.
     overrides: Overrides,
+    /// The rig's current main body clip path (under meshes) and clip metadata, updated
+    /// each frame in [`pose_rig`] for `anim_state.rs` (`GetPlayingAnimSequencePaths`,
+    /// `GetAnimationAttributes`, `GetPlayingAnimBySequenceType`) [design].
+    active_clip: Option<(String, Arc<Clip>)>,
     /// Third person: the head bone and the eye in its space.
     head: Option<usize>,
     eye_local: Vec3,
@@ -939,6 +949,16 @@ impl Rig {
     /// `ProjectileNode`, each node where the clips have it.
     fn muzzle_at(&self, root: Transform) -> Option<Vec3> {
         Some(self.weapon_node_at(root, self.muzzle.as_ref()?)?.translation.into())
+    }
+
+    /// Where the weapon's muzzle is and the barrel's forward unit vector (game space) in
+    /// the last pose with the rig at `root`: `ProjectileNode` position and weapon model
+    /// `+X` axis (the barrel axis used by `line_up_sights`).
+    fn weapon_aim_at(&self, root: Transform) -> Option<([f32; 3], [f32; 3])> {
+        let muzzle = self.muzzle_at(root)?;
+        let model = self.weapon_node_at(root, &[])?;
+        let dir = model.transform_vector3(Vec3::X).normalize_or_zero();
+        (dir.length_squared() > 0.5).then_some((muzzle.to_array(), dir.to_array()))
     }
 
     /// Where a node of the weapon model is in the last pose with the rig at `root`
@@ -1275,6 +1295,9 @@ pub struct PlayerBody {
     /// The third-person head's eye this frame, game space, while the view is from
     /// outside; `None` in first person or without a body.
     head_eye: Option<[f32; 3]>,
+    /// The weapon muzzle position and barrel forward unit vector (game space) in the rig
+    /// in view while a weapon is drawn in hand; `None` when holstered or unarmed.
+    weapon_aim: Option<([f32; 3], [f32; 3])>,
     motion: Motion,
     /// Why the body could not be built (reported once).
     failed: Option<String>,
@@ -1320,9 +1343,25 @@ impl PlayerBody {
         self.body.as_ref().and_then(|b| b.first.as_ref()).is_some_and(|f| f.shown == Some(true))
     }
 
+    /// The active main body clip (path under meshes and decoded clip) for the player's
+    /// selected view, for `anim_state.rs` and `Game::set_sequence_info` [design].
+    pub fn active_clip(&self, first_person: bool) -> Option<(&str, &Arc<Clip>)> {
+        let b = self.body.as_ref()?;
+        let rig = if first_person { b.first.as_ref().unwrap_or(&b.third) } else { &b.third };
+        rig.active_clip.as_ref().map(|(p, c)| (p.as_str(), c))
+    }
+
     /// The real arms rig available for hidden draws [design: pipboy_arm.rs].
     pub fn first_person_root(&self) -> Option<Entity> {
         self.body.as_ref()?.first.as_ref().map(|f| f.root)
+    }
+    /// A tried-and-missing native raise clip cannot support direct manipulation.
+    /// Unknown still uses the ordinary rig.clip load/female-to-male fallback.
+    #[cfg(any(target_os = "android", test))]
+    pub fn pipboy_clip_missing(&self) -> bool {
+        self.body.as_ref().and_then(|body| body.first.as_ref()
+            .and_then(|rig|rig.clips.get(&ClipKey::PipBoy(body.female))))
+            .is_some_and(Option::is_none)
     }
 
     /// The root entities of the rigs built (the body's, then the arms rig's).
@@ -1341,6 +1380,17 @@ impl PlayerBody {
     /// without a body.
     pub fn head_eye(&self) -> Option<[f32; 3]> {
         self.head_eye
+    }
+
+    /// Muzzle position and barrel forward unit vector (game space) of the weapon in hand
+    /// in the rig in view, for weapon-attached flashlight alignment (`flashlight.rs`).
+    pub fn weapon_aim(&self) -> Option<([f32; 3], [f32; 3])> {
+        self.weapon_aim
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_weapon_aim_for_test(&mut self, aim: Option<([f32; 3], [f32; 3])>) {
+        self.weapon_aim = aim;
     }
 
     /// The entity of the muzzle node (`ProjectileNode`) of the weapon in hand, in the
@@ -1402,7 +1452,7 @@ impl PlayerBody {
             Rig {
                 view, root, lens: None, folder: String::new(), skeleton: actor.skeleton,
                 animator: Animator::new(actor.skel, actor.nodes, None),
-                clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), head: None,
+                clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
                 eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None, script_used: None, translate: None,
                 weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
                 weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(),
@@ -1422,6 +1472,16 @@ impl PlayerBody {
             }),
             ..Self::default()
         }
+    }
+
+    /// Build the actual player rigs through the owning resolver/asset path for
+    /// dialogue-provider controls; no ready state or private worn vector is seeded.
+    #[cfg(test)]
+    pub(crate) fn dialogue_fixture_body(
+        commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut ActorCtx,
+        worn: &[FormId], look: Option<&fnv_actor::Look>,
+    ) -> Result<Self, String> {
+        Ok(Self { body: Some(build(commands,parent,world,ctx,worn,look)?), ..Self::default() })
     }
 
     /// The clips heard (`anim_sounds.rs`): the animator of the rig in view (the
@@ -1703,6 +1763,7 @@ fn draw_warm_pose(
     mut meshes: Query<(Has<NoFrustumCulling>, &mut Mesh3d)>,
     unculled: Query<Entity, With<WarmUnculled>>,
     cameras: Query<(&GlobalTransform, &Projection), With<nvf_play::PlayerCamera>>,
+    sizing: Option<Res<nvf_play::pipboy::touch_presentation::PipBoySize>>,
 ) {
     let clear_unculled = |commands: &mut Commands| {
         for e in &unculled {
@@ -1774,7 +1835,7 @@ fn draw_warm_pose(
         }
     } else if let (Some([_, inner]), Projection::Perspective(p)) = (rig.lens, projection) {
         if let Ok(mut lens) = transforms.get_mut(inner) {
-            let k = arms_magnification(p.fov, PIPBOY_FOV);
+            let k = arms_magnification(p.fov, sizing.as_deref().map_or(PIPBOY_FOV, |s| s.device_fov(PIPBOY_FOV)));
             lens.scale = Vec3::new(k, 1.0, k);
         }
     }
@@ -2272,6 +2333,7 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
         clips: HashMap::new(),
         variants: HashMap::new(),
         overrides: Arc::default(),
+        active_clip: None,
         head,
         eye_local,
         looking,
@@ -2322,6 +2384,8 @@ struct Frame {
     /// (they started and stopped with every turn of the view, restarting under an aim: "the
     /// animation resets and kinda skips", the seventh playtest; the arms' turn is the sway's).
     inertia: bool,
+    /// The real arm-gesture producer owns clip_time, including settle/cancel.
+    pipboy_manual: bool,
     /// Eased crouch is on: in the first-person rig a crouch is kept through a jump (no
     /// standing jump or landing clip while sneaking).
     crouch_jump: bool,
@@ -2429,6 +2493,18 @@ struct Posed<'a> {
 /// the frag mine, docs/spec-notes/animation.md §9.11].
 fn land_mine_grip() -> (Quat, Vec3) {
     (Quat::from_rotation_x(240f32.to_radians()), Vec3::new(4.4, -3.9, 4.5))
+}
+
+// Shared by ordinary and direct arm poses: the real Animator samples the clip
+// at this absolute time; it never advances an owned finger pose on its own.
+fn set_pipboy_layer(a: &mut Animator, clip: &Arc<Clip>, time: f32) {
+    let i=a.want(clip,TAG_PIPBOY,1.0,Mode::Once,0.0);
+    (a.layers[i].rate,a.layers[i].time)=(0.0,time);
+}
+fn ease_pipboy_layer(a:&mut Animator,time:f32) {
+    for layer in a.layers.iter_mut().filter(|layer|layer.tag==TAG_PIPBOY) {
+        (layer.weight,layer.ease)=(1.0,pipboy_ease(time));
+    }
 }
 
 /// Pose `rig` for the frame, apply the weapon events, place it at its root; returns the
@@ -2708,6 +2784,14 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
             want.push((c.clone(), TAG_EQUIP, 1.0, Mode::Once));
         }
     }
+    // Record the rig's main body clip (movement/jump/turn, else standing idle) for
+    // `anim_state.rs` (`GetPlayingAnimSequencePaths`, `GetAnimationAttributes`).
+    let main_clip = want
+        .iter()
+        .filter(|(_, tag, _, _)| *tag == TAG_JUMP || (*tag >= TAG_MOVE && *tag < TAG_MOVE + 4) || *tag == TAG_TURN)
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+        .or_else(|| want.iter().find(|(_, tag, _, _)| *tag == TAG_IDLE));
+    rig.active_clip = main_clip.map(|(c, ..)| (c.path.clone(), c.clip.clone()));
     let a = &mut rig.animator;
     a.begin();
     let covered = special.covers();
@@ -2865,15 +2949,24 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
         let layer = &mut a.layers[i];
         layer.rate = 0.0;
         layer.time = sequence.time;
+        layer.weight = sequence.weight;
+        layer.target = sequence.weight;
+        layer.weight_as_blend = true;
+        layer.additive = sequence.additive.clone();
         layer.sequence_priority = sequence.request.priority;
         layer.fade_out = sequence.request.ease_out;
     }
     // The Pip-Boy: its clip at the time the Pip-Boy is at, over the rest (its tracks'
     // priority is above the others' [observed: 98]); it does not turn the view.
     if let Some((c, t)) = &pipboy {
-        let i = a.want(&c.clip, TAG_PIPBOY, 1.0, Mode::Once, 0.0);
-        let l = &mut a.layers[i];
-        (l.rate, l.time) = (0.0, if f.inertia { pipboy_clip_time(*t) } else { *t });
+        set_pipboy_layer(a, &c.clip, if f.inertia && !f.pipboy_manual { pipboy_clip_time(*t) } else { *t });
+        // Direct manipulation owns the sampled pose and its original blend law.
+        // Ordinary automatic raises retain movement-inertia smoothing.
+        if f.pipboy_manual {
+            for layer in a.layers.iter_mut().filter(|l| l.tag == TAG_PIPBOY) {
+                layer.smooth = false;
+            }
+        }
     }
     a.end();
     // Movement clips play at the speed the character actually moves [hypothesis: the
@@ -2959,9 +3052,7 @@ fn pose_rig(rig: &mut Rig, f: &Frame, events: &[HandEvent], posed: Posed, ctx: &
         }
     }
     if let Some((_, t)) = pipboy {
-        for l in a.layers.iter_mut().filter(|l| l.tag == TAG_PIPBOY) {
-            (l.weight, l.ease) = (1.0, pipboy_ease(t));
-        }
+        ease_pipboy_layer(a, t);
     }
     a.pose();
     // A Land Mine weapon sits turned in the first-person hand: the clips leave the frag
@@ -3442,7 +3533,7 @@ fn drive_body(
         ResMut<nvf_play::furniture::PlayerSeat>,
         Res<nvf_play::pipboy::PipBoy>,
         Query<&Projection, With<nvf_play::PlayerCamera>>,
-        (Option<Res<nvf_play::free_cam::FirstPersonFov>>, Option<Res<crate::Args>>),
+        (Option<Res<nvf_play::free_cam::FirstPersonFov>>, Option<Res<crate::Args>>, Option<Res<nvf_play::pipboy::touch_presentation::PipBoySize>>),
         Option<Res<nvf_play::combat::PlayerLimbs>>,
         (Res<crate::death_cam::DeathCam>, Res<crate::player_knockdown::PlayerKnockdown>),
         (Option<Res<nvf_play::aim_zoom::AimZoom>>, Option<Res<nvf_play::combat::Combat>>, Option<ResMut<nvf_play::aim_zoom::TrueSights>>, Option<Res<nvf_play::aim_zoom::Scope>>, Option<ResMut<nvf_play::aim_zoom::Scope3d>>, Option<Res<nvf_play::aim_zoom::LensSway>>),
@@ -3472,6 +3563,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         return;
     };
     if death.down() || knock.ragdolled() {
@@ -3483,6 +3575,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         show_rigs(body, &mut commands, &mut visibility, Seen { body: true, head: death.third_person() || knock.ragdolled(), arms: true, weapon: true }, false);
         return;
     }
@@ -3537,7 +3630,10 @@ fn drive_body(
     m.airborne = if grounded || swimming { 0.0 } else { m.airborne + dt };
     let was_falling = m.falling;
     m.falling = m.airborne > 0.0 && (m.falling || (m.airborne >= AIRBORNE_LOOP && ground_gap.is_none_or(|g| g > FALL_GAP)));
-    let landing = was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0;
+    let landing = was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0 && m.fall_speed > LAND_MIN_FALL;
+    if was_falling && airborne_before >= AIRBORNE_LAND && m.airborne == 0.0 && !landing {
+        info!("player view: down again after {airborne_before:.2}s off the ground without a fall ({:.0} units/s): no landing", m.fall_speed);
+    }
     if m.airborne > 0.0 {
         m.fall_speed = m.fall_speed.max(-vertical);
     } else {
@@ -3627,6 +3723,7 @@ fn drive_body(
         anim.casing = None;
         state.muzzle_entity = None;
         state.casing_entity = None;
+        state.weapon_aim = None;
         show_rigs(body, &mut commands, &mut visibility, Seen { body: third_view || own_body, head: third_view, arms: true, weapon: true }, false);
         return;
     }
@@ -3801,6 +3898,7 @@ fn drive_body(
     }
     let frame = Frame {
         inertia: smooth,
+        pipboy_manual: pip.manual_pose(),
         crouch_jump: inertia.as_deref().is_some_and(|i| i.eased_crouch()),
         aim_fade: inertia.as_deref().filter(|i| i.smooth_hands() || i.handles()).map(|i| i.aim_seconds(control.aiming)),
         stance_fade,
@@ -3902,7 +4000,7 @@ fn drive_body(
     // original's 55°, is scaled against the arms' size for it, so it looks the same size at
     // any viewmodel field of view (`view_sway::rescale`).
     let viewmodel_fov = {
-        let (asked_fov, args) = &first_fov;
+        let (asked_fov, args, _) = &first_fov;
         asked_fov.as_ref().and_then(|f| f.0).or_else(|| args.as_ref().map(|a| a.viewmodel_fov)).unwrap_or(FIRST_PERSON_FOV)
     };
     let sway_share = arms_magnification(1.0, FIRST_PERSON_FOV) / arms_magnification(1.0, viewmodel_fov).max(1e-3);
@@ -4085,11 +4183,12 @@ fn drive_body(
             Projection::Perspective(p) => Some(p.fov),
             _ => None,
         });
+        let pip_size = &first_fov.2;
         let first_fov = viewmodel_fov;
         let k = match (pip.on_arm() && pip.warming.is_none(), vfov) {
             (true, Some(v)) => {
                 let normal = arms_magnification(v, first_fov);
-                normal + (arms_magnification(v, PIPBOY_FOV) - normal) * pipboy_ease(pip.clip_time)
+                normal + (arms_magnification(v, pip_size.as_deref().map_or(PIPBOY_FOV, |s| s.device_fov(PIPBOY_FOV))) - normal) * pipboy_ease(pip.clip_time)
             }
             (false, Some(v)) => arms_magnification(v, first_fov),
             _ => 1.0,
@@ -4236,6 +4335,7 @@ fn drive_body(
         _ => &body.third,
     };
     anim.muzzle = if m.hands.in_hand { seen.muzzle_at(root).map(|p| p.to_array()) } else { None };
+    state.weapon_aim = if m.hands.in_hand { seen.weapon_aim_at(root) } else { None };
     state.muzzle_entity = seen.muzzle_entity.filter(|_| m.hands.in_hand);
     state.casing_entity = seen.casing_entity.filter(|_| m.hands.in_hand);
     anim.casing = if m.hands.in_hand { seen.casing_at(root).map(|(p, d)| (p.to_array(), d.to_array())) } else { None };
@@ -4474,7 +4574,7 @@ mod tests {
         let third_rig = Rig {
             view: View::Third, root: third_root, lens: None, folder: String::new(), skeleton: String::new(),
             animator: Animator::new(skel, vec![third_root, bone], None),
-            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), head: None,
+            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
             eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
             script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
             weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
@@ -4488,7 +4588,7 @@ mod tests {
             view: View::First, root, lens: Some([outer, inner]), folder: String::new(), skeleton: String::new(),
             animator,
             clips: [(ClipKey::PipBoy(false), Some(pip_clip))].into_iter().collect(),
-            variants: HashMap::new(), overrides: Arc::default(), head: None,
+            variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
             eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
             script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
             weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
@@ -4559,7 +4659,7 @@ mod tests {
         let make_rig = |root: Entity, view: View, shown: Option<bool>| Rig {
             view, root, lens: None, folder: String::new(), skeleton: String::new(),
             animator: Animator::new(skel.clone(), vec![root], None),
-            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), head: None,
+            clips: HashMap::new(), variants: HashMap::new(), overrides: Arc::default(), active_clip: None, head: None,
             eye_local: Vec3::ZERO, looking: None, camera: None, script_turn: None, posed_root: None,
             script_used: None, translate: None, weapon_node: None, weapon_parent: None, holstered_weapon: None, furniture_logged: None, attached: None,
             weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(), idle_logged: false,
@@ -5001,3 +5101,7 @@ mod movement_camera_tests;
 
 #[cfg(test)]
 mod sequence_consumer_tests;
+
+#[cfg(test)]
+#[path="player_body/arm_gesture_tests.rs"]
+mod arm_gesture_tests;

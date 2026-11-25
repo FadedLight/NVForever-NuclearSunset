@@ -1472,3 +1472,50 @@ ignores the aids), `volumetric-light-row` (the row alone, without the shadows' r
 `volumetric-light-clouds` (with the clouds and their shadows), `volumetric-light-solid-cores`, and with
 `NVF_SMOKE_DEV_AIDS` set (an exe built with the feature) `-aid` (the light by its aid, the row off), `-picture` (the picture with and
 without it, measured), `-solid-cores-tank` and `-solid-cores-blend`.
+
+## Wind-blown dust: the rules (#3032 stage 4)
+
+[design] An addition of NVForever's own, an engineering choice for the enhanced look: not a fact
+about the original, never a parity item, and never to be used to explain a difference from its
+frames. **Only the rules are built** (`engine/nvforever/src/wind_dust.rs`, pure functions and a
+small state with unit tests): nothing is drawn, no system runs them, there is no row, aid or log
+line. The grid, the light on it and the row are later changes. Every number below is a start value
+[design] until stills with the drawing judge it.
+
+**What it follows: weather values alone.** No form IDs, editor IDs or file names decide anything, so a
+mod's weather gets what its own values say. A value that is not a finite number counts as none.
+
+- **How much.** The weather's wind speed byte, blended through a weather fade as the trees' wind
+  is, through straight lines: 0 up to byte 20, 1 at 50, 3 at 127, 3 above. Nearly every master
+  weather stores 50, HVDustStorm 127, NVHooverFinalBattle 130 [observed: the records,
+  `fnv_world::sky::Weather::wind_speed`]. So an ordinary day is 1 and strong wind 3: in a throwaway
+  prototype's stills 1 was barely seen, 3 clearly dust and 8 heavy [observed: NVForever's own
+  frames, 2026-11-25].
+- **None while drops fall.** A weather with the Rainy flag, the class Rainy or Snow (DATA
+  [documented: xEdit; GECK wiki GetWeatherTraitNumeric]) or a precipitation model has no dust. Through a fade
+  the share blends, and it reaches 0 where the incoming weather's precipitation begins and leaves 0
+  where the outgoing one's stops, by weather_fx.rs's own rule on the fade bytes [hypothesis there].
+  A wet weather shown with no fade left (ForceWeather) has none at once.
+- **Until the last drop.** Every source placed so far is waited for, not the last one only: a
+  precipitation model's own systems until none of their drops is counted, and its add-on nodes'
+  drops too. NVForever shares an add-on node's system between all emitters of its index (particles.md
+  §7.1), so that wait also ends when the longest life of a drop is over (a quarter second more, 30 s
+  when the life is not known, 120 s at most): a burning barrel of the same index holds nothing up.
+- **No jump back.** The amount rises by at most 0.1 a second, whatever moved its target: the end of
+  rain, its last drop, a forced weather, a turned-round fade, a hitch (a frame counts as 0.25 s at
+  most). Ordinary dust is back ten seconds after the rain, a strong wind's after thirty. The wind's strength
+  glides at the same rate both ways; the amount falls by at most 3 a second except where drops cut
+  it to 0 at once. In an interior it is 0 and the rules go on with the weather outside, so a door
+  is no way round the glide. After a load (`WindDust::arrive`) the first frame shows its target.
+- **Where it goes.** The trees' direction (fixed, or a script's SetWindDirection [documented: GECK wiki
+  SetWindDirection]) at 600 units a second for byte 255 (118 at 50); the velocity follows the wind's
+  over two seconds, and the place is its sum in f64, so a turn, a cut or a stop changes the way from
+  then on and never the place. It wraps after 96,000 units, where patches of 2,000 and of 600 units
+  repeat exactly, so the wrap moves nothing.
+- **Colour.** The fog colour now, tinted by the hue of the light on it (ambient plus sunlight
+  over their luminance, 0 to 2 per channel), never a colour of ours. Under a black fog it is black.
+
+**What it does not cover.** Honest Hearts' rain is drawn by a script's activators while IsRaining
+(docs/spec-notes/world.md §6): the weather's Rainy flag cuts the dust there; those activators'
+drops are not counted. A fade redirected away from a wet weather that has no model may lower the
+amount within a second with no rain to see.

@@ -542,3 +542,26 @@ fn load_door_lock_prompt_uses_partner_level_and_key() {
     sim.world.unlock(FormId(DOOR_REF)).unwrap();
     assert!(matches!(describe(&sim, index(), DOOR_REF).unwrap().1, Action::Travel { .. }));
 }
+
+#[test]
+fn restored_unloaded_changes_are_summarised_while_live_and_drawn_changes_log_individually() {
+    assert!(!log_ref_change_individually(true, 0), "restored unloaded refs go to the single summary line");
+    assert!(log_ref_change_individually(true, 1), "restored drawn refs keep per-ref info");
+    assert!(log_ref_change_individually(false, 0), "live refs keep per-ref info even when 0 entities updated");
+    assert!(log_ref_change_individually(false, 3), "live drawn refs keep per-ref info");
+
+    // End-to-end: a batch mixing restored undrawn refs, restored drawn refs, and live
+    // changes still updates every drawn entity cleanly.
+    let mut app = scene(&[]);
+    let stim = visual(&mut app, STIM_REF, [60.0, 0.0, 100.0]);
+    app.update();
+    assert_eq!(app.world().get::<Visibility>(stim), Some(&Visibility::Inherited));
+    app.world_mut().resource_mut::<SimState>().world.activate(FormId::PLAYER_REF, FormId(STIM_REF)).unwrap();
+    let mut msgs = app.world_mut().resource_mut::<Messages<RefChanged>>();
+    msgs.write(RefChanged { form_id: STIM_REF, restored: true });
+    msgs.write(RefChanged { form_id: 0x0099_0001, restored: true });
+    msgs.write(RefChanged { form_id: 0x0099_0002, restored: true });
+    msgs.write(RefChanged { form_id: 0x0099_0003, restored: false });
+    app.update();
+    assert_eq!(app.world().get::<Visibility>(stim), Some(&Visibility::Hidden));
+}

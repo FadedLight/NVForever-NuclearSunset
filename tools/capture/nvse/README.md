@@ -78,8 +78,8 @@ Probes in `catalogs/` target:
     write JSON and Markdown scoreboards.
   - `cite` — format copy-paste-ready clean-room `[observed: ...]` citations with
     the automated privacy gate.
-- `catalogs/` — 10 sanitized declarative console-only JSON catalogs (28 batches,
-  543 read-only probes total; all file-writing and `con_Save` probes excluded):
+- `catalogs/` — 11 sanitized declarative console-only JSON catalogs (32 batches,
+  596 read-only probes total; all file-writing and `con_Save` probes excluded):
   - `wave1_parity_probes.json` — Wave 1/2 parity probes covering xNVSE compound
     assignments & `dATan2`, JIP hit 3D direction/base damage/reticle limbs,
     ShowOff `OnFireWeapon` & `ForceWeaponJamAnim`, ShowOff objective/unholster
@@ -123,6 +123,13 @@ Probes in `catalogs/` target:
   - `wave6_t1_jg_colors.json` — Wave 6 Tier 1 read-only console-only probes
     covering JohnnyGuitar `RGBtoHSV`, `HSVtoRGB`, and `GetSystemColorAlt` (1
     batch, 2 probes: `w6_t1_jg_colors`).
+  - `wave6d8_ai_crime_followers_pickpocket.json` — Wave 6D-8 read-only
+    console-only probes covering AI packages, script/interrupt packages, package
+    list/field mutations, AI state flags, followers/teammates, companion wheel
+    flags, multi-target combat/flee/yield, faction reactions and multi-faction
+    precedence, karma alignment/titles/kill GMSTs, reputation clamps/invalid
+    axes, ownership/trespassing/crime alarms, detection overrides, and
+    pickpocket/stealth flags (4 batches, 53 probes: `w6d8_01`..`w6d8_04`).
 - `tests/test_nvse_harness.py` — offline stdlib `unittest` suite (no game
   install or captured logs required).
 

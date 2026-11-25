@@ -174,14 +174,15 @@ class TestCatalogValidation(unittest.TestCase):
                 "wave4h_reconcile.json",
                 "wave6_point_raycast.json",
                 "wave6_t1_jg_colors.json",
+                "wave6d8_ai_crime_followers_pickpocket.json",
             ],
         )
         self.assertFalse((nvse_harness.DEFAULT_CATALOG_DIR / "persistence_matrix.json").exists())
         errors, counts = nvse_harness.validate_catalogs(paths)
         self.assertEqual(errors, [], f"Catalog validation errors: {errors[:5]}")
-        self.assertEqual(counts["catalogs"], 10)
-        self.assertEqual(counts["probe_batches"], 28)
-        self.assertEqual(counts["probes"], 543)
+        self.assertEqual(counts["catalogs"], 11)
+        self.assertEqual(counts["probe_batches"], 32)
+        self.assertEqual(counts["probes"], 596)
         self.assertEqual(counts["persistence_items"], 0)
 
         # Verify Wave 1 parity probe IDs and corrected Wave 4A/4D/4E/4G/4H targeted probes are present verbatim.
@@ -218,6 +219,10 @@ class TestCatalogValidation(unittest.TestCase):
             "w6_01_point_raycast_angles",
             "w6_02_point_raycast_miss_and_range",
             "w6_03_point_raycast_collision_flags",
+            "w6d8p2_03_package_list_add_remove_doc",
+            "w6d8p2_19_combat_multi_target_active",
+            "w6d8p2_31_kill_karma_all_alignments",
+            "w6d8_45_pickpocket_flags_equipped_planted_caught",
         ):
             self.assertIn(req_id, probes_by_id)
 

@@ -147,6 +147,9 @@ pub struct DoorEdge {
     pub door_at: Option<[f32; 3]>,
 }
 
+/// How near two edges' ends are to count as the same edge, game units [engine choice].
+pub const EDGE_MATCH: f32 = 1.0;
+
 /// Counts of what the graph could and could not resolve while building.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct BuildStats {
@@ -159,6 +162,8 @@ pub struct BuildStats {
     pub boundary_edges: usize,
     /// Linked edges whose NVEX entry, navmesh or triangle is missing.
     pub unresolved_links: usize,
+    /// One-way portals linked back from the edge they land on ([`NavGraph::join_one_way_portals`]).
+    pub portals_joined_back: usize,
     /// Triangles left out because their corners are not finite, lie past [`MAX_COORD`]
     /// or spread wider than [`MAX_TRI_SPAN`].
     pub bad_triangles: usize,
@@ -186,8 +191,12 @@ pub struct NavGraph {
     /// Lock data of door references (authored XLOC; the game updates it as doors are
     /// unlocked, [`NavGraph::set_door_lock`]).
     pub door_locks: HashMap<u32, DoorLock>,
-    /// Load doors that are not in the world now (disabled, or deleted): no path goes
-    /// through them ([`NavGraph::door_open`]). Built from the
+    /// Doors that are not in the world now (disabled, or deleted). No path goes through
+    /// such a load door ([`NavGraph::door_open`]); such a door that opens in place bars
+    /// nothing and gets no stop, as if it were not placed (#2405: Point Lookout's
+    /// mansion has a second, initially disabled and locked door in the doorway of the
+    /// one Desmond's quest opens, `DLC04SideDoubleDoor02REF`, and it closed his way to
+    /// the player). Built from the
     /// load order's enable state ([`NavGraph::build`]); the game brings it in line as
     /// scripts enable and disable references ([`NavGraph::sync_door_presence`]). Nellis's
     /// hangar has two pairs of doors on the same spot, one into each version of the
@@ -346,9 +355,11 @@ impl NavGraph {
                 g.door_locks.insert(d, l);
             }
         }
-        let doors = g.door_refs_through();
-        g.disabled_doors = doors.into_iter().filter(|&d| !authored_enabled(lo, schema, d)).collect();
         g.learn_in_place_doors(lo, schema, ix);
+        // Load doors and doors that open in place alike (#2405): one disabled as placed
+        // is not there.
+        let doors = g.door_refs();
+        g.disabled_doors = doors.into_iter().filter(|&d| !authored_enabled(lo, schema, d)).collect();
         g.learn_obstacles(lo, schema, ix);
         g
     }
@@ -440,6 +451,7 @@ impl NavGraph {
                 }
             }
         }
+        g.join_one_way_portals();
         // Outline vertices.
         g.boundary_vertex = vec![false; g.vertices.len()];
         for t in &g.tris {
@@ -479,6 +491,54 @@ impl NavGraph {
         g.up = (0..g.tris.len() as u32).map(|t| slope_cos(g.corners(t))).collect();
         g.compute_areas();
         g
+    }
+
+    /// A portal from one triangle onto an edge of another that does not lead back: the
+    /// edge it lands on, when it is the same edge (both ends within [`EDGE_MATCH`]) and
+    /// is open (no neighbour) or links to a triangle that has no such edge (a stale
+    /// link), is linked back [engine choice]. Lonesome Road's silo lift: the far door's
+    /// one-triangle navmesh 0x0100A556 links onto the lift floor (0x0100A555 triangles 12
+    /// and 15), whose edges there link to triangle 16 of 0x0100A554, far off; the door
+    /// was an island no path reached (observed 2026-11-15, `fnvtool nav near`).
+    fn join_one_way_portals(&mut self) {
+        let ends = |g: &NavGraph, t: u32, e: usize| {
+            let v = g.tris[t as usize].v;
+            (g.vertices[v[e] as usize], g.vertices[v[(e + 1) % 3] as usize])
+        };
+        let same = |a: [f32; 3], b: [f32; 3]| (a[0] - b[0]).abs() <= EDGE_MATCH && (a[1] - b[1]).abs() <= EDGE_MATCH && (a[2] - b[2]).abs() <= EDGE_MATCH;
+        let meets = |g: &NavGraph, (p, q): ([f32; 3], [f32; 3]), t: u32, e: usize| {
+            let (a, b) = ends(g, t, e);
+            (same(p, a) && same(q, b)) || (same(p, b) && same(q, a))
+        };
+        let mut fixes: Vec<(u32, usize, u32)> = Vec::new();
+        for t in 0..self.tris.len() as u32 {
+            let tri = self.tris[t as usize];
+            if tri.has(tri_flags::DELETED) {
+                continue;
+            }
+            for e in 0..3 {
+                let n = tri.next[e];
+                if tri.kind[e] != EdgeKind::Portal || n == NONE || self.tris[n as usize].next.contains(&t) || self.tris[n as usize].has(tri_flags::DELETED) {
+                    continue;
+                }
+                let edge = ends(self, t, e);
+                let Some(ne) = (0..3).find(|&ne| meets(self, edge, n, ne)) else { continue };
+                let nt = self.tris[n as usize];
+                let stale = match nt.kind[ne] {
+                    EdgeKind::Boundary => true,
+                    EdgeKind::Portal => nt.next[ne] == NONE || !(0..3).any(|me| meets(self, edge, nt.next[ne], me)),
+                    _ => false,
+                };
+                if stale {
+                    fixes.push((n, ne, t));
+                }
+            }
+        }
+        for (n, ne, t) in fixes {
+            self.tris[n as usize].next[ne] = t;
+            self.tris[n as usize].kind[ne] = EdgeKind::Portal;
+            self.stats.portals_joined_back += 1;
+        }
     }
 
     /// Label walkable areas (flood fill over internal and portal edges between usable
@@ -628,13 +688,14 @@ impl NavGraph {
         v
     }
 
-    /// Bring the load doors' presence in line with the game's: `states` gives each door
-    /// and whether it is in the world now (enabled, with its enable parents, and not
-    /// deleted). Doors the graph has no load door for are passed over. Returns the doors
-    /// gone from the world and those back in it.
+    /// Bring the doors' presence (load doors and doors that open in place) in line with
+    /// the game's: `states` gives each door and whether it is in the world now (enabled,
+    /// with its enable parents, and not deleted). Doors the graph does not know
+    /// ([`NavGraph::door_refs`]) are passed over. Returns the doors gone from the world
+    /// and those back in it.
     pub fn sync_door_presence(&mut self, states: impl IntoIterator<Item = (u32, bool)>) -> DoorPresenceChanges {
         let mut out = DoorPresenceChanges::default();
-        let known = self.door_refs_through();
+        let known = self.door_refs();
         for (d, present) in states {
             if known.binary_search(&d).is_err() {
                 continue;

@@ -106,7 +106,7 @@ fn handlers_hear_the_game() {
     q(&mut g, "let TestGlobal := 0\nSetJohnnyOnLimbGoneEventHandler 1 (begin function {ref rA, int iLimb}\nlet TestGlobal := TestGlobal + iLimb\nend) 0 0 1");
     g.dismember(FormId::PLAYER_REF, &[(1, false), (3, false)], None);
     assert_eq!(global(&mut g), 1.0);
-    // [hypothesis: SetOnReputationChangeEventHandler's (reputation, axis, value)].
+    // SetOnReputationChangeEventHandler's (reputation, axis, value) (see docs/spec-notes/ext-jg8.md).
     q(&mut g, "let TestGlobal := 0\nSetOnReputationChangeEventHandler 1 (begin function {ref rR, int iAxis, float fV}\nlet TestGlobal := fV\nend) 0 TestReputation");
     fnv_game::functions::reputation_store(&mut g, FormId(REPU), 0, 5.0);
     assert_eq!(global(&mut g), 5.0);
@@ -115,6 +115,22 @@ fn handlers_hear_the_game() {
     let removed = g.other.jg8.handlers.len();
     q(&mut g, "SetJohnnyOnFailQuestEventHandler 0 (begin function {ref rQ}\nend) 0 TestQuest");
     assert_eq!(g.other.jg8.handlers.len(), removed, "another function's removal leaves the handler");
+    // Aliases SetOnSettingsUpdateEventHandler and SetOnKBCTrlUIDeltaHandler:
+    // MenuID filter 0 or omitted matches any menu; positive MenuID matches only that menu.
+    q(&mut g, "let TestGlobal := 0\nSetOnSettingsUpdateEventHandler 1 (begin function {}\nlet TestGlobal := TestGlobal + 7\nend) 0");
+    g.jg8_settings_closed();
+    assert_eq!(global(&mut g), 7.0);
+    q(&mut g, "let TestGlobal := 0\nSetOnKBCTrlUIDeltaHandler 1 (begin function {int m}\nlet TestGlobal := TestGlobal + m\nend) 0 1002");
+    q(&mut g, "SetOnKBCTrlUIDeltaHandler 1 (begin function {int m}\nlet TestGlobal := TestGlobal + 1\nend) 0 0");
+    q(&mut g, "SetJohnnyOnKeyboardControllerSelectionChangeEventHandler 1 (begin function {int m}\nlet TestGlobal := TestGlobal + 10\nend) 0");
+    g.jg8_keyboard_selection(1008.0);
+    assert_eq!(global(&mut g), 11.0, "only wildcard 0 and unfiltered handlers fire for 1008");
+    g.jg8_keyboard_selection(1002.0);
+    assert_eq!(global(&mut g), 11.0 + 1002.0 + 1.0 + 10.0, "exact 1002 plus both wildcards fire");
+    // Unregistering with setOrRemove=0 and matching func+filter removes that handler.
+    let before = g.other.jg8.handlers.len();
+    q(&mut g, "ref h\nlet h := (begin function {int m}\nlet TestGlobal := TestGlobal + 99\nend)\nSetOnKBCTrlUIDeltaHandler 1 h 0 1002\nSetOnKBCTrlUIDeltaHandler 0 h 0 1002");
+    assert_eq!(g.other.jg8.handlers.len(), before);
 }
 
 #[test]
@@ -166,13 +182,21 @@ fn arrays_colours_and_menus() {
     assert_eq!(n(&mut g, "GetSystemColor 3"), f64::from(0x21E779u32));
     q(&mut g, "SetSystemColor 4 10 20 30");
     assert_eq!(s(&mut g, "int r\nint gg\nint b\nGetSystemColorAlt 4 r gg b\nSetFunctionValue (sv_Construct \"%g %g %g\" r gg b)"), "10 20 30");
+    // Invalid ids return 0 and preserve output variables unchanged [observed: w6_t1_08_jg_system_color_alt].
+    assert_eq!(s(&mut g, "int r = 111\nint gg = 222\nint b = 333\nGetSystemColorAlt 0 r gg b\nSetFunctionValue (sv_Construct \"%g %g %g\" r gg b)"), "111 222 333");
+    assert_eq!(s(&mut g, "int r = 111\nint gg = 222\nint b = 333\nGetSystemColorAlt 6 r gg b\nSetFunctionValue (sv_Construct \"%g %g %g\" r gg b)"), "111 222 333");
     assert_eq!(n(&mut g, "GetSystemColor 6"), 0.0);
     // [documented: GetSleepWaitMenuState 0 closed, 1 wait, 2 sleep].
     assert_eq!(n(&mut g, "GetSleepWaitMenuState"), 0.0);
     g.other.jg8.sleep_menu = true;
     g.open_menu(1012);
     assert_eq!(n(&mut g, "GetSleepWaitMenuState"), 2.0);
-    // Nothing to clear yet; IsRadioRefPlaying reads 0 (the page: it crashes the game).
-    assert_eq!(n(&mut g, "ClearCustomMapMarker"), 0.0);
+    // ClearCustomMapMarker returns 1 even when no custom marker is set [observed: Wave 4
+    // jg_29_custom_map_marker_set_clear_ret, JohnnyGuitarNVSE 528: 1,1,1,1].
+    assert_eq!(n(&mut g, "ClearCustomMapMarker"), 1.0);
+    g.other.jg8.custom_marker = Some((FormId(0x1), [10.0, 20.0, 30.0]));
+    assert_eq!(n(&mut g, "ClearCustomMapMarker"), 1.0);
+    assert_eq!(g.other.jg8.custom_marker, None);
+    assert_eq!(n(&mut g, "ClearCustomMapMarker"), 1.0);
     assert_eq!(n(&mut g, "IsBSALoaded \"Fallout - Meshes.bsa\""), 0.0);
 }

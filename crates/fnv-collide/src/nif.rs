@@ -404,13 +404,14 @@ impl Walk<'_> {
             }
             let m = mesh_data(d);
             let base = vertices.len() as u32;
-            // Its NiTriStripsData vertices are game units, not Havok units: they are stored
-            // here over HAVOK_SCALE so the shape's common scale gives them back as they are
-            // [observed: upstream issue #3110, `fnvtool collide` survey of TTW's
-            // Fallout3 - Meshes.bsa, render/stored ratio 1.00 for bhkNiTriStripsShape (15
-            // meshes) against 7.0 for every other family; scaled x7, Megaton's
-            // MegatonRampTurn90Sml railing became an invisible wall across the walkway].
-            vertices.extend(m.positions.into_iter().map(|p| p.map(|c| c / HAVOK_SCALE)));
+            // NiTriStripsData under a bhkNiTriStripsShape is stored in game units, not
+            // Havok units: render extent / stored extent has a median of 1.00 over the 13
+            // single-object meshes of Fallout3 - Meshes.bsa that use it, where every other
+            // shape family is 7.0 [observed: fnvtool collide survey, collision.md §2].
+            // Brought into Havok units here so the shared conversion's ×7 gives game
+            // units again (without it TTW's MegatonRampTurn90Sml railing was seven times
+            // its size and walled off the walkway beside it).
+            vertices.extend(m.positions.into_iter().map(|p| p.map(|v| v / HAVOK_SCALE)));
             triangles.extend(m.triangles.into_iter().map(|t| t.map(|v| v.saturating_add(base))));
         }
         let materials = vec![mat; triangles.len()];
@@ -670,18 +671,10 @@ impl RawCollision {
     /// Convert to the engine-neutral API in game units. The body transform is applied
     /// only for bhkRigidBodyT; plain bhkRigidBody stores a transform the shapes do not
     /// use [observed: collision.md §4]. A node scale other than 1 is baked into the shape.
-    /// The body translation takes [`HAVOK_SCALE`] only, never the node's scale (as the
-    /// ragdoll's bodies already do) [observed: NS "NS C NSALVO M 00.bsa"
-    /// `meshes\scol\scolparkinglotchunk03bsandy.nif`, 8 bhkRigidBodyT on nodes scaled
-    /// 0.91–1.99 (each shape's own `scale` equals its node's): translation × 7 cancels
-    /// the packed vertices' centre × 7 × node scale to within 1 unit for every one
-    /// (Havok5: 572.68 × 7 = 4009 against 309.6 × 7 × 1.85 = 4009); scaled by the node
-    /// too, Havok5's collision sat 3,400 units from its road piece (bug hunt
-    /// CollisionTooBig 3,922 against the model's 825, Goodsprings 00106B76)].
     pub fn to_object(&self) -> crate::shape::CollisionObject {
         let f = HAVOK_SCALE * self.node_to_root.scale;
         let mut body = if self.body_type == "bhkRigidBodyT" { self.body_iso() } else { Iso::IDENTITY };
-        body.translation = body.translation.map(|v| v * HAVOK_SCALE);
+        body.translation = body.translation.map(|v| v * f);
         crate::shape::CollisionObject {
             node: self.node_name.clone(),
             node_block: self.node_block,
@@ -826,6 +819,19 @@ mod tests {
         let Some(Shape::TriMesh { triangles, materials, .. }) = w.shape(0) else { panic!("a mesh") };
         assert_eq!((triangles.len(), materials), (1, vec![0]));
         assert_eq!(w.problems.len(), 1, "{:?}", w.problems);
+    }
+
+    #[test]
+    fn strips_shape_vertices_are_game_units() {
+        // Stored in game units (collision.md §2), so the walk returns them in Havok
+        // units and the ×7 conversion restores them.
+        let (raw, dec) = blocks(vec![
+            ("bhkNiTriStripsShape", vec![("strips_data", Value::RefList(vec![1]))]),
+            ("NiTriStripsData", vec![("vertices", Value::FloatList { dim: 3, data: vec![0.0, 0.0, 0.0, 70.0, 0.0, 0.0, 0.0, 140.0, 0.0] })]),
+        ]);
+        let mut w = walk(&raw, &dec);
+        let Some(Shape::TriMesh { vertices, .. }) = w.shape(0) else { panic!("a mesh") };
+        assert_eq!(vertices, vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 20.0, 0.0]]);
     }
 
     fn sim(t: [f32; 3]) -> Similarity {
@@ -974,9 +980,8 @@ mod tests {
         assert_eq!(plain.material, Some(24));
         assert_eq!(plain.root_bounds().min, [-14.0, -28.0, -42.0]);
         let t = raw("bhkRigidBodyT").to_object();
-        // The translation takes the Havok scale, not the node's (2 here).
-        assert_eq!(t.body_transform.translation, [7.0, 0.0, 0.0]);
-        assert_eq!(t.root_bounds().min, [-7.0, -28.0, -42.0]);
+        assert_eq!(t.body_transform.translation, [14.0, 0.0, 0.0]);
+        assert_eq!(t.root_bounds().min, [0.0, -28.0, -42.0]);
         assert!(raw("bhkSimpleShapePhantom").is_phantom());
     }
 

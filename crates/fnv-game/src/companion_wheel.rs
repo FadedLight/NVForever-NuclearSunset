@@ -278,7 +278,7 @@ impl Game<'_> {
         let data = self.data;
         let inv = self.world.peek(FormId::PLAYER_REF).and_then(|s| s.inventory.as_ref())?;
         let plain = data.default_object(crate::data::DefaultObject::Stimpak).or_else(|| data.by_edid("Stimpak"));
-        let mut found: Vec<(FormId, i32)> = inv.iter().filter(|(i, n)| *n > 0 && data.ingestibles.get(i).is_some_and(|d| d.equip_type == 11)).collect();
+        let mut found: Vec<(FormId, i32)> = inv.iter().filter(|(i, n)| *n > 0 && self.ingestible_def(*i).is_some_and(|d| d.equip_type == 11)).collect();
         found.sort_by_key(|(i, _)| (Some(*i) != plain, *i));
         let total = found.iter().map(|(_, n)| n).sum();
         found.first().map(|(i, _)| (*i, total))
@@ -354,6 +354,52 @@ Stimpak {}", now.max(0.0).ceil(), full, carried.map_or(0, |(_, n)| n)));
             out.push(State { command: c, alt, enabled, label: c.label(alt), context });
         }
         out
+    }
+
+    /// Why an already-computed wheel button cannot be selected now, from its actual gates.
+    /// Reuses the [`State`] produced by [`Self::wheel_buttons`] without rebuilding all buttons.
+    pub fn wheel_unavailable_reason_for(&self, companion: FormId, button: &State) -> Option<String> {
+        if button.enabled {
+            return None;
+        }
+        if button.command == Command::UseStimpak {
+            if let Some((_, n)) = self.wheel_scrap(companion) {
+                return Some(if n <= 0 {
+                    "You have no scrap metal.".into()
+                } else {
+                    "The companion is already at full health.".into()
+                });
+            }
+            return Some(if self.wheel_stimpak().is_none() {
+                "You have no stimpaks.".into()
+            } else {
+                "The companion is already at full health.".into()
+            });
+        }
+        Some("No eligible companion response is available.".into())
+    }
+
+    /// Why an existing wheel button cannot be selected now, from its actual gates.
+    /// This is interface explanation, not a second command implementation.
+    pub fn wheel_unavailable_reason(&mut self, command: Command) -> Option<String> {
+        let Some(companion) = self.wheel_companion() else { return Some("The companion wheel is closed.".into()) };
+        if command == Command::UseStimpak {
+            if let Some((_, n)) = self.wheel_scrap(companion) {
+                if n <= 0 {
+                    return Some("You have no scrap metal.".into());
+                }
+                let (now, full) = self.health_now_and_full(companion);
+                return (now >= full).then(|| "The companion is already at full health.".into());
+            }
+            if self.wheel_stimpak().is_none() {
+                return Some("You have no stimpaks.".into());
+            }
+            let (now, full) = self.health_now_and_full(companion);
+            return (now >= full).then(|| "The companion is already at full health.".into());
+        }
+        let buttons = self.wheel_buttons(companion);
+        let button = buttons.iter().find(|b| b.command == command)?;
+        self.wheel_unavailable_reason_for(companion, button)
     }
 
     /// The player picks a command on the open wheel. Talk closes the wheel and starts the

@@ -143,8 +143,6 @@ pub struct Gilrs {
     axis_to_btn_released: f32,
     pub(crate) update_state: bool,
     pub(crate) gamepads_data: Vec<GamepadData>,
-    /// NVForever patch (#3097): pad ids whose dropped events were already logged.
-    unknown_warned: std::collections::HashSet<usize>,
 }
 
 impl Gilrs {
@@ -238,23 +236,25 @@ impl Gilrs {
                     trace!("Original event: {:?}", event);
                     let id = GamepadId(id);
 
-                    // NVForever patch (#3097): an event for a pad with no data (input from a
-                    // second controller before its Connected, or a Connected past the next
-                    // id) indexed `gamepads_data` out of bounds in `gamepad()` and panicked
-                    // the game. Such an event is dropped with a warning, once per pad.
-                    let known = id.0 < self.gamepads_data.len()
-                        || (matches!(event_type, RawEventType::Connected)
-                            && id.0 == self.gamepads_data.len());
-                    if !known {
-                        if self.unknown_warned.insert(id.0) {
+                    // NVForever patch (#3097): an event for a pad with no data yet is
+                    // dropped. Anything but the Connected that adds the next pad would
+                    // index `gamepads_data` past its end here (`Gilrs::gamepad`) or in the
+                    // filters that run on every event (`axis_dpad_to_button`), and panic.
+                    let known = self.gamepads_data.len();
+                    let adds_next = id.0 == known && matches!(event_type, RawEventType::Connected);
+                    if id.0 >= known && !adds_next {
+                        // Warned once per pad id (a held stick sends many events).
+                        static WARNED: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let bit = 1u64 << id.0.min(63);
+                        if WARNED.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0 {
                             warn!(
-                                "dropped input from gamepad {} that gilrs holds no data for \
-                                 ({} known)",
-                                id.0,
-                                self.gamepads_data.len()
+                                "Dropped {:?} for gamepad {}: no data for it ({} known); \
+                                 its later events are dropped quietly",
+                                event_type, id.0, known
                             );
                         }
-                        return None;
+                        return self.next_event_priv(is_blocking, blocking_timeout);
                     }
 
                     let event = match event_type {
@@ -773,7 +773,6 @@ impl GilrsBuilder {
             axis_to_btn_released: self.axis_to_btn_released,
             update_state: self.update_state,
             gamepads_data: Vec::new(),
-            unknown_warned: Default::default(),
         };
         gilrs.finish_gamepads_creation();
 

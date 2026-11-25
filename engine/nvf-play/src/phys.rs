@@ -56,7 +56,6 @@ use fnv_collide::{Iso, Motion};
 use drawn::DrawnFloors;
 use fnv_phys::{Arrival, Character, CharacterParams, Filter, Owner, PhysParams, PhysWorld, RayHit, RefPose, Stepper, WaterArea};
 use fnv_sim::{FormId, World};
-use fnv_world::placed::placement;
 use fnv_world::reach::ReachIndex;
 use fnv_world::transform::{max_diff, ref_angles, ref_rotation};
 use fnv_world::{cell_of, Placement, WorldIndex, CELL_SIZE};
@@ -142,6 +141,9 @@ pub struct PhysState {
     /// The height of each living actor's drawn bounds, game units, as `crate::hitvol`
     /// last measured them: an actor's character is made this tall ([`PhysState::add_npc`]).
     pub actor_heights: HashMap<u32, f32>,
+    /// Scaled creature BBX radii for actor blocking only (`hitvol::sync_volumes`)
+    /// [hypothesis: fits capture run15b_b2 spacing; original shape unseen, #2535].
+    pub actor_block_radii: HashMap<u32, f32>,
     /// Actors drawn standing without a character: their feet, whether they may follow the
     /// landscape, and how far below them the body is drawn
     /// ([`PhysState::standing_drawn_feet`]).
@@ -237,6 +239,7 @@ impl Default for PhysState {
             player_sink: 0.0,
             player_lift: step_lift::StepLift::default(),
             actor_heights: HashMap::new(),
+            actor_block_radii: HashMap::new(),
             standing: HashMap::new(),
             left: HashMap::new(),
             stats: PhysStats::default(),
@@ -780,7 +783,7 @@ impl PhysState {
         }
         if let Some(pc) = ws.and_then(|w| w.persistent_cell).and_then(|c| d.index.cells.get(&c)) {
             for &r in &pc.refs {
-                if let Some(p) = placement(d.lo, d.schema, r) {
+                if let Some(p) = d.index.placement(d.lo, d.schema, r) {
                     self.persistent_by_grid.entry(cell_of(p.position[0], p.position[1])).or_default().push(r);
                 }
             }
@@ -1248,7 +1251,7 @@ impl PhysState {
         let src = self.source(ctx);
         let mut times = LoadTimes::default();
         let t = Instant::now();
-        let mut pl = placement(ctx.d.lo, ctx.d.schema, r).map(|pl| prepare::at_pose(pl, ctx.sim.moved_pose(r)));
+        let mut pl = ctx.d.index.placement(ctx.d.lo, ctx.d.schema, r).map(|pl| prepare::at_pose(pl, ctx.sim.moved_pose(r)));
         // A script's scale (SetScale) in place of the placement's; one too small to see
         // has no collision (`crate::sim::MIN_DRAWN_SCALE`).
         if let (Some(p), Some(s)) = (pl.as_mut(), ctx.sim.script_scale(r)) {

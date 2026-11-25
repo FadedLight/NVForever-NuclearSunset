@@ -14,7 +14,8 @@ use crate::game::Game;
 use fnv_script::vm::{ArrayKind, XKey, XVal};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The host's answer for a path in the archives too: 0 none, 1 a loose file, 2 inside an
 /// archive.
@@ -45,11 +46,19 @@ pub struct Roots {
 }
 
 static ROOTS: Mutex<Option<Roots>> = Mutex::new(None);
+static ROOTS_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// Monotonic revision bumped whenever process-wide file roots change (`set_roots` /
+/// `update_roots`).
+pub fn roots_generation() -> u64 {
+    ROOTS_GEN.load(Ordering::Acquire)
+}
 
 /// Set the roots for the games made after this (the engine, `fnvtool --config`).
 pub fn set_roots(r: Roots) {
     if let Ok(mut g) = ROOTS.lock() {
         *g = Some(r);
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -58,6 +67,7 @@ pub fn set_roots(r: Roots) {
 pub fn update_roots(f: impl FnOnce(&mut Roots)) {
     if let Ok(mut g) = ROOTS.lock() {
         f(g.get_or_insert_with(Roots::default));
+        ROOTS_GEN.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -177,6 +187,10 @@ pub struct ModFiles {
     /// Files written this session, by lower-case Data path (the disk copy, if any, is
     /// written too).
     written: HashMap<String, String>,
+    /// Exact bytes written this session, by the same keys as [`Self::written`], so UTF-8
+    /// text and binary readers both observe lossless bytes without Latin-1 corruption
+    /// [design].
+    written_bytes: HashMap<String, Vec<u8>>,
     /// ShowOff's cached INI files, by lower-case Data path: key -> value, read once.
     cache: HashMap<String, HashMap<String, String>>,
     /// ShowOff's cached JSON files (ReadFromJSON, WriteToJSON with useCache), by the
@@ -184,8 +198,12 @@ pub struct ModFiles {
     showoff_json: HashMap<String, serde_json::Value>,
     /// Folders CreateFolder made this session (under the game's folder, lower case).
     folders: std::collections::HashSet<String>,
-    /// SUP's JSONGetValue files read with iCached, by lower-case path (`crate::nvse_sup5`).
-    pub(crate) json: HashMap<String, serde_json::Value>,
+    /// Monotonic counter bumped whenever this session's written files change.
+    generation: u64,
+    /// Cached `Data\NVSE\Plugins\TTW.ini` `[Karma Titles]` overrides (`OnceLock` so
+    /// `&Game` readers stay allocation-free and `Send + Sync`; cleared on session writes)
+    /// [design].
+    ttw_karma_titles: OnceLock<crate::karma_titles::TtwKarmaTitles>,
 }
 
 /// The folder of NVForever's layer standing for the game's own folder.
@@ -280,26 +298,50 @@ pub fn files_in(rel: &str) -> Vec<String> {
     list_files(rel, false)
 }
 
-fn list_files(rel: &str, deep: bool) -> Vec<String> {
-    fn walk(dir: &Path, prefix: &str, deep: bool, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            let rel = if prefix.is_empty() { name } else { format!("{prefix}\\{name}") };
-            if e.path().is_dir() {
-                if deep {
-                    walk(&e.path(), &rel, deep, seen, out);
-                }
-            } else if seen.insert(rel.to_ascii_lowercase()) {
-                out.push(rel);
+/// The files under `dir` added to `out` as paths relative to it (`\` between parts), a
+/// path once (`seen`, lower case); subfolders too when `deep`. A folder that is a link
+/// (a symlink, an NTFS junction) to a folder the walk is already inside is not entered:
+/// a junction to its own parent would otherwise be walked until the system's path limit
+/// (#3154). `open` holds the real paths of the folders the walk is inside.
+fn walk_files(dir: &Path, prefix: &str, deep: bool, open: &mut Vec<PathBuf>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let rel = if prefix.is_empty() { name } else { format!("{prefix}\\{name}") };
+        let path = e.path();
+        if path.is_dir() {
+            if !deep {
+                continue;
             }
+            // A plain folder's real path is its parent's with its name; only a link is
+            // resolved (a system call each).
+            let linked = e.file_type().map_or(true, |t| !t.is_dir());
+            let real = match open.last() {
+                Some(parent) if !linked => parent.join(e.file_name()),
+                _ => match path.canonicalize() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                },
+            };
+            if open.contains(&real) {
+                continue;
+            }
+            open.push(real);
+            walk_files(&path, &rel, deep, open, seen, out);
+            open.pop();
+        } else if seen.insert(rel.to_ascii_lowercase()) {
+            out.push(rel);
         }
     }
+}
+
+fn list_files(rel: &str, deep: bool) -> Vec<String> {
     let (mut seen, mut out) = (std::collections::HashSet::new(), Vec::new());
     let r = roots();
     for root in &r.read {
         if let Some(dir) = find_dir(root, rel) {
-            walk(&dir, "", deep, &mut seen, &mut out);
+            let mut open: Vec<PathBuf> = dir.canonicalize().into_iter().collect();
+            walk_files(&dir, "", deep, &mut open, &mut seen, &mut out);
         }
     }
     // Then the host's own loose files there (a Mod Organizer 2 merge's), after the roots.
@@ -346,6 +388,55 @@ pub fn read_loose(rel: &str) -> Option<Vec<u8>> {
         .or_else(|| (r.lookup.as_ref().is_some_and(|f| f(&host) == 1)).then(|| r.reader.as_ref().and_then(|f| f(&host))).flatten())
 }
 
+/// Strip a leading UTF-8 BOM (either decoded as `\u{feff}` or as three latin-1 chars
+/// `\u{ef}\u{bb}\u{bf}`) from INI text.
+fn strip_bom(text: String) -> String {
+    if let Some(rest) = text.strip_prefix('\u{feff}') {
+        rest.to_string()
+    } else if let Some(rest) = text.strip_prefix("\u{ef}\u{bb}\u{bf}") {
+        rest.to_string()
+    } else {
+        text
+    }
+}
+
+/// Read all loose `.ini` files directly inside `folder` across `roots` (earlier root wins
+/// on case-insensitive filename collision; path components matched without regard to
+/// case), sorted case-insensitively (`A..Z`) by filename.
+pub fn read_folder_inis_from_roots(roots: &[PathBuf], folder: &str) -> Vec<(String, String)> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    for root in roots {
+        let Some(dir) = find_dir(root, folder) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let path = e.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            let lower = name.to_ascii_lowercase();
+            if lower.ends_with(".ini") && seen.insert(lower) {
+                entries.push((name, path));
+            }
+        }
+    }
+    entries.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+    entries
+        .into_iter()
+        .filter_map(|(name, path)| {
+            let bytes = std::fs::read(path).ok()?;
+            Some((name, strip_bom(latin1(&bytes))))
+        })
+        .collect()
+}
+
+/// Read all loose `.ini` files directly inside `folder` across the current read roots,
+/// sorted case-insensitively (`A..Z`) by filename.
+pub fn read_data_folder_inis(folder: &str) -> Vec<(String, String)> {
+    read_folder_inis_from_roots(&roots().read, folder)
+}
+
 /// Whether NVForever may write `path`: never inside the game's install or the original
 /// game's user folder (`fnv_install::guard_write`), nor under the game folder the Data
 /// read root stands in (a headless run that did not register the install).
@@ -379,10 +470,45 @@ fn norm(p: &str) -> String {
 }
 
 impl ModFiles {
+    /// Monotonic counter bumped on session file writes and deletes.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// [`ModFiles::read`] for the other files of the crate: a Data file's text, this
     /// session's write first.
     pub(crate) fn read_text(&self, rel: &str) -> Option<String> {
         self.read(rel)
+    }
+
+    /// A Data file's text with case-insensitive path matching on disk, this session's
+    /// write first, with any leading UTF-8 BOM stripped.
+    pub(crate) fn read_text_any_case(&self, rel: &str) -> Option<String> {
+        if let Some(t) = self.written.get(&norm(rel)) {
+            return Some(strip_bom(t.clone()));
+        }
+        let rel = rel.replace('/', "\\");
+        on_disk(Path::new(""), &rel)?;
+        read_loose(&rel).map(|b| strip_bom(latin1(&b)))
+    }
+
+    /// Loose `.ini` files directly inside `folder` across the current read roots and this
+    /// session's in-memory writes, sorted case-insensitively (`A..Z`) by filename.
+    /// Session writes override disk files with the same case-insensitive filename.
+    pub fn read_folder_inis(&self, folder: &str) -> Vec<(String, String)> {
+        let mut by_lower: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
+        for (name, text) in read_data_folder_inis(folder) {
+            by_lower.insert(name.to_ascii_lowercase(), (name, text));
+        }
+        let prefix = format!("{}\\", norm(folder).trim_end_matches('\\'));
+        for (path_lower, text) in &self.written {
+            if let Some(file_lower) = path_lower.strip_prefix(&prefix) {
+                if !file_lower.is_empty() && !file_lower.contains('\\') && file_lower.ends_with(".ini") {
+                    by_lower.insert(file_lower.to_string(), (file_lower.to_string(), strip_bom(text.clone())));
+                }
+            }
+        }
+        by_lower.into_values().collect()
     }
 
     /// A file's text: this session's write, else NVForever's layer, else the game's Data,
@@ -467,8 +593,40 @@ impl ModFiles {
                 return false;
             }
         }
+        self.invalidate_plugin_ini_cache(&key);
+        self.written_bytes.insert(key.clone(), bytes.to_vec());
         self.written.insert(key, text);
+        self.generation = self.generation.wrapping_add(1);
         true
+    }
+
+    fn invalidate_plugin_ini_cache(&mut self, norm_key: &str) {
+        if norm_key == "nvse\\plugins\\ttw.ini" {
+            let _ = self.ttw_karma_titles.take();
+        }
+    }
+
+    /// Read a plugin INI under `Data` (case-insensitive across read roots and VFS
+    /// archives), preferring session writes first.
+    fn read_plugin_ini(&self, rel: &str) -> Option<String> {
+        let key = norm(rel);
+        if let Some(b) = self.written_bytes.get(&key) {
+            return Some(String::from_utf8(b.clone()).unwrap_or_else(|e| latin1(e.as_bytes())));
+        }
+        if let Some(t) = self.written.get(&key) {
+            return Some(t.clone());
+        }
+        let bytes = read_data_file(rel)?;
+        Some(String::from_utf8(bytes).unwrap_or_else(|e| latin1(e.as_bytes())))
+    }
+
+    /// Loaded `Data\NVSE\Plugins\TTW.ini` `[Karma Titles]` overrides (empty when absent).
+    pub fn ttw_karma_titles(&self) -> &crate::karma_titles::TtwKarmaTitles {
+        self.ttw_karma_titles.get_or_init(|| {
+            self.read_plugin_ini("NVSE\\Plugins\\TTW.ini")
+                .map(|text| crate::karma_titles::TtwKarmaTitles::parse(&text))
+                .unwrap_or_default()
+        })
     }
 
     /// [`ModFiles::read_root`] for the other files of the crate.
@@ -481,10 +639,52 @@ impl ModFiles {
         self.write_root(rel, text)
     }
 
-    /// A file under the game's own folder as bytes ([`ModFiles::read_root`]; SUP's Excel
-    /// files).
+    /// A file under the game's own folder as raw bytes: this session's write, else
+    /// NVForever's `GameRoot` layer (case-insensitive), else for `Data\...` paths
+    /// session/layer/VFS Data files (`read_data_file`), else the game folder
+    /// (case-insensitive) [design].
     pub(crate) fn read_root_bytes(&self, rel: &str) -> Option<Vec<u8>> {
-        self.read_root(rel).map(|t| t.chars().map(|c| c as u8).collect())
+        on_disk(Path::new(""), rel)?;
+        let key = format!("<root>\\{}", norm(rel));
+        if let Some(b) = self.written_bytes.get(&key) {
+            return Some(b.clone());
+        }
+        if let Some(t) = self.written.get(&key) {
+            return Some(t.as_bytes().to_vec());
+        }
+        let rel = rel.replace('/', "\\");
+        let r = roots();
+        if let Some(p) = r.write.as_ref().and_then(|w| find_file(&w.join(GAME_ROOT), &rel)) {
+            if let Ok(b) = std::fs::read(p) {
+                return Some(b);
+            }
+        }
+        let lower = rel.to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("data\\").map(|_| &rel[5..]).filter(|s| !s.is_empty()) {
+            let data_key = norm(rest);
+            if let Some(b) = self.written_bytes.get(&data_key) {
+                return Some(b.clone());
+            }
+            if let Some(b) = read_data_file(rest) {
+                return Some(b);
+            }
+        }
+        r.read
+            .last()
+            .and_then(|d| d.parent())
+            .and_then(|d| find_file(d, &rel))
+            .and_then(|p| std::fs::read(p).ok())
+    }
+
+    /// A file under the game's own folder decoded as UTF-8 with any leading UTF-8 BOM
+    /// removed, for JSON readers (`ReadFromJSON`, `WriteToJSON`, `nvse_json`) [design].
+    pub(crate) fn read_root_utf8(&self, rel: &str) -> Option<String> {
+        let bytes = self.read_root_bytes(rel)?;
+        let slice = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        Some(match std::str::from_utf8(slice) {
+            Ok(s) => s.to_owned(),
+            Err(_) => String::from_utf8_lossy(slice).into_owned(),
+        })
     }
 
     /// Write a binary file of the game's own folder into NVForever's layer
@@ -504,11 +704,17 @@ impl ModFiles {
         if on_disk(Path::new(""), rel).is_none() {
             return false;
         }
-        let mut gone = self.written.remove(&norm(rel)).is_some();
+        let key = norm(rel);
+        self.invalidate_plugin_ini_cache(&key);
+        let mut gone = self.written.remove(&key).is_some();
+        gone |= self.written_bytes.remove(&key).is_some();
         if let Some(p) = roots().write.and_then(|w| find_file(&w, rel)) {
             if may_write(&p) && std::fs::remove_file(&p).is_ok() {
                 gone = true;
             }
+        }
+        if gone {
+            self.generation = self.generation.wrapping_add(1);
         }
         gone
     }
@@ -518,7 +724,13 @@ impl ModFiles {
     /// ([`ModFiles::read_root`]'s order). A session-only write has no disk file.
     pub(crate) fn root_file(&self, rel: &str) -> Option<(u64, Option<PathBuf>)> {
         on_disk(Path::new(""), rel)?;
-        if let Some(t) = self.written.get(&format!("<root>\\{}", norm(rel))) {
+        let key = format!("<root>\\{}", norm(rel));
+        if let Some(b) = self.written_bytes.get(&key) {
+            let r = roots();
+            let disk = r.write.and_then(|w| find_file(&w.join(GAME_ROOT), rel));
+            return Some((b.len() as u64, disk));
+        }
+        if let Some(t) = self.written.get(&key) {
             let r = roots();
             let disk = r.write.and_then(|w| find_file(&w.join(GAME_ROOT), rel));
             return Some((t.chars().count() as u64, disk));
@@ -826,10 +1038,13 @@ fn xval_to_json(g: &Game, v: &XVal, depth: usize) -> serde_json::Value {
     }
 }
 
-/// Put `value` at a JSON Pointer (RFC 6901) in `root`, making the objects on the way
-/// that are missing [hypothesis: the page does not say what a pointer into a missing
-/// part does]; an array index at or past the end (or `-`) appends. False when the path
-/// runs through a value that is neither an object nor an array.
+/// Put `value` at a JSON Pointer (RFC 6901) in `root`. Promotes a `null` root (including
+/// a missing file) into `{}` so single-level pointers such as `"/k"` succeed, while
+/// failing when any intermediate segment is missing rather than auto-creating intermediate
+/// objects [hypothesis: the page does not specify missing-path creation; root-object
+/// creation is retained for missing files / null roots while missing intermediate segments
+/// return false]. An array index at the final segment equal to `len` (or `-`) appends.
+/// False when any intermediate segment is missing or traverses a non-container value.
 fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Value) -> bool {
     use serde_json::Value as J;
     if pointer.is_empty() {
@@ -838,32 +1053,35 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
     }
     let Some(rest) = pointer.strip_prefix('/') else { return false };
     let parts: Vec<String> = rest.split('/').map(|p| p.replace("~1", "/").replace("~0", "~")).collect();
+    if root.is_null() {
+        *root = J::Object(serde_json::Map::new());
+    }
     let mut cur = root;
     let mut value = Some(value);
     for (i, part) in parts.iter().enumerate() {
         let last = i + 1 == parts.len();
-        if cur.is_null() {
-            *cur = J::Object(serde_json::Map::new());
-        }
         cur = match cur {
             J::Object(m) => {
                 if last {
                     m.insert(part.clone(), value.take().unwrap_or(J::Null));
                     return true;
                 }
-                m.entry(part.clone()).or_insert(J::Null)
+                let Some(next) = m.get_mut(part) else { return false };
+                next
             }
             J::Array(items) => {
                 let at = match part.parse::<usize>() {
-                    Ok(n) => n.min(items.len()),
-                    Err(_) if part == "-" => items.len(),
-                    Err(_) => return false,
+                    Ok(n) if last => n.min(items.len()),
+                    Ok(n) if n < items.len() => n,
+                    Err(_) if last && part == "-" => items.len(),
+                    _ => return false,
                 };
-                if at == items.len() {
-                    items.push(J::Null);
-                }
                 if last {
-                    items[at] = value.take().unwrap_or(J::Null);
+                    if at == items.len() {
+                        items.push(value.take().unwrap_or(J::Null));
+                    } else {
+                        items[at] = value.take().unwrap_or(J::Null);
+                    }
                     return true;
                 }
                 &mut items[at]
@@ -874,14 +1092,22 @@ fn json_set(root: &mut serde_json::Value, pointer: &str, value: serde_json::Valu
     false
 }
 
-/// A JSON file under the game's folder: the cache's copy, else the file parsed. Every
-/// parser mode reads standard JSON [hypothesis: JAXN (1) and TaoConfig (2) extend it;
-/// their extensions are not read, so such a file fails to parse].
-fn json_file(g: &Game, path: &str) -> Option<serde_json::Value> {
-    if let Some(v) = g.mod_files.showoff_json.get(&norm(path)) {
-        return Some(v.clone());
+/// A JSON file under the game's folder: with `use_cache`, the cache's copy when present;
+/// otherwise the UTF-8 file parsed fresh (UTF-8 BOM stripped). All three parser modes
+/// (`0` JSON, `1` JAXN, `2` TaoConfig) read standard JSON [observed: Fallout: New Vegas
+/// 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184, 2026-11-24, `GSDocMitchellHouse`
+/// (`0x00103DF9`), 10 official base masters, `w4d_38_showoff_perk_stagger_fade`
+/// (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+/// `json(42,42,42,0/1,0/1)` (standard JSON across modes 0/1/2, JAXN in modes 0/1,
+/// TaoConfig in modes 0/2); no DLL or source consulted]; JAXN (1) and
+/// TaoConfig (2) syntax extensions are [not built], so such files fail to parse.
+fn json_file(g: &Game, path: &str, use_cache: bool) -> Option<serde_json::Value> {
+    if use_cache {
+        if let Some(v) = g.mod_files.showoff_json.get(&norm(path)) {
+            return Some(v.clone());
+        }
     }
-    let text = g.mod_files.read_root(path)?;
+    let text = g.mod_files.read_root_utf8(path)?;
     serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()
 }
 
@@ -1250,8 +1476,9 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
         "readfromjson" => {
             let path = text(args, 0).unwrap_or_default();
             let pointer = text(args, 1).unwrap_or_default();
-            let Some(root) = json_file(g, &path) else { return Some(Err(format!("ReadFromJSON: no JSON file {path}"))) };
-            if num(args, 3, 0.0) != 0.0 {
+            let use_cache = num(args, 3, 0.0) != 0.0;
+            let Some(root) = json_file(g, &path, use_cache) else { return Some(Err(format!("ReadFromJSON: no JSON file {path}"))) };
+            if use_cache {
                 g.mod_files.showoff_json.insert(norm(&path), root.clone());
             }
             match root.pointer(&pointer) {
@@ -1264,29 +1491,39 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
         }
         // `toWrite filepath [jsonPointer] [parserMode] [useCache] [saveFile]
         // [compactFormatting]`: the value converted and put at the pointer of the file's
-        // JSON (a file that is missing or not JSON starts from nothing); cached when
+        // JSON (a missing file, malformed non-JSON file, or `null` root starts from `null`
+        // and promotes the root to `{}` for a single-level pointer, while missing
+        // intermediate segments return `0` without creating intermediate objects
+        // [hypothesis]); cached when
         // asked, saved unless saveFile is 0, minified or indented [documented:
         // WriteToJSON]. Saved into NVForever's layer, never the game's folder
         // (`write_root`). 1 when done [documented: "success"].
         "writetojson" => {
             let Some(value) = args.first() else { return Some(Ok(zero)) };
             let path = text(args, 1).unwrap_or_default();
-            if path.trim().is_empty() {
+            if path.trim().is_empty() || on_disk(Path::new(""), &path).is_none() {
                 return Some(Ok(zero));
             }
             let pointer = text(args, 2).unwrap_or_default();
+            let use_cache = num(args, 4, 0.0) != 0.0;
+            let save_file = num(args, 5, 1.0) != 0.0;
             let new = xval_to_json(g, value, 0);
-            let mut root = json_file(g, &path).unwrap_or(serde_json::Value::Null);
+            let mut root = json_file(g, &path, use_cache).unwrap_or(serde_json::Value::Null);
             if !json_set(&mut root, &pointer, new) {
                 return Some(Ok(zero));
             }
-            if num(args, 4, 0.0) != 0.0 {
-                g.mod_files.showoff_json.insert(norm(&path), root.clone());
+            let key = norm(&path);
+            if use_cache {
+                g.mod_files.showoff_json.insert(key.clone(), root.clone());
             }
             let mut ok = true;
-            if num(args, 5, 1.0) != 0.0 {
+            if save_file {
                 let body = if num(args, 6, 0.0) != 0.0 { serde_json::to_string(&root) } else { serde_json::to_string_pretty(&root) }.unwrap_or_default();
                 ok = g.mod_files.write_root(&path, body);
+                if ok && !use_cache {
+                    // Drop any stale cached document so a later cached read observes the new file [design].
+                    g.mod_files.showoff_json.remove(&key);
+                }
             }
             XVal::Num(f64::from(u8::from(ok)))
         }
@@ -1408,7 +1645,57 @@ fn glob(pat: &str, s: &str) -> bool {
 
 #[cfg(test)]
 mod path_tests {
-    use super::{on_disk, on_disk_any_case};
+    use super::{on_disk, on_disk_any_case, walk_files};
+
+    /// A folder link at `link` to `target`: a symlink on unix, an NTFS junction on Windows
+    /// (no privilege needed, unlike a Windows symlink). Whether it was made.
+    fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(target, link).is_ok();
+        #[cfg(windows)]
+        return std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output().is_ok_and(|o| o.status.success());
+        #[cfg(not(any(unix, windows)))]
+        return false;
+    }
+
+    fn listing(dir: &std::path::Path) -> Vec<String> {
+        let (mut seen, mut out) = (std::collections::HashSet::new(), Vec::new());
+        let mut open: Vec<std::path::PathBuf> = dir.canonicalize().into_iter().collect();
+        walk_files(dir, "", true, &mut open, &mut seen, &mut out);
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_deep_listing_does_not_walk_round_a_folder_link() {
+        let base = std::env::temp_dir().join(format!("nvf-link-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("a/sub")).unwrap();
+        std::fs::create_dir_all(base.join("b")).unwrap();
+        std::fs::create_dir_all(base.join("elsewhere")).unwrap();
+        std::fs::write(base.join("a/one.txt"), "1").unwrap();
+        std::fs::write(base.join("a/sub/two.txt"), "2").unwrap();
+        std::fs::write(base.join("b/three.txt"), "3").unwrap();
+        std::fs::write(base.join("elsewhere/four.txt"), "4").unwrap();
+        // a\sub\up -> a (its own grandparent), a\to_b -> b and b\to_a -> a (a ring of
+        // two), a\out -> elsewhere (a link that leads nowhere back).
+        // (Paths joined part by part: mklink takes no `/`.)
+        let (a, b) = (base.join("a"), base.join("b"));
+        let made = link_dir(&a, &a.join("sub").join("up")) && link_dir(&b, &a.join("to_b")) && link_dir(&a, &b.join("to_a")) && link_dir(&base.join("elsewhere"), &a.join("out"));
+        if made {
+            // Each link back into a folder the walk is inside is left out; the others
+            // are followed once.
+            assert_eq!(listing(&base.join("a")), ["one.txt", "out\\four.txt", "sub\\two.txt", "to_b\\three.txt"]);
+        } else {
+            eprintln!("folder links could not be made here; only the plain listing is checked");
+            assert_eq!(listing(&base.join("a")), ["one.txt", "sub\\two.txt"]);
+        }
+        // Remove the links first: removing the tree must not go through them.
+        for l in ["a/sub/up", "a/to_b", "b/to_a", "a/out"] {
+            let _ = std::fs::remove_dir(base.join(l));
+        }
+        std::fs::remove_dir_all(&base).ok();
+    }
     use std::path::Path;
 
     #[test]

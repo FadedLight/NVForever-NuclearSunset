@@ -661,7 +661,15 @@ display case, and a resting dropped item not woken by `SetPos` (§4.3, `pc_drop_
   they are struck (shots, explosions: `push_ref`, `push_dynamic`) or when a body they
   touch is removed (an item picked up from under them) [observed: fnv-phys tests
   `clutter_added_asleep_*`]. Dropped items (§4.3) are added awake, as before.
-- A placed reference with **two or more dynamic bodies keeps them keyframed** at its
+- A placed **item** (WEAP, ARMO, AMMO, MISC, ALCH, BOOK, KEYM, NOTE, IMOD, CHIP, CMNY,
+  CCRD) whose model is **two or more dynamic bodies** and nothing else (the teddy bear:
+  six on five limited hinges) is joined into **one rigid dynamic body**, as a dropped one
+  is (`one_dynamic_body`, #1604; `join_jointed_item`, tallied `jointed_item_joined`). It
+  moves as one piece in the pose its file draws [design: the hinges are not simulated]:
+  the grab key holds it, and shots and blasts move it (#3428). One posed from its XRGD
+  (the bear south of Goodsprings, 00172D8B, lying as its designer left it) is joined in
+  that pose.
+- Any other placed reference with **two or more dynamic bodies keeps them keyframed** at its
   placement (`hold_jointed` in `phys/prepare.rs`; tallied `jointed_held`): solid where it
   is drawn, never moving [engineering choice until constraints are modelled for placed
   references; then they would hang and swing as in the game]. Two kinds are let go
@@ -733,15 +741,16 @@ playtest list 5 item 59]. The tumbleweeds roll with the weather's wind: [wind](w
   `engine/nvf-play/src/phys/tests.rs`] (docs/design/layer4-play.md §6).
 - **Snapshots**: `PhysWorld::snapshot` copies the whole world (bodies, colliders, contact
   graph, islands, broad phase); stepping the copy and the original with the same inputs
-  stays bit-identical, a character included [observed: test
+  stays bit-identical, a character included [implementation evidence: test
   `snapshot_continues_identically`].
-- **rapier quirk**: bringing queries up to date between steps runs rapier's collision-only
+- **Query refresh backends**: [implementation history: registry collision-only route]
+  Bringing queries up to date between steps ran rapier's collision-only
   pipeline, which consumes the change flags of newly inserted bodies without registering
   them for simulation; a dynamic body added and then queried (or added while a character
-  moves, since `move_character` updates queries first) never moved [observed: test
-  `bodies_added_then_queried_still_simulate`, rapier 0.36.0]. `update_queries` flags such
+  moves, since `move_character` updates queries first) never moved [implementation evidence: test
+  `bodies_added_then_queried_still_simulate`, rapier 0.36.0]. That route flags such
   bodies changed again so the next step registers them. Re-check when upgrading rapier.
-  This rearm must also keep a kinematic body's queued next pose. `set_position`
+  For that registry route (#2638), the rearm must also keep a kinematic body's queued next pose. `set_position`
   replaces both its current and next pose; `character::apply_move` has already queued
   the next translation before the fixed step [documented: rapier3d 0.36.0,
   `dynamics/rigid_body.rs`, `set_position` and `set_next_kinematic_position`;
@@ -753,10 +762,10 @@ playtest list 5 item 59]. The tumbleweeds roll with the weather's wind: [wind](w
   followed by an unrelated insertion and query. The query must not advance time or
   erase the movement that the next step consumes. These are authored implementation
   controls, not measurements of the original game.
-  The same query loses the wake-up of a sleeping kinematic body that is teleported
+  The collision-only query also loses the wake-up of a sleeping kinematic body that is teleported
   (`place_character` on a character that was not moved for a few seconds): the body
   stayed where it was put while the character walked on, so rays and other characters
-  met it there [observed: test `a_placed_character_takes_its_body_along`]. Placed
+  met it there [implementation evidence: test `a_placed_character_takes_its_body_along`]. Placed
   bodies are woken again after the query, like struck ones (`PhysWorld::body_placed`).
   The same pipeline loses the wake-up of a sleeping body that was struck
   (`push_ref`, `push_dynamic`) since the last step: the body counts as awake, keeps its
@@ -775,6 +784,17 @@ playtest list 5 item 59]. The tumbleweeds roll with the weather's wind: [wind](w
   outside the awake set, or one in a sleeping set whose island has a body in the awake set,
   is woken with its island; a fixed body still listed in an island has its type told again
   for the next step. The exit log's "island repairs after query refreshes" line counts them.
+  [documented: current selected backend] This branch instead uses the vendored
+  Rapier 0.36.1 zero-dt physics-registration path, including its deferred-BVH join
+  and sleeping-bootstrap corrections. It does not rearm inserted bodies with
+  `set_position`. Each quarantine report is consumed before another pipeline call
+  clears it; at most one additional zero-time pass publishes remedy changes, while
+  unexpected pending marks remain dirty. See
+  [the query-refresh lifecycle note](query-refresh-island-lifecycle.md).
+  The three observable motion contracts remain unchanged. The registry rearm
+  correction remains valid for consumers of that route; it is not concatenated
+  with this distinct registration backend. Neither source description establishes
+  new runtime or original-game evidence.
 - **Drawing is not stepping**: frames come at their own rate, between the fixed steps;
   what physics moves is drawn between its last two steps (§5.2), which reads the world
   and never writes it. Everything the simulation sees (the poses written back to the
@@ -2475,6 +2495,35 @@ just above the surface. A human check in the game would settle the depth: walk i
 Mead at Boulder Beach (east from (56992, 37536)) and note where swimming starts. The bed
 falls about 12°, 44 below S at 256 units out, 140 at 768.
 
+**Actors standing on the bed** (2026-11-21, #2980). Actors give the controller no
+vertical input, so the rule above leaves an actor whose character is live on a bed deeper
+than `wade_depth` swimming from that character's first step, held at the bed with no
+buoyancy, and it played its swimming idle (`mirelurkking\swimidle.kf` for a lakelurk)
+whenever it stood still there. Only an actor on its way keeps a character: `residents.rs`
+takes it from an actor that stands idle, and from a fighter that holds its ground in
+range (`fnv_ai` alert, `Search::Holding`, activity There) unless an attack carries it;
+such an actor plays its standing set whatever the water. A swimmer stands still with a
+character only for moments (waiting at the end of its way for a target that moves). Whether this swimming idle is the T-pose reported for idle lakelurks
+in #2980 is therefore not shown [hypothesis]; the pose watch (test aid
+`NVF_PLAY_TEST_POSE_WATCH`) and the base layer warning (`actor base layer fault`) report
+what a lakelurk plays. The physics is unchanged (the player's and every swimmer's depths
+stay as above). The animation reads the swimming state otherwise: an actor whose
+character swims with its feet within 2 units of the support under them
+(`Character::ground_gap`, 0 against the bed, at least 9 for a swimmer floating at
+`float_depth` over a bed deep enough to swim on), standing still (slower than
+`STAND_SPEED`, no walk or run playing) and with its stop faded into the swimming idle,
+plays its standing clips; setting off, it walks on its standing walk until that has faded
+in and then changes to the swimming walk, so no clip still showing is cut off (and while
+such a change of set fades a creature's walk waits for the fade's end; other changes of
+set start it at once as before); moving, it swims
+on its swimming clips as before
+(`engine/nvforever/src/swimming.rs`, `rests_now`) [design]. "Swimming is when your feet do
+not touch solid ground" [documented: GECK wiki fSwimRadiationDamageMult]; how the original
+poses such an actor is observer check 269 [hypothesis]. Smoke `lakelurk-idle-pose` (idle,
+no character) and `lakelurk-rests-on-bed` (following the player in, with one; it depends
+on a lakelurk standing still while it keeps its character, so its checks are marked
+known failing until a run shows one).
+
 **Placed water** (2026-10-08) [observed: the masters and `Fallout - Meshes.bsa`, read-only].
 The reference in `NVDLC03SLH2OINT` is REFR 0x03014467, base PWAT 0x03014465
 (`NVDLC03CleanWater2048x2048`: OBND ±1024 × ±1024 × 0, MODL
@@ -2633,9 +2682,9 @@ rule above would replace it (left to the Layer 5 owner).
 
 ### 6.8 Actors in the player's way (`engine/nvf-play`, `blocking.rs`)
 
-How the game keeps characters apart is not captured [hypothesis: every actor has a
-character controller of its own on the Char Controller layer, 30; nothing here depends
-on it]. What the engine does is [design]:
+The original's collision shape is unseen [hypothesis: every actor has a character
+controller of its own on the Char Controller layer, 30; nothing here depends on it].
+Large-creature spacing is measured below (#2535). What the engine does is [design]:
 
 - Each frame, every drawn, living actor has a **block** where its body is now: the line
   on the ground under its torso's bones (pelvis to neck, from the posed skeleton that
@@ -2675,6 +2724,82 @@ on it]. What the engine does is [design]:
   walk took the standing player with him at his own speed, from 3.5 units away, all
   the way to the saloon door [observed: `--play --npc-packages EasyPeteRef --hour 12`
   with the player put on his way, 163 units, rapier 0.36.0].
+
+**Walking creatures' widths (#2535).** [hypothesis: fits the observed spacing; the
+original's shape was not seen] A creature with a skeleton `BSBound` extra named
+`BBX` blocks other walking actors and the player with a circle of radius at least
+its BBX half-width x × Base Scale × reference scale. The existing character radius
+wins when larger; NPC_ people and creatures without BBX keep their existing radii.
+The radius is used for both the walker and its block, including carried lunges and
+steps while the player is on furniture or has collision off [design: `player.rs`,
+`blocking::walking_radius`]. It changes neither the world capsule nor navmesh paths:
+larger world capsules would not fit the doors and paths actors walk [design:
+`phys::npc_params`]. `actor_block_radii` is refreshed beside `actor_heights` from
+visible living creature roots; their transforms already include both scales
+[design: `actors::spawn_creature`, `hitvol::sync_volumes`].
+
+[design: `residents::think`, `hitvol::sync_volumes`, #2535] A stopped fighter
+loses its walking character. Its standing block keeps the scaled BBX circle at
+the creature root's feet when wider than the existing drawn block, including
+while an attack holds the block in place. This preserves both creatures' widths
+when either stops to fight; the posed torso's narrower block cannot replace one
+side of the pair. Standing pushes and attack anchoring retain their existing rules.
+
+[observed: the main session's runs of NVForever, 2026-11-15, reproduction on
+Searchlight Airport's runway: the Radscorpion + Giant Radscorpion pair against
+a god-mode player who backs away from 16 s to 28 s; pair distance read once
+a second; three runs of upstream main 99faa23b7 and six of this branch]
+Standing and fighting, the pair stays 66–84 units apart on upstream main and
+113 on this branch (the designed sum). Chasing, both builds stay mostly
+62–64 units apart. On this branch, in four of six runs one reading late in
+the chase, as the pair comes back to a stop, fell to 7–39 units for about a
+second. Upstream main showed no such dip in its runs.
+[design, #2535] The widened block keeps standing creatures apart but not
+moving ones, and the change from walking to standing can let one creature
+pass briefly into the other. Both are left for the follow-up on the character
+controller's movement path.
+
+[observed: FalloutNV.esm and Fallout - Meshes.bsa, fnvtool esm decode / nif decode,
+main session 2026-11-15] The radscorpion skeleton's BBX centre is (0, 0, 30.21),
+half sizes (70.56, 125.84, 30.21). Other skeleton half sizes: `characters\_male`
+(23.10, 17.64, 66.22), centre (0, 0, 66.22); deathclaw (50.00, 95.14, 76.18);
+dog (29.56, 62.75, 35.51); brahmin (40, 80, 40). The pair in combat-rules.md §10
+has base scales 0.6 and 1.0, giving radii 42.336 and 70.56, sum 112.896 (about
+113). Before #2535 NVForever's pair settled only 62–84 units centre to centre,
+despite drawn widths 85/141 [observed: main session's measured Searchlight runway
+run on 63db0209c, 2026-11-15].
+
+[observed: capture run15b_b2, 2026-11-15; xNVSE 6.4.9, JIP LN 57.30] The same
+pair against a standing god-mode player on Searchlight Airport's runway, sampled
+at 30 Hz for 17 s: while both were within 300 units of the player (452 samples),
+GetDistance between them had median 131, tenth percentile 93, ninetieth 283 and
+minimum 32 briefly. This measures spacing, not a rigid non-overlap invariant.
+
+[design: `npc_combat::creature_spacing`, `Fighters::lunge_room`, `attack_anims::carry`]
+Combat body gaps and lunge stopping use the walking block's radius too. Creature
+reach remains centre to centre, (RNAM + body reach) × scale: for this pair,
+(64 + 124) × 0.6 = 112.8 and × 1.0 = 188, beyond their respective blocks plus
+the player's radius (64.336/92.56). People count melee reach beyond body radii.
+[design: `npc_combat::CombatBodies`, `use_weapon::melee_range`, #2535] Ordinary
+combat and scripted melee share the body lookup. When either participant has
+a widened block, combat also supplies the other participant's ordinary character
+block if absent from the drawn list. Both attack directions therefore have a body
+gap and summed radii, including a walking humanoid against a walking or standing
+creature. Widened eligibility uses the published BBX width against the character's
+capsule radius (or `phys::npc_params` from its height once the character is removed),
+so stopping does not remove the ordinary walker's body gap.
+Pairs without a widened participant keep the existing drawn-block lookup.
+[design: `nvf_play::combat::PhysView::melee_targets_near`,
+`fnv_combat::projectile::swing_reaching`, #2535] The player's ground-reach fallback
+uses max(24, the target's published scaled BBX radius) in place of the fixed
+24-unit target margin. The player's own capsule radius remains part of its reach.
+Thus a short weapon still reaches a low creature at its widened blocking stop,
+looking level or down; ordinary targets keep their existing reach. The same
+per-target margin expands candidate lookup, and the obstruction rays still must
+meet the target first.
+The separate navmesh `fnv_ai::Ai::keep_apart` still uses 18 per actor; it does
+not read these blocks. The original's transient overlap, unseen shape, extra
+attack pause and backing-away cadence remain open in observer check 244.
 
 **Pushing** (2026-10-10, owner request: "the player or npc moving needs to be able to
 push another actor if they are stood still"). What the game does when one character

@@ -29,6 +29,8 @@ fnv-actor.workspace = true
 fnv-voice.workspace = true
 fnv-vfs.workspace = true
 fnv-font.workspace = true
+# Rasterize the interface's on-demand CJK fallback with the version Bevy already uses.
+swash = "0.2.10"
 fnv-dds.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,11 +48,20 @@ rodio = { version = "0.22", default-features = false, features = ["mp3", "vorbis
 png = "0.18"
 
 [features]
+# nvforever's `dev-aids`: the developer aids kept out of release builds
+# (`NVF_PLAY_TEST_SHOT_DIFF`, src/test_aid.rs).
+dev-aids = []
 # [design, #2403] Synthetic private-screen fixtures for cross-crate reports tests only.
 report-test-support = []
+# Module-owned authored script inputs for cross-crate menu router controls only.
+test-fixtures = []
 default = ["intro-video"]
 # [design, #2652] Synthetic runtime fixtures for downstream engine tests.
 test-support = []
 # The intro film before a new game (src/intro.rs); its Bink decoder is GPL-3.0-or-later,
 # as NVForever is (owner decision 2026-10-15).
 intro-video = ["dep:infinitier_bik_decoder"]
+
+[dev-dependencies]
+# Exercises the production native-result consumer without creating an OS window.
+bevy_winit = { version = "=0.20.1", features = ["cursor-test-support"] }

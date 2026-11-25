@@ -21,6 +21,11 @@ pub struct Jip3State {
     pub jg_handlers: Vec<(JgEvent, XVal, Option<FormId>)>,
     /// FreezeTime's mode: game time stands still (`Game::tick`).
     pub time_frozen: bool,
+    /// The quantized game clock at the last RenderUpdate dispatch: its handlers'
+    /// GetSecondsPassed is the time since (docs/spec-notes/jip-callback-clock.md).
+    pub render_clock: Option<f64>,
+    /// Transient `RefreshItemsList` request for the engine's open item/recipe menu.
+    pub refresh_items_list: bool,
 }
 
 /// The JohnnyGuitar events whose handlers this file keeps.
@@ -67,7 +72,9 @@ fn facing(x: f32, z: f32) -> [f32; 3] {
     [z.sin() * x.cos(), z.cos() * x.cos(), -x.sin()]
 }
 
-/// The default reach of a cast with no range given [hypothesis].
+/// The default reach of a cast with no `maxRange` given (`GetPointRayCastPos`: `50_000.0`
+/// [observed: 2026-11-24, `w6_02_point_raycast_miss_and_range`]; `GetRayCastPos` /
+/// `GetRayCastRef` remain [hypothesis]).
 const RAY_REACH: f32 = 50_000.0;
 
 impl Game<'_> {
@@ -76,6 +83,17 @@ impl Game<'_> {
     /// RenderUpdate) [documented: the SetJohnnyOn…EventHandler pages; hypothesis: the
     /// arguments].
     pub(crate) fn jg_event(&mut self, ev: JgEvent, subject: Option<FormId>) {
+        // A RenderUpdate handler runs every frame as a function, with no script instance
+        // of its own: its GetSecondsPassed (and its nested calls') is the game-clock time
+        // since the previous dispatch, as a main-loop callback's (jip-callback-clock.md)
+        // [hypothesis: B42 True Leaning eases its lean by GetSecondsPassed in its handler;
+        // observed: mods_reference ln_B42Leaning.txt]. A clock that went back (another
+        // session) gives 0.
+        let seconds = (ev == JgEvent::RenderUpdate).then(|| {
+            let now = crate::functions::clock_now(self.time);
+            let last = self.gaps.jip3.render_clock.replace(now);
+            last.map_or(0.0, |l| (now - l).max(0.0))
+        });
         if self.gaps.jip3.jg_handlers.iter().all(|(e, _, _)| *e != ev) {
             return;
         }
@@ -90,7 +108,7 @@ impl Game<'_> {
                 continue;
             }
             let args = subject.map(|s| vec![XVal::Ref(s.0)]).unwrap_or_default();
-            if let Err(error) = self.run_function(&f, None, args, None, RunCtx::default()) {
+            if let Err(error) = self.run_function_with_seconds(&f, None, args, None, (RunCtx::default(), seconds)) {
                 self.handler_failed("JohnnyGuitar event handler".into(), error);
             }
         }
@@ -102,6 +120,17 @@ impl Game<'_> {
         if outside {
             self.gaps.jip3.last_exterior_door = Some(door);
         }
+    }
+
+    /// Whether a script has requested `RefreshItemsList` since the engine last consumed it.
+    pub fn refresh_items_list_pending(&self) -> bool {
+        self.gaps.jip3.refresh_items_list
+    }
+
+    /// Consume a pending `RefreshItemsList` request (one-shot: returns `true` once, then
+    /// `false` until a script calls `RefreshItemsList` again).
+    pub fn take_refresh_items_list(&mut self) -> bool {
+        std::mem::take(&mut self.gaps.jip3.refresh_items_list)
     }
 }
 
@@ -219,12 +248,14 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let flags = crate::nvse::record_value(g, b, "ACBS", "template_flags").and_then(|v| v.num().ok()).unwrap_or(0.0) as u64;
             yes(flags & (num(args, 0, 0.0) as u64) != 0)
         }
-        // The base's Immobile flag (ACBS bit 23) [documented: GetIsImmobile, "incapable of
+        // The base's Immobile flag (CREA ACBS bit 23) [documented: GetIsImmobile, "incapable of
         // moving"; the bit, the schema's ACBS flags].
         "getisimmobile" => {
-            let Some(b) = form(args, 0).or_else(|| subject.map(|r| crate::functions::base_of(g, r).unwrap_or(r))) else { return Some(Ok(zero)) };
-            let flags = crate::nvse::record_value(g, b, "ACBS", "flags").and_then(|v| v.num().ok()).unwrap_or(0.0) as u64;
-            yes(flags & (1 << 23) != 0)
+            let Some(b) = form(args, 0).or(subject).map(|r| g.actor_flags_target(r)) else { return Some(Ok(zero)) };
+            if g.data.sig(g.unclone(b)) == Some(*b"NPC_") {
+                return Some(Ok(zero));
+            }
+            yes(g.actor_base_flags_raw(b) & (1 << crate::actor_values::acbs::IMMOBILE) != 0)
         }
         // LU `list`: the calling actor's race is in the form list [documented: IsRaceInList].
         "israceinlist" => {
@@ -262,9 +293,12 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             s.since_run = (delay - secs).max(0.0);
             XVal::Num(secs)
         }
-        // The open menu's item list is drawn afresh each frame here [design: nothing to
-        // refresh] [documented: RefreshItemsList].
-        "refreshitemslist" => zero,
+        // Request that the engine rebuild the open item/recipe menu's displayed rows on
+        // the next UI sync without closing the menu [documented: RefreshItemsList].
+        "refreshitemslist" => {
+            g.gaps.jip3.refresh_items_list = true;
+            zero
+        }
         // `mode`: 0 god mode (1 while on), 1 the actors' AI (1 while it runs, 0 after
         // `tai`) [documented: GetDebugModeState; observed: jip3a, 0 then 1 across `tgm`,
         // 1 then 0 then 1 across `tai`; hypothesis: 2 combat AI, 3 collision, 4 borders
@@ -292,19 +326,36 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let heading = dx.atan2(dy).to_degrees().rem_euclid(360.0);
             outputs(g, zero, &[pitch, heading])
         }
-        // `x y z pitch heading → x y z [flags] [range]`: where a cast from the point the way
-        // of the angles (degrees) first meets the scene; 0 for no hit [documented:
-        // GetPointRayCastPos; hypothesis: the second angle is the heading, the collision
-        // flags not told apart].
+        // `x y z rotX rotZ → x y z [flags] [range]`: casts from `(x, y, z)` along
+        // right-handed Euler `Rz(rotZ) · Rx(rotX) · +Y` (`[-sin(rotZ)·cos(rotX),
+        // cos(rotZ)·cos(rotX), sin(rotX)]`, i.e. `facing(-rotX, -rotZ)` — pitch positive
+        // up, yaw counter-clockwise from +Y). Returns `1` on both geometry hits and
+        // open-sky misses, writing the hit point on hit or `origin + dir * reach` on
+        // miss; omits `maxRange` → `50_000.0`, while explicit `0` writes `origin` and
+        // explicit `-1` casts `-1` unit along `-dir`; `collisionFlag` `0`/`1`/`6`/`-1`
+        // hit terrain and actors, while `8`/`19` hit terrain and interior statics while
+        // skipping actors [documented: GECK wiki GetPointRayCastPos; observed: 2026-11-24,
+        // FNV 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, committed probes
+        // `w6_01_point_raycast_angles`, `w6_02_point_raycast_miss_and_range`, and
+        // `w6_03_point_raycast_collision_flags` in
+        // `tools/capture/nvse/catalogs/wave6_point_raycast.json`; see
+        // `docs/spec-notes/jip-point-raycast.md`]. Routing `8 | 19` through
+        // `CastKind::CameraClearance` (also excluding dynamic clutter) and unprobed
+        // flags through `CastKind::World`, plus returning `1` headless without a physics
+        // caster, remain [design] / [hypothesis].
         "getpointraycastpos" => {
             let o = [num(args, 0, 0.0) as f32, num(args, 1, 0.0) as f32, num(args, 2, 0.0) as f32];
-            let dir = facing((num(args, 3, 0.0) as f32).to_radians(), (num(args, 4, 0.0) as f32).to_radians());
-            let reach = Some(num(args, 6, 0.0) as f32).filter(|r| *r > 0.0).unwrap_or(RAY_REACH);
+            let dir = facing(-(num(args, 3, 0.0) as f32).to_radians(), -(num(args, 4, 0.0) as f32).to_radians());
+            let flag = num(args, 5, 0.0) as i64;
+            let kind = match flag {
+                8 | 19 => crate::ray::CastKind::CameraClearance,
+                _ => crate::ray::CastKind::World,
+            };
+            let reach = num(args, 6, f64::from(RAY_REACH)) as f32;
             let to = [o[0] + dir[0] * reach, o[1] + dir[1] * reach, o[2] + dir[2] * reach];
-            match crate::ray::cast_hit(o, to, crate::ray::CastKind::World) {
-                Some(h) => outputs(g, XVal::Num(1.0), &[f64::from(h.point[0]), f64::from(h.point[1]), f64::from(h.point[2])]),
-                None => outputs(g, zero, &[0.0, 0.0, 0.0]),
-            }
+            let hit = (reach != 0.0).then(|| crate::ray::cast_hit(o, to, kind)).flatten();
+            let pt = hit.map_or(to, |h| h.point);
+            outputs(g, XVal::Num(1.0), &[f64::from(pt[0]), f64::from(pt[1]), f64::from(pt[2])])
         }
         // `xGlobal yGlobal zGlobal [offset] [flags] [node] [range]` and `[flags] [node]`:
         // a cast from the reference along its facing (an actor from its eyes) [documented:

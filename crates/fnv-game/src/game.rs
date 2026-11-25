@@ -370,6 +370,11 @@ pub struct RefExtra {
     /// Who killed the actor (KillActor's killer), for IsKiller.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub killer: Option<FormId>,
+    /// GameDaysPassed when the actor died, for GetTimeDead; cleared by a Disable ("If the
+    /// actor gets disabled after dying, it loses its info about when it has died"
+    /// [documented: GECK wiki GetTimeDead]). `None` for a corpse laid out at the start.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub died_day: Option<f64>,
     /// KillActor's cause of death, which GetCauseofDeath reads before the killing hit.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub death_cause: Option<i32>,
@@ -515,6 +520,9 @@ pub struct RefExtra {
     /// reference's (`Game::merchant_container`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub merchant_container: Option<FormId>,
+    /// RemoveMerchantContainer explicitly clears even an authored XMRC assignment.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub merchant_container_cleared: bool,
     /// Wait: the Follow or Accompany package the actor waits in, standing where it is,
     /// until StopWaiting (`functions::fo3`; the AI's follow step reads [`Game::waits`]).
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -605,6 +613,10 @@ pub struct FormChanges {
     /// SetActorFullName: base → the message whose title is the new name.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub names: BTreeMap<FormId, FormId>,
+    /// Savebaked base-form string name overrides (`.fos` `NPC_` bit 5 / `TACT` bit 2),
+    /// separate from session-only `SetName`/`SetFullNameAlt`/`LNSetName` (`Game::name_overrides`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub saved_names: BTreeMap<FormId, String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub quest_items: BTreeMap<FormId, bool>,
     /// SetCellOwnership (None: the owner was cleared).
@@ -621,6 +633,10 @@ pub struct FormChanges {
     /// FACT XNAM's (`functions::fo3`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub faction_modifiers: BTreeMap<FormId, BTreeMap<FormId, i64>>,
+    /// Runtime FACT flag overrides (16-bit DATA flags: Hidden, Evil, Special Combat, Track
+    /// Crime, Allow Sell), overriding `GameData::faction_flags` (`Game::faction_flags`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
+    pub faction_flags: BTreeMap<FormId, u16>,
     /// ResetInterior: interior cells reset at their next load (`crate::respawn`).
     #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty", default)]
     pub expired_cells: std::collections::BTreeSet<FormId>,
@@ -781,6 +797,19 @@ impl Extend<FormId> for KnownTopics {
 }
 
 /// The player's state outside the world's reference table.
+/// Who called DisablePlayerControls ([`PlayerState::controls_disabled_by`]).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ControlsCaller {
+    /// The script unit's label (`Ctx::unit`: the owner record, a quest stage, a dialogue line).
+    pub unit: String,
+    /// The quest whose script or stage result ran it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub quest: Option<FormId>,
+    /// The reference the script runs on.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reference: Option<FormId>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlayerState {
     pub xp: f64,
@@ -837,6 +866,11 @@ pub struct PlayerState {
     /// text, sneaking.
     #[serde(default)]
     pub controls_disabled: [bool; 7],
+    /// The last DisablePlayerControls call that still holds a group: the running unit's
+    /// label, its quest and its reference, for the players' reports' controls_locked event
+    /// (#3044) [design]. Cleared once EnablePlayerControls leaves no group disabled.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub controls_disabled_by: Option<ControlsCaller>,
     /// SetHardcore (otherwise the configuration's).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hardcore: Option<bool>,
@@ -894,6 +928,10 @@ pub struct PlayerState {
     /// a script clears them [design].
     #[serde(skip_serializing_if = "BTreeSet::is_empty", default)]
     pub enemy_of_script: BTreeSet<FormId>,
+    /// Factions the player has been expelled from (SetPCExpelled / GetPCExpelled)
+    /// [documented: GECK wiki SetPCExpelled, GetPCExpelled].
+    #[serde(skip_serializing_if = "BTreeSet::is_empty", default)]
+    pub expelled_from: BTreeSet<FormId>,
     /// SetInCharGen.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub in_chargen: bool,
@@ -1057,12 +1095,16 @@ pub mod menus {
     /// `Begin MenuMode 1` block (the crippled-limb tutorial) runs while the Pip-Boy is
     /// open [observed in the masters].
     pub const PIPBOY: u16 = 1;
+    /// Console menu group [documented: GECK wiki MenuMode, 3 = Console].
+    pub const CONSOLE: u16 = 3;
     /// Title-screen group, distinct from pause menu 1013 [documented: GECK MenuMode
     /// block/function pages]. Admitted during the existing startup frames only.
     pub const TITLE: u16 = 4;
     /// The Pip-Boy's ITEMS page, the inventory [documented: GECK wiki GetSelectedItemRef,
     /// "Inventory Menu (1002)"; GetMenuItemListRefs, "1002 Pip-Boy Inventory Menu"].
     pub const INVENTORY: u16 = 1002;
+    /// The container menu [documented: GECK wiki GetMenuTargetRef, "1008 Container Menu"].
+    pub const CONTAINER: u16 = 1008;
     /// The Pip-Boy's STATS page [documented: GECK wiki GetSelectedItemRef, "Pipboy STATS
     /// Menu (1003) - Perk"].
     pub const STATS: u16 = 1003;
@@ -1079,6 +1121,9 @@ pub mod menus {
     /// GetSelectedItemRef, "Pipboy DATA Menu (1023) - Quest/Note/Challenge";
     /// GetMenuTargetRef, "1023 The Map Marker on which the mouse is over"].
     pub const MAP: u16 = 1023;
+    /// The book/scroll reading menu [documented: GECK wiki Hardcoded UI Shortcuts,
+    /// revision 39903, `BookMenu` class ID 1026; `fnv_ui::value::MENU_CLASSES`].
+    pub const BOOK: u16 = 1026;
     /// The sleep/wait menu (`nvf-play` wait.rs opens it as 1012) [documented: GECK wiki
     /// MenuMode].
     pub const SLEEP_WAIT: u16 = 1012;
@@ -1243,12 +1288,12 @@ pub enum LineLook {
     Both,
     /// Nobody turns: a conversation between actors started with `headTrack` 0
     /// [documented: GECK wiki StartConversation: "Enter 0 to disable" head tracking
-    /// during the conversation], and a SayTo line with `noTargetLookFlag` 1
-    /// [hypothesis, observer check 218, #2796] (`functions::misc::say_to`). Until #2796
-    /// that flag only kept the listener still (a variant `Speaker`); a game saved while
-    /// such a line was said reads it as this one.
-    #[serde(alias = "Speaker")]
+    /// during the conversation].
     Nobody,
+    /// The speaker turns to the listener, the listener is not made to look at the
+    /// speaker: a SayTo line with `noTargetLookFlag` 1 (`functions::misc::say_to`)
+    /// [observed: observer check 218, base game 2026-11-25, #3989].
+    Speaker,
 }
 
 impl LineLook {
@@ -1317,18 +1362,25 @@ pub struct Game<'a> {
     /// The user-defined functions running, innermost last (script-compiler.md §9).
     udf: Vec<UdfFrame>,
     /// The lambdas scripts made: the unit, the lambda, the instance whose variables it
-    /// shares; named by `LAMBDA_BASE + index`.
+    /// shares. Returned handles are kept separately from vector positions.
     lambdas: Vec<LambdaDef<'a>>,
+    lambda_slots: std::collections::HashMap<u32, usize>,
+    next_lambda: u32,
     /// Extender handlers and queued calls whose function cannot run, by (where, error),
     /// reported once each ([`Game::handler_failed`], #2280).
     unusable_reported: std::collections::HashSet<(String, String)>,
-    /// CompileScript's scripts, named by `COMPILED_BASE + index`, and their files' paths
-    /// (lower case) to them.
+    /// CompileScript's scripts and their exact owned handles; file paths are lower case.
     compiled_files: Vec<&'a Compiled>,
+    compiled_slots: std::collections::HashMap<u32, usize>,
+    next_compiled: u32,
     compiled_paths: std::collections::HashMap<String, u32>,
     compiled_origins: crate::jip_provenance::CompiledOrigins,
     /// Repeated script Console expressions compile once, separately from debug lines.
     console_sources: std::collections::HashMap<String, ConsoleSource<'a>>,
+    /// Persistent local variables declared in interactive console lines
+    /// (`docs/design/console.md`). Lives for this game/loaded save only; cleared on
+    /// new game and not carried across `take_session`/`put_session`.
+    console_locals: ConsoleLocals,
     /// JIP's Script Runner: its files and their units (`crate::script_runner`).
     pub(crate) sr: crate::script_runner::SrState<'a>,
     /// A lambda already made, by its unit, its number in the unit and whose variables it
@@ -1357,6 +1409,11 @@ pub struct Game<'a> {
     /// Record fields xNVSE's setters changed this session (`crate::nvse`), by form and
     /// "SUB/path", and the names SetName gave.
     pub(crate) field_overrides: std::collections::HashMap<(FormId, String), fnv_script::vm::XVal>,
+    /// Transient instance identity + monotonic revision for live interior cell-lighting
+    /// session edits (`SetCellLightingTemplate`, `SetCellFlag` 8..=16,
+    /// `SetLightingTemplateTraitNumeric`, `SetInteriorLightingTraitNumeric`); never saved.
+    pub(crate) lighting_instance: u64,
+    pub(crate) lighting_revision: u64,
     /// Owner witness for bounded diagnostic restoration; never part of a save.
     pub(crate) projectile_launch_restore_owner: std::sync::Arc<()>,
     pub(crate) name_overrides: std::collections::HashMap<FormId, String>,
@@ -1406,6 +1463,10 @@ pub struct Game<'a> {
     pub showoff: crate::nvse_showoff::ShowOffState,
     /// Mods' INI and other files (`crate::mod_files`).
     pub mod_files: crate::mod_files::ModFiles,
+    /// Runtime settings loaded from `Data\NVSE\Plugins\kNVSE.ini` (`crate::knvse_ini`,
+    /// not saved in snapshots).
+    pub knvse_ini: crate::knvse_ini::KnvseIni,
+    pub(crate) ysi_filename: crate::ysi_filename::State,
     /// SUP batch 6's state: the mouse, the cursor, the debug texts, the lockpick menu …
     /// (`crate::nvse_sup6`; the engine fills and takes it).
     pub sup: crate::nvse_sup6::SupState,
@@ -1488,7 +1549,7 @@ pub struct Game<'a> {
     /// without includes.
     pub ui_files: Option<Box<dyn fnv_ui::Source + Send + Sync>>,
     /// The menu an engine page stands for while [`Game::page_tick`] runs its blocks.
-    page_menu: Option<u16>,
+    pub(crate) page_menu: Option<u16>,
     /// The clock of [`Game::page_tick`]'s frames (their `frame_seconds`): GetSecondsPassed
     /// in a block run there counts it [hypothesis: the original's MenuMode 1013 blocks see
     /// time pass under its start menu, for Just Assorted Mods' half-second MenuMode timer
@@ -1516,6 +1577,12 @@ pub struct Game<'a> {
     pub ui_pointer: fnv_ui::input::Pointer,
     /// The game's difficulty (`crate::difficulty`): the engine sets it from its settings.
     pub difficulty: crate::difficulty::Difficulty,
+    /// The Custom level's multipliers (`crate::difficulty`): the engine sets them from its
+    /// settings.
+    pub difficulty_custom: crate::difficulty::CustomDifficulty,
+    /// The level a script's `SetGameDifficulty` chose, for the engine to keep as the
+    /// player's choice and clear (`crate::difficulty`); `None`: none since it last looked.
+    pub difficulty_request: Option<crate::difficulty::Difficulty>,
     /// The player's tweaks (`crate::tweaks`): the engine sets them from its settings.
     pub tweaks: crate::tweaks::Tweaks,
     /// What scripts asked of the engine's combat (`crate::combat::CombatRequest`), for
@@ -1692,6 +1759,7 @@ pub struct Game<'a> {
     /// Forms added to form lists at run time.
     pub form_lists: BTreeMap<FormId, Vec<FormId>>,
     pub loaded_cells: BTreeSet<FormId>,
+    pub(crate) placed_effect_actors: Option<crate::abilities::PlacedEffectActors<'a>>,
     /// Scripted references a script moved (they may have left their authored cell).
     pub moved: BTreeSet<FormId>,
     /// References other than the player that a script put somewhere (MoveTo or a door) since the
@@ -1704,6 +1772,10 @@ pub struct Game<'a> {
     /// References Rotate turned or SetScale resized in the latest [`Game::tick`], for the
     /// engine to draw at their new angle and size. Not saved.
     pub turned: BTreeSet<FormId>,
+    /// The NPCs the save had seated, each with its furniture reference, for the engine to
+    /// put back on at once (`Game::stand_everyone_up`, #3991). Filled by a load, taken once
+    /// by the engine; not saved.
+    pub saved_seats: BTreeMap<FormId, FormId>,
     /// Actors whose OnStartCombat block was fired and whose OnCombatEnd was not yet
     /// (`Game::combat_blocks`). Saved with the combat states, so that a load runs no block
     /// for a fight already going [documented: GECK wiki event handler table, OnStartCombat
@@ -1728,7 +1800,7 @@ pub struct Game<'a> {
     /// changes "will not be saved"].
     pub face_from_base: std::collections::BTreeMap<FormId, FormId>,
     /// Inside [`Game::came_through_start_menu`]: MenuMode blocks for any menu run too.
-    start_frames: bool,
+    pub(crate) start_frames: bool,
     /// The perks' choice list open for an activation (`crate::activate_choices`). Not
     /// saved.
     pub activate_menu: Option<crate::activate_choices::ActivateMenu>,
@@ -1853,6 +1925,18 @@ pub struct Game<'a> {
     /// next one [observed: OnLoad after Enable had not run on the line after Enable and
     /// had run by the next frame, layer5-captures.md §8.3 d].
     pub pending_onload: Vec<FormId>,
+    /// Living template-scripted actors of the loaded cells whose OnLoad runs at the first
+    /// frame after a restore (`Game::queue_template_onloads`, #3228); each is checked again
+    /// (present, loaded, alive) when its turn comes and dropped if a cell load ran its
+    /// OnLoad first. Not saved: a restore builds it again.
+    pub restored_onload: Vec<FormId>,
+    /// OnLoad blocks of reference scripts entered so far (each block run, where the
+    /// script runs it); not saved. A count for the engine's game digest test aid
+    /// (nvforever game_digest.rs).
+    pub onload_runs: u64,
+    /// Encounter zones given their level so far (`crate::zones`, when a cell loads: the
+    /// zone's first entry); not saved. For the game digest test aid.
+    pub zone_levels_set: u64,
     /// References whose GameMode and MenuMode blocks wait: the engine has not placed
     /// them yet. A trigger whose model is not read has no volumes, so an actor standing
     /// in it at the start gets no OnTriggerEnter before the script's first GameMode run;
@@ -1957,6 +2041,9 @@ pub struct Game<'a> {
 /// variables it shares.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedLambda {
+    /// Absent in older snapshots: retain their base-plus-position identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<u32>,
     pub unit: String,
     pub lambda: fnv_script::ir::XExpr,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1983,8 +2070,8 @@ pub struct RetiredSceneBase {
     pub model_override: Option<String>,
 }
 
-/// Snapshot of the Layer 5 state plus the world's. Ordinary saves remain `/1`;
-/// retired scene provenance requires `/2-retired-scenes`, which older readers explicitly reject.
+/// Snapshot of the Layer 5 state plus the world's. Retired scene provenance and
+/// explicit lambda handles each require an opt-in format that older readers reject.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameSnapshot {
     pub format: String,
@@ -2134,6 +2221,12 @@ pub struct GameSnapshot {
     /// (actor, target) pairs StartCombat made hostile until StopCombat.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub forced_combat: BTreeSet<(FormId, FormId)>,
+    /// Those of `forced_combat` whose target has not been measured since StartCombat
+    /// (`Awareness::scripted`), written, empty too, whenever there are forced pairs: so
+    /// `None` beside forced pairs is a save made before this field
+    /// (`Game::restore_scripted_combat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scripted_combat: Option<BTreeSet<(FormId, FormId)>>,
     /// ppNVSE's form instances [documented: CreateFormInstance, "tied to the users save
     /// game"] (`crate::nvse_pp`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2156,7 +2249,9 @@ impl GameSnapshot {
     /// Whether [`Game::restore`] and `World::restore` can take this snapshot: a load asks
     /// before it starts anything from the save (docs/design/save-load.md §6).
     pub fn check(&self) -> Result<(), String> {
-        if self.format != SNAPSHOT_FORMAT && self.format != crate::retired_scene::FORMAT {
+        if !matches!(self.format.as_str(),
+            SNAPSHOT_FORMAT | LAMBDA_SNAPSHOT_FORMAT | crate::retired_scene::FORMAT | crate::retired_scene::FORMAT_WITH_LAMBDAS)
+        {
             return Err(format!("unsupported snapshot format {:?}", self.format));
         }
         self.check_retired_scene_bases()?;
@@ -2241,6 +2336,7 @@ impl GameSnapshot {
 }
 
 pub const SNAPSHOT_FORMAT: &str = "fnv.game.state/1";
+pub(crate) const LAMBDA_SNAPSHOT_FORMAT: &str = "fnv.game.state/2-lambda-handles";
 
 /// The player led by an actor's Dialogue package to its trigger location
 /// ([`Game::player_lead`]).
@@ -2302,11 +2398,34 @@ pub enum ActMode {
     Block,
 }
 
+/// Persistent interactive console locals (`docs/design/console.md`): declared `int`,
+/// `short`, `long`, `float`, `ref`, `string_var`, and `array_var` variables persist across
+/// console lines in the current game and reset on new game or save reload.
+#[derive(Debug, Clone, Default)]
+struct ConsoleLocals {
+    vars: Vec<fnv_script::VarDecl>,
+    ref_vars: std::collections::HashSet<String>,
+    values: BTreeMap<u16, Value>,
+}
+
+/// Result of running one interactive console script line (`Game::run_console_line`,
+/// `docs/design/console.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleLineResult {
+    /// Formatted result of the last value-producing statement or expression, if any
+    /// (`None` for bare declarations such as `int x`).
+    pub value: Option<String>,
+    /// Compiler warnings produced for the line.
+    pub warnings: Vec<String>,
+}
+
 /// Where a running script keeps its locals.
 enum Locals {
     Instance(InstKey),
     /// A result script (stage, dialogue, package): locals live for one run.
     Temp(BTreeMap<u16, Value>),
+    /// Interactive console lines: locals live in `Game::console_locals` across lines.
+    Console,
 }
 
 /// What makes a lambda the same one each time a script makes it (#1088): its unit (by
@@ -2348,6 +2467,7 @@ fn unit_lambda(unit: &Compiled, l: &fnv_script::ir::XExpr) -> Option<fnv_script:
 /// and that unit's key, the lambda, and the instance whose variables it shares.
 #[derive(Clone)]
 struct LambdaDef<'a> {
+    handle: u32,
     unit: Option<&'a Compiled>,
     key: String,
     lambda: fnv_script::ir::XExpr,
@@ -2365,6 +2485,9 @@ pub struct Session {
     /// [documented: SetGameMainLoopCallback, 8 "auto-remove on load game"; observed:
     /// save-read, runtime lambdas did not run after a load, flag 8 or not].
     main_loop: Vec<crate::jip_events::MainLoop>,
+    /// Registrar provenance for carried `main_loop` entries plus the prior `JipEvents.seq`.
+    main_loop_registrars: std::collections::HashMap<u64, std::sync::Arc<crate::jip_provenance::Registrar>>,
+    jip_seq: u64,
     restarted_seen: BTreeSet<String>,
     handler_seq: u64,
     /// ppNVSE's instance and item-mod handlers, and the instances to deconstruct.
@@ -2383,6 +2506,31 @@ pub struct Session {
     kept_calls: Vec<crate::delayed::Delayed>,
     /// The form lists' ListAddForm/ListRemove… edits (`Game::list_edits`), issue #2944.
     list_edits: std::collections::HashMap<FormId, Vec<FormId>>,
+    /// Session-only `SetOwningFactionRequiredRank` overrides (`OtherState::owner_ranks`).
+    owner_ranks: std::collections::HashMap<FormId, i32>,
+    /// Session-only destruction data edits (`Jip6State::destruction`: `SetDestructionDataHealth`,
+    /// `SetDestructionDataTargetable`, `AddDestructionStage`, `RemoveDestructionStage`,
+    /// `SetNthDestructionStage*`).
+    destruction: std::collections::HashMap<FormId, crate::data::DestructionDef>,
+    /// Session-only perk definition edits (`Lu3State::perk_edits`: entries, `SetPerkLevel`,
+    /// `SetPerkFlag`, `LNSetIsPlayable`).
+    perk_edits: std::collections::HashMap<FormId, crate::data::PerkDef>,
+    /// Session-only `SetRadius` reference overrides (`LutanaState::ref_radius`).
+    ref_radius: std::collections::HashMap<FormId, f32>,
+    /// Session-only `SetRadiationExtraData` overrides (`ShowOffState::radiation`).
+    radiation: std::collections::HashMap<FormId, f32>,
+    /// Session-only `SetPasswordNote` overrides by `TERM` base (`Terminals::password_notes`).
+    terminal_password_notes: BTreeMap<FormId, Option<FormId>>,
+    /// Session-only authored package overrides (`Game::package_overrides` for forms in
+    /// `GameData::package_defs`: SetPackageFlag, SetPackageLocationRadius,
+    /// SetPackageTargetDistance, etc.).
+    package_overrides: std::collections::HashMap<FormId, crate::package::PackageDef>,
+    /// Session-only `SetZoneOwner` and `SetZoneFlag` bit-1 overrides (`OtherState::zone_changes`).
+    zone_changes: std::collections::HashMap<FormId, crate::nvse_anh::ZoneChange>,
+    /// Session `SetObjectEffect` (`EITM/`) overrides on loaded base forms (0 = cleared).
+    object_effect_overrides: std::collections::HashMap<FormId, FormId>,
+    /// Session `SetWeaponCritDamage` (`CRDT/critical_damage`) overrides on loaded base forms.
+    weapon_crit_damage_overrides: std::collections::HashMap<FormId, fnv_script::vm::XVal>,
 }
 
 /// An event handler: the event (lower case), the function or lambda, the filters by
@@ -2413,11 +2561,19 @@ pub const MAX_UDF_DEPTH: usize = 30;
 const NOT_A_FUNCTION: &str = " is not a function script";
 const NO_FUNCTION_BLOCK: &str = " has no Function block";
 
-/// Lambdas are named by values from here on, in a `ref` variable's slot [decision: a
-/// FormID this high needs a 255th plugin, which NVForever's load order never gives a
-/// lambda's place to; script-compiler.md §9].
-/// Ids of foreach's temporary inventory references (B5), below the lambdas'.
+/// Internal callable regions. Loaded records can also occupy these numbers: allocation
+/// skips them and dispatch uses actual ownership (callable-identity.md).
+/// Ids of foreach's temporary inventory references (B5), in
+/// `[TEMP_REF_BASE, BULLET_SNAP_SOUND_BASE)`.
 pub const TEMP_REF_BASE: u32 = 0xFE40_0000;
+/// Audio-only synthetic `SOUN` FormIDs reserved for BulletSnap pass-by folders
+/// (`nvf_play::bullet_snap`), carved out in `[BULLET_SNAP_SOUND_BASE, CAMERA_OVERLAY_BASE)`
+/// above temporary inventory references and below camera overlay references [design].
+pub const BULLET_SNAP_SOUND_BASE: u32 = 0xFE7E_0000;
+/// Fixed engine-owned runtime references (such as JohnnyGuitar's camera overlay
+/// references), carved out in `[CAMERA_OVERLAY_BASE, LAMBDA_BASE)` above
+/// [`BULLET_SNAP_SOUND_BASE`] and below lambdas [design].
+pub const CAMERA_OVERLAY_BASE: u32 = 0xFE7F_0000;
 /// Ids of the scripts CompileScript made from text files, below the temporary
 /// references' [decision, as the lambdas'].
 pub const COMPILED_BASE: u32 = 0xFE20_0000;
@@ -2473,16 +2629,27 @@ impl<'a> Game<'a> {
         world.set_inventory_sources(sources);
         // JIP LN's write for JIP Companions Command & Control's MCM page (`crate::jip_ccc`).
         crate::jip_ccc::write_globals(&data.load_order, &mut world);
+        // Stewie Tweaks modular override folders (`Data\NVSE\Plugins\Tweaks\INIs\*.ini`
+        // and `Data\NVSE\Plugins\Tweaks\GameSettings\*.ini`): no-op when absent or empty.
+        let mut tweaks = crate::tweaks::Tweaks::default();
+        let (_, modular_tweaks) = crate::stewie_inis::load_modular_inis_from_data();
+        crate::stewie_inis::apply_modular_tweaks_to_game(&modular_tweaks, &mut tweaks);
+        crate::stewie_inis::apply_modular_game_settings_to_world(&mut world);
         Game {
             data,
             ext: Default::default(),
             udf: Vec::new(),
             lambdas: Vec::new(),
+            lambda_slots: Default::default(),
+            next_lambda: LAMBDA_BASE,
             unusable_reported: Default::default(),
             compiled_files: Vec::new(),
+            compiled_slots: Default::default(),
+            next_compiled: COMPILED_BASE,
             compiled_paths: std::collections::HashMap::new(),
             compiled_origins: Default::default(),
             console_sources: Default::default(),
+            console_locals: Default::default(),
             combat_style_edits: Default::default(),
             sr: Default::default(),
             lambda_ids: Default::default(),
@@ -2495,6 +2662,11 @@ impl<'a> Game<'a> {
             delayed: Vec::new(),
             ref_walk: Vec::new(),
             field_overrides: std::collections::HashMap::new(),
+            lighting_instance: {
+                static NEXT_LIGHTING_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT_LIGHTING_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            lighting_revision: 0,
             projectile_launch_restore_owner: std::sync::Arc::new(()),
             name_overrides: std::collections::HashMap::new(),
             mod_data: BTreeMap::new(),
@@ -2525,6 +2697,8 @@ impl<'a> Game<'a> {
             hud: Default::default(),
             showoff: Default::default(),
             mod_files: Default::default(),
+            knvse_ini: crate::knvse_ini::KnvseIni::load(),
+            ysi_filename: Default::default(),
             sup: Default::default(),
             lu3: Default::default(),
             sup7: Default::default(),
@@ -2532,7 +2706,7 @@ impl<'a> Game<'a> {
             save_files: Default::default(),
             traits: Default::default(),
             anim_paths: Default::default(),
-            anim_folders: Default::default(),
+            anim_folders: crate::nvse_anim_folders::AnimFolders::with_seed(cfg.seed),
             knvse: Default::default(),
             jippp: Default::default(),
             vheyes: Default::default(),
@@ -2558,7 +2732,9 @@ impl<'a> Game<'a> {
             ui_extra: Default::default(),
             ui_pointer: fnv_ui::input::Pointer::default(),
             difficulty: Default::default(),
-            tweaks: Default::default(),
+            difficulty_custom: Default::default(),
+            difficulty_request: None,
+            tweaks,
             combat_requests: Vec::new(),
             destruction_changes: Vec::new(),
             due_children: Vec::new(),
@@ -2605,7 +2781,7 @@ impl<'a> Game<'a> {
             locks: Default::default(),
             senses: Default::default(),
             vats: Default::default(),
-            weather: Default::default(),
+            weather: crate::weather::WeatherState::cold_start(data),
             ui: Default::default(),
             console_requests: Vec::new(),
             mfg: Default::default(),
@@ -2620,10 +2796,12 @@ impl<'a> Game<'a> {
             coop: Vec::new(),
             form_lists: BTreeMap::new(),
             loaded_cells: BTreeSet::new(),
+            placed_effect_actors: None,
             moved: BTreeSet::new(),
             teleported: BTreeSet::new(),
             rotations: BTreeMap::new(),
             turned: BTreeSet::new(),
+            saved_seats: BTreeMap::new(),
             cell_resets: Vec::new(),
             level_news: Vec::new(),
             resurrections: Vec::new(),
@@ -2665,6 +2843,9 @@ impl<'a> Game<'a> {
             frame: 0,
             time: 0.0,
             pending_onload: Vec::new(),
+            restored_onload: Vec::new(),
+            onload_runs: 0,
+            zone_levels_set: 0,
             scripts_held: BTreeSet::new(),
             door_gates: Default::default(),
             door_heard: Default::default(),
@@ -2714,6 +2895,14 @@ impl<'a> Game<'a> {
         // The soft-lock watchdog's count of the events that say a scene goes on.
         if let EventKind::StageSet { quest, stage, .. } = &kind {
             self.softlock_seen.stage = Some((*quest, *stage));
+        }
+        if let EventKind::LineStarted { info, .. } = &kind {
+            let lines = &mut self.softlock_seen.lines;
+            if lines.len() == crate::softlock::LINES_KEPT {
+                lines.pop_front();
+            }
+            lines.push_back(*info);
+            self.softlock_seen.lines_begun += 1;
         }
         let chatter = matches!(&kind, EventKind::LineStarted { topic, .. } if self.chatter_topic(*topic));
         if crate::softlock::story(&kind, chatter) {
@@ -2778,11 +2967,29 @@ impl<'a> Game<'a> {
         format!("Note: {}", self.expand_codes(&name.unwrap_or_else(|| self.data.name(note))))
     }
 
+    /// Re-read and apply Stewie Tweaks modular override folders
+    /// (`Data\NVSE\Plugins\Tweaks\INIs\*.ini` and
+    /// `Data\NVSE\Plugins\Tweaks\GameSettings\*.ini`) from both disk read roots and this
+    /// session's `mod_files` writes. Returns `(tweak_fields_applied, gmsts_applied)`.
+    /// Bound application settings (`bind_stewie_stat_settings`) are left intact.
+    pub fn apply_stewie_modular_inis(&mut self) -> (usize, usize) {
+        let tweaks_applied = if self.small.stewie_stat_settings_loaded {
+            0
+        } else {
+            let (_, overrides) = crate::stewie_inis::load_modular_inis(&self.mod_files);
+            crate::stewie_inis::apply_modular_tweaks_to_game(&overrides, &mut self.tweaks)
+        };
+        let (_, gmsts) = crate::stewie_inis::load_modular_game_settings(&self.mod_files);
+        let gmsts_applied = crate::stewie_inis::apply_game_settings_to_world(&mut self.world, &gmsts);
+        (tweaks_applied, gmsts_applied)
+    }
+
     /// The new-game state: every quest flagged "Start game enabled" is running, with no
     /// stage set [hypothesis: the flag's documented meaning (xEdit); which quest the
     /// "New Game" menu starts is a separate input, scripts.md §8]; the placed actors that
     /// start as corpses are dead ([`Game::lay_out_corpses`]).
     pub fn new_game(&mut self) {
+        self.clear_console_locals();
         // IsNewGame (`crate::nvse_unlisted2`): until a save is loaded.
         self.other.unlisted2.new_game = true;
         // Placed corpses (Base Health 0) lie dead from the start.
@@ -2838,6 +3045,18 @@ impl<'a> Game<'a> {
             s.running = true;
             s.since_run = 0.0;
             s.since_menu_run = 0.0;
+            // Its script's clock starts again: GetSecondsPassed in the first run after the
+            // start is 0, not the time since the run before it stopped [hypothesis: a
+            // stopped quest's script does not run, so that time is not "since it last
+            // ran"; #3465: VMS49's helper quest 0x00168A86, stopped since an earlier event,
+            // was started with a 20 s time-out that ran out on its first run, and Veronica
+            // dropped her confront-the-elder package 0.2 s after the trigger gave it].
+            if let Some(inst) = self.instances.get_mut(&InstKey::Quest { quest: q }) {
+                if let Some(last) = inst.run_last.take() {
+                    tracing::info!("quest: {q} started again; its script's GetSecondsPassed counts from its next run, not from its last run at {last:.2} s");
+                }
+                (inst.run_prev, inst.page_last, inst.page_prev) = (None, None, None);
+            }
             self.emit(EventKind::QuestStarted { quest: q });
             self.quest_event(q, true);
         }
@@ -2888,7 +3107,15 @@ impl<'a> Game<'a> {
         if !self.quest(q).completed {
             self.start_quest(q);
         }
-        self.quest(q).stages_done.insert(stage);
+        let qst = self.quest(q);
+        qst.stages_done.insert(stage);
+        if let Some(cur) = qst.current_stage {
+            if stage >= qst.stages_done.iter().next_back().copied().unwrap_or(stage) {
+                qst.current_stage = None;
+            } else if stage > cur {
+                qst.current_stage = Some(stage);
+            }
+        }
         let player = Some(FormId::PLAYER_REF);
         let label = format!("QUST {q} stage {stage}");
         let mut ran = Vec::new();
@@ -2973,6 +3200,31 @@ impl<'a> Game<'a> {
         }
         if displayed == Some(true) {
             self.start_quest(q);
+        }
+        let (d0, c0, quest_completed) = self.quests.get(&q).map_or((false, false, false), |s| {
+            let (d, c) = s.objectives.get(&index).map_or((false, false), |o| (o.displayed, o.completed));
+            (d, c, s.completed)
+        });
+        let will_display = displayed == Some(true) && !d0;
+        let d_after = displayed.unwrap_or(d0);
+        let c_after_disp = if will_display { false } else { c0 };
+        // [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE Plugin 184,
+        // 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters, probes
+        // `w1_3656_objectives_unholster_imod` (`StartQuest 0x000E282D`,
+        // `SetObjectiveDisplayed`/`SetObjectiveCompleted` 20/30/50/5/999 +
+        // `CompleteAllObjectives` + `CompleteQuest`) and
+        // `b3_so_ex_06_on_display_complete_objective` (`SetObjectiveDisplayed 0x00104C1C 10
+        // 1` -> `dispInside=0`) in #3679] Both ShowOff:OnDisplayObjective and
+        // ShowOff:OnCompleteObjective fire PRE-update (`GetObjectiveDisplayed` /
+        // `GetObjectiveCompleted` still read `0` inside the callback), and
+        // ShowOff:OnCompleteObjective does not fire for hidden (undisplayed) objectives or
+        // completed quests.
+        let will_complete = completed == Some(true) && !c_after_disp && d_after && !quest_completed;
+        if will_display {
+            self.showoff_on_display_objective(q, index);
+        }
+        if will_complete {
+            self.showoff_on_complete_objective(q, index);
         }
         let o = self.quest(q).objectives.entry(index).or_default();
         let (d0, c0) = (o.displayed, o.completed);
@@ -3292,18 +3544,82 @@ impl<'a> Game<'a> {
     /// `ctx.self_ref`; the value is what SetFunctionValue set (0 when nothing). The
     /// extender's and JIP's stores, handlers and the game itself keep what it changed.
     pub fn run_query(&mut self, src: &str, ctx: RunCtx) -> Result<fnv_script::vm::XVal, String> {
-        use fnv_script::vm::XVal;
-        let c = fnv_script::compile::compile_runtime(src, &self.data.table, &GameEnv { g: self });
-        if let Some(e) = c.errors().next() {
-            // The error is the capture's own text; what the compiler said goes to the trace.
-            let what = format!("query: {}: {}", e.kind.replace('_', " "), e.detail);
-            self.emit(EventKind::Skipped { unit: "query".into(), what });
-            return Err("script did not compile".into());
+        self.run_query_with(src, ctx, false, |_, value| value)
+    }
+
+    /// Clear all persistent interactive console locals, freeing any `string_var` and
+    /// `array_var` handles they own in `ExtStore` (`docs/design/console.md`).
+    pub fn clear_console_locals(&mut self) {
+        for var in std::mem::take(&mut self.console_locals.vars) {
+            if let Some(val) = self.console_locals.values.remove(&(var.index as u16)) {
+                match &var.ty {
+                    VarType::Other(t) if t == "string_var" => self.ext.destroy(val.num() as u32),
+                    VarType::Other(t) if t == "array_var" => self.ext.release(&fnv_script::vm::XVal::Array(val.num() as u32)),
+                    _ => {}
+                }
+            }
         }
+        self.console_locals.ref_vars.clear();
+        self.console_locals.values.clear();
+    }
+
+    /// Whether `name` names a persistent interactive console local (case-insensitive).
+    pub fn has_console_local(&self, name: &str) -> bool {
+        self.console_locals.vars.iter().any(|v| v.name.eq_ignore_ascii_case(name))
+    }
+
+    /// If `name` is a persistent interactive console `ref` local currently holding a
+    /// non-zero FormID, return that FormID.
+    pub fn console_local_ref(&self, name: &str) -> Option<FormId> {
+        if !self.console_locals.ref_vars.contains(&name.to_ascii_lowercase()) {
+            return None;
+        }
+        let var = self.console_locals.vars.iter().find(|v| v.name.eq_ignore_ascii_case(name))?;
+        self.console_locals.values.get(&(var.index as u16)).copied()?.as_form().map(FormId)
+    }
+
+    fn compile_console_candidate(
+        &self,
+        src: &str,
+    ) -> Result<(fnv_script::compile::Compiled, std::collections::HashSet<String>, fnv_script::Decoded, Vec<String>), String> {
+        let (c, ref_vars) = fnv_script::compile::compile_runtime_with_locals(
+            src,
+            &self.data.table,
+            &GameEnv { g: self },
+            &self.console_locals.vars,
+            &self.console_locals.ref_vars,
+        );
+        if let Some(e) = c.errors().next() {
+            return Err(format!("{}: {}", e.kind.replace('_', " "), e.detail));
+        }
+        let warnings = c.diags.iter().map(|d| format!("{}: {}", d.kind.replace('_', " "), d.detail)).collect();
         let d = fnv_script::decode(&c.bytes, &self.data.table);
+        Ok((c, ref_vars, d, warnings))
+    }
+
+    fn commit_console_locals(&mut self, new_vars: Vec<fnv_script::VarDecl>, new_ref_vars: std::collections::HashSet<String>) {
+        for old in &self.console_locals.vars {
+            let new_var = new_vars.iter().find(|v| v.index == old.index);
+            let old_ref = self.console_locals.ref_vars.contains(&old.name.to_ascii_lowercase());
+            let new_ref = new_var.is_some_and(|v| new_ref_vars.contains(&v.name.to_ascii_lowercase()));
+            if new_var.is_none_or(|v| v.ty != old.ty || new_ref != old_ref) {
+                if let Some(val) = self.console_locals.values.remove(&(old.index as u16)) {
+                    match &old.ty {
+                        VarType::Other(t) if t == "string_var" => self.ext.destroy(val.num() as u32),
+                        VarType::Other(t) if t == "array_var" => self.ext.release(&fnv_script::vm::XVal::Array(val.num() as u32)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.console_locals.vars = new_vars;
+        self.console_locals.ref_vars = new_ref_vars;
+    }
+
+    fn leak_console_unit(&self, src: &str, c: fnv_script::compile::Compiled, d: fnv_script::Decoded) -> &'a Compiled {
         let unit = fnv_script::ScriptUnit {
-            plugin: "query".into(),
-            owner: fnv_script::UnitOwner::Other { sig: "QURY".into(), form: 0, ordinal: 0 },
+            plugin: "console".into(),
+            owner: fnv_script::UnitOwner::Other { sig: "CONS".into(), form: 0, ordinal: 0 },
             kind: fnv_script::ScriptKind::Object,
             header: Default::default(),
             variables: c.variables,
@@ -3312,14 +3628,154 @@ impl<'a> Game<'a> {
             bytes: c.bytes,
             source: Some(src.to_string()),
         };
-        // Leaked as the console's lines are: a lambda the query makes may outlive it.
-        let unit: &'a Compiled = Box::leak(Box::new(Compiled::new(unit, d.program, d.report.raw_total())));
+        Box::leak(Box::new(Compiled::new(unit, d.program, d.report.raw_total())))
+    }
+
+    fn run_console_unit(&mut self, unit: &'a Compiled, ctx: RunCtx) -> Result<Option<String>, String> {
+        let data = self.data;
+        let mut opts = self.opts();
+        opts.strict = true;
+        self.depth += 1;
+        self.open_run();
+        let mut ex = Exec { game: self, unit, locals: Locals::Console, ctx, seconds: None };
+        let result = Vm::new(&data.table, &mut ex, opts).run_capturing_last(&unit.program.top).map_err(|e| e.to_string());
+        self.close_run();
+        self.depth -= 1;
+        if self.depth == 0 {
+            self.run_deferred_deaths();
+        }
+        let (_, value) = result?;
+        let shown = value.as_ref().map(|v| crate::functions::console::expression_result(self, v));
+        if let Some(v) = value {
+            self.ext.hand_over(&v);
+            self.ext.sweep();
+        }
+        Ok(shown)
+    }
+
+    /// Compile and run one interactive console line with persistent console locals and
+    /// transparent expression/statement result printing (`docs/design/console.md`).
+    ///
+    /// Compile-mode selection happens strictly before execution so a failing side effect
+    /// is never retried. Bare declarations (`int x`, `array_var a`, ...) persist their
+    /// slots with `value: None`; initializers, assignments, extender/vanilla calls, and
+    /// bare expressions (`5 + 5`, `x`, `GetModelPath TestBox`, `ar_List 1, 9`,
+    /// `player.GetAV Health + 10`) return their formatted result value before temporary
+    /// arrays are swept.
+    pub fn run_console_line(&mut self, line: &str, ctx: RunCtx) -> Result<ConsoleLineResult, String> {
+        use fnv_script::compile::{lex, parse};
+        use fnv_script::ir::XExpr;
+
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(ConsoleLineResult { value: None, warnings: Vec::new() });
+        }
+        let is_single_call_or_expr = if line.contains(['\r', '\n']) {
+            false
+        } else {
+            let mut long = Vec::new();
+            let ls = lex::lines(line, &mut long);
+            ls.len() == 1 && matches!(parse::statement(&ls[0]), Ok(s) if matches!(s.kw, parse::Kw::Call(_)))
+        };
+
+        let (chosen_src, c, ref_vars, d, warnings) = if !is_single_call_or_expr {
+            let (c, ref_vars, d, warnings) = self.compile_console_candidate(line)?;
+            (line.to_string(), c, ref_vars, d, warnings)
+        } else {
+            let expr_src = format!("eval ({line})");
+            let expr_cand = self.compile_console_candidate(&expr_src);
+            let expr_is_non_call = expr_cand.as_ref().is_ok_and(|(_, _, d, _)| {
+                matches!(
+                    d.program.top.as_slice(),
+                    [Stmt::Eval { expr } | Stmt::Let { expr }] if !matches!(expr, XExpr::Call { .. })
+                )
+            });
+            if expr_is_non_call {
+                let (c, ref_vars, d, warnings) = expr_cand.unwrap();
+                (expr_src, c, ref_vars, d, warnings)
+            } else {
+                let stmt_cand = self.compile_console_candidate(line);
+                let stmt_clean = stmt_cand.as_ref().is_ok_and(|(c, _, _, _)| {
+                    !c.diags.iter().any(|d| matches!(d.kind, "surplus_arguments" | "rest_of_line_dropped"))
+                });
+                match (stmt_cand, expr_cand) {
+                    (Ok((c, rv, d, w)), _) if stmt_clean => (line.to_string(), c, rv, d, w),
+                    (_, Ok((c, rv, d, w))) => (expr_src, c, rv, d, w),
+                    (Ok((c, rv, d, w)), Err(_)) => (line.to_string(), c, rv, d, w),
+                    (Err(se), Err(ee)) => {
+                        return Err(if se.starts_with("unknown function:") && crate::functions::console::has_expression_operator(line) {
+                            ee
+                        } else {
+                            se
+                        });
+                    }
+                }
+            }
+        };
+
+        let new_vars = c.variables.clone();
+        let unit = self.leak_console_unit(&chosen_src, c, d);
+        self.commit_console_locals(new_vars, ref_vars);
+        let value = self.run_console_unit(unit, ctx)?;
+        Ok(ConsoleLineResult { value, warnings })
+    }
+
+    /// Print an interactive expression before the VM sweeps temporary arrays.
+    /// Reads and updates persistent interactive console locals (`docs/design/console.md`).
+    pub fn eval_console_expression(&mut self, expr: &str, ctx: RunCtx) -> Result<String, String> {
+        let expr = expr.trim();
+        if expr.is_empty() || expr.contains(['\r', '\n']) {
+            return Err("eval requires one script expression".into());
+        }
+        let src = format!("eval ({expr})");
+        let (c, ref_vars, d, _warnings) = self.compile_console_candidate(&src)?;
+        let new_vars = c.variables.clone();
+        let unit = self.leak_console_unit(&src, c, d);
+        self.commit_console_locals(new_vars, ref_vars);
+        let value = self.run_console_unit(unit, ctx)?;
+        Ok(value.unwrap_or_else(|| "0".into()))
+    }
+
+    fn run_query_with<T>(
+        &mut self,
+        src: &str,
+        ctx: RunCtx,
+        console: bool,
+        finish: impl FnOnce(&Self, fnv_script::vm::XVal) -> T,
+    ) -> Result<T, String> {
+        use fnv_script::vm::XVal;
+        let unit = if console {
+            self.compile_statements(src, "console", "CONS")?.0
+        } else {
+            let c = fnv_script::compile::compile_runtime(src, &self.data.table, &GameEnv { g: self });
+            if let Some(e) = c.errors().next() {
+                let what = format!("query: {}: {}", e.kind.replace('_', " "), e.detail);
+                self.emit(EventKind::Skipped { unit: "query".into(), what });
+                return Err("script did not compile".into());
+            }
+            let d = fnv_script::decode(&c.bytes, &self.data.table);
+            let unit = fnv_script::ScriptUnit {
+                plugin: "query".into(),
+                owner: fnv_script::UnitOwner::Other { sig: "QURY".into(), form: 0, ordinal: 0 },
+                kind: fnv_script::ScriptKind::Object,
+                header: Default::default(),
+                variables: c.variables,
+                refs: c.refs,
+                has_scda: true,
+                bytes: c.bytes,
+                source: Some(src.to_string()),
+            };
+            // A lambda made by the query may outlive the call.
+            let unit: &'a Compiled = Box::leak(Box::new(Compiled::new(unit, d.program, d.report.raw_total())));
+            unit
+        };
         let block = unit.program.blocks.iter().find(|b| b.event == fnv_script::ir::FUNCTION_BLOCK).ok_or("the script has no Function block")?;
         let data = self.data;
         let opts = self.opts();
         self.udf.push(UdfFrame { value: None, caller: None });
         self.open_run();
-        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds: None };
+        let seconds = Some(self.stateless_udf_seconds());
+        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds };
         let result = Vm::new(&data.table, &mut ex, opts).run(&block.body).map_err(|e| e.to_string());
         if let Locals::Temp(m) = &ex.locals {
             for (&index, v) in m {
@@ -3334,8 +3790,9 @@ impl<'a> Game<'a> {
         let frame = self.udf.pop();
         let v = frame.and_then(|f| f.value).unwrap_or(XVal::Num(0.0));
         self.ext.hand_over(&v);
+        let shown = result.map(|_| finish(self, v));
         self.ext.sweep();
-        result.map(|_| v)
+        shown
     }
 
     /// CompileScript: the script a text file under `Data\NVSE\user_defined_functions`
@@ -3393,11 +3850,12 @@ impl<'a> Game<'a> {
     /// A function script from source text, kept as CompileScript keeps its files; `None`
     /// when it does not compile (the compiler's words go to the trace).
     fn compile_source(&mut self, what: &str, src: String) -> Option<u32> {
-        // The IDs end where the temporary references' begin: no more units past it.
-        if COMPILED_BASE as usize + self.compiled_files.len() >= TEMP_REF_BASE as usize {
+        // Admission precedes compilation/leaking the unit. Loaded forms may consume
+        // numbers inside this internal region too.
+        let Some(id) = self.free_callable_handle(self.next_compiled, TEMP_REF_BASE) else {
             self.emit(EventKind::Skipped { unit: "CompileScript".into(), what: format!("{what}: no compiled-script ID left") });
             return None;
-        }
+        };
         let c = fnv_script::compile::compile_mod_runtime(&src, &self.data.table, &GameEnv { g: self });
         if let Some(e) = c.errors().next() {
             let what = format!("{what}: {}: {}", e.kind.replace('_', " "), e.detail);
@@ -3417,7 +3875,8 @@ impl<'a> Game<'a> {
             source: Some(src),
         };
         let unit: &'a Compiled = Box::leak(Box::new(Compiled::new(unit, d.program, d.report.raw_total())));
-        let id = COMPILED_BASE + self.compiled_files.len() as u32;
+        self.next_compiled = id + 1;
+        self.compiled_slots.insert(id, self.compiled_files.len());
         self.compiled_files.push(unit);
         self.compiled_origins.set(id, crate::jip_provenance::CompiledOrigin::Dynamic);
         Some(id)
@@ -3459,6 +3918,63 @@ impl<'a> Game<'a> {
         self.emit(EventKind::ScriptError { unit, error });
     }
 
+    /// Exact record/owned-handle identity, shared by dispatch and arity admission.
+    fn callable_script(&self, id: u32) -> Option<&'a Compiled> {
+        self.data.script(FormId(id)).or_else(|| self.compiled_slots.get(&id).and_then(|&i| self.compiled_files.get(i).copied()))
+    }
+
+    /// Human-readable identifier for a script callable (FormID-backed UDF, compiled-file
+    /// UDF, or lambda) used to enrich runtime error units such as delayed calls [design].
+    /// Returns `None` when `f` does not resolve to a known script unit so unresolved
+    /// handles keep their existing error unit and deduplication key.
+    pub(crate) fn callable_label(&self, f: &fnv_script::vm::XVal) -> Option<String> {
+        let id = match f {
+            fnv_script::vm::XVal::Ref(id) => *id,
+            fnv_script::vm::XVal::Num(x) => *x as u32,
+            _ => return None,
+        };
+        if let Some(&index) = self.lambda_slots.get(&id) {
+            let key = crate::jip_provenance::Text::new(&self.lambdas[index].key).single_line();
+            return Some(format!("{key} lambda"));
+        }
+        if let Some(unit) = self.data.script(FormId(id)) {
+            let key = crate::jip_provenance::Text::new(unit.shared_key()).single_line();
+            return Some(match self.data.edid_of.get(&FormId(id)) {
+                Some(edid) if !edid.is_empty() => format!("{key} {}", crate::jip_provenance::Text::new(edid).single_line()),
+                _ => key,
+            });
+        }
+        if self.compiled_slots.contains_key(&id) {
+            let file = match self.compiled_origins.get(id) {
+                Some(crate::jip_provenance::CompiledOrigin::File(file)) => Some(file.single_line()),
+                Some(crate::jip_provenance::CompiledOrigin::Dynamic) => None,
+                None => self.compiled_paths.iter().find_map(|(path, &cid)| (cid == id).then(|| crate::jip_provenance::Text::new(path).single_line())),
+            };
+            return Some(match file {
+                Some(path) => format!("CompileScript {path} 0x{id:08X}"),
+                None => format!("CompileScript 0x{id:08X}"),
+            });
+        }
+        None
+    }
+
+    pub(crate) fn free_callable_handle(&self, start: u32, end: u32) -> Option<u32> {
+        let mut id = start;
+        while id < end {
+            if self.data.sig(FormId(id)).is_none() && !self.package_overrides.contains_key(&FormId(id))
+                && !self.lambda_slots.contains_key(&id) && !self.compiled_slots.contains_key(&id) { return Some(id); }
+            id = id.checked_add(1)?;
+        }
+        None
+    }
+
+    /// Keep the established low-reference policy, including text-compiled functions,
+    /// while admitting actual loaded script records in every load-order slot.
+    pub(crate) fn session_function(&self, value: &fnv_script::vm::XVal) -> bool {
+        matches!(value, fnv_script::vm::XVal::Ref(id) if self.data.script(FormId(*id)).is_some()
+            || (*id < LAMBDA_BASE && !self.lambda_slots.contains_key(id)))
+    }
+
     /// `Call`: a function script's `Begin Function` block with fresh variables of its own,
     /// its parameters set from the arguments, on the calling reference (`ref.Call`); or a
     /// lambda, over the variables of the script that made it [documented: Call; User
@@ -3468,9 +3984,23 @@ impl<'a> Game<'a> {
         self.run_function_with_seconds(f, on, args, caller, (ctx, None))
     }
 
+    /// Single-frame delta exposed to stateless UDFs (`GetSecondsPassed` when `ctx.inst` is
+    /// `None`): zero while paused in menus, loading, or `FreezeTime`, otherwise the current
+    /// frame step `cfg.frame_seconds` [observed: w4g_03_jip_callback_getsecondspassed].
+    pub(crate) fn stateless_udf_seconds(&self) -> f64 {
+        if self.in_menu() || self.loading || self.gaps.jip3.time_frozen {
+            0.0
+        } else {
+            self.cfg.frame_seconds
+        }
+    }
+
     /// An elapsed value belongs to this UDF invocation and its nested calls only.
-    /// JIP callbacks supply it; ordinary calls and result scripts do not.
+    /// Callers may supply an explicit delta; stateless UDFs without one receive the
+    /// single-frame delta (`stateless_udf_seconds`), while persistent instances keep their
+    /// own clocks and result scripts continue to read zero.
     pub(crate) fn run_function_with_seconds(&mut self, f: &fnv_script::vm::XVal, on: Option<Value>, args: Vec<fnv_script::vm::XVal>, caller: Option<FormId>, (ctx, seconds): (RunCtx, Option<f64>)) -> Result<fnv_script::vm::XVal, String> {
+        let seconds = seconds.or_else(|| Some(self.stateless_udf_seconds()));
         self.nested(move |g| g.run_function_here(f, on, args, caller, (ctx, seconds)))
     }
 
@@ -3486,9 +4016,13 @@ impl<'a> Game<'a> {
         }
         let data = self.data;
         let opts = self.opts();
-        let self_ref = on.and_then(|v| v.as_form()).map(FormId);
-        let (unit, params, body, value, locals): (&Compiled, Vec<VarRef>, Vec<Stmt>, Option<fnv_script::ir::XExpr>, Locals) = if id >= LAMBDA_BASE {
-            let d = self.lambdas.get((id - LAMBDA_BASE) as usize).cloned().ok_or("an unknown lambda")?;
+        let self_ref = match on {
+            Some(value) => Some(FormId(value.as_form().ok_or_else(|| VmError::NoReference("call".into()).to_string())?)),
+            None => ctx.self_ref,
+        };
+        let lambda = self.lambda_slots.get(&id).copied();
+        let (unit, params, body, value, locals): (&Compiled, Vec<VarRef>, Vec<Stmt>, Option<fnv_script::ir::XExpr>, Locals) = if let Some(index) = lambda {
+            let d = self.lambdas[index].clone();
             let (unit, l, inst) = (d.unit.ok_or_else(|| format!("the lambda's script {} is gone", d.key))?, d.lambda, d.inst);
             let fnv_script::ir::XExpr::Lambda { params, body, value, .. } = l else { return Err("an unknown lambda".into()) };
             let locals = match inst {
@@ -3497,18 +4031,19 @@ impl<'a> Game<'a> {
             };
             (unit, params, body, value.map(|v| *v), locals)
         } else {
-            let compiled = id.checked_sub(COMPILED_BASE).filter(|_| id < TEMP_REF_BASE).and_then(|i| self.compiled_files.get(i as usize).copied());
-            let unit = match compiled {
-                Some(u) => u,
-                None => data.script(FormId(id)).ok_or_else(|| format!("{}{NOT_A_FUNCTION}", data.name(FormId(id))))?,
-            };
+            let unit = self.callable_script(id).ok_or_else(|| {
+                // Preserve unresolved-handle diagnostics and their reporting frequency;
+                // this fallback does not decide whether an existing callable is a lambda.
+                if id >= LAMBDA_BASE { "an unknown lambda".into() }
+                else { format!("{}{NOT_A_FUNCTION}", data.name(FormId(id))) }
+            })?;
             let block = unit.program.blocks.iter().find(|b| b.event == fnv_script::ir::FUNCTION_BLOCK).ok_or_else(|| format!("{}{NO_FUNCTION_BLOCK}", data.name(FormId(id))))?;
             let params = block.params.iter().flatten().filter_map(|a| if let Arg::Var(v) = a { Some(*v) } else { None }).collect();
             (unit, params, block.body.clone(), None, Locals::Temp(BTreeMap::new()))
         };
         self.udf.push(UdfFrame { value: None, caller });
         self.open_run();
-        let ctx = RunCtx { self_ref: self_ref.or(ctx.self_ref), ..ctx };
+        let ctx = RunCtx { self_ref, ..ctx };
         let mut ex = Exec { game: self, unit, locals, ctx, seconds };
         let mut vm = Vm::new(&data.table, &mut ex, opts);
         let mut result = Ok(());
@@ -3536,17 +4071,17 @@ impl<'a> Game<'a> {
         // variables, for its next call and for the maker's run (`Exec::call_function`)
         // [documented: Lambda, its variables are its maker's; observed: the High and Dry
         // session's repro, `({x} => c += x)` called in its maker's query left `c` 1, #2275].
-        if id >= LAMBDA_BASE {
+        if let Some(index) = lambda {
             if let Locals::Temp(m) = &ex.locals {
                 let m = m.clone();
-                if let Some(d) = ex.game.lambdas.get_mut((id - LAMBDA_BASE) as usize).filter(|d| d.inst.is_none()) {
+                if let Some(d) = ex.game.lambdas.get_mut(index).filter(|d| d.inst.is_none()) {
                     d.captured = Some(m);
                 }
             }
         }
         // A function script's own strings and arrays go with it (a lambda's variables are
         // its maker's).
-        if let (true, Locals::Temp(m)) = (id < LAMBDA_BASE, &ex.locals) {
+        if let (true, Locals::Temp(m)) = (lambda.is_none(), &ex.locals) {
             for (&index, v) in m {
                 match unit.var_type(index) {
                     Some(VarType::Other(t)) if t == "string_var" => ex.game.ext.destroy(v.num() as u32),
@@ -3672,24 +4207,29 @@ impl<'a> Game<'a> {
             EventCall::CurrentName => XVal::Str(self.event_names.last().cloned().unwrap_or_default()),
             EventCall::JipSet { event, func, add, filters } => XVal::Num(f64::from(u8::from(self.jip_set(event, func, add, filters, registrar)))),
             EventCall::MainLoop { func, add, delay, flags, on } => {
-                self.jip_main_loop(func, add, delay, flags, on.and_then(|v| v.as_form()).map(FormId));
+                self.jip_main_loop(func, add, delay, flags, on.and_then(|v| v.as_form()).map(FormId), registrar);
                 XVal::Num(0.0)
             }
         })
     }
 
     /// A temporary inventory reference for one kind of item in a container (B5).
+    /// Bounded strictly below [`BULLET_SNAP_SOUND_BASE`] (and therefore below
+    /// [`CAMERA_OVERLAY_BASE`]) so temporary inventory references can never collide with
+    /// reserved audio-only BulletSnap `SOUN` IDs or camera overlay references.
     pub(crate) fn temp_ref(&mut self, container: FormId, item: FormId) -> FormId {
         if let Some(i) = self.temp_refs.iter().position(|&(c, x)| c == container && x == item) {
             return FormId(TEMP_REF_BASE + i as u32);
         }
+        let max = (BULLET_SNAP_SOUND_BASE - TEMP_REF_BASE) as usize;
+        assert!(self.temp_refs.len() < max, "temporary inventory references exhausted");
         self.temp_refs.push((container, item));
         FormId(TEMP_REF_BASE + self.temp_refs.len() as u32 - 1)
     }
 
     /// The container and item of a live temporary inventory reference.
     pub fn temp_item(&self, r: FormId) -> Option<(FormId, FormId)> {
-        let i = r.0.checked_sub(TEMP_REF_BASE).filter(|_| r.0 < LAMBDA_BASE)?;
+        let i = r.0.checked_sub(TEMP_REF_BASE).filter(|_| r.0 < BULLET_SNAP_SOUND_BASE)?;
         self.temp_refs.get(i as usize).copied()
     }
 
@@ -3702,12 +4242,12 @@ impl<'a> Game<'a> {
             XVal::Num(x) => *x as u32,
             _ => return None,
         };
-        if id >= LAMBDA_BASE {
-            let d = self.lambdas.get((id - LAMBDA_BASE) as usize)?;
+        if let Some(&index) = self.lambda_slots.get(&id) {
+            let d = &self.lambdas[index];
             let fnv_script::ir::XExpr::Lambda { params, .. } = &d.lambda else { return None };
             return Some(params.len());
         }
-        let unit = self.data.script(FormId(id))?;
+        let unit = self.callable_script(id)?;
         let block = unit.program.blocks.iter().find(|b| b.event == fnv_script::ir::FUNCTION_BLOCK)?;
         Some(block.params.iter().flatten().count())
     }
@@ -3722,33 +4262,61 @@ impl<'a> Game<'a> {
             .handlers
             .iter()
             .filter(|h| !h.alt)
-            .filter(|h| matches!(h.func, fnv_script::vm::XVal::Ref(f) if f < LAMBDA_BASE))
+            .filter(|h| self.session_function(&h.func))
             .filter(|h| h.filters.iter().all(|(_, v)| !matches!(v, fnv_script::vm::XVal::Array(_))))
             .cloned()
             .collect();
-        let main_loop = self
+        let main_loop: Vec<_> = self
             .jip
             .main_loop
             .iter()
-            .filter(|m| m.flags & 8 == 0 && matches!(m.func, fnv_script::vm::XVal::Ref(f) if f < LAMBDA_BASE))
+            .filter(|m| m.flags & 8 == 0 && self.session_function(&m.func))
             .cloned()
             .map(|mut m| {
                 m.due = 0;
                 m
             })
             .collect();
+        let (main_loop_registrars, jip_seq) = self.jip.take_main_loop_registrars(&main_loop);
         let pp = self.pp_take_session();
         let sr_registered = self.sr.take_registered();
-        Session { handlers, main_loop, restarted_seen: std::mem::take(&mut self.restarted_seen), handler_seq: self.handler_seq, pp, itr_kept: std::mem::take(&mut self.other.itr.kept), sr_registered, jip_kept: std::mem::take(&mut self.jip.kept), dialogue_edits: self.dialogue_edits.for_session(), save_files: std::mem::take(&mut self.save_files), kept_calls: self.take_kept_calls(), list_edits: std::mem::take(&mut self.list_edits) }
+        let package_overrides: std::collections::HashMap<FormId, crate::package::PackageDef> = self
+            .package_overrides
+            .iter()
+            .filter(|(id, _)| self.data.package_defs.contains_key(id))
+            .map(|(&id, &def)| (id, def.clone()))
+            .collect();
+        self.package_overrides.retain(|id, _| !self.data.package_defs.contains_key(id));
+        let object_effect_overrides = self
+            .field_overrides
+            .iter()
+            .filter_map(|((form, key), val)| {
+                if key == "EITM/" && self.data.sigs.contains_key(form) {
+                    if let fnv_script::vm::XVal::Ref(id) = *val {
+                        return Some((*form, FormId(id)));
+                    }
+                }
+                None
+            })
+            .collect();
+        let weapon_crit_damage_overrides = self
+            .field_overrides
+            .iter()
+            .filter_map(|((form, key), val)| {
+                if key == "CRDT/critical_damage" && self.data.sigs.contains_key(form) {
+                    return Some((*form, val.clone()));
+                }
+                None
+            })
+            .collect();
+        Session { handlers, main_loop, main_loop_registrars, jip_seq, restarted_seen: std::mem::take(&mut self.restarted_seen), handler_seq: self.handler_seq, pp, itr_kept: std::mem::take(&mut self.other.itr.kept), sr_registered, jip_kept: std::mem::take(&mut self.jip.kept), dialogue_edits: self.dialogue_edits.for_session(), save_files: std::mem::take(&mut self.save_files), kept_calls: self.take_kept_calls(), list_edits: std::mem::take(&mut self.list_edits), owner_ranks: std::mem::take(&mut self.other.owner_ranks), destruction: std::mem::take(&mut self.other.jip6.destruction), perk_edits: std::mem::take(&mut self.lu3.perk_edits), ref_radius: std::mem::take(&mut self.other.lutana.ref_radius), radiation: std::mem::take(&mut self.showoff.radiation), terminal_password_notes: std::mem::take(&mut self.terminals.password_notes), package_overrides, zone_changes: std::mem::take(&mut self.other.zone_changes), object_effect_overrides, weapon_crit_damage_overrides }
     }
 
     /// Take over what lasts for the session ([`Game::take_session`]).
     pub fn put_session(&mut self, s: Session) {
         self.handlers = s.handlers;
         self.jip.main_loop = s.main_loop;
-        for callback in &mut self.jip.main_loop {
-            callback.last_clock = functions::clock_now(self.time);
-        }
+        self.jip.restore_main_loop_registrars(s.main_loop_registrars, s.jip_seq);
         self.restarted_seen = s.restarted_seen;
         self.handler_seq = s.handler_seq;
         self.pp_put_session(s.pp);
@@ -3759,6 +4327,22 @@ impl<'a> Game<'a> {
         self.save_files = s.save_files;
         self.put_kept_calls(s.kept_calls);
         self.list_edits = s.list_edits;
+        self.other.owner_ranks = s.owner_ranks;
+        self.other.jip6.destruction = s.destruction;
+        self.lu3.perk_edits = s.perk_edits;
+        self.other.lutana.ref_radius = s.ref_radius;
+        self.showoff.radiation = s.radiation;
+        self.terminals.password_notes = s.terminal_password_notes;
+        for (id, def) in s.package_overrides {
+            self.change_package(id, |d| *d = def);
+        }
+        self.other.zone_changes = s.zone_changes;
+        for (form, ench) in s.object_effect_overrides {
+            self.field_overrides.insert((form, "EITM/".into()), fnv_script::vm::XVal::Ref(ench.0));
+        }
+        for (form, val) in s.weapon_crit_damage_overrides {
+            self.field_overrides.insert((form, "CRDT/critical_damage".into()), val);
+        }
     }
 
     /// Run every handler registered for `event` whose filters match, highest priority
@@ -3788,6 +4372,32 @@ impl<'a> Game<'a> {
         }
         self.npc_door_run = door_run;
         self.event_names.pop();
+        hs.len()
+    }
+
+    /// Run every handler whose lower-case event name satisfies `matches` and whose filters
+    /// match, highest priority first, ties in registration order. Each handler sees its
+    /// own registered event name via `GetCurrentEventName` (used for bitmask-qualified
+    /// events such as `OnButtonDown:<mask>`).
+    pub(crate) fn dispatch_event_matching(&mut self, matches: impl Fn(&str) -> bool, args: Vec<fnv_script::vm::XVal>, on: Option<FormId>) -> usize {
+        if self.handlers.is_empty() {
+            return 0;
+        }
+        let mut hs: Vec<Handler> = self.handlers.iter().filter(|h| matches(&h.event) && self.handler_matches(h, &args, on)).cloned().collect();
+        if hs.is_empty() {
+            return 0;
+        }
+        hs.sort_by(|a, b| b.priority.cmp(&a.priority).then(a.seq.cmp(&b.seq)));
+        let ctx = RunCtx { self_ref: on, ..RunCtx::default() };
+        let door_run = self.npc_door_run.take();
+        for h in &hs {
+            self.event_names.push(h.name.clone());
+            if let Err(error) = self.run_function(&h.func, on.map(|f| Value::Ref(f.0)), args.clone(), None, ctx) {
+                self.handler_failed(format!("event handler for {}", h.name), error);
+            }
+            self.event_names.pop();
+        }
+        self.npc_door_run = door_run;
         hs.len()
     }
 
@@ -3905,6 +4515,9 @@ impl<'a> Game<'a> {
             self.instance(key, Some(script));
             self.cover_block(|| unit.key(), i);
             ran = true;
+            if event == event::ON_LOAD && matches!(key, InstKey::Ref { .. }) {
+                self.onload_runs += 1;
+            }
             let outer = self.jip.wait_depth.replace(self.depth + 1);
             let (returned, wait) = self.exec_at(unit, &b.body, Locals::Instance(key), ctx, resume.as_deref());
             self.jip.wait_depth = outer;
@@ -3955,10 +4568,17 @@ impl<'a> Game<'a> {
     /// Run a non-frame event on a reference's script, with a trace line.
     pub fn ref_event(&mut self, r: FormId, event: u16, subject: Option<Value>, action_ref: Option<FormId>) -> bool {
         self.ext_event(event, r, subject);
+        self.ref_blocks(r, event, subject, action_ref)
+    }
+
+    /// [`Game::ref_event`] without the NVSE event handlers: the reference's own blocks
+    /// only, for an event whose blocks take a `subject` its handlers are not given.
+    pub(crate) fn ref_blocks(&mut self, r: FormId, event: u16, subject: Option<Value>, action_ref: Option<FormId>) -> bool {
         if event == event::ON_LOAD {
             // An OnLoad run by the caller (a cell load, or an engine that runs it
             // itself) settles one queued by Enable: OnLoad runs once per load.
             self.pending_onload.retain(|&x| x != r);
+            self.restored_onload.retain(|&x| x != r);
         }
         let Some(script) = self.ref_script(r) else { return false };
         let has = self.data.script(script).is_some_and(|u| u.has_block(event));
@@ -4088,6 +4708,7 @@ impl<'a> Game<'a> {
     /// ran, each after the previous one was closed, layer5-captures.md §10.1–10.2].
     pub fn tick(&mut self) {
         self.frame += 1;
+        self.sync_knvse_ini();
         self.temp_refs.clear();
         self.sync_player_level();
         // JIP's SetGameMainLoopCallback functions due this frame (task J6), then xNVSE's
@@ -4113,6 +4734,9 @@ impl<'a> Game<'a> {
         let (dt, frame) = (self.cfg.frame_seconds, self.frame);
         self.gaps.sounds.tick(dt, frame);
         self.projectiles_tick(dt as f32);
+        // InsertNode's nodes in models drawn since (`crate::nvse_jippp`), before the
+        // per-frame handlers that move them.
+        self.insert_runtime_nodes();
         self.jg_event(crate::nvse_jip3::JgEvent::RenderUpdate, None);
         self.hud_tick();
         self.lu3_tick();
@@ -4130,6 +4754,8 @@ impl<'a> Game<'a> {
         self.world.set_power_armor_training(self.player.power_armor || self.tweaks.power_armor_needs_no_training);
         // The player's Equip Broken Items tweak [design: docs/design/tweaks.md].
         self.world.set_player_equips_broken(self.tweaks.equip_broken_items);
+        // The player's No Encounter Zone Level Lock tweak [design: docs/design/tweaks.md].
+        self.world.set_no_lock_encounter_zone_levels(self.tweaks.no_lock_encounter_zone_levels);
         // Cannibal's and Mister Sandman's acts that are over (`crate::activate_choices`).
         if !self.perk_acts.is_empty() {
             self.finish_perk_acts();
@@ -4177,8 +4803,28 @@ impl<'a> Game<'a> {
         if self.script_looks.fades.len() > 256 {
             self.script_looks.fades.drain(..128);
         }
-        for r in std::mem::take(&mut self.pending_onload) {
+        // Those queued before this frame, each still in its list until its turn: an earlier
+        // OnLoad that loads cells (a MoveTo of the player) runs a later one's OnLoad there,
+        // which takes it off (`Game::ref_blocks`), so none runs twice; one queued during
+        // this frame waits for the next.
+        let due = self.pending_onload.clone();
+        for r in due {
+            if !self.pending_onload.contains(&r) {
+                continue;
+            }
+            self.pending_onload.retain(|&x| x != r);
             if self.present(r) && self.cell_of(r).is_some_and(|c| self.loaded_cells.contains(&c)) {
+                self.ref_event(r, event::ON_LOAD, None, None);
+            }
+        }
+        // After a restore (`Game::queue_template_onloads`): alive when its turn comes.
+        let due = self.restored_onload.clone();
+        for r in due {
+            if !self.restored_onload.contains(&r) {
+                continue;
+            }
+            self.restored_onload.retain(|&x| x != r);
+            if self.present(r) && !self.is_dead(r) && self.cell_of(r).is_some_and(|c| self.loaded_cells.contains(&c)) {
                 self.ref_event(r, event::ON_LOAD, None, None);
             }
         }
@@ -4271,6 +4917,7 @@ impl<'a> Game<'a> {
         self.sync_loaded_actor_effects();
         if !in_menu {
             self.update_effects(dt);
+            self.tick_man_on_fire(dt);
             self.tick_concussions();
             self.tick_radiation(dt);
             self.tick_needs(dt);
@@ -4545,6 +5192,13 @@ impl<'a> Game<'a> {
     /// observed: the Begin Again list 2026-11-13, MCM listed none of the 23 it loaded].
     /// How many handlers ran.
     pub fn page_menu_event(&mut self, code: u16, open: bool) -> usize {
+        // Input callbacks can run just before the held page's first script tick.
+        // A new request from that same opening belongs to the new page lifetime.
+        let carry_cursor = open && self.other.jip9.cursor_warp.is_some()
+            && self.other.jip9.cursor_warp_start_menu
+            && self.other.jip9.cursor_warp_requested_generation == self.other.jip9.cursor_warp_generation;
+        self.other.jip9.invalidate_cursor_warp();
+        if carry_cursor { self.other.jip9.cursor_warp_requested_generation = self.other.jip9.cursor_warp_generation; }
         let before = self.page_menu.replace(code);
         let ran = self.jip_event(if open { "menuopen" } else { "menuclose" }, None, vec![fnv_script::vm::XVal::Num(f64::from(code))]);
         self.page_menu = before;
@@ -4743,6 +5397,7 @@ impl<'a> Game<'a> {
 
     pub fn close_menu(&mut self) -> Option<u16> {
         let m = self.menu.take()?;
+        self.other.jip9.invalidate_cursor_warp();
         if m == menus::TUTORIAL {
             // The menu under it is the open one again (`Game::show_tutorial`).
             self.tutorial.clear();
@@ -4938,8 +5593,8 @@ impl<'a> Game<'a> {
     ///   "forced to look at the speaker" unless `noTargetLookFlag`]: its head only for a
     ///   SayTo line [design], head and body in a conversation between actors, where it
     ///   speaks next [design, as `fnv_ai` has turned both since it started them];
-    /// - nobody, when the line's [`LineLook`] says so (StartConversation's `headTrack` 0,
-    ///   SayTo's `noTargetLookFlag` 1).
+    /// - nobody, when the line's [`LineLook`] says so (StartConversation's `headTrack` 0);
+    ///   the speaker alone for SayTo's `noTargetLookFlag` 1.
     ///
     /// A line said to nobody (Say) turns nobody. Whether the engine can turn a body (one
     /// on furniture or on its way cannot) is the engine's. A line said through a talking
@@ -4955,6 +5610,9 @@ impl<'a> Game<'a> {
                 continue;
             }
             out.push(Facing { who: speaker, to, body: true, speaking: true, info: s.info });
+            if s.look == LineLook::Speaker {
+                continue;
+            }
             out.push(Facing { who: to, to: speaker, body: s.conversation.is_some(), speaking: false, info: s.info });
         }
         out
@@ -5017,6 +5675,7 @@ impl<'a> Game<'a> {
             self.emit(EventKind::ResultScript { unit: data.unit(u).key(), on: Some(speaker) });
             self.run_result(u, RunCtx { self_ref: Some(speaker), action_ref: None, quest: def.quest });
         }
+        self.jip_dialog_topic(speaker, topic, info);
     }
 
     /// The lines being said outside a conversation move on to their next responses as
@@ -5096,11 +5755,14 @@ impl<'a> Game<'a> {
     /// to it, no conversation: [`Speech::greeting`]). The engine keeps it where it
     /// stands, turned to the player, until the line is over; its package goes on after
     /// [owner statement 2026-10-27, the Goodsprings settler's water line: "make her stop
-    /// and look at the player"; docs/design/dialogue-play.md §1]. Not once it is in a
-    /// combat state (Alert, Combat, Lost): the line then ends as if said to the end
-    /// (`Game::update_speech_of`) and it fights.
+    /// and look at the player"; docs/design/dialogue-play.md §1]. Not once it is fighting
+    /// (`State::Combat`, #883): the line then ends as if said to the end
+    /// (`Game::update_speech_of`) and it fights. An actor that is merely searching
+    /// (`State::Alert` or `State::Lost`, #3663) still pauses to finish its greeting
+    /// [hypothesis: a searching NPC can be talked to].
     pub fn greets_player(&self, actor: FormId) -> bool {
-        !self.awareness.state(actor).in_combat() && self.speech.iter().any(|s| s.speaker == actor && s.greeting && s.target == Some(FormId::PLAYER_REF))
+        self.awareness.state(actor) != crate::awareness::State::Combat
+            && self.speech.iter().any(|s| s.speaker == actor && s.greeting && s.target == Some(FormId::PLAYER_REF))
     }
 
     /// One frame of dialogue (game time only, like script time [hypothesis: a line does
@@ -5130,12 +5792,15 @@ impl<'a> Game<'a> {
             // be (`crate::talking_activators`); the actor's death still cuts the line.
             let place = s.place();
             let here = self.world.peek(place).is_none_or(|w| !w.deleted()) && self.world.is_enabled(place).unwrap_or(false);
-            // A Goodbye greeting at the player whose speaker is drawn into a fight ends at
-            // once as if said to the end (`Game::cut_line`, `Game::greets_player`) [owner
-            // statement 2026-10-27: "skip to the end of the line as if she finished
-            // speaking", "all the code runs"]; so does a farewell ([`Speech::farewell`])
-            // [hypothesis, as in `Game::cut_line`].
-            let fights = s.goodbye_at_player() && self.awareness.state(s.speaker).in_combat();
+            // A Goodbye greeting at the player whose speaker is drawn into a fight
+            // (`State::Combat`, #883) ends at once as if said to the end (`Game::cut_line`,
+            // `Game::greets_player`) [owner statement 2026-10-27: "skip to the end of the
+            // line as if she finished speaking", "all the code runs"]; so does a farewell
+            // ([`Speech::farewell`]) [hypothesis, as in `Game::cut_line`]. Searching states
+            // (`State::Alert` / `State::Lost`, #3663) do not end the line prematurely so a
+            // Goodbye greeting started while searching is heard rather than discarded in
+            // the same frame [hypothesis: a searching NPC can be talked to].
+            let fights = s.goodbye_at_player() && self.awareness.state(s.speaker) == crate::awareness::State::Combat;
             if !here || (self.extra.get(&s.speaker).is_some_and(|e| e.dead) && Some(s.topic) != death) {
                 cut.push(s.speaker);
             } else if s.remaining <= 1e-9 || fights {
@@ -5329,6 +5994,18 @@ impl<'a> Game<'a> {
         self.scripted_refs_in(&self.loaded_cells)
     }
 
+    /// Whether `r` is an actor scripted only through its template: its base has no script
+    /// of its own and takes the script from a template (template flag "Script") or is a
+    /// leveled list placed directly. Used to find moved actors for OnLoad when restoring
+    /// a save (docs/spec-notes/scripts.md §7.1) [design, #3228].
+    pub fn template_only(&self, r: FormId) -> bool {
+        let Some(base) = self.world.peek(r).map(|s| s.base).or_else(|| self.world.placed.get(r).map(|p| p.base)) else { return false };
+        if self.data.script_of_base(base).is_some() {
+            return false;
+        }
+        self.data.actors.get(&base).is_some_and(|a| a.template_script && a.template.is_some()) || self.data.leveled_actors.contains_key(&base)
+    }
+
     /// Scripted references now in `cells` and not deleted, disabled ones included, in
     /// FormID order: those placed there that stayed, and those moved or created there.
     fn scripted_refs_in(&self, cells: &BTreeSet<FormId>) -> Vec<FormId> {
@@ -5342,6 +6019,44 @@ impl<'a> Game<'a> {
         out.into_iter()
             .filter(|&r| self.cell_of(r).is_some_and(|c| cells.contains(&c)) && self.world.peek(r).is_none_or(|s| !s.deleted()))
             .collect()
+    }
+
+    /// Actors placed in `cell` that are scripted only through their template
+    /// ([`crate::data::GameData::template_scripted_by_cell`]), still there and not
+    /// deleted, in FormID order. This index schedules OnLoad and OnReset
+    /// (docs/spec-notes/scripts.md §7.1) [design].
+    pub(crate) fn template_scripted_in(&self, cell: FormId) -> Vec<FormId> {
+        self.data
+            .template_scripted_by_cell
+            .get(&cell)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&r| self.cell_of(r) == Some(cell) && self.world.peek(r).is_none_or(|s| !s.deleted()))
+            .collect()
+    }
+
+    /// After a save is restored: the living actors now in a loaded cell (placed there or
+    /// moved there) that are scripted only through their template and whose script has an
+    /// OnLoad block run it at the start of the next frame (`restored_onload`, checked
+    /// again then). The cells stay loaded through a restore, so no cell load runs it; a
+    /// save from before #3228 holds leveled spawns' placeholders that never ran theirs and
+    /// are alive, some away from where they were placed (docs/spec-notes/dead-on-spawn.md
+    /// §4.1) [design; hypothesis: the original runs OnLoad when a reference's 3D loads, a
+    /// loaded save's too]. References scripted by their own base are left as before.
+    fn queue_template_onloads(&mut self) {
+        let mut refs: BTreeSet<FormId> = self.data.template_scripted_by_cell.values().flatten().copied().collect();
+        refs.extend(self.moved.iter().copied().filter(|&r| self.template_only(r)));
+        for r in refs {
+            let loaded = self.cell_of(r).is_some_and(|c| self.loaded_cells.contains(&c));
+            if !loaded || self.world.peek(r).is_some_and(|s| s.deleted()) || self.is_dead(r) {
+                continue;
+            }
+            let has = self.ref_script(r).and_then(|s| self.data.script(s)).is_some_and(|u| u.has_block(event::ON_LOAD));
+            if has && !self.restored_onload.contains(&r) {
+                self.restored_onload.push(r);
+            }
+        }
     }
 
     /// The cells loaded around `cell`: the cell itself for an interior; for an exterior,
@@ -5406,6 +6121,11 @@ impl<'a> Game<'a> {
                 let mut refs = self.scripted_refs_in(&BTreeSet::from([c]));
                 // MoveTo lists a scripted player as moved; no cell loads the player.
                 refs.retain(|&r| r != FormId::PLAYER_REF);
+                // Actors scripted only through their template run OnLoad too (#3228).
+                let mut templated = self.template_scripted_in(c);
+                templated.retain(|r| !refs.contains(r));
+                refs.extend(templated);
+                refs.sort();
                 // The extender's OnLoad handlers hear the unscripted references too.
                 let others = if all { self.refs_in_cell(c, false).into_iter().filter(|r| !refs.contains(r)).collect() } else { Vec::new() };
                 (refs, others)
@@ -5449,6 +6169,13 @@ impl<'a> Game<'a> {
             if was_interior && placed.world_of(c).is_some() && !self.player.fast_travel.keep {
                 self.player.fast_travel.travel_disabled = false;
             }
+            if let Some(w) = placed.world_of(c) {
+                self.other.jg6.last_exterior_world = Some(w);
+            } else if self.other.jg6.last_exterior_world.is_none() {
+                if let Some(w) = self.loaded_cells.iter().find_map(|&l| placed.world_of(l)) {
+                    self.other.jg6.last_exterior_world = Some(w);
+                }
+            }
             let cells = self.cells_around(c);
             self.set_loaded(cells);
         }
@@ -5491,6 +6218,13 @@ impl<'a> Game<'a> {
             if !self.activation_goes_on(actor, target) {
                 return Ok(serde_json::json!({"result": "destroyed"}));
             }
+        } else {
+            if !self.pre_scripted_activation_allows(actor, target, mode == ActMode::Block) {
+                return Ok(serde_json::json!({"result": "prevented"}));
+            }
+            if !self.activation_goes_on(actor, target) {
+                return Ok(serde_json::json!({"result": "destroyed"}));
+            }
         }
         // The player's Disable Character Respec tweak: the activator that offers to remake
         // the character on leaving the start (VCG04ActivatorScript) does nothing
@@ -5525,32 +6259,39 @@ impl<'a> Game<'a> {
         self.activation_goes_on(actor, target) && self.pre_activation_allows(actor, target) && self.activation_goes_on(actor, target)
     }
 
-    /// Regular activation only: after OnActivate observers and before a block or
-    /// default action. An explicit numeric SetFunctionValue 0 prevents activation;
-    /// a void callback keeps the ordinary Call result without becoming a veto.
+    /// Shared dispatch for ShowOff cancellable pre-events (`ShowOff:OnPreActivate`,
+    /// `ShowOff:OnPreScriptedActivate`, `ShowOff:OnPreActivateInventoryItem`,
+    /// `ShowOff:OnPreActivateInventoryItemAlt`). An explicit numeric `SetFunctionValue 0`
+    /// sets `allowed = false` (sticky); a void callback or error does not veto.
     /// See docs/spec-notes/preactivation-events.md.
-    fn pre_activation_allows(&mut self, actor: FormId, target: FormId) -> bool {
+    pub(crate) fn dispatch_pre_event(
+        &mut self,
+        event: &str,
+        on: Option<FormId>,
+        action_ref: Option<FormId>,
+        initial_allowed: bool,
+        mut build_args: impl FnMut(bool) -> Vec<fnv_script::vm::XVal>,
+    ) -> bool {
         use fnv_script::vm::XVal;
-        const EVENT: &str = "ShowOff:OnPreActivate";
-        let mut handlers: Vec<_> = self.handlers.iter().filter(|h| h.event.eq_ignore_ascii_case(EVENT)).cloned().collect();
-        if handlers.is_empty() { return true; }
+        let mut handlers: Vec<_> = self.handlers.iter().filter(|h| h.event.eq_ignore_ascii_case(event)).cloned().collect();
+        if handlers.is_empty() { return initial_allowed; }
         handlers.sort_by(|a, b| b.priority.cmp(&a.priority).then(a.seq.cmp(&b.seq)));
         // A callback may unregister an array-filtered later callback. Keep the
         // dispatch snapshot's filters alive while its current allowed flag changes.
         for handler in &handlers {
             for (_, filter) in &handler.filters { self.ext.retain(filter); }
         }
-        self.event_names.push(EVENT.into());
+        self.event_names.push(event.into());
         let door_run = self.npc_door_run.take();
-        let mut allowed = true;
+        let mut allowed = initial_allowed;
         for handler in &handlers {
-            let args = vec![XVal::Ref(actor.0), XVal::Num(if allowed { 1.0 } else { 0.0 })];
-            if !self.handler_matches(handler, &args, Some(target)) { continue; }
-            let ctx = RunCtx { self_ref: Some(target), action_ref: Some(actor), ..RunCtx::default() };
-            match self.run_function(&handler.func, Some(Value::Ref(target.0)), args, None, ctx) {
+            let args = build_args(allowed);
+            if !self.handler_matches(handler, &args, on) { continue; }
+            let ctx = RunCtx { self_ref: on, action_ref, ..RunCtx::default() };
+            match self.run_function(&handler.func, on.map(|r| Value::Ref(r.0)), args, None, ctx) {
                 Ok(XVal::Num(value)) if self.udf_value_set && value == 0.0 => allowed = false,
                 Ok(_) => {},
-                Err(error) => self.handler_failed(format!("event handler for {EVENT}"), error),
+                Err(error) => self.handler_failed(format!("event handler for {event}"), error),
             }
         }
         self.npc_door_run = door_run;
@@ -5559,6 +6300,17 @@ impl<'a> Game<'a> {
             for (_, filter) in &handler.filters { self.ext.release(filter); }
         }
         allowed
+    }
+
+    /// Regular activation only: after OnActivate observers and before a block or
+    /// default action. An explicit numeric SetFunctionValue 0 prevents activation;
+    /// a void callback keeps the ordinary Call result without becoming a veto.
+    /// See docs/spec-notes/preactivation-events.md.
+    fn pre_activation_allows(&mut self, actor: FormId, target: FormId) -> bool {
+        use fnv_script::vm::XVal;
+        self.dispatch_pre_event("ShowOff:OnPreActivate", Some(target), Some(actor), true, |allowed| {
+            vec![XVal::Ref(actor.0), XVal::Num(if allowed { 1.0 } else { 0.0 })]
+        })
     }
 
     /// The extender's OnActivate handlers hear `actor` activating `target` (the target
@@ -5666,7 +6418,7 @@ impl<'a> Game<'a> {
             Outcome::PickedUp { item, count, .. } => {
                 item_added_event = Some(self.events.len());
                 self.emit(EventKind::ItemAdded { to: actor, item, count, silent: false });
-                self.item_event(actor, item, event::ON_ADD, Some(Value::Ref(actor.0)));
+                self.item_event_with(actor, item, event::ON_ADD, Some(Value::Ref(actor.0)), Some(target));
             }
             Outcome::Teleported { cell, .. } if actor == FormId::PLAYER_REF => {
                 self.arrived_through(target, cell);
@@ -5735,6 +6487,17 @@ impl<'a> Game<'a> {
     /// An inventory event on a scripted item (OnAdd, OnDrop, OnEquip, OnUnequip): the
     /// item's script runs in an instance per holder and item [hypothesis].
     pub fn item_event(&mut self, holder: FormId, item: FormId, ev: u16, subject: Option<Value>) -> bool {
+        self.item_event_with(holder, item, ev, subject, None)
+    }
+
+    fn item_event_with(
+        &mut self,
+        holder: FormId,
+        item: FormId,
+        ev: u16,
+        subject: Option<Value>,
+        world_ref: Option<FormId>,
+    ) -> bool {
         // The extender's OnEquip and OnUnequip (and OnActorUnequip with it): the holder and
         // the item [observed: nvse-events, (player, pistol) for all three]. Not OnAdd:
         // AddItem of a base form did not fire it [observed]; OnDrop is sent by Drop with
@@ -5743,7 +6506,7 @@ impl<'a> Game<'a> {
             self.ext_event(ev, holder, Some(Value::Ref(item.0)));
         }
         if ev == event::ON_ADD {
-            self.showoff_on_add(holder, item);
+            self.showoff_on_add(holder, item, world_ref);
         }
         if ev == event::ON_UNEQUIP {
             use fnv_script::vm::XVal;
@@ -5830,10 +6593,18 @@ impl<'a> Game<'a> {
     /// script (0 begin, 1 end, 2 change) and the actor's OnPackageStart / OnPackageDone /
     /// OnPackageChange blocks.
     pub fn package_event(&mut self, actor: FormId, package: FormId, which: usize) {
-        let data = self.data;
         if which != 1 {
             self.extra.entry(actor).or_default().current_package = Some(package);
         }
+        self.run_package_event(actor, package, which);
+    }
+
+    /// Run a package's event hooks (result script, topic, idle, and actor script block)
+    /// without mutating `current_package`. Used by [`Game::set_package`] so an outgoing
+    /// package's Change script (`which == 2`) sees the already-updated `current_package`
+    /// and cannot re-enter itself via `EvaluatePackage`.
+    pub(crate) fn run_package_event(&mut self, actor: FormId, package: FormId, which: usize) {
+        let data = self.data;
         if let Some(Some(u)) = data.packages.get(&package).map(|p| p[which]) {
             self.emit(EventKind::ResultScript { unit: data.unit(u).key(), on: Some(actor) });
             self.run_result(u, RunCtx { self_ref: Some(actor), ..Default::default() });
@@ -5904,7 +6675,14 @@ impl<'a> Game<'a> {
     pub fn apply_magic_item_with(&mut self, target: FormId, source: FormId, caster: Option<FormId>, permanent: bool, mods: &crate::aid::Mods) -> Vec<crate::aid::Applied> {
         let data = self.data;
         // With AddNewEffect's entries after the record's (`crate::nvse_jip14`).
-        let items = self.applied_effects(source);
+        let items = {
+            let own = self.applied_effects(source);
+            if own.is_empty() && self.clones.contains_key(&source) {
+                self.applied_effects(self.unclone(source))
+            } else {
+                own
+            }
+        };
         if items.is_empty() {
             return Vec::new();
         }
@@ -5918,7 +6696,7 @@ impl<'a> Game<'a> {
             if mods.only.is_some_and(|o| o != index) || self.effect_removed(source, index) {
                 continue;
             }
-            let label = format!("{} effect {index}", data.name(source));
+            let label = format!("{} effect {index}", data.name(self.unclone(source)));
             // A lasting effect whose conditions fail (an ability, a worn enchantment, or a
             // spell's effect with a duration) is listed inactive, to take hold when they
             // pass (`crate::abilities::recheck_conditions`); only an instant one is dropped.
@@ -5929,7 +6707,8 @@ impl<'a> Game<'a> {
             if !pass && !permanent && e.duration == 0 {
                 continue;
             }
-            let seconds = mods.seconds(data.magic_effects.get(&e.effect), e);
+            let mgef = self.magic_effect_def(e.effect);
+            let seconds = mods.seconds(mgef.as_ref(), e);
             if !permanent && e.duration > 0 {
                 let active = self
                     .effects
@@ -5954,14 +6733,13 @@ impl<'a> Game<'a> {
             }
             let id = self.next_effect;
             self.next_effect += 1;
-            let script = data.magic_effects.get(&e.effect).and_then(|m| m.script).filter(|s| data.scripts.contains_key(s));
-            let resisted = if mods.hit { self.resisted(target, data.magic_effects.get(&e.effect)) } else { 0.0 };
+            let script = mgef.as_ref().and_then(|m| m.script).filter(|s| data.scripts.contains_key(s));
+            let resisted = if mods.hit { self.resisted(target, mgef.as_ref()) } else { 0.0 };
             if resisted >= 1.0 {
                 continue;
             }
-            let change = data
-                .magic_effects
-                .get(&e.effect)
+            let change = mgef
+                .as_ref()
                 .and_then(|m| crate::aid::value_change(m, e, mods.potency, permanent))
                 .map(|c| mods.on_change(c))
                 .map(|mut c| {
@@ -6018,6 +6796,12 @@ impl<'a> Game<'a> {
     /// removed and it is used ([`Game::ingest`]: its effects with the item's potency, the
     /// usage monitor and the addiction roll). EquipItem of an aid item does the same.
     pub fn consume(&mut self, actor: FormId, item: FormId) -> Result<Vec<u32>, String> {
+        if self.handled(crate::nvse_showoff::ON_PRE_ACTIVATE_INVENTORY_ITEM_ALT)
+            && self.world.item_count(actor, item).unwrap_or(0) > 0
+            && !self.pre_activate_inventory_item_alt(actor, item, 0, true)
+        {
+            return Ok(Vec::new());
+        }
         let removed = self.world.remove_item(actor, item, 1).map_err(|e| e.to_string())?;
         if removed == 0 {
             return Err(format!("{} carries no {}", self.data.name(actor), self.data.name(item)));
@@ -6082,7 +6866,7 @@ impl<'a> Game<'a> {
     /// default objects' Drug Wears Off Image Space plays [documented: the DOBJ entry's
     /// name; hypothesis: when, docs/spec-notes/default-objects.md].
     fn drug_wore_off(&mut self, target: FormId, source: FormId) {
-        let chem = self.data.ingestibles.get(&source).is_some_and(|i| i.equip_type == crate::data::IngestibleDef::CHEMS);
+        let chem = self.ingestible_def(source).is_some_and(|i| i.equip_type == crate::data::IngestibleDef::CHEMS);
         // The player's tweak can leave the effect out [design: docs/design/tweaks.md].
         if target != FormId::PLAYER_REF || !chem || self.tweaks.no_chem_wore_off_effect || self.effects.iter().any(|x| x.target == target && x.source == source) {
             return;
@@ -6167,24 +6951,71 @@ impl<'a> Game<'a> {
 
     // ---- image space modifiers ---------------------------------------------------
 
-    /// ApplyImageSpaceModifier: the modifier starts playing. One that is already on the
-    /// screen starts again from its beginning [hypothesis: one instance per modifier;
-    /// image-modifiers.md §3].
+    /// Safety cap on stacked instances tracked per IMAD form so a script re-applying an
+    /// IMAD in a loop cannot grow memory or `OnRemoveIMOD` loops without bound [design].
+    pub const MAX_IMOD_STACK: usize = 64;
+
+    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance in
+    /// exact application order (`image-modifiers.md §3`, `jip-world-12.md §2`). Both
+    /// animatable and non-animatable re-applies push an [`ActiveImageModifier`] entry
+    /// capped at `MAX_IMOD_STACK` per form (evicting the oldest matching entry once at
+    /// capacity so repeated script re-applies stay bounded), while the renderer draws at
+    /// most one instance per form [design]. Dispatches xNVSE `OnApplyIMOD` PRE-update with
+    /// `(modifier)` and `on = None` when handled so `IsImageSpaceActive` reads `0` on first
+    /// apply and `1` when stacking onto an already-active modifier [documented: GECK wiki
+    /// NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9,
+    /// 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters, probes
+    /// `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice + `rimod` twice on
+    /// `WhiteNonAnimated` `0x000C9AFA`) and `b3_core_ex_06_on_apply_imod_event`
+    /// (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier` on `0x00144C41`) in #3679;
+    /// application-order non-animatable duplicates observed: 2026-11-24, JIP LN 57.30,
+    /// probe `w4d_24_active_imods_order` in `tools/capture/nvse/catalogs/wave4d_extenders.json`
+    /// (`n=3,0=00054E13,1=001736A8,2=00054E13`)].
     pub fn apply_image_modifier(&mut self, modifier: FormId) {
-        self.image_modifiers.retain(|m| m.modifier != modifier);
+        if self.handled("onapplyimod") {
+            self.dispatch_event("OnApplyIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
+        }
+        let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if active >= Self::MAX_IMOD_STACK {
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
+            }
+        }
         self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
         self.emit(EventKind::ImageModifierApplied { modifier });
     }
 
-    /// RemoveImageSpaceModifier: whether the modifier was on the screen.
+    /// RemoveImageSpaceModifier: removes every active instance of `modifier`, returning
+    /// whether any was active. Dispatches xNVSE `OnRemoveIMOD` PRE-removal with `(modifier)`
+    /// and `on = None` once per removed stacked instance so `IsImageSpaceActive` reads `1`
+    /// inside each callback (twice when two stacked instances are removed) [documented:
+    /// GECK wiki NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525 + xNVSE
+    /// 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters,
+    /// probe `w1_3656_objectives_unholster_imod` (`imod` twice then `rimod` on
+    /// `WhiteNonAnimated` `0x000C9AFA` -> 2 `OnRemoveIMOD` callbacks with `IsActive=1`,
+    /// then 0 on inactive `rimod`) in #3679].
     pub fn remove_image_modifier(&mut self, modifier: FormId) -> bool {
-        let before = self.image_modifiers.len();
-        self.image_modifiers.retain(|m| m.modifier != modifier);
-        let was = self.image_modifiers.len() != before;
-        if was {
+        let total = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if total == 0 {
+            return false;
+        }
+        let mut removed = false;
+        for _ in 0..total {
+            if !self.image_modifiers.iter().any(|m| m.modifier == modifier) {
+                break;
+            }
+            if self.handled("onremoveimod") {
+                self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
+            }
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
+                removed = true;
+            }
+        }
+        if removed {
             self.emit(EventKind::ImageModifierRemoved { modifier, ended: false });
         }
-        was
+        removed
     }
 
     /// IsImageSpaceActive.
@@ -6195,19 +7026,36 @@ impl<'a> Game<'a> {
     /// Age the modifiers; an animatable one whose duration has passed ends [hypothesis
     /// from the shipped scripts: 29 lines wait for IsImageSpaceActive to read 0 on
     /// FadeToBlackISFX (4 s), which no script removes; image-modifiers.md §3].
+    /// Dispatches xNVSE `OnRemoveIMOD` PRE-removal when an active modifier expires so
+    /// `IsImageSpaceActive` reads `1` inside the callback [observed: Fallout: New Vegas
+    /// 1.4.0.525 + xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official
+    /// base masters, probe `w1_3656_objectives_unholster_imod` (`imod GetHit` `0x00000162`
+    /// 0.4 s + ~1.5 s wait -> `OnRemoveIMOD` with `IsImageSpaceActive == 1`, then `0`)
+    /// in #3679].
     fn update_image_modifiers(&mut self, dt: f64) {
         let data = self.data;
-        let mut ended = Vec::new();
-        self.image_modifiers.retain_mut(|m| {
+        let mut expired = Vec::new();
+        for m in &mut self.image_modifiers {
             m.elapsed += dt;
-            let over = data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64);
-            if over {
-                ended.push(m.modifier);
+            if data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64) {
+                expired.push(m.modifier);
             }
-            !over
-        });
-        for modifier in ended {
-            self.emit(EventKind::ImageModifierRemoved { modifier, ended: true });
+        }
+        for modifier in expired {
+            let is_expired = |m: &ActiveImageModifier| {
+                m.modifier == modifier
+                    && data.image_modifiers.get(&m.modifier).is_some_and(|d| d.animatable && m.elapsed + 1e-9 >= d.duration as f64)
+            };
+            if !self.image_modifiers.iter().any(is_expired) {
+                continue;
+            }
+            if self.handled("onremoveimod") {
+                self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
+            }
+            if let Some(pos) = self.image_modifiers.iter().position(is_expired) {
+                self.image_modifiers.remove(pos);
+                self.emit(EventKind::ImageModifierRemoved { modifier, ended: true });
+            }
         }
     }
 
@@ -6298,6 +7146,21 @@ impl<'a> Game<'a> {
         if c.function == crate::idles::IS_LAST_IDLE_PLAYED {
             return crate::idles::is_last_idle_played(self, on, &c.params);
         }
+        // IsGreetingPlayer and GetUsedItemLevel have condition indices only (`cond`, #3614).
+        if c.function == cond::IS_GREETING_PLAYER {
+            return if on.is_some_and(|a| self.is_greeting_player(a)) { 1.0 } else { 0.0 };
+        }
+        // What "the used item's level" counts is not documented; 0 keeps the only
+        // conditions on it (the ground pick-up idles, `== 0`) passing, as they did before
+        // the index was named [hypothesis: a level of 0 is the ground, the idles' case].
+        // IsHorseStolen: New Vegas has no horses, so none is stolen [hypothesis: a check
+        // left from the engine's earlier game; the name is xEdit's, #3617].
+        if c.function == cond::IS_HORSE_STOLEN {
+            return 0.0;
+        }
+        if c.function == cond::GET_USED_ITEM_LEVEL {
+            return 0.0;
+        }
         // The VATS area functions have condition indices only, too (`crate::vats`).
         if crate::vats::is_area_function(c.function) {
             return crate::vats::area_value(self, c.function);
@@ -6308,33 +7171,46 @@ impl<'a> Game<'a> {
         if c.params.iter().any(|p| matches!(p, ArgValue::Value(Value::Ref(0)))) {
             return 0.0;
         }
-        // Only these two CTDA aliases use the already built named extender handlers.
-        // This is not a fallback for arbitrary unknown opcodes. Keep the established
-        // null-form condition rule above, and form remapping in cond::ParamTypes.
-        let native = match c.function {
-            cond::GET_PERK_RANK => Some("getperkrank"),
-            cond::GET_PC_USING_IRON_SIGHTS => Some("getpcusingironsights"),
-            _ => None,
-        };
-        if let Some(name) = native {
-            use fnv_script::vm::XVal;
-            let args = if c.function == cond::GET_PERK_RANK {
-                match c.params.first() {
-                    Some(ArgValue::Value(Value::Ref(r))) => vec![XVal::Ref(*r)],
-                    Some(ArgValue::Value(Value::Num(n))) => vec![XVal::Num(*n)],
-                    _ => Vec::new(),
-                }
-            } else { Vec::new() };
-            return match crate::nvse::call(self, &RunCtx { self_ref: on, ..RunCtx::default() }, name, on, &args) {
-                Some(Ok(XVal::Num(value))) => value,
-                Some(Err(error)) => {
-                    self.emit(EventKind::CallFailed { opcode: format!("0x{:04X}", ctx.opcode), name: name.into(), unit: ctx.unit.to_string(), error });
-                    0.0
-                }
-                _ => 0.0,
-            };
+        // An extender function in a condition (a mod's CTDA): the registry has no entry for
+        // its opcode, the original's opcode table names it, and the named extender
+        // dispatcher answers it, with the parameters `cond::ParamTypes` read (#3616,
+        // docs/spec-notes/extender-condition-aliases.md). The null-form rule above holds
+        // for it too; a name no handler knows goes on to the unhandled path below.
+        if functions::lookup(ctx.opcode).is_none() {
+            if let Some(v) = self.extender_condition(&ctx, on, &c.params) {
+                return v;
+            }
         }
         self.call_function(&ctx, &c.params).num()
+    }
+
+    /// [`Game::condition_value`]'s bridge to the named extender handlers: `None` when no
+    /// name the opcode table gives `ctx.opcode` has a handler.
+    fn extender_condition(&mut self, ctx: &Ctx, on: Option<FormId>, params: &[ArgValue]) -> Option<f64> {
+        use fnv_script::vm::XVal;
+        let args: Vec<XVal> = params
+            .iter()
+            .map(|p| match p {
+                ArgValue::Value(Value::Ref(r)) => XVal::Ref(*r),
+                ArgValue::Value(Value::Num(n)) => XVal::Num(*n),
+                ArgValue::Enum(e) => XVal::Num(*e as f64),
+                _ => XVal::Num(0.0),
+            })
+            .collect();
+        let run = RunCtx { self_ref: on, ..RunCtx::default() };
+        for name in crate::nvse_debug::opcode_names(ctx.opcode as u32) {
+            let lower = name.to_ascii_lowercase();
+            match crate::nvse::call(self, &run, &lower, on, &args) {
+                Some(Ok(XVal::Num(value))) => return Some(value),
+                Some(Ok(_)) => return Some(0.0),
+                Some(Err(error)) => {
+                    self.emit(EventKind::CallFailed { opcode: format!("0x{:04X}", ctx.opcode), name, unit: ctx.unit.to_string(), error });
+                    return Some(0.0);
+                }
+                None => {}
+            }
+        }
+        None
     }
 
     /// Dispatch a function by opcode (scripts and conditions share it).
@@ -6462,11 +7338,16 @@ impl<'a> Game<'a> {
         let retired_scene_bases = self.retired_scene_snapshot(&sim);
         let clone_sequence_floor = (!retired_scene_bases.is_empty()).then_some(self.clone_seq);
         GameSnapshot {
-            format: if retired_scene_bases.is_empty() { SNAPSHOT_FORMAT } else { crate::retired_scene::FORMAT }.into(),
+            format: match (retired_scene_bases.is_empty(), self.lambdas.is_empty()) {
+                (true, true) => SNAPSHOT_FORMAT,
+                (true, false) => LAMBDA_SNAPSHOT_FORMAT,
+                (false, true) => crate::retired_scene::FORMAT,
+                (false, false) => crate::retired_scene::FORMAT_WITH_LAMBDAS,
+            }.into(),
             retired_scene_bases,
             clone_sequence_floor,
             ext: self.ext.clone(),
-            lambdas: self.lambdas.iter().map(|d| SavedLambda { unit: d.key.clone(), lambda: d.lambda.clone(), inst: d.inst }).collect(),
+            lambdas: self.lambdas.iter().map(|d| SavedLambda { handle: Some(d.handle), unit: d.key.clone(), lambda: d.lambda.clone(), inst: d.inst }).collect(),
             // A created reference deleted since keeps no variables: its FormID is not
             // used again, so they could never be read.
             nx: crate::nvse_nx::NxVars(self.nx.0.iter().filter(|(id, _)| !sim.deleted_created.contains_key(id)).map(|(k, v)| (*k, v.clone())).collect()),
@@ -6519,9 +7400,13 @@ impl<'a> Game<'a> {
             say_to_unsaid: self.say_to_unsaid.clone(),
             queued_ref_events: self.queued_ref_events.clone(),
             door_open_seen: self.door_open_seen.iter().filter(|&(&r, &seen)| self.world.peek(r).is_some_and(|s| s.open != seen)).map(|(&r, &seen)| (r, seen)).collect(),
-            awareness: self.awareness.actors.iter().filter(|(_, a)| a.state.in_combat() || !a.targets.is_empty() || !a.alarms.is_empty() || a.fighting.is_some()).map(|(&r, a)| (r, a.clone())).collect(),
+            awareness: self.awareness.actors.iter().filter(|(_, a)| a.state.in_combat() || !a.targets.is_empty() || !a.alarms.is_empty() || a.fighting.is_some()).map(|(&r, a)| {
+                // `scripted` is kept as `scripted_combat` below.
+                (r, crate::awareness::Awareness { scripted: BTreeSet::new(), ..a.clone() })
+            }).collect(),
             fighting: Some(self.fighting.clone()),
             forced_combat: self.awareness.forced.clone(),
+            scripted_combat: (!self.awareness.forced.is_empty()).then(|| self.scripted_combat()),
             form_instances: self.pp.instances.iter().map(|(k, v)| (*k, v.clone())).collect(),
             object_groups: self.anims.asked_all().clone(),
             extra_misc_stats: self.jip2.misc_stats.iter().map(|(k, v)| (k.clone(), *v)).collect(),
@@ -6536,7 +7421,16 @@ impl<'a> Game<'a> {
         g.retired_scene_bases = s.retired_scene_bases.clone();
         g.clone_seq = s.clone_sequence_floor.unwrap_or(0);
         g.ext = s.ext.clone();
-        for l in &s.lambdas {
+        for (ordinal, l) in s.lambdas.iter().enumerate() {
+            let handle = match l.handle {
+                Some(handle) => handle,
+                None => LAMBDA_BASE.checked_add(u32::try_from(ordinal).map_err(|_| "too many saved lambdas")?).ok_or("too many saved lambdas")?,
+            };
+            if !(LAMBDA_BASE..FormId::FIRST_DYNAMIC.0).contains(&handle) || g.lambda_slots.contains_key(&handle) || data.sig(FormId(handle)).is_some() {
+                return Err(format!("saved lambda handle {handle:08X} is not an unambiguous runtime callable"));
+            }
+            g.next_lambda = g.next_lambda.max(handle + 1);
+            g.lambda_slots.insert(handle, g.lambdas.len());
             // A lambda whose unit is gone (a plugin removed, a console line) keeps its place,
             // so the later ones keep their names; calling it fails.
             let unit = data.unit_by_key.get(&l.unit).map(|&i| &data.units[i]);
@@ -6545,9 +7439,9 @@ impl<'a> Game<'a> {
             // reads every lambda as number 0, and an edited plugin can number other code
             // the same; those get a new ID with the current code when made.
             if let Some(u) = unit.filter(|u| unit_lambda(u, &l.lambda).is_some_and(|now| now == l.lambda)) {
-                g.lambda_ids.entry(lambda_key(u, &l.lambda, l.inst)).or_insert(LAMBDA_BASE + g.lambdas.len() as u32);
+                g.lambda_ids.entry(lambda_key(u, &l.lambda, l.inst)).or_insert(handle);
             }
-            g.lambdas.push(LambdaDef { unit, key: l.unit.clone(), lambda: l.lambda.clone(), inst: l.inst, captured: None });
+            g.lambdas.push(LambdaDef { handle, unit, key: l.unit.clone(), lambda: l.lambda.clone(), inst: l.inst, captured: None });
         }
         g.nx = s.nx.clone();
         g.quests = s.quests.clone();
@@ -6604,6 +7498,7 @@ impl<'a> Game<'a> {
         g.radio.npc_radios = s.npc_radios.clone();
         g.weather.shown = s.weather_shown;
         g.weather.raining = s.raining;
+        g.weather.clear_measurement();
         g.provocations.grudges = s.grudges.iter().copied().collect();
         g.provocations.forgiven = s.forgiven.clone();
         g.nav_switches = s.nav_switches.clone();
@@ -6619,6 +7514,7 @@ impl<'a> Game<'a> {
         g.restore_jip10(&s.jip10);
         g.awareness.actors = s.awareness.clone();
         g.awareness.forced = s.forced_combat.clone();
+        g.restore_scripted_combat(s.scripted_combat.as_ref());
         // A save from before `fighting` was saved cannot say which starts had run: everyone
         // in Combat or Lost counts as started, Alert (no fight yet) does not [design:
         // docs/design/save-load.md §3.2]. A start still due in such a save does not run.
@@ -6646,6 +7542,8 @@ impl<'a> Game<'a> {
         }
         // Crime enmities an older save holds undated start their cooldown now (#2467).
         g.date_crimes();
+        // Template-scripted actors' OnLoad after a load (#3228).
+        g.queue_template_onloads();
         let pos: u128 = s.rng_word_pos.parse().map_err(|_| format!("bad rng_word_pos {:?}", s.rng_word_pos))?;
         g.rng.set_word_pos(pos);
         Ok(g)
@@ -6770,7 +7668,7 @@ impl Exec<'_, '_> {
     fn inst_key(&self) -> Option<InstKey> {
         match self.locals {
             Locals::Instance(k) => Some(k),
-            Locals::Temp(_) => None,
+            Locals::Temp(_) | Locals::Console => None,
         }
     }
 
@@ -6846,7 +7744,7 @@ impl Host for Exec<'_, '_> {
             }
         }
         let g = &*self.game;
-        let named = |x: FormId| g.name_overrides.get(&x).or_else(|| g.data.full_names.get(&g.unclone(x))).cloned();
+        let named = |x: FormId| g.name_overrides.get(&x).or_else(|| g.forms.saved_names.get(&x)).or_else(|| g.data.full_names.get(&g.unclone(x))).cloned();
         named(f).or_else(|| crate::functions::base_of(g, f).and_then(named))
     }
 
@@ -6858,6 +7756,7 @@ impl Host for Exec<'_, '_> {
             }
             (None, VarSlot::Local { index, .. }) => Ok(match &self.locals {
                 Locals::Temp(m) => m.get(&index).copied().unwrap_or_default(),
+                Locals::Console => self.game.console_locals.values.get(&index).copied().unwrap_or_default(),
                 Locals::Instance(k) => self.game.var(*k, index),
             }),
             (Some(r), VarSlot::Local { index, .. }) => {
@@ -6885,6 +7784,10 @@ impl Host for Exec<'_, '_> {
                 Locals::Temp(m) => {
                     let int = matches!(self.unit.var_type(index), Some(VarType::Int)) || (self.unit.var_type(index).is_none() && short(letter));
                     m.insert(index, if int { Value::Num(to_int_storage(value.num()) as f64) } else { value });
+                }
+                Locals::Console => {
+                    let int = matches!(self.unit.var_type(index), Some(VarType::Int)) || (self.unit.var_type(index).is_none() && short(letter));
+                    self.game.console_locals.values.insert(index, if int { Value::Num(to_int_storage(value.num()) as f64) } else { value });
                 }
                 Locals::Instance(k) => {
                     let k = *k;
@@ -7084,17 +7987,24 @@ impl Host for Exec<'_, '_> {
         if let Some(&id) = self.game.lambda_ids.get(&key) {
             // Made again by a maker with no instance: it reads that run's variables
             // [hypothesis, script-compiler.md §9 Lambdas].
-            if let (Locals::Temp(m), Some(d)) = (&self.locals, self.game.lambdas.get_mut((id - LAMBDA_BASE) as usize)) {
-                d.captured = Some(m.clone());
+            if let Some(&index) = self.game.lambda_slots.get(&id) {
+                match &self.locals {
+                    Locals::Temp(m) => self.game.lambdas[index].captured = Some(m.clone()),
+                    Locals::Console => self.game.lambdas[index].captured = Some(self.game.console_locals.values.clone()),
+                    Locals::Instance(_) => {}
+                }
             }
             return Ok(fnv_script::vm::XVal::Ref(id));
         }
-        let id = LAMBDA_BASE + self.game.lambdas.len() as u32;
+        let id = self.game.free_callable_handle(self.game.next_lambda, FormId::FIRST_DYNAMIC.0).ok_or("runtime lambda handles exhausted")?;
+        self.game.next_lambda = id + 1;
         let captured = match &self.locals {
             Locals::Temp(m) => Some(m.clone()),
+            Locals::Console => Some(self.game.console_locals.values.clone()),
             Locals::Instance(_) => None,
         };
-        self.game.lambdas.push(LambdaDef { unit: Some(self.unit), key: self.unit.key(), lambda: l.clone(), inst: key.2, captured });
+        self.game.lambda_slots.insert(id, self.game.lambdas.len());
+        self.game.lambdas.push(LambdaDef { handle: id, unit: Some(self.unit), key: self.unit.key(), lambda: l.clone(), inst: key.2, captured });
         self.game.lambda_ids.insert(key, id);
         Ok(fnv_script::vm::XVal::Ref(id))
     }
@@ -7123,8 +8033,8 @@ impl Host for Exec<'_, '_> {
         // A lambda this run made, called in it, runs on this run's variables and leaves
         // them as it wrote them (`Game::run_function_here`).
         let mine = match (f, &self.locals) {
-            (fnv_script::vm::XVal::Ref(id), Locals::Temp(m)) if *id >= LAMBDA_BASE => {
-                let i = (*id - LAMBDA_BASE) as usize;
+            (fnv_script::vm::XVal::Ref(id), Locals::Temp(m)) if self.game.lambda_slots.contains_key(id) => {
+                let i = self.game.lambda_slots[id];
                 let unit = self.unit as *const Compiled;
                 match self.game.lambdas.get_mut(i) {
                     Some(d) if d.inst.is_none() && d.unit.is_some_and(|u| std::ptr::eq(u, unit)) => {
@@ -7134,12 +8044,28 @@ impl Host for Exec<'_, '_> {
                     _ => None,
                 }
             }
+            (fnv_script::vm::XVal::Ref(id), Locals::Console) if self.game.lambda_slots.contains_key(id) => {
+                let i = self.game.lambda_slots[id];
+                let unit = self.unit as *const Compiled;
+                let snap = self.game.console_locals.values.clone();
+                match self.game.lambdas.get_mut(i) {
+                    Some(d) if d.inst.is_none() && d.unit.is_some_and(|u| std::ptr::eq(u, unit)) => {
+                        d.captured = Some(snap);
+                        Some(i)
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
         };
         let r = self.game.run_function_with_seconds(f, on, args, caller, (ctx, self.seconds));
-        if let (Some(i), Locals::Temp(m)) = (mine, &mut self.locals) {
+        if let Some(i) = mine {
             if let Some(c) = self.game.lambdas.get(i).and_then(|d| d.captured.clone()) {
-                *m = c;
+                match &mut self.locals {
+                    Locals::Temp(m) => *m = c,
+                    Locals::Console => self.game.console_locals.values = c,
+                    Locals::Instance(_) => {}
+                }
             }
         }
         r
@@ -7147,9 +8073,13 @@ impl Host for Exec<'_, '_> {
 
     fn event_call(&mut self, c: fnv_script::vm::EventCall) -> Result<fnv_script::vm::XVal, String> {
         let sender = self.unit.unit.plugin.clone();
-        let registrar = if matches!(&c, fnv_script::vm::EventCall::JipSet { add: true, .. }) {
+        let registrar = if matches!(
+            &c,
+            fnv_script::vm::EventCall::JipSet { add: true, .. }
+                | fnv_script::vm::EventCall::MainLoop { add: true, .. }
+        ) {
             let plugin = self.calling_plugin();
-            let compiled = self.game.compiled_files.iter().position(|&unit| std::ptr::eq(unit, self.unit)).map(|i| COMPILED_BASE + i as u32);
+            let compiled = self.game.compiled_slots.iter().find_map(|(&id, &index)| std::ptr::eq(self.game.compiled_files[index], self.unit).then_some(id));
             let origin = compiled.and_then(|id| self.game.compiled_origins.get(id));
             Some(std::sync::Arc::new(crate::jip_provenance::Registrar::capture(self.unit, self.ctx, plugin, compiled, origin)))
         } else { None };
@@ -7185,6 +8115,11 @@ impl Host for Exec<'_, '_> {
         // The player reference is no record of a plugin [documented: PlayerREF, 00000014].
         if let Some(s) = self.game.data.sig(f).or_else(|| (f == FormId::PLAYER_REF).then_some(*b"ACHR")) {
             return Some(s);
+        }
+        // Built-in JohnnyGuitar camera overlay references fall back to REFR only when no
+        // loaded plugin record occupies the same FormID [design].
+        if crate::nvse_jg_nif::is_camera_overlay_ref(f) {
+            return Some(*b"REFR");
         }
         // A reference made at run time (a dropped item, PlaceAtMe) is a reference too, an
         // actor's by its base [observed: rgb-ui, OnDrop's dropped stimpak is a reference
@@ -7260,11 +8195,15 @@ impl Host for Exec<'_, '_> {
             (_, VarSlot::Global { global }) => VarPlace::Global(self.global_form(global).ok()?),
             (None, VarSlot::Local { index, .. }) => match &self.locals {
                 Locals::Instance(k) => VarPlace::Var(*k, index),
-                Locals::Temp(_) => return None,
+                Locals::Temp(_) | Locals::Console => return None,
             },
             (Some(r), VarSlot::Local { index, .. }) => VarPlace::Var(self.remote(r).ok()?.0, index),
         };
         Some(self.game.add_var_place(p))
+    }
+
+    fn allows_null_receiver(&self, name: &str) -> bool {
+        functions::player_source::handles(name)
     }
 
     fn ext_call(&mut self, name: &str, on: Option<Value>, args: &[fnv_script::vm::XVal]) -> Option<Result<fnv_script::vm::XVal, String>> {
@@ -7272,6 +8211,11 @@ impl Host for Exec<'_, '_> {
             let source_ctx = Ctx { unit: self.unit.shared_key().clone(), opcode: 0, on: None, self_ref: self.ctx.self_ref,
                 action_ref: self.ctx.action_ref, quest: self.ctx.quest, inst: None, in_condition: false };
             return functions::player_source::call(self.game, &source_ctx, on, name, args);
+        }
+        if functions::refs::handles_source(name) {
+            let source_ctx = Ctx { unit: self.unit.shared_key().clone(), opcode: 0, on: None, self_ref: self.ctx.self_ref,
+                action_ref: self.ctx.action_ref, quest: self.ctx.quest, inst: None, in_condition: false };
+            return functions::refs::call_source(self.game, &source_ctx, on, name, args);
         }
         let on = on.and_then(|v| v.as_form()).map(FormId);
         let ctx = self.ctx;
@@ -7370,3 +8314,7 @@ mod effect_lookup_tests {
         assert_eq!(effect_from(&[], 3, 2), None);
     }
 }
+
+#[cfg(test)]
+#[path = "game/callable_allocation_tests.rs"]
+mod callable_allocation_tests;

@@ -1,7 +1,7 @@
 # NVForever for Nuclear Sunset (FNV + TTW)
 
-This branch is NVForever **v0.8.0** (upstream tag `v0.8.0`, commit `6cb47ad`) with local fixes
-that make the Nuclear Sunset modlist (Fallout: New Vegas + Tale of Two Wastelands, 251 plugins,
+This branch is NVForever upstream `main` as of 2026-11-25 (commit `bd0c8f4`, after tag `v0.8.1`;
+first built on `v0.8.0`, `6cb47ad`) with local fixes that make the Nuclear Sunset modlist (Fallout: New Vegas + Tale of Two Wastelands, 251 plugins,
 Mod Organizer 2) start and play. The charter in `CLAUDE.md` still holds: clean room, every claim
 tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repository.
 
@@ -10,6 +10,39 @@ tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repos
 - Problem → cause → fix → how to check, plus what was tried and taken back out:
   [`docs/nuclear-sunset/FIXES.md`](docs/nuclear-sunset/FIXES.md).
 - Debug tools (Bug Log, `bughunt`): [`docs/debug-tools.md`](docs/debug-tools.md).
+
+## Sync with upstream, 2026-11-25
+
+Upstream `main` (`bd0c8f4`, 2,475 commits past `v0.8.0`) was merged into this branch (a merge
+commit, no history rewritten). Upstream had meanwhile fixed several of the issues reported
+from here in its own way; where its fix covers ours, **upstream's code was kept and ours
+dropped**:
+
+| # | Ours | Now |
+|---|---|---|
+| 11 | NIF size-table retry in `fnv-nif/src/file.rs` | upstream's same fallback (`size_table_ignored`) |
+| 12 | Megaton railing ×7 (#3110) | upstream's identical fix in `fnv-collide/src/nif.rs` |
+| 16 | stale TAA view (#2955) | upstream's `drop_stale` in `taa.rs` |
+| 17 | SpeechChallengeFailure offered (#3024) | upstream's `player_links` filter in `dialogue.rs` |
+| 18, 21 | karma and caps sounds (#3095) | upstream's `sound_by_edid` and `ItemAddedSound` |
+| 19 | gilrs second-controller crash (#3097) | upstream's vendored `engine/vendor/gilrs` (same patch, skips to the next event) |
+| 20 | interior fog 0..0 (#3038) | upstream's `interior_fog_active` in `sky.rs` |
+| 22 | level-up held by searchers (#3030) | upstream's `after_combat::drawn_hunters` in `xp_meter.rs` (our `experience.rs` loaded-cell filter stays) |
+| 24 | `GetCellFlag` on a worldspace (#3757) | upstream's CELL-only check in `nvse_gaps.rs` |
+| 26 | our "Distant tree distance" slider (percent) | upstream's "Tree distance" row (game units, #3016) |
+
+Kept and merged into upstream's new code: MO2 merged-file listings (`mod_files.rs` `list` next to
+upstream's `read_roots`/directory-link walk), yUI 140 next to upstream's Improved Console, the
+texture size cap (now also on BC4/BC7, after upstream's `colour_shape_ok`), the terrain
+layer-alpha fix (also on the new parallax path), Outdoor Fog Distance (now
+`sky.rs` `apply_cell_fog_spread`), No Invisible Walls, the Pip-Boy short-clip fix (inside
+upstream's `set_pipboy_layer`), the Mod List/Bug Log hold, `bughunt`, F8 Bug Log and the NVR
+look. One lane moved: the emissive hold for ordinary lit emitters (#9) is now
+`emissive_rule.y` on lit shapes, because upstream uses `.w` as the authored-material mark.
+
+Checked in the cloud: `cargo check` of both workspaces, the root workspace tests and the
+engine tests named in the commit. **Not yet checked: a game run on the Nuclear Sunset
+install** (smoke test, Goodsprings and Megaton bug hunt).
 
 ## Release notes
 

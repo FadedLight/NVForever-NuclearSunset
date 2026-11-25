@@ -2,6 +2,7 @@
 //! that starts the game.
 
 use crate::catalog::{self, Catalog, Kind, Row};
+use crate::catalog::rule_holds;
 use crate::launch::{self, Start};
 use crate::news::{self, Post, Source};
 use crate::theme::{self, BAD, CARD, GOLD, GOOD, LINE, WEAK};
@@ -50,7 +51,23 @@ enum Upd {
     /// Downloaded and checked; installs as soon as the game is not running.
     Ready(update::Ready),
     Installing,
+    /// The swap is done and the new launcher was started: this window is closing (#3117).
+    Closing,
     Failed(String),
+}
+
+impl Upd {
+    /// Whether a close of the window is refused: only during the swap itself. The launcher's
+    /// own close after the swap arrives as a close request one frame later, so the state has
+    /// to have left `Installing` by then or the launcher cancels its own close (#3117).
+    fn refuses_close(&self) -> bool {
+        matches!(self, Upd::Installing)
+    }
+
+    /// The state once the swap went in, by whether the new launcher could be started.
+    fn installed(restarted: &Result<(), String>) -> Upd {
+        if restarted.is_ok() { Upd::Closing } else { Upd::Idle }
+    }
 }
 
 /// The launcher's version: its build's, or `NVF_LAUNCHER_VERSION` (a test aid: a launcher
@@ -320,7 +337,7 @@ impl App {
     }
 
     fn game(&self) -> Option<GameInstall> {
-        Config::from_ini(&self.ini_text).game_dir.and_then(|d| GameInstall::open(d).ok())
+        launch::game_from_ini(&self.ini_text)
     }
 
     /// Whether the game would find its folder when started now ([`launch::folder_known`]).
@@ -328,18 +345,10 @@ impl App {
         launch::folder_known(self.game().is_some(), fnv_install::mo2::usvfs_loaded(), std::env::var_os("NVFOREVER_DATA").as_deref())
     }
 
-    /// Write `edit` over the INI as it is on disk now (the game may have written it since it
-    /// was read), keeping every other line.
-    fn write_ini(&mut self, edit: impl FnOnce(String) -> String) -> Result<(), String> {
+    /// Read the latest file first, keeping every other line.
+    fn write_ini(&self, edit: impl FnOnce(String) -> String) -> Result<(), String> {
         let path = self.ini_path().ok_or("no home folder (Documents) found")?;
-        let now = std::fs::read_to_string(&path).unwrap_or_default();
-        let text = edit(now);
-        guard_write(&path, self.game().as_ref()).map_err(|e| e.to_string())?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        write_whole(&path, text.as_bytes()).map_err(|e| e.to_string())?;
-        Ok(())
+        launch::write_ini(&path, edit)
     }
 
     fn set_launcher_key(&mut self, key: &str, value: &str) {
@@ -467,7 +476,7 @@ impl App {
     }
 
     fn start(&mut self, ctx: &egui::Context, start: Start) {
-        if matches!(self.upd, Upd::Installing) {
+        if matches!(self.upd, Upd::Installing | Upd::Closing) {
             self.message = Some(("The update is being installed: play once it is done.".into(), true));
             return;
         }
@@ -503,13 +512,7 @@ impl App {
     }
 
     fn save_settings(&mut self) -> Result<(), String> {
-        let edits = self.edits.clone();
-        self.write_ini(|mut t| {
-            for (k, v) in &edits {
-                t = ini_set(&t, "Settings", k, v);
-            }
-            t
-        })
+        self.write_ini(|text| catalog::with_edits(text, &self.edits))
     }
 }
 
@@ -519,7 +522,7 @@ impl eframe::App for App {
         self.poll_news();
         let running = self.running();
         self.poll_update(ctx, running);
-        if matches!(self.upd, Upd::Installing) && ctx.input(|i| i.viewport().close_requested()) {
+        if self.upd.refuses_close() && ctx.input(|i| i.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.message = Some(("Installing the update: the launcher closes by itself when it is done.".into(), false));
         }
@@ -791,20 +794,6 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     let x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
     p.circle_filled(egui::pos2(x, rect.center().y), 8.0, theme::TEXT);
     resp
-}
-
-/// Whether `rule` holds for its row's INI value `value` (its choice's name `name`), the row
-/// of kind `kind` (`None`: built in, by the value).
-fn rule_holds(rule: &menu::Rule, kind: Option<&menu::Kind>, value: &str, name: &str) -> bool {
-    if !rule.choices.is_empty() {
-        return rule.choices.iter().any(|c| c.eq_ignore_ascii_case(name));
-    }
-    match kind {
-        Some(menu::Kind::List { choices }) => choices.first().is_none_or(|c| c.name != name),
-        Some(menu::Kind::Slider { .. }) => value.parse::<f32>().is_ok_and(|v| v >= 0.5),
-        // A switch, or a row with no kind (built in): off as `0`, a list's Off, or no value.
-        _ => !(value.is_empty() || value == "0" || value.eq_ignore_ascii_case("off")),
-    }
 }
 
 /// The part of 0..1 that `text`, typed into a slider of the evenly spread `words`, stands
@@ -1106,6 +1095,11 @@ impl App {
                         menu_control(ui, key, kind, &v, control_w)
                     } else if let Some(choices) = self.display_choices(key) {
                         let at = crate::display::chosen(key, &choices, &v);
+                        // Monitor with nothing kept: the display the game takes then (#3334).
+                        let at = at.or_else(|| {
+                            let m = (key == "monitor" && v.trim().is_empty()).then(|| crate::display::chosen_monitor(&self.monitors, None)).flatten()?;
+                            choices.iter().position(|c| c.stored == m.name)
+                        });
                         let shown = at.map_or(v.clone(), |i| choices[i].label.clone());
                         let mut picked = None;
                         egui::ComboBox::from_id_salt(key).width(control_w - 8.0).selected_text(shown).show_ui(ui, |ui| {
@@ -1401,16 +1395,9 @@ impl App {
     fn display_choices(&self, key: &str) -> Option<Vec<crate::display::Choice>> {
         use crate::display;
         match key {
-            "display-sync" => Some(display::sync_choices()),
-            "frame-cap" => Some(display::cap_choices()),
             "monitor" if !self.monitors.is_empty() => Some(display::monitor_choices(&self.monitors)),
-            "physics-rate" => Some(display::physics_choices()),
-            "fps-counter-low" => Some(display::counter_low_choices()),
-            "crosshair-style" => Some(display::crosshair_choices()),
-            "hud-colour" | "pipboy-colour" => Some(display::colour_choices()),
             "language" => Some(self.languages.clone()),
-            "frame-generation" => Some(display::frame_gen_choices()),
-            k => display::named_choices(k),
+            k => display::common_choices(k),
         }
     }
 
@@ -1628,8 +1615,8 @@ impl App {
                     self.start_edit = saved.clone();
                 }
             });
-            if self.start_edit.is_ttw() && ttw == Some(false) {
-                ui.label(RichText::new(format!("{} is off in the list below: turn it on, or this start quest is not found.", start::TTW_PLUGIN)).small().color(BAD));
+            if let Some(why) = start::ttw_missing(&self.start_edit, ttw) {
+                ui.label(RichText::new(why).small().color(BAD));
             }
         });
         if save {
@@ -1742,7 +1729,13 @@ impl App {
     fn save_game_folder(&mut self) {
         let dir = PathBuf::from(self.game_edit.trim());
         let r = match GameInstall::open(&dir) {
-            Ok(_) => self.write_ini(|t| Config { game_dir: Some(dir.clone()), code_page: None }.to_ini(&t)),
+            Ok(_) => self.write_ini(|t| {
+                Config {
+                    game_dir: Some(dir.clone()),
+                    ..Config::default()
+                }
+                .to_ini(&t)
+            }),
             Err(e) => Err(e.to_string()),
         };
         self.after_write(r, Some("Game folder saved."));
@@ -1834,10 +1827,10 @@ impl App {
                 Msg::Installed(Ok(v)) => {
                     self.upd_rx = None;
                     let restarted = install_dir(self.game().as_ref()).and_then(|d| update::restart(&d, "--updated").map_err(|e| e.to_string()));
+                    self.upd = Upd::installed(&restarted);
                     match restarted {
                         Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
                         Err(e) => {
-                            self.upd = Upd::Idle;
                             self.latest = None;
                             self.message = Some((format!("Updated to v{v}; start the launcher again ({e})."), false));
                         }
@@ -1933,7 +1926,7 @@ impl App {
                     Upd::Ready(_) => {
                         ui.label(RichText::new(if running { "Downloaded. It installs as soon as the game is closed." } else { "Downloaded." }).color(GOOD));
                     }
-                    Upd::Installing => {
+                    Upd::Installing | Upd::Closing => {
                         ui.add(egui::ProgressBar::new(1.0).animate(true).text(Phase::Installing.words()));
                     }
                     Upd::Failed(e) => {
@@ -2029,6 +2022,23 @@ fn preview(body: &str, open: bool) -> (&str, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #3117: the close guard holds the window only during the swap; once the new launcher
+    /// was started the old one's own close goes through.
+    #[test]
+    fn the_window_closes_once_the_new_launcher_started() {
+        assert!(Upd::Installing.refuses_close());
+        let after = Upd::installed(&Ok(()));
+        assert!(matches!(after, Upd::Closing));
+        assert!(!after.refuses_close());
+        // The new launcher did not start: the window stays, usable and closable by hand.
+        let after = Upd::installed(&Err("no such file".into()));
+        assert!(matches!(after, Upd::Idle));
+        assert!(!after.refuses_close());
+        for u in [Upd::Idle, Upd::Working { phase: Phase::Checking, done: 0, total: 0 }, Upd::Failed(String::new())] {
+            assert!(!u.refuses_close());
+        }
+    }
 
     #[test]
     fn parts_as_the_ini_keeps_them() {

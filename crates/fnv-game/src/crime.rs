@@ -467,6 +467,22 @@ impl Game<'_> {
         self.forms.public_cells.get(&cell).copied().unwrap_or_else(|| self.data.cells.get(&cell).is_some_and(|c| c.public))
     }
 
+    /// The faction rank required to own `r`: SetOwningFactionRequiredRank's override,
+    /// else the placed record's XRNK.
+    pub fn owner_rank(&self, r: FormId) -> Option<i32> {
+        self.other.owner_ranks.get(&r).or_else(|| self.data.owner_ranks.get(&r)).copied()
+    }
+
+    /// The reference's own owner (without cell inheritance): live `extra.owner` when
+    /// loaded/edited (`SetOwnership`/`ClearOwnership`/`SetOwnershipTemp`), else the
+    /// placed record's XOWN.
+    pub(crate) fn ref_owner_in(world: &World<'_>, r: FormId) -> Option<FormId> {
+        match world.peek(r) {
+            Some(s) => s.extra.owner,
+            None => world.placed.get(r).and_then(|p| p.owner),
+        }
+    }
+
     /// Who owns a reference (module notes): its own owner, else its cell's. A reference
     /// made at run time (a dropped item) has no cell to inherit from [design].
     pub fn ownership(&self, r: FormId) -> Option<Ownership> {
@@ -476,14 +492,10 @@ impl Game<'_> {
     /// [`Game::ownership`] with the references' state of `world` (the engine keeps the
     /// world outside the game between script runs).
     pub fn ownership_in(&self, world: &World<'_>, r: FormId) -> Option<Ownership> {
-        let state = world.peek(r);
-        let own = match state {
-            Some(s) => s.extra.owner,
-            None => world.placed.get(r).and_then(|p| p.owner),
-        };
-        if let Some(owner) = own {
-            return Some(Ownership { owner, rank: self.data.owner_ranks.get(&r).copied(), from_cell: false });
+        if let Some(owner) = Self::ref_owner_in(world, r) {
+            return Some(Ownership { owner, rank: self.owner_rank(r), from_cell: false });
         }
+        let state = world.peek(r);
         let placed = world.placed.get(r)?;
         let cell = state.and_then(|s| s.cell).or(placed.cell)?;
         self.cell_ownership(cell)
@@ -552,9 +564,20 @@ impl Game<'_> {
         self.turn_on_player(actor, kind)
     }
 
+    /// Effective 16-bit FACT flags for `faction`, checking saved `FormChanges::faction_flags`
+    /// overrides before the authored `GameData::faction_flags`.
+    pub fn faction_flags(&self, faction: FormId) -> u16 {
+        self.forms
+            .faction_flags
+            .get(&faction)
+            .copied()
+            .or_else(|| self.data.faction_flags.get(&faction).copied())
+            .unwrap_or(0)
+    }
+
     fn karma_for_theft(&mut self, o: &Ownership) -> bool {
         if self.is_faction(o.owner) {
-            let f = self.data.faction_flags.get(&o.owner).copied().unwrap_or(0);
+            let f = self.faction_flags(o.owner);
             return f & faction_flags::TRACK_CRIME != 0 && f & faction_flags::EVIL == 0;
         }
         !self.alignment(o.owner).evil()
@@ -671,7 +694,7 @@ impl Game<'_> {
         let owners: Vec<FormId> = seen_by.iter().copied().filter(|&w| self.speaks_for(w, o)).collect();
         // A faction that does not track crime does not remember it [documented: GECK wiki
         // Category:Factions, Track Crime].
-        let tracks = !self.is_faction(o.owner) || self.data.faction_flags.get(&o.owner).is_some_and(|f| f & faction_flags::TRACK_CRIME != 0);
+        let tracks = !self.is_faction(o.owner) || (self.faction_flags(o.owner) & faction_flags::TRACK_CRIME != 0);
         let mut hostile = Vec::new();
         if tracks {
             for &w in &owners {
@@ -765,7 +788,7 @@ impl Game<'_> {
         // count restarts (§3.7, #2467).
         if cared {
             for f in factions_of(self, victim) {
-                let tracks = self.data.faction_flags.get(&f).is_some_and(|x| x & faction_flags::TRACK_CRIME != 0);
+                let tracks = self.faction_flags(f) & faction_flags::TRACK_CRIME != 0;
                 if tracks {
                     self.make_player_enemy_of(f);
                 }

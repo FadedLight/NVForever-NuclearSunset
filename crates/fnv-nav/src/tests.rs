@@ -401,6 +401,35 @@ fn a_walker_stops_and_faces_a_load_door_before_going_through() {
     panic!("never reached the door");
 }
 
+/// A door on a one-triangle navmesh whose portal lands on the floor's edge, where the
+/// floor's own link leads elsewhere (Lonesome Road's silo lift, 0x0100A556): the floor's
+/// edge is linked back, and a path from the floor goes through the door.
+#[test]
+fn a_one_way_portal_is_linked_back_from_the_edge_it_lands_on() {
+    let inside = Space::Interior(0x77);
+    let mut a = grid(1, [0.0, 0.0], 2, 2, 100.0, &[], flat);
+    let mut b = grid(2, [5000.0, 5000.0], 3, 3, 100.0, &[], |_, _| 50.0);
+    // The patch east of a: one triangle on a's east edge at y 0..100.
+    let (at, ae, p0, p1) = edges_at(&a, 200.0).into_iter().find(|e| e.2[1].max(e.3[1]) <= 100.0).unwrap();
+    let mut patch = NavMeshRecord { form_id: 3, vertices: vec![p1, p0, [260.0, 50.0, 0.0]], triangles: vec![Triangle { v: [0, 1, 2], edges: [-1; 3], flags: 0, cover: 0 }], ..Default::default() };
+    link(&mut patch, 0, 0, 1, at, 0);
+    // a's edge there links, stale, to a triangle of b far off.
+    link(&mut a, at, ae, 2, 0, 0);
+    patch.door_links.push(DoorLink { door: 0xD1, triangle: 0 });
+    b.door_links.push(DoorLink { door: 0xD2, triangle: 0 });
+    let meshes = [(a, W), (patch, W), (b, inside)];
+    let input: Vec<_> = meshes.iter().map(|(m, s)| (m, Some(0), Some(*s))).collect();
+    let mut g = NavGraph::assemble(&input);
+    assert_eq!(g.stats.portals_joined_back, 1);
+    g.join_doors(&input, |door| match door {
+        0xD1 => Some((0xD2, [5050.0, 5030.0, 50.0], 0.5, inside)),
+        0xD2 => Some((0xD1, [240.0, 50.0, 0.0], 3.0, W)),
+        _ => None,
+    });
+    let p = g.find_path(Place { space: W, pos: [20.0, 180.0, 0.0] }, Place { space: inside, pos: [5250.0, 5250.0, 50.0] }, &PathParams::default()).unwrap();
+    assert_eq!(p.legs[0].door.map(|d| d.door), Some(0xD1));
+}
+
 #[test]
 fn routes_chain_interiors_and_worldspaces_and_respect_locks() {
     use crate::graph::DoorLock;
@@ -755,6 +784,40 @@ fn locked_doors_that_open_in_place_close_the_way_without_the_key() {
     // Unlocked at run time.
     g.set_door_lock(0xD00, None);
     assert!(g.find_path(from, to, &PathParams::default()).is_ok());
+}
+
+#[test]
+fn a_door_that_opens_in_place_and_is_not_in_the_world_bars_nothing() {
+    // #2405, Point Lookout's mansion: two doors in one doorway, the quest's spawn door
+    // (opened by its stage) and a locked one placed initially disabled for later. The
+    // disabled one stood in Desmond's way; a door not in the world bars nothing.
+    use crate::graph::DoorLock;
+    let mut g = graph(&[(grid(1, [0.0, 0.0], 10, 1, 100.0, &[], flat), W)]);
+    let locked = DoorLock { level: 255, key: None };
+    g.set_in_place_doors(vec![hinged(0xD00, 500.0, 0.0), hinged(0xD01, 500.0, 0.0)], |_| Some(locked));
+    let from = Place { space: W, pos: [50.0, 50.0, 0.0] };
+    let to = Place { space: W, pos: [950.0, 50.0, 0.0] };
+    let spawn_open = PathParams { open_doors: vec![0xD00], ..Default::default() };
+    // Both in the world: the locked one closes the way, and the search says how much it
+    // searched before giving up (the failed leg's triangles were not counted: "0
+    // triangles searched" read as no door at all).
+    match g.find_path(from, to, &spawn_open) {
+        Err(PathError::Unreachable { expanded }) => assert!(expanded > 0, "{expanded}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(g.doors_closing(from, to, &spawn_open), Some(vec![0xD01]), "the door to blame");
+    // Disabled (as placed, or by a script): no barrier, and no stop in front of it.
+    let changes = g.sync_door_presence([(0xD01, false)]);
+    assert_eq!(changes.gone, vec![0xD01]);
+    let path = g.find_path(from, to, &spawn_open).unwrap();
+    assert_eq!(path.legs[0].door_stops.iter().map(|s| s.door).collect::<Vec<_>>(), vec![0xD00]);
+    assert_eq!(g.doors_closing(from, to, &spawn_open), Some(vec![]));
+    // Enabled again: closed again.
+    assert_eq!(g.sync_door_presence([(0xD01, true)]).back, vec![0xD01]);
+    assert!(g.find_path(from, to, &spawn_open).is_err());
+    // A way no door would open: nothing to blame.
+    let island = graph(&[(grid(1, [0.0, 0.0], 2, 1, 100.0, &[], flat), W), (grid(2, [1000.0, 0.0], 2, 1, 100.0, &[], flat), W)]);
+    assert_eq!(island.doors_closing(from, Place { space: W, pos: [1050.0, 50.0, 0.0] }, &PathParams::default()), None);
 }
 
 #[test]

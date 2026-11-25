@@ -4,7 +4,7 @@
 
 
 import bevy_pbr::render::mesh_bindings::mesh;
-@if(BINDLESS) import bevy_render::bindless::{bindless_textures_2d, bindless_samplers_filtering};
+@if(BINDLESS) import bevy_render::bindless::{bindless_textures_2d, bindless_textures_cube, bindless_samplers_filtering};
 @if(BINDLESS) import bevy_pbr::render::pbr_bindings::{material_indices, material_array};
 @if(BINDLESS) import bevy_pbr::render::pbr_types::StandardMaterial;
 @if(!BINDLESS) import bevy_pbr::render::pbr_bindings;
@@ -36,11 +36,12 @@ struct NifSurface {
     // REFRACT: seconds for the normal map to scroll once up its texture (fire
     // refraction); 0: it does not move.
     fire_period: f32,
-    // x 1 skips the image-space emissive scale; y holds each channel on the soft path
-    // (0: no hold); z an unlit shape's vertex colours are display values; w 1: a lit
-    // shape's emitted light only fills it up to its surface colour (nif_spawn.rs
-    // `shape_emissive_rule`) [hypothesis, nif.md §6 "Unlit shapes that are pictures,
-    // and cut-out signs", "Emissive light"]. Same fields in the same order as NifSurfaceUniform.
+    // x 1 skips the image-space emissive scale; y on an unlit shape holds each channel on
+    // the soft path (0: no hold), on a lit shape 1: its emitted light only fills it up to its
+    // surface colour (nif_spawn.rs `shape_emissive_rule`); z an unlit shape's vertex colours
+    // are display values; w the authored-set mark (authored.rs `AUTHORED_MARK`) [hypothesis,
+    // nif.md §6 "Unlit shapes that are pictures, and cut-out signs", "Emissive light"].
+    // Same fields in the same order as NifSurfaceUniform.
     emissive_rule: vec4<f32>,
     // Holes: x the value (alpha units, negative: no holes), y the edge band's width.
     holes: vec4<f32>,
@@ -56,8 +57,20 @@ struct NifSurface {
     // noise's reach (display values), z the canvas's share of the texture's width; w unused.
     pipboy_b: vec4<f32>,
     // Landscape anti-tiling (nif_material.rs NifSurface::terrain_repeat): x world units per
-    // texture repeat of a landscape material, 0 on every other shape; y, z, w unused.
+    // texture repeat of a landscape material, 0 on every other shape; y an authored set's
+    // metal gain (NifSurface::metal_gain, #2981; 0 on every other material), read by
+    // nif_material.wesl's lift only; z, w unused.
     terrain: vec4<f32>,
+    // Environment map (nif_material.rs NifSurface::env): x the scale (0: none), y the mask
+    // (0 none, 1 the mask's red, 2 the mask's alpha: the game's normal map bound as the
+    // mask, a debug switch's variant), z and w the fade distances
+    // (both 0: no fade). After `terrain`, as in NifSurfaceUniform; the blend type has none
+    // (nif_surface_blend.rs: its uniform goes on with its own rows here).
+    @if(!NIF_SURFACE_BLEND) env: vec4<f32>,
+    // Environment map (NifSurface::env_how): x the cube orientation (0 #2669's lookup),
+    // y 1 scales by received light, 2 by the scene light, z 1 for a window shape, w 1 on
+    // every shape with an environment map. The blend type has none either.
+    @if(!NIF_SURFACE_BLEND) env_how: vec4<f32>,
     // [design] The enabled blend type (nif_surface_blend.rs): band, view, contact shape,
     // shading; the cache's southwest cell in origin.xy; hybrid v2's flat and steep band
     // widths in widths.xy (z, w unused).
@@ -66,7 +79,8 @@ struct NifSurface {
     @if(NIF_SURFACE_BLEND) mesh_terrain_widths: vec4<f32>,
 }
 
-// The extension's index table (indices 50-53 of NifSurface's bindless attribute). The
+// The extension's index table (indices 50-56 of NifSurface's bindless attribute; 54-56
+// are the window environment map's cube, sampler and mask, the ordinary type's only). The
 // enabled blend type (nif_surface_blend.rs module notes) has the same table, with its
 // landscape colour atlas at 51, that atlas's sampler at 52 and its height atlas at 53,
 // and after them round 10a's landscape palette (indices 54-453: 384 textures, then 16
@@ -77,6 +91,9 @@ struct NifSurface {
     holes_texture: u32,    // 51
     holes_sampler: u32,    // 52
     facegen_offset: u32,   // 53
+    @if(!NIF_SURFACE_BLEND) env_cube: u32,     // 54
+    @if(!NIF_SURFACE_BLEND) env_sampler: u32,  // 55
+    @if(!NIF_SURFACE_BLEND) env_mask: u32,     // 56
     @if(NIF_SURFACE_BLEND) palette: array<u32, 400>, // 54-453
 }
 @if(BINDLESS) @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<storage> nif_indices: array<NifSurfaceIndices>;
@@ -85,6 +102,9 @@ struct NifSurface {
 @if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(51) var holes_texture: texture_2d<f32>;
 @if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(52) var holes_sampler: sampler;
 @if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(53) var facegen_offset: texture_2d<f32>;
+@if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(54) var env_cube: texture_cube<f32>;
+@if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(55) var env_sampler: sampler;
+@if(!BINDLESS && !NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(56) var env_mask: texture_2d<f32>;
 @if(!BINDLESS && NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(51) var mesh_terrain_colour: texture_2d<f32>;
 @if(!BINDLESS && NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(52) var mesh_terrain_sampler: sampler;
 @if(!BINDLESS && NIF_SURFACE_BLEND) @group(constants::MATERIAL_BIND_GROUP) @binding(53) var mesh_terrain_height: texture_2d<f32>;
@@ -1000,6 +1020,30 @@ fn holes_alpha(instance_index: u32, uv: vec2<f32>) -> f32 {
     @if(!BINDLESS && NIF_SURFACE_BLEND) return 0.0;
 }
 
+// The environment cube in the direction `dir` (cube space), at its top level.
+@if(!NIF_SURFACE_BLEND) fn env_cube_texel(instance_index: u32, dir: vec3<f32>) -> vec3<f32> {
+    @if(BINDLESS) let i = nif_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleLevel(bindless_textures_cube[i.env_cube], bindless_samplers_filtering[i.env_sampler], dir, 0.0).rgb;
+    @if(!BINDLESS) return textureSampleLevel(env_cube, env_sampler, dir, 0.0).rgb;
+}
+
+// The environment mask's red channel at `uv`, at its top level.
+@if(!NIF_SURFACE_BLEND) fn env_mask_texel(instance_index: u32, uv: vec2<f32>) -> f32 {
+    @if(BINDLESS) let i = nif_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleLevel(bindless_textures_2d[i.env_mask], bindless_samplers_filtering[i.env_sampler], uv, 0.0).r;
+    @if(!BINDLESS) return textureSampleLevel(env_mask, env_sampler, uv, 0.0).r;
+}
+
+// The environment mask's alpha at `uv`, at its top level: in a debug switch's variant
+// (env_map.rs NVF_PLAY_DEBUG_ENV_NO_MASK=normal-alpha) the mask slot holds the game's own
+// normal map (nif_spawn.rs `shape_material_inner`), so an authored set that replaces the
+// drawn normal map does not change what is read here.
+@if(!NIF_SURFACE_BLEND) fn env_mask_alpha(instance_index: u32, uv: vec2<f32>) -> f32 {
+    @if(BINDLESS) let i = nif_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleLevel(bindless_textures_2d[i.env_mask], bindless_samplers_filtering[i.env_sampler], uv, 0.0).a;
+    @if(!BINDLESS) return textureSampleLevel(env_mask, env_sampler, uv, 0.0).a;
+}
+
 // The size of the FaceGen offset image.
 fn facegen_size(instance_index: u32) -> vec2<u32> {
     @if(BINDLESS) return textureDimensions(bindless_textures_2d[nif_indices[material_slot(instance_index)].facegen_offset]);
@@ -1035,6 +1079,24 @@ fn base_color_texel_level(instance_index: u32, uv: vec2<f32>, level: f32) -> vec
 fn base_color_size(instance_index: u32) -> vec2<u32> {
     @if(BINDLESS) return textureDimensions(bindless_textures_2d[material_indices[material_slot(instance_index)].base_color_texture]);
     @if(!BINDLESS) return textureDimensions(pbr_bindings::base_color_texture);
+}
+
+// The occlusion texture's red channel sampled at `uv` with the view's mip bias `bias` (the
+// authored materials' occlusion view, nif_material.wesl "NVF_PBR_VIEW"); the caller checks
+// the material has one.
+fn occlusion_texel(instance_index: u32, uv: vec2<f32>, bias: f32) -> f32 {
+    @if(BINDLESS) let i = material_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleBias(bindless_textures_2d[i.occlusion_texture], bindless_samplers_filtering[i.occlusion_sampler], uv, bias).r;
+    @if(!BINDLESS) return textureSampleBias(pbr_bindings::occlusion_texture, pbr_bindings::occlusion_sampler, uv, bias).r;
+}
+
+// The depth map's red channel (the authored height map as stored: 1 high, 0 low, #2981)
+// sampled at `uv` with the view's mip bias `bias` (the authored materials' height view,
+// nif_material.wesl "NVF_PBR_VIEW"); the caller checks the material has one.
+fn height_texel(instance_index: u32, uv: vec2<f32>, bias: f32) -> f32 {
+    @if(BINDLESS) let i = material_indices[material_slot(instance_index)];
+    @if(BINDLESS) return textureSampleBias(bindless_textures_2d[i.depth_map_texture], bindless_samplers_filtering[i.depth_map_sampler], uv, bias).r;
+    @if(!BINDLESS) return textureSampleBias(pbr_bindings::depth_map_texture, pbr_bindings::depth_map_sampler, uv, bias).r;
 }
 
 // The normal map sampled at `uv`.

@@ -4037,6 +4037,21 @@ expect = [
 ]
 
 [[scenario]]
+name = "ai-goal-off-navmesh-named"
+kind = "tool"
+source = "#2756: a package place with no navmesh near it is logged with its cell or worldspace. Jean-Baptiste's VFSJeanBaptisteStandInPlacePackage goes to VFSJeanBaptisteMarkerREF, placed at (0, 0, 0) in FreesideSilverRush (the data's own, 3,000 units from that cell's navmesh); without the cell the line read as a goal looked for in Freeside, where he was"
+areas = ["ai"]
+paths = ["crates/fnv-ai/src/carry.rs", "crates/fnv-nav/src/path.rs"]
+commands = [
+  ["ai", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--hours", "2", "--actor", "VFSJeanBaptisteCuttingREF", "--force", "VFSJeanBaptisteCuttingREF=VFSJeanBaptisteStandInPlacePackage"],
+  ["ai", "run", "{data}", "FalloutNV.esm", "--schema", "schemas/fnv", "--hours", "2", "--actor", "VHDPreBattleNCRTrooper3REF"],
+]
+expect = [
+  { json = "actors.?actor=VFSJeanBaptisteCuttingREF.events.?kind=unreachable.why", schema = "fnv.ai.run/1", equals = "no navmesh triangle near the goal (0, 0, 0) in FreesideSilverRush", label = "Jean-Baptiste's goal is named in the marker's interior" },
+  { json = "actors.?actor=VHDPreBattleNCRTrooper3REF.events.?kind=unreachable.why", schema = "fnv.ai.run/1", equals = "no navmesh triangle near the goal (66071, 18461, 4825) in WastelandNV", label = "trooper 3's barricade marker, off the navmesh, is named in WastelandNV" },
+]
+
+[[scenario]]
 name = "ai-no-door-out-of-sight-game"
 source = "docs/spec-notes/packages.md §11 (#2405): in the game, with the player outside the NCR safehouse's cave door (0x001593B6, WastelandNV), Gomez in the interior behind it is out of the loaded area; his Leave package (vSafehouse variable 10, GomezGoToSleep, = 1) sends him from the side room's navmesh island to GomezDoor, which no door joins: he is put there instead of logging 'cannot reach' every game hour (players' reports, build 0.7.0)"
 areas = ["ai"]

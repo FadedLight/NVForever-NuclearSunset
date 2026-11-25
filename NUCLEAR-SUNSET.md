@@ -26,6 +26,12 @@ tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repos
    section with `sCharGenQuest=0x001FFFF8`. Without it a new game starts at Doc Mitchell's
    instead of TTW's start.
 
+**Or with the launcher** (`nvforever-launcher.exe`): on its **Game folder** page, in the
+**Mod Organizer 2** card, click **Find it** (or **Browse…** to the folder that holds
+ModOrganizer.exe), pick the profile, **Save**. Play and Continue then start the game through
+that profile; MO2 does not need to run. The **Mods** page then lists the profile's mods (with
+MO2's separators) and plugins, read only: reorder them in MO2.
+
 NVForever never writes into the game folder, the MO2 folders or `Documents\My Games\FalloutNV`.
 
 ## Changelog
@@ -44,6 +50,9 @@ NVForever never writes into the game folder, the MO2 folders or `Documents\My Ga
   (46), and the Goodsprings parking-lot road's collision is back in place (47): two of our
   first-pass fixes that the upstream merge had dropped.
 - NVR's **Water Lens**: water drops on the screen for a few seconds after you surface (48).
+- **Launcher**: a Mod Organizer 2 card on the Game folder page (find or browse to the
+  instance, choose the profile, Save; Play starts through it), and the Mods page shows that
+  profile's mods and plugins.
 - NVR's look now follows **Cartographer's preset per area** (Capital Wasteland → DCWorld,
   the Pitt, Dead Money, Point Lookout, the Strip…) instead of one look everywhere (49).
 

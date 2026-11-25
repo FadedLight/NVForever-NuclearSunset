@@ -79,6 +79,8 @@ pub struct Triggers {
     waiting_since: HashMap<FormId, f64>,
     /// Scripts with a trigger block, by SCPT.
     has_blocks: HashMap<FormId, bool>,
+    /// Scripts with an OnHit / OnHitWith block, by SCPT (#3662).
+    has_hit_blocks: HashMap<FormId, bool>,
     /// Actor references (ACHR, ACRE) placed in each cell, once listed.
     actors_by_cell: HashMap<FormId, Vec<FormId>>,
     /// (trigger, actor) pairs touching after the last frame.
@@ -87,13 +89,18 @@ pub struct Triggers {
     /// shots, blasts and guns fired inside set off (`crate::gas_traps`, #2687). Built
     /// and dropped with [`Triggers::shapes`].
     gas: HashMap<FormId, Vec<TriggerShape>>,
+    /// Scripted references in loaded cells checked for a Projectile Zone primitive
+    /// (`XPRM` with `XTRI 23`, `fnv_phys::layers::PROJECTILE_ZONE`) (#3662): `Some` holds
+    /// the volume at its last pose, `None` records that the reference is not on layer 23
+    /// so its record is not decoded every frame.
+    projectile_zones: HashMap<FormId, (Pose, Option<TriggerShape>)>,
 }
 
 impl Triggers {
     /// Every trigger volume built so far, at the pose it was built at (the collision
     /// view draws them, `crate::collision_view`).
     pub fn volumes(&self) -> impl Iterator<Item = &TriggerShape> {
-        self.shapes.values().flat_map(|(_, v)| v.iter())
+        self.shapes.values().flat_map(|(_, v)| v.iter()).chain(self.projectile_zones.values().filter_map(|(_, s)| s.as_ref()))
     }
 
     /// A trigger reference's volumes, once built.
@@ -106,6 +113,13 @@ impl Triggers {
     pub fn gas_volumes(&self) -> impl Iterator<Item = (FormId, &TriggerShape)> {
         self.gas.iter().flat_map(|(r, v)| v.iter().map(move |s| (*r, s)))
     }
+
+    /// The Projectile Zone (`XTRI 23`) primitive volumes built so far, by reference
+    /// (#3662); a reference disabled since is still listed: the caller checks
+    /// `Game::present` and `loaded_cells`.
+    pub fn projectile_zone_volumes(&self) -> impl Iterator<Item = (FormId, &TriggerShape)> {
+        self.projectile_zones.iter().filter_map(|(r, (_, s))| s.as_ref().map(|s| (*r, s)))
+    }
 }
 
 /// How long a trigger's script waits for its model's volumes before its GameMode runs
@@ -114,6 +128,7 @@ impl Triggers {
 const HOLD_SECS: f64 = 2.0;
 
 const TRIGGER_BLOCKS: [u16; 3] = [event::ON_TRIGGER_ENTER, event::ON_TRIGGER, event::ON_TRIGGER_LEAVE];
+const HIT_BLOCKS: [u16; 2] = [event::ON_HIT, event::ON_HIT_WITH];
 
 fn is_actor(sig: &[u8; 4]) -> bool {
     sig == b"ACHR" || sig == b"ACRE"
@@ -218,18 +233,80 @@ fn actors(rt: &mut Runtime, phys: &PhysState, player: Capsule) -> Vec<(FormId, C
     out
 }
 
+/// A reference's Projectile Zone primitive (`XPRM` with `XTRI == PROJECTILE_ZONE` (23))
+/// at `pose`, if it has one (#3662) [documented: xEdit names layer 23 Projectile Zone;
+/// GECK wiki Creating Primitives: the Projectile flag is "Used for triggers which can be
+/// activated by a projectile"; hypothesis: XTRI 23 stores that flag]. Non-layer-23
+/// primitives return `None`.
+fn projectile_zone_shape(play: &PlayWorld, rt: &Runtime, r: FormId, pose: Pose) -> Option<TriggerShape> {
+    let p = fnv_phys::primitive::primitive(play.lo, play.schema, r.0)?;
+    if p.layer != Some(u32::from(fnv_phys::layers::PROJECTILE_ZONE)) {
+        return None;
+    }
+    let (pos, rot, scale) = pose;
+    let rot = ref_rotation(rot);
+    let kind = if let Some((sphere, b)) = rt.game.script_primitive(r) {
+        if sphere { TriggerKind::Sphere { radius: b[0].abs() } } else { TriggerKind::Box { half_extents: b.map(f32::abs) } }
+    } else {
+        match p.kind {
+            fnv_phys::primitive::PrimitiveKind::Box => TriggerKind::Box { half_extents: p.bounds.map(f32::abs) },
+            fnv_phys::primitive::PrimitiveKind::Sphere => TriggerKind::Sphere { radius: p.bounds[0].abs() },
+            _ => return None,
+        }
+    };
+    Some(TriggerShape { pos, rot, scale, kind })
+}
+
+/// The Projectile Zone (`XTRI 23`) volumes that shots can cross now: present and in a
+/// loaded cell (#3662). Call with the world in the runtime (`crate::script::with_world`).
+pub fn projectile_zones(rt: &Runtime) -> Vec<(FormId, TriggerShape)> {
+    let g = &rt.game;
+    rt.triggers
+        .projectile_zone_volumes()
+        .filter(|(r, _)| g.present(*r) && g.cell_of(*r).is_some_and(|c| g.loaded_cells.contains(&c)))
+        .map(|(r, s)| (r, *s))
+        .collect()
+}
+
+/// The Projectile Zone volumes crossed by shot segment `from`–`to`, ordered nearest to
+/// `from` along the shot direction (ties broken by `FormId`), each at most once (#3662).
+pub fn crossed_projectile_zones(vols: &[(FormId, TriggerShape)], from: [f32; 3], to: [f32; 3]) -> Vec<FormId> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let mut hits: Vec<(FormId, f32)> = vols
+        .iter()
+        .filter(|(_, s)| s.crossed_by(from, to))
+        .map(|(r, s)| {
+            let v = [s.pos[0] - from[0], s.pos[1] - from[1], s.pos[2] - from[2]];
+            (*r, v[0] * d[0] + v[1] * d[1] + v[2] * d[2])
+        })
+        .collect();
+    hits.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.0.cmp(&b.0.0)));
+    let mut out = Vec::with_capacity(hits.len());
+    for (r, _) in hits {
+        if !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 /// Test the actors against the triggers of the loaded cells and run the blocks. `player`
 /// is the player's capsule; `None` when the player has no position yet: the volumes are
 /// looked up (and their scripts held while they wait) but nobody enters or leaves.
 pub fn update(rt: &mut Runtime, play: &PlayWorld, phys: &PhysState, player: Option<Capsule>) {
     let data = rt.game.data;
     let mut candidates: Vec<FormId> = Vec::new();
+    let mut hit_candidates: Vec<FormId> = Vec::new();
     for c in &rt.game.loaded_cells {
         for &r in data.scripted_by_cell.get(c).map_or(&[][..], |v| v.as_slice()) {
             let Some(script) = data.script_of_base(rt.game.world.placed.get(r).map_or(FormId(0), |p| p.base)) else { continue };
             let has = *rt.triggers.has_blocks.entry(script).or_insert_with(|| data.script(script).is_some_and(|u| TRIGGER_BLOCKS.iter().any(|&b| u.has_block(b))));
             if has {
                 candidates.push(r);
+            }
+            let has_hit = *rt.triggers.has_hit_blocks.entry(script).or_insert_with(|| data.script(script).is_some_and(|u| HIT_BLOCKS.iter().any(|&b| u.has_block(b))));
+            if has_hit {
+                hit_candidates.push(r);
             }
         }
     }
@@ -286,6 +363,22 @@ pub fn update(rt: &mut Runtime, play: &PlayWorld, phys: &PhysState, player: Opti
             rt.triggers.waiting_since.remove(&r);
         }
         shapes.extend(rt.triggers.shapes[&r].1.iter().map(|s| (r, *s)));
+    }
+    for r in hit_candidates {
+        if !rt.game.present(r) {
+            continue;
+        }
+        let Some(pose) = pose_of(rt, r) else { continue };
+        if rt.triggers.projectile_zones.get(&r).is_some_and(|(at, _)| *at != pose) {
+            rt.triggers.projectile_zones.remove(&r);
+        }
+        if !rt.triggers.projectile_zones.contains_key(&r) {
+            let shape = projectile_zone_shape(play, rt, r, pose);
+            if shape.is_some() {
+                bevy::log::info!("script: {} has a Projectile Zone primitive (XTRI 23)", rt.game.data.name(r));
+            }
+            rt.triggers.projectile_zones.insert(r, (pose, shape));
+        }
     }
     // The triggers still waiting for their volumes hold their scripts' GameMode, so an
     // actor standing in one at the start enters it first (`Game::scripts_held`, #2571).

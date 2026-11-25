@@ -1,16 +1,17 @@
 //! The render world's side: what plan.rs decided, carried out. The component is inserted, changed
 //! and removed in the extraction alone, as bevy_pbr requires (mesh_view_bindings.rs).
 
+use super::admit::{self, Asked};
 use super::plan::{plan, Admission, Key, Latch, Now, Pipelines, Plan, Why};
 use super::{hook_state, place, Did, Place, RtgiCounts, RtgiRequest, RtgiVolumeUniform};
 use bevy::app::SubApp;
 use bevy::ecs::system::SystemParam;
-use bevy::pbr::NvfRtgiVolumeBindings;
+use bevy::pbr::{MeshPipelineViewLayouts, NvfRtgiVolumeBindings};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AddressMode, CachedPipelineState, Extent3d, FilterMode, PipelineCache, PipelineDescriptor, Sampler, SamplerDescriptor, TextureDataOrder, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, UniformBuffer,
+    AddressMode, CachedPipelineState, Extent3d, FilterMode, PipelineCache, PipelineDescriptor, Sampler, SamplerDescriptor, TextureDataOrder, TextureDescriptor, TextureDimension, TextureView, TextureViewDescriptor, UniformBuffer,
 };
-use bevy::render::renderer::{RenderDevice, RenderQueue};
+use bevy::render::renderer::{RenderAdapter, RenderDevice, RenderQueue};
 use bevy::render::sync_world::RenderEntity;
 use bevy::render::{Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderSystems};
 use nvf_assets::nif_material::RTGI_VOLUME_DEF;
@@ -18,7 +19,7 @@ use nvf_assets::nif_material::RTGI_VOLUME_DEF;
 pub(super) fn add(render_app: &mut SubApp) {
     render_app
         .init_gpu_resource::<RtgiGpu>()
-        .add_systems(ExtractSchedule, extract)
+        .add_systems(ExtractSchedule, extract.after(crate::sun_visibility::SunVisibilityExtracted))
         .add_systems(Render, observe.in_set(RenderSystems::Cleanup));
 }
 
@@ -35,6 +36,7 @@ pub(super) struct Held {
 pub(super) struct RtgiGpu {
     pub(super) held: Option<Held>,
     latch: Latch,
+    pub(super) asked: Option<Asked>,
     /// The visit in which a pipeline that reads failed.
     failed: Option<Place>,
     /// The visit whose pipelines the log has, and the visit of which it says why the light is stock.
@@ -52,20 +54,34 @@ struct Main<'w, 's> {
     cams: Query<'w, 's, RenderEntity, crate::fly::WorldCamera>,
 }
 
-/// The device.
+/// The device, and what the question of admission needs beside it.
 #[derive(SystemParam)]
 struct Device<'w> {
     device: Option<Res<'w, RenderDevice>>,
     queue: Option<Res<'w, RenderQueue>>,
+    adapter: Option<Res<'w, RenderAdapter>>,
+    layouts: Option<Res<'w, MeshPipelineViewLayouts>>,
+    sun: Option<Res<'w, crate::sun_visibility::SunVisibilityGpu>>,
 }
 
 impl Device<'_> {
-    /// Nothing is asked of it yet but that it is there.
-    fn admission(&self) -> Admission {
-        if self.device.is_some() && self.queue.is_some() {
+    /// Whether the view may have a texture of these sides, asked again where the answer may be
+    /// another one: the sides, or the light volume's arrays, which this frame's extraction of the
+    /// sun visibility has decided.
+    fn admission(&self, asked: &mut Option<Asked>, atlas: [u32; 3]) -> Admission {
+        let (Some(device), Some(adapter), Some(layouts), true) = (&self.device, &self.adapter, &self.layouts, self.queue.is_some()) else { return Admission::Deferred };
+        let clouds = self.sun.as_ref().is_some_and(|s| s.light_volume_bound());
+        if asked.as_ref().is_none_or(|a| !a.is_of(clouds, atlas)) {
+            let answer = Asked::of(device, adapter, layouts, clouds, atlas);
+            if let Err(why) = &answer.granted {
+                warn!("rtgi: {why}; the stock light");
+            }
+            *asked = Some(answer);
+        }
+        if asked.as_ref().is_some_and(|a| a.granted.is_ok()) {
             Admission::Granted
         } else {
-            Admission::Deferred
+            Admission::Refused
         }
     }
 }
@@ -80,7 +96,7 @@ fn extract(mut commands: Commands, main: Extract<Main>, mut bound: Query<(Entity
     }
     let here = place(main.streamer.as_deref(), main.script.as_deref());
     let admission = match request.filter(|r| here == Some(r.place)) {
-        Some(_) => gpu.admission(),
+        Some(r) => gpu.admission(&mut state.asked, r.atlas().0),
         None => Admission::Deferred,
     };
     let now = Now { here, hook: hook_state(), admission, open, failed: state.failed };
@@ -189,8 +205,8 @@ fn make_texture(device: &RenderDevice, queue: &RenderQueue, (sides, bytes): ([u3
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D3,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            format: admit::FORMAT,
+            usage: admit::USAGE,
             view_formats: &[],
         },
         TextureDataOrder::LayerMajor,

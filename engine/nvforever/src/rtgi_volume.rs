@@ -10,7 +10,8 @@
 //! that lights.rs patches into `pbr_functions` ([`hook`]).
 //!
 //! The way of a volume: the main world's [`RtgiRequest`], for one [`Place`]; what each extraction
-//! makes of it ([`plan`], a pure function), carried out in [`gpu`], the only code that makes one of its GPU objects or changes the component.
+//! makes of it ([`plan`], a pure function), asked of the device first ([`admit`]) and carried out
+//! in [`gpu`], the only code that makes one of its GPU objects or changes the component.
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::pbr::{NVF_RTGI_VIEW_BIND_GROUPS, NVF_VIEW_BIND_GROUPS};
@@ -22,6 +23,7 @@ use nvf_rtgi::SolvedVolume;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
+mod admit;
 mod gpu;
 pub mod hook;
 mod plan;

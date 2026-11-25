@@ -1,12 +1,15 @@
-//! Who may have a volume and when, without a GPU: the plan as a table, and that nothing is done without a request.
+//! Who may have a volume and when, without a GPU: the plan and the admission as tables, and that
+//! nothing is done without a request.
 
+use super::admit::{admit, counts, view_key, Limits, MESH, MOST_BYTES};
 use super::gpu::RtgiGpu;
 use super::plan::{plan, Admission, Key, Latch, Now, Pipelines, Plan, Why};
 use super::tests::{extracted, noop};
 use super::*;
+use crate::sun_visibility::{view_counts, StageCounts};
 use crate::world::Streamer;
 use bevy::app::SubApp;
-use bevy::pbr::{check_views_need_specialization, MeshPipelineKey, NvfRtgiVolumeBindings, ViewKeyCache};
+use bevy::pbr::{check_views_need_specialization, init_mesh_pipeline_view_layouts, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshPipelineViewLayouts, NvfRtgiVolumeBindings, ViewKeyCache};
 use bevy::render::camera::DirtySpecializations;
 use bevy::render::render_resource::CachedPipelineState;
 use bevy::render::sync_world::{MainEntity, RenderEntity};
@@ -92,6 +95,63 @@ fn a_reader_fails_for_good_only() {
         n.count(&CachedPipelineState::Err(e));
     }
     assert_eq!(n, Pipelines { waiting: 3, failed: 2, ..default() });
+}
+
+// ---------------------------------------------------------------------------------------
+// The admission.
+
+/// Each limit, at what is needed and one below it, for what a view and a material may have.
+#[test]
+fn the_admission() {
+    let atlas = [100, 60, 80];
+    // Without bindless 13 and 12, with the tonemapping's table 14, with the clouds' arrays left out
+    // 12; bindless materials have none that count. Two more are the mesh's.
+    for (view, material, textures) in [(13, 12, 27), (14, 12, 28), (12, 12, 26), (12, 0, 14)] {
+        let needed = StageCounts { textures: view, samplers: 9, uniforms: 10 }.plus(MESH).plus(StageCounts { textures: material, samplers: 4, uniforms: 2 });
+        assert_eq!(needed, StageCounts { textures, samplers: 15, uniforms: 16 });
+        let fits = Limits { stage: needed, side: 100, format: true };
+        assert_eq!(admit(&fits, needed, atlas), Ok(()));
+        let one_less = [
+            ("sampled textures", Limits { stage: StageCounts { textures: textures - 1, ..needed }, ..fits }),
+            ("samplers", Limits { stage: StageCounts { samplers: 14, ..needed }, ..fits }),
+            ("uniform buffers", Limits { stage: StageCounts { uniforms: 15, ..needed }, ..fits }),
+            ("side", Limits { side: 99, ..fits }),
+            ("filtered", Limits { format: false, ..fits }),
+        ];
+        for (why, limits) in one_less {
+            assert!(admit(&limits, needed, atlas).unwrap_err().contains(why), "{why}");
+        }
+    }
+    let fits = Limits { stage: MESH, side: u32::MAX, format: true };
+    assert_eq!(8 * 256 * 256 * 64, MOST_BYTES);
+    for small in [[256, 256, 64], EMPTY] {
+        assert_eq!(admit(&fits, MESH, small), Ok(()));
+    }
+    for large in [[256, 256, 65], [1, 1, (MOST_BYTES / 8) as u32 + 1], [u32::MAX; 3]] {
+        assert!(admit(&fits, MESH, large).unwrap_err().contains("bytes"), "{large:?}");
+    }
+}
+
+/// What is counted is what bevy_pbr lays out: the volume's three bindings, the clouds' two arrays,
+/// the tonemapping's table; the mesh's and a material's beside it.
+#[test]
+fn the_counts_are_of_the_layouts() {
+    let (device, adapter, _) = noop();
+    let mut world = World::new();
+    world.insert_resource(device.clone());
+    world.insert_resource(adapter);
+    world.run_system_cached(init_mesh_pipeline_view_layouts).expect("the layouts");
+    let layouts = world.resource::<MeshPipelineViewLayouts>();
+    let on = |clouds| view_counts(layouts, view_key(clouds));
+    let more = |c: StageCounts, textures, samplers, uniforms| c.plus(StageCounts { textures, samplers, uniforms });
+    assert_eq!(on(true), more(on(false), 2, 0, 0), "the light volume's arrays");
+    for clouds in [false, true] {
+        let without = |bit: MeshPipelineViewLayoutKey| view_counts(layouts, view_key(clouds).difference(bit));
+        assert_eq!(on(clouds), more(without(MeshPipelineViewLayoutKey::NVF_RTGI_VOLUME), 1, 1, 1));
+        assert_eq!(on(clouds), more(without(MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER), 1, 1, 0));
+        let (all, rest) = (counts(&device, layouts, clouds), on(clouds).plus(MESH));
+        assert!(all.textures > rest.textures && all.samplers > rest.samplers && all.uniforms >= rest.uniforms, "{all:?}, {rest:?} before the material");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -186,7 +246,7 @@ fn nothing_is_done_without_a_request() {
         let render = app.sub_app_mut(RenderApp).world_mut();
         assert_eq!(render.resource::<RtgiCounts>().all(), [0; 4], "{case}");
         let state = render.resource::<RtgiGpu>();
-        assert!(state.held.is_none(), "{case}");
+        assert!(state.held.is_none() && state.asked.is_none(), "{case}");
         assert_eq!(render.query::<&NvfRtgiVolumeBindings>().iter(render).count(), 0, "{case}");
         assert_eq!(keys(render, &ours), before, "{case}");
     };

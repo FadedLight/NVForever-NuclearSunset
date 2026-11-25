@@ -18,7 +18,6 @@ pub(super) struct Key {
 pub(super) enum Admission {
     /// It cannot be asked yet: asked again in the next frame.
     Deferred,
-    #[allow(dead_code)]
     Refused,
     Granted,
 }
@@ -46,7 +45,6 @@ pub(super) enum Why {
     Waiting,
     Hook,
     Failed,
-    #[allow(dead_code)]
     Refused,
     /// Asked for when no view can be given the bindings: the next visit's screen is waited for.
     Late,

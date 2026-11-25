@@ -140,6 +140,23 @@ main has the same guard.
 HDR output: `src/msaa_writeback.rs` fills `BlitPipelineKey`'s two new fields (`false`,
 `false`), as the vendored bevy_core_pipeline's key needs them.
 
+A third auto-exposure change (#3917), marked `NVForever (#3917)`, in `src/auto_exposure/`:
+
+- `auto_exposure.wesl` (`compute_average`): replaces the unclamped forward-Euler
+  exponential step `delta * exp_down` / `delta * exp_up` with exact exponential decay
+  `delta * (1.0 - exp(-exp_down))` clamped to `delta`. Upstream overshot `target_exposure`
+  whenever `speed * delta_time / exponential_transition_distance > 1.0`, and diverged into
+  a sustained `±(speed * delta_time)` EV period-2 black/bright strobe whenever that ratio
+  reached `2.0` (e.g. under slow frames or fast adaptation speeds after switching Quality
+  presets back up with Light glow re-enabled).
+- `buffers.rs` and `mod.rs`: maps `RemovedComponents<AutoExposure>` main-world entities to
+  `RenderEntity` (and prunes inactive views), removes `ViewAutoExposurePipeline` when
+  `AutoExposure` is removed, and guards `auto_exposure` with `With<AutoExposure>` and
+  `camera.hdr`. Upstream passed main-world entities into an `EntityHashMap` keyed by
+  `RenderEntity` and left `ViewAutoExposurePipeline` attached, so removing `AutoExposure`
+  (switching Light glow off via Quality Low) left the compute pass running on SDR views
+  and carried stale GPU exposure state into a later switch back up.
+
 ## bevy_pbr 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
 Skinning storage-buffer wrapping and normal hardening in `src/render/skinning.wesl`:

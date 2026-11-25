@@ -509,6 +509,26 @@ End) 0::player 1::OwnedAid"#,
     // Unvetoed weapon EquipItem succeeds.
     query(&mut g, "player.EquipItem OwnedWeap");
     assert_eq!(query(&mut g, "SetFunctionValue (player.GetEquipped OwnedWeap)"), XVal::Num(1.0));
+
+    // Scripted UnequipItem dispatches ShowOff:OnPreActivateInventoryItemAlt (bEquipping=1) and respects veto.
+    query(
+        &mut g,
+        r#"SetModLocalData "inv.un_veto_flag" 1
+SetEventHandlerAlt "ShowOff:OnPreActivateInventoryItemAlt" (Begin Function {ref itemBase, ref itemRef, int allowed, int key, int eq}
+SetModLocalData "inv.un_calls" ((GetModLocalData "inv.un_calls") + 1)
+SetModLocalData "inv.un_beq" eq
+if eval (GetModLocalData "inv.un_veto_flag")
+SetFunctionValue 0
+endif
+End) 0::player 1::OwnedWeap"#,
+    );
+    query(&mut g, "player.UnequipItem OwnedWeap");
+    assert_eq!(query(&mut g, "SetFunctionValue (player.GetEquipped OwnedWeap)"), XVal::Num(1.0), "vetoed UnequipItem must keep weapon equipped");
+    assert_eq!(num(&mut g, "inv.un_calls"), 1.0);
+    assert_eq!(num(&mut g, "inv.un_beq"), 1.0);
+    query(&mut g, "SetModLocalData \"inv.un_veto_flag\" 0\nplayer.UnequipItem OwnedWeap");
+    assert_eq!(query(&mut g, "SetFunctionValue (player.GetEquipped OwnedWeap)"), XVal::Num(0.0), "unvetoed UnequipItem succeeds");
+    assert_eq!(num(&mut g, "inv.un_calls"), 2.0);
     no_errors(&g);
 }
 

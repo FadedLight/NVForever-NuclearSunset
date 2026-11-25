@@ -3,18 +3,10 @@
 //! here is the shader that reads a volume; **nothing makes or binds one**: there is no setting
 //! and no texture, so no view has the bindings and no pipeline reads them.
 //!
-//! The parts, built the way the ambient occlusion's are (ssao_lighting.rs):
-//! - bevy_pbr's view component `NvfRtgiVolumeBindings` (vendored, engine/vendor/README.md): a
-//!   uniform (rtgi_volume.wesl `NvfRtgiVolume`, 80 bytes), the volume's 3D texture and its
-//!   sampler at mesh view bindings 47-49. It gives the view's pipelines a key bit and no shader
-//!   def;
-//! - nvf_assets nif_material.rs `reads_rtgi_volume`: the NIF surfaces whose pipelines take the
-//!   shader def `NVF_RTGI_VOLUME` from that bit;
-//! - rtgi_volume.wesl, imported as `nvforever::rtgi_volume` under that def;
-//! - the text hook ([`hook`]), patched into `pbr_functions` by lights.rs after the ambient
-//!   occlusion's and before the reflection gate: every statement it adds is under
-//!   `@if(NVF_RTGI_VOLUME)`, and the one line it replaces is kept word for word under
-//!   `@if(!NVF_RTGI_VOLUME)`.
+//! The parts, built the way the ambient occlusion's are (ssao_lighting.rs): bevy_pbr's view
+//! component `NvfRtgiVolumeBindings` (vendored, engine/vendor/README.md), the NIF surfaces that
+//! read it (nvf_assets nif_material.rs `reads_rtgi_volume`), rtgi_volume.wesl, and the text hook
+//! that lights.rs patches into `pbr_functions` ([`hook`]).
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::prelude::*;

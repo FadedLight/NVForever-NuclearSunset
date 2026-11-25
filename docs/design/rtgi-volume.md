@@ -46,10 +46,14 @@ At the place P with the geometric normal G, on the side the camera sees, and the
 ```text
 q = (P + offset G - origin) / spacing          outside -1 < q < dimensions: E = v = 0
 t = (q + 1.5 + (0, 0, s (D + 2))) / atlas      of slab s; linear filter
-w = 1 / max(m, thin)
+w = 1 / max(m, thin)                           thin = 0.25
 E = max(w (C0 + Cx n.x + Cy n.y + Cz n.z), 0)
 v = w (m v)
 ```
+
+`thin` is 0.25, the least support [design]: one point of eight in reach fades out instead of being
+taken for the whole. The shader takes it from the uniform (`fit.z`), so whoever fills the uniform
+supplies it, for an empty texture too: with 0 a read without support divides by 0.
 
 G is the triangle's, from the world position's derivatives, taken before anything is discarded;
 where a triangle is too small to have one, n. The reads are of an explicit level, so they need no
@@ -80,7 +84,7 @@ reflections and the fog are as before.
   (0.8125^2.2) at full share. A uniform with b = 1, g = 0, pull = 0 and share = 0 is the stock light
   whatever the texture holds.
 
-No value of b, g, pay, least, thin, pull or the offset is in this code: they come with the uniform.
+No value of b, g, pay, least, thin, pull or the offset is in this code: all come with the uniform.
 
 ## Who reads it
 
@@ -95,24 +99,28 @@ DLSS has it drawn as a mask and not while it is blended.
 ## The hook
 
 `lights.rs` patches bevy_pbr's `pbr_functions` once, at its load: the display-value sum, the sun
-visibility, the ambient occlusion, this hook, the reflection gate. The hook adds an import and
-replaces the diffuse line: the old line stays word for word under `@if(!NVF_RTGI_VOLUME)`, its
-replacement is under the def (`rtgi_volume/hook.rs`). It is always put in, and reported as
-installed only once the patched shader is stored. When a line is missing or there twice, the source
-stays as it was and one error is logged (`HookState::Failed`): then no view may get a volume.
+visibility, the ambient occlusion, this hook (an import and the diffuse line, `rtgi_volume/hook.rs`),
+the reflection gate. It is always put in, and reported as installed only once the patched shader is
+stored. When a line is missing or there twice, the source stays as it was and one error is logged
+(`HookState::Failed`): then no view may get a volume.
 
 ## What nothing bound means
 
-- No view's layout has an entry at 47 or above, no pipeline has the def, and every composed shader
+- No view's layout has an entry at 47-49, no pipeline has the def, and every composed shader
   declares what it declares without this [tested without a GPU, `rtgi_volume/tests.rs`: bevy_pbr's
   own layouts and view key systems on wgpu's no-op device, and the shaders composed and validated
   with and without the hook, over the shader defs listed there].
-- **The numbers of mesh pipeline keys do change**: the packed fields above the new bit (samples,
-  blend, tonemapping, shadow filter, projection, transmission, target format) are one bit higher.
-  They are only in memory.
-- The disk caches of pipelines hold no mesh key. The cache of composed shaders is keyed by its
-  sources' text, so the shaders that use `pbr_functions` or the NIF source are composed once more
-  after an update that brings this. How long that takes is not measured here.
+
+What a run without a volume does differ in:
+
+- The numbers of mesh pipeline keys: the packed fields above the new bit (samples, blend,
+  tonemapping, shadow filter, projection, transmission, target format) are one bit higher. They are
+  only in memory; the disk caches of pipelines hold none.
+- One shader asset more (`rtgi_volume.wesl`), the edits in the text of `pbr_functions` and
+  `nif_material.wesl`, and one log line ("RTGI volume hook installed").
+- The cache of composed shaders is keyed by its sources' text, so the entries of shaders that use
+  those two are composed once more after an update that brings this. How long that takes is not
+  measured here.
 
 Not shown without a GPU: that a bound volume reads right, that a pipeline with the def compiles on
 a device, what either costs, and that the picture without a volume is the one of before.

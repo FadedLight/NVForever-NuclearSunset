@@ -1218,7 +1218,34 @@ mod tests {
         let source = unix_lines(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")));
         let display = display_patched(&source).expect("display patch applies");
         let sun = crate::sun_visibility::hook_patched(&display).expect("sun hook applies");
-        crate::ssao_lighting::hook::hook_patched(&sun).expect("ambient occlusion hook applies")
+        let ao = crate::ssao_lighting::hook::hook_patched(&sun).expect("ambient occlusion hook applies");
+        crate::rtgi_volume::hook_patched(&ao).expect("RTGI volume hook applies")
+    }
+
+    /// The installer itself: the whole chain in its order stored and the bounce light's hook
+    /// (#3009) reported installed; with its anchor doubled (which fails no other edit), or
+    /// without the display sum, reported failed and not in the text.
+    #[test]
+    fn the_installer_reports_the_rtgi_hook() {
+        use crate::rtgi_volume::{hook::IMPORT_LINE, hook_state, HookState};
+        let good = std::fs::read_to_string(format!("{}/../vendor/bevy_pbr/src/render/pbr_functions.wesl", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let doubled = unix_lines(&good).replacen(IMPORT_LINE, &IMPORT_LINE.repeat(2), 1);
+        assert_eq!(hook_state(), HookState::Pending, "no other test installs it");
+        for (source, installed) in [(&good, true), (&doubled, false), (&good, true), (&String::new(), false), (&good, true)] {
+            let mut world = World::new();
+            let mut shaders = Assets::<Shader>::default();
+            let handle = shaders.add(Shader::from_wesl(source.clone(), PBR_FUNCTIONS));
+            world.insert_resource(shaders);
+            world.insert_resource(FunctionsShader { handle: handle.clone(), patched: false });
+            world.run_system_cached(patch_display_sum).unwrap();
+            let bevy::shader::Source::Wesl(text) = &world.resource::<Assets<Shader>>().get(&handle).unwrap().source else { panic!("WESL") };
+            if installed {
+                assert_eq!(*text, reflection_gate::gate_patched(&chain_before_gate()).unwrap());
+            } else {
+                assert!(!text.contains("NVF_RTGI_VOLUME"));
+            }
+            assert_eq!(hook_state(), if installed { HookState::Installed } else { HookState::Failed });
+        }
     }
 
     /// The gate applies after the other edits, leaves no plain `@if(ENVIRONMENT_MAP)` block

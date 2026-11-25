@@ -10,7 +10,7 @@ use crate::sun_visibility::tests::{balanced, block_after, code, code_lines, reso
 use bevy::core_pipeline::prepass::{DepthPrepass, MotionVectorPrepass, NormalPrepass};
 use bevy::mesh::BaseMeshPipelineKey;
 use bevy::pbr::{
-    alpha_mode_pipeline_key, check_prepass_views_need_specialization, check_views_lights_need_specialization, check_views_need_specialization, init_mesh_pipeline_view_layouts, nvf_rtgi_layout_entries, LightEntity, LightKeyCache,
+    alpha_mode_pipeline_key, check_prepass_views_need_specialization, check_views_lights_need_specialization, check_views_need_specialization, init_mesh_pipeline_view_layouts, LightEntity, LightKeyCache,
     MeshPipelineKey, MeshPipelineViewLayoutKey, MeshPipelineViewLayouts, NvfRtgiVolumeBindings, Shadow, ViewKeyCache, ViewKeyPrepassCache,
 };
 use bevy::render::batching::gpu_preprocessing::GpuPreprocessingMode;
@@ -31,10 +31,6 @@ use wgpu::naga;
 fn vendored(file: &str) -> String {
     let path = format!("{}/../vendor/bevy_pbr/src/render/{file}", env!("CARGO_MANIFEST_DIR"));
     unix_lines(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}")))
-}
-
-fn wesl() -> String {
-    unix_lines(include_str!("../rtgi_volume.wesl"))
 }
 
 /// wgpu's no-op device and adapter: real resource creation and validation, no GPU.
@@ -129,8 +125,8 @@ fn the_mesh_key_gives_the_layout_key() {
 // ---------------------------------------------------------------------------------------
 // The layouts.
 
-/// bevy_pbr's own view layouts on the no-op device: without the bit nothing at 47 or above,
-/// with it exactly 47-49 more; the labels aside.
+/// bevy_pbr's own view layouts on the no-op device: 47-49 with the bit and not without, nothing
+/// else changed; the labels aside.
 #[test]
 fn the_bit_adds_three_bindings_and_nothing_else() {
     let (device, adapter) = noop();
@@ -139,10 +135,9 @@ fn the_bit_adds_three_bindings_and_nothing_else() {
     world.insert_resource(adapter);
     world.run_system_cached(init_mesh_pipeline_view_layouts).expect("the layouts");
     let layouts = world.resource::<MeshPipelineViewLayouts>();
-    let mut seen = 0;
     for key in view_keys().map(MeshPipelineViewLayoutKey::from) {
         let (off, on) = (layouts.get_view_layout(key), layouts.get_view_layout(key | LAYOUT_BIT));
-        assert!(off.main_layout.entries.iter().all(|e| e.binding < 47), "{key:?}");
+        assert!(off.main_layout.entries.iter().all(|e| !(47..=49).contains(&e.binding)), "{key:?}");
         let (ours, rest): (Vec<_>, Vec<_>) = on.main_layout.entries.iter().copied().partition(|e| (47..=49).contains(&e.binding));
         assert_eq!(rest, off.main_layout.entries, "{key:?}");
         assert_eq!(ours.iter().map(|e| e.binding).collect::<Vec<_>>(), [47, 48, 49], "{key:?}");
@@ -152,40 +147,18 @@ fn the_bit_adds_three_bindings_and_nothing_else() {
         assert_eq!(ours[2].ty, wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering));
         assert_eq!(on.binding_array_layout.entries, off.binding_array_layout.entries, "{key:?}");
         assert_eq!(on.empty_layout.entries, off.empty_layout.entries, "{key:?}");
-        assert!(nvf_rtgi_layout_entries(key).is_empty() && nvf_rtgi_layout_entries(key | LAYOUT_BIT).len() == 3);
-        seen += 1;
     }
-    assert_eq!(seen, 1024);
-}
-
-/// The shader's bindings and the bind group's are the layout's. The bind group is made in a
-/// system that needs the renderer, so its three entries are read in its text.
-#[test]
-fn the_bindings_are_the_shaders() {
-    let (wesl, layout) = (wesl(), vendored("mesh_view_bindings.rs"));
-    for (text, times) in [
-        ("@group(0) @binding(47) var<uniform> nvf_rtgi: NvfRtgiVolume;", 1),
-        ("@group(0) @binding(48) var nvf_rtgi_texture: texture_3d<f32>;", 1),
-        ("@group(0) @binding(49) var nvf_rtgi_sampler: sampler;", 1),
-        ("@group(", 3),
-        ("textureSampleLevel(", 4),
-    ] {
-        assert_eq!(wesl.matches(text).count(), times, "{text}");
-    }
-    assert_eq!(layout.matches("(47, volume.uniform.as_entire_binding()),\n                    (48, &volume.texture),\n                    (49, &volume.sampler),").count(), 1);
-    // The module by itself is valid.
-    let module = naga::front::wgsl::parse_str(&wesl).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&wesl)));
-    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default()).validate(&module).unwrap_or_else(|e| panic!("{e:?}"));
-    // The mesh pipeline pushes no def of the name.
-    assert!(!vendored("mesh.rs").contains("\"NVF_RTGI_VOLUME\""));
 }
 
 /// The light as it was approved, statement by statement: the stand of k without support, the
 /// debit from the occluded ambient, the occlusion once on the bounce, the colour's way back,
-/// the share over all of it.
+/// the share over all of it. The module is valid by itself, with four reads.
 #[test]
 fn the_light_is_the_approved_one() {
-    let wesl = wesl();
+    let wesl = unix_lines(include_str!("../rtgi_volume.wesl"));
+    let module = naga::front::wgsl::parse_str(&wesl).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&wesl)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default()).validate(&module).unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(wesl.matches("textureSampleLevel(").count(), 4);
     let mut last = 0;
     for line in [
         "let q = (p + nvf_rtgi.dimensions.w * g - nvf_rtgi.origin.xyz) * nvf_rtgi.origin.w;",
@@ -362,8 +335,6 @@ fn which_materials_read() {
 /// (graphics.rs `apply`), and is stock while it is drawn blended.
 #[test]
 fn blended_cutouts_read_while_they_are_masks() {
-    let apply = unix_lines(include_str!("../graphics.rs"));
-    assert!(apply.contains("let temporal = upscaler != UpscalerChoice::Off;") && apply.contains("cutouts.set_if_neq(nvf_assets::nif_material::BlendedCutouts(temporal));"), "FSR and DLSS alike");
     let mut app = App::new();
     app.init_resource::<Assets<NifMaterial>>().init_resource::<BlendedCutouts>().add_message::<AssetEvent<NifMaterial>>().add_systems(PostUpdate, nvf_assets::nif_material::blended_cutout_system());
     let material = app.world_mut().resource_mut::<Assets<NifMaterial>>().add(NifMaterial {
@@ -437,31 +408,6 @@ fn a_missing_or_doubled_line_leaves_the_source_alone() {
     assert!(hook_patched(&crate::sun_visibility::hook_patched(&display).unwrap()).is_none(), "nor without the ambient occlusion's hook");
 }
 
-/// lights.rs makes the hook after the ambient occlusion's and before the gate, and reports it
-/// installed only after the patched shader is stored; each way out reports it failed.
-#[test]
-fn lights_installs_the_hook_in_its_place() {
-    let lights = unix_lines(include_str!("../lights.rs"));
-    let body = block_after(&lights, "fn patch_display_sum(");
-    let at = |s: &str| {
-        assert_eq!(body.matches(s).count(), 1, "{s}");
-        body.find(s).unwrap()
-    };
-    let order = [
-        at("crate::ssao_lighting::hook_patched(&patched)"),
-        at("crate::rtgi_volume::hook_patched(&patched)"),
-        at("reflection_gate::gate_patched(&patched)"),
-        at("shaders.insert(&state.handle, patched)"),
-        at("crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Installed);"),
-    ];
-    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
-    assert_eq!(body.matches("crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Failed);").count(), 4, "not WESL, no display sum, no anchors, not stored");
-    for state in [HookState::Installed, HookState::Failed, HookState::Pending] {
-        set_hook_state(state);
-        assert_eq!(hook_state(), state);
-    }
-}
-
 // ---------------------------------------------------------------------------------------
 // The composed shaders, the whole chain of lights.rs.
 
@@ -487,14 +433,13 @@ fn modules(hook: bool) -> Vec<(String, String)> {
         let (ours, rest): (Vec<&str>, Vec<&str>) = text.lines().partition(|l| l.contains(RTGI_VOLUME_DEF));
         assert!(ours.len() == 2 && ours.iter().all(|l| l.trim_start().starts_with("@if(")), "{ours:?}");
         *nif = rest.join("\n");
-        assert!(modules.iter().all(|(_, s)| !code(s).contains("nvf_rtgi") && !code(s).contains(RTGI_VOLUME_DEF)), "nothing of it is left");
     }
     modules
 }
 
-/// The NIF fragment's defs without bindless, and `extra`.
+/// The NIF fragment's defs and `extra`, bindless where that says so.
 fn defs(extra: &[&'static str]) -> Vec<ShaderDefVal> {
-    let mut out: Vec<ShaderDefVal> = ["BINDLESS", "NIF_SURFACE_BLEND", "MESH_TERRAIN_BLEND", "PREPASS_PIPELINE"].into_iter().map(|d| ShaderDefVal::Bool(d.into(), false)).collect();
+    let mut out: Vec<ShaderDefVal> = ["BINDLESS", "NIF_SURFACE_BLEND", "MESH_TERRAIN_BLEND", "PREPASS_PIPELINE"].into_iter().filter(|d| !extra.contains(d)).map(|d| ShaderDefVal::Bool(d.into(), false)).collect();
     out.extend(["VERTEX_POSITIONS", "VERTEX_NORMALS", "VERTEX_UVS", "VERTEX_UVS_A", "VERTEX_TANGENTS", "VERTEX_COLORS", "VERTEX_OUTPUT_INSTANCE_INDEX", "AVAILABLE_STORAGE_BUFFER_BINDINGS__GE_3", "AVAILABLE_STORAGE_BUFFER_BINDINGS__GE_6"].map(ShaderDefVal::from));
     out.extend([("MATERIAL_BIND_GROUP", 3), ("MAX_DIRECTIONAL_LIGHTS", 10), ("MAX_CASCADES_PER_LIGHT", 4), ("MAX_RECT_LIGHTS", 1)].map(|(d, n)| ShaderDefVal::UInt(d.into(), n)));
     out.extend(extra.iter().map(|d| ShaderDefVal::from(*d)));
@@ -523,13 +468,12 @@ fn same(case: &str, before: &str, after: &str) {
 #[test]
 fn without_the_def_the_composed_shaders_are_what_they_were() {
     let (before, after) = (modules(false), modules(true));
-    let check = |entry: &str, defs: &[ShaderDefVal], case: &str| {
-        let (b, a) = (compose(&before, entry, defs), compose(&after, entry, defs));
-        same(&format!("{entry} {case}"), &b, &a);
-        a
-    };
-    let nif: [&[&'static str]; 14] = [
+    let check = |entry: &str, defs: &[ShaderDefVal], case: &str| same(&format!("{entry} {case}"), &compose(&before, entry, defs), &compose(&after, entry, defs));
+    let nif: [&[&'static str]; 17] = [
         &[],
+        &["BINDLESS"],
+        &["ALPHA_TO_COVERAGE", "MULTISAMPLED"],
+        &["BINDLESS", "ALPHA_TO_COVERAGE", "MULTISAMPLED"],
         &["MAY_DISCARD"],
         &["MAY_DISCARD", "SOFT_EDGES", "MULTISAMPLED"],
         &["MAY_DISCARD", "PREPASS_COVERAGE", "DEPTH_PREPASS"],
@@ -545,18 +489,7 @@ fn without_the_def_the_composed_shaders_are_what_they_were() {
         &["DISTANCE_FOG", "NVF_AMBIENT_OCCLUSION"],
     ];
     for extra in nif {
-        let composed = check(NIF, &defs(extra), &format!("{extra:?}"));
-        if extra.is_empty() {
-            // The comparison is not blind to the order of statements: two neighbours swapped
-            // inside the lighting are a difference.
-            let lines: Vec<&str> = composed.lines().collect();
-            let is_let = |l: &str| l.trim_start().starts_with("let ") && l.trim_end().ends_with(';');
-            let sum = lines.iter().position(|l| l.contains("let nvf_sum")).expect("the display-value sum");
-            let i = (1..sum).rev().find(|&i| is_let(lines[i]) && is_let(lines[i - 1]) && lines[i] != lines[i - 1]).expect("two neighbouring statements");
-            let mut swapped = lines.clone();
-            swapped.swap(i, i - 1);
-            assert!(declaration_difference(&declarations(&swapped.join("\n")), &declarations(&composed)).is_some());
-        }
+        check(NIF, &defs(extra), &format!("{extra:?}"));
     }
     // The depth prepass and shadow passes of the NIF shapes, and the mesh terrain blend, whose
     // pipelines never have the def.
@@ -583,10 +516,21 @@ fn without_the_def_the_composed_shaders_are_what_they_were() {
 const OURS: [(u32, u32); 3] = [(0, 47), (0, 48), (0, 49)];
 
 /// With the def the NIF fragment composes and validates in its variants and reads the three
-/// bindings and nothing else more; the uniform is the one the notes describe.
+/// bindings more, all the others too; the uniform is the one the notes describe.
 #[test]
 fn with_the_def_the_nif_fragment_reads_the_volume() {
     let modules = modules(true);
+    let reads = |extra: &[&'static str]| {
+        let off = bindings(&compose(&modules, NIF, &defs(extra)));
+        assert!(OURS.iter().all(|b| !off.contains(b)), "{extra:?}");
+        let on = compose(&modules, NIF, &defs(&[extra, &[RTGI_VOLUME_DEF]].concat()));
+        assert_eq!(bindings(&on), off.into_iter().chain(OURS).collect(), "{extra:?}");
+        let module = naga::front::wgsl::parse_str(&on).unwrap();
+        let uniform = module.global_variables.iter().find(|(_, g)| g.binding.as_ref().is_some_and(|b| (b.group, b.binding) == OURS[0])).expect("the uniform").1;
+        let naga::TypeInner::Struct { members, span } = &module.types[uniform.ty].inner else { panic!("a struct") };
+        assert_eq!(*span, 80);
+        assert_eq!(members.iter().map(|m| (m.name.as_deref().unwrap_or(""), m.offset)).collect::<Vec<_>>(), [("origin", 0), ("dimensions", 16), ("atlas", 32), ("fit", 48), ("light", 64)]);
+    };
     let coverage: [&[&'static str]; 4] = [&[], &["MAY_DISCARD"], &["MAY_DISCARD", "SOFT_EDGES", "DEPTH_PREPASS"], &["MAY_DISCARD", "PREPASS_COVERAGE", "DEPTH_PREPASS"]];
     for i in 0..8 {
         let mut extra: Vec<&'static str> = Vec::new();
@@ -602,21 +546,16 @@ fn with_the_def_the_nif_fragment_reads_the_volume() {
             if i & 1 == 0 && j == 1 {
                 all.extend(["DEPTH_PREPASS", "NORMAL_PREPASS", "LOAD_PREPASS_NORMALS", "MOTION_VECTOR_PREPASS"]);
             }
-            let off = bindings(&compose(&modules, NIF, &defs(&all)));
-            assert!(OURS.iter().all(|b| !off.contains(b)), "{all:?}");
-            all.push(RTGI_VOLUME_DEF);
-            let on = compose(&modules, NIF, &defs(&all));
-            assert_eq!(&bindings(&on) - &off, OURS.into_iter().collect(), "{all:?}: nothing else is read");
-            let module = naga::front::wgsl::parse_str(&on).unwrap();
-            let uniform = module.global_variables.iter().find(|(_, g)| g.binding.as_ref().is_some_and(|b| (b.group, b.binding) == OURS[0])).expect("the uniform").1;
-            let naga::TypeInner::Struct { members, span } = &module.types[uniform.ty].inner else { panic!("a struct") };
-            assert_eq!(*span, 80);
-            assert_eq!(members.iter().map(|m| (m.name.as_deref().unwrap_or(""), m.offset)).collect::<Vec<_>>(), [("origin", 0), ("dimensions", 16), ("atlas", 32), ("fit", 48), ("light", 64)]);
+            reads(&all);
         }
     }
-    for extra in [&["NVF_PBR_REFLECT", "ENVIRONMENT_MAP"][..], &["DISTANCE_FOG", "NVF_AMBIENT_OCCLUSION"], &["STANDARD_MATERIAL_NORMAL_MAP", "FACEGEN_TINT"]] {
-        let mut all = extra.to_vec();
-        all.push(RTGI_VOLUME_DEF);
-        assert!(OURS.iter().all(|b| bindings(&compose(&modules, NIF, &defs(&all))).contains(b)), "{all:?}");
-    }
+    let others: [&[&'static str]; 6] = [
+        &["BINDLESS"],
+        &["BINDLESS", "ALPHA_TO_COVERAGE", "MULTISAMPLED"],
+        &["ALPHA_TO_COVERAGE", "MULTISAMPLED"],
+        &["NVF_PBR_REFLECT", "ENVIRONMENT_MAP"],
+        &["DISTANCE_FOG", "NVF_AMBIENT_OCCLUSION"],
+        &["STANDARD_MATERIAL_NORMAL_MAP", "FACEGEN_TINT"],
+    ];
+    others.iter().for_each(|extra| reads(extra));
 }

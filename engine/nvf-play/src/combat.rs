@@ -151,6 +151,10 @@ mod critical_damage_hit_tests;
 mod world_blood_tests;
 #[cfg(test)]
 mod weapon_sound_bridge_tests;
+#[cfg(test)]
+mod bullet_snap_tests;
+#[cfg(test)]
+mod showoff_combat_tests;
 
 /// The shooter's id for projectiles (the player has no hit volume).
 const PLAYER: ActorId = u64::MAX;
@@ -405,8 +409,17 @@ fn armour_lines(script: Option<&mut ScriptState>, attacker: Option<FormId>, targ
 /// units [design].
 const BLOW_PROBE: f32 = 24.0;
 
-fn blast_hit_info(cause: Option<Cause>) -> HitInfo {
-    HitInfo { attacker: cause.map(|c| c.actor), weapon: cause.map(|c| c.weapon), location: -1, critical: false, limb: None }
+fn blast_hit_info(cause: Option<Cause>, explosion_ref: Option<FormId>, base_damage: f64) -> HitInfo {
+    HitInfo {
+        attacker: cause.map(|c| c.actor),
+        weapon: cause.map(|c| c.weapon),
+        projectile: explosion_ref,
+        location: -1,
+        critical: false,
+        explosion: true,
+        base_weapon_damage: base_damage,
+        ..HitInfo::default()
+    }
 }
 
 /// One projectile to draw this frame.
@@ -917,6 +930,10 @@ pub struct CombatStats {
     pub world_hits: u32,
     /// Shots on objects whose OnHit / OnHitWith blocks ran, and objects knocked away.
     pub object_scripts: u32,
+    /// The player's shots on objects whose OnHit / OnHitWith blocks ran, by object
+    /// reference: the quest pilot's sign that a shot landed (the laser detonator on Lonesome
+    /// Road's warheads).
+    pub player_object_hits: std::collections::BTreeMap<u32, u32>,
     pub objects_pushed: u32,
     pub explosions: u32,
     pub damage: f32,
@@ -1109,6 +1126,10 @@ struct Ghost {
     fresh: bool,
     /// A beam from the muzzle: its start stays on the muzzle while it shows.
     follow: bool,
+    /// Weapon base damage and BulletSnap eligibility/player-impact flag for pass-by snaps.
+    damage: f32,
+    snap_eligible: bool,
+    hit_player: bool,
 }
 
 /// How strongly a shot is drawn with `left` of its `fade` seconds to go: a beam fades
@@ -1333,6 +1354,87 @@ impl Combat {
         world.remove_resource::<Combat>().unwrap()
     }
 
+    /// Build a [`Combat`] resource from [`CombatForms`] with default runtime state.
+    /// Shared by [`init_combat`] and unit tests so adding a field to `Combat` updates one
+    /// production constructor.
+    pub(crate) fn from_forms(forms: CombatForms) -> Self {
+        let rules = Rules::from_forms(&forms);
+        // A thrown grenade's restitution (combat-rules.md §5).
+        let grenade_restitution = forms.setting("fGrenadeRestitution").unwrap_or(CombatTuning::default().grenade_restitution);
+        let fists = forms.by_edid("Fists");
+        Combat {
+            forms,
+            rules,
+            tuning: CombatTuning {
+                grenade_restitution,
+                ..CombatTuning::default()
+            },
+            weapon: None,
+            equipped: None,
+            mods: 0,
+            silenced_logged: None,
+            fists,
+            ammo: None,
+            self_ammo: false,
+            melee: false,
+            swings: Melee::default(),
+            blows: 0,
+            boom: Vec::new(),
+            meltdowns: HashSet::new(),
+            debris: Vec::new(),
+            cycle: None,
+            kick: Kick::default(),
+            flying: Vec::new(),
+            dropped_live: Vec::new(),
+            settled: Vec::new(),
+            landed: Vec::new(),
+            fire_landed: Vec::new(),
+            splashes: Vec::new(),
+            ghosts: Vec::new(),
+            looping: None,
+            ejects_seen: 0,
+            vats_throw: None,
+            last_shot: 0.0,
+            next_visual: 0,
+            pending: Vec::new(),
+            script_shots: Vec::new(),
+            guarding: HashMap::new(),
+            blocked_blows: Vec::new(),
+            fresh_reload: false,
+            guard_down_until: 0.0,
+            marks: Vec::new(),
+            rng: SplitMix(1),
+            swing_rng: SplitMix(2),
+            time: 0.0,
+            no_spread: false,
+            tracer_hold: None,
+            load_magazine: None,
+            load_ammo: None,
+            chosen_ammo: std::collections::BTreeMap::new(),
+            crosshair_cone: None,
+            player_spread: None,
+            grenade_hold: 0.0,
+            grenade_held: false,
+            vats_cone: None,
+            vats_blast: VatsBlast::default(),
+            player_blocked_at: None,
+            special_swing: None,
+            throw_logged: None,
+            spread_perks_logged: None,
+            flinch_until: 0.0,
+            flinch_end: None,
+            flinch_rng: SplitMix(3),
+            kick_rng: SplitMix(5),
+            kick_just_settled: false,
+            kick_left: [0.0; 2],
+            kick_back_goal: [0.0; 2],
+            kick_back: [crate::ease::Spring::default(); 2],
+            spent_rng: SplitMix(4),
+            blood_rng: SplitMix(6),
+            blood_chance_logged: false,
+        }
+    }
+
     /// Whether the player's flinch (a staggering hit, [`player_flinch`]) still plays: the
     /// player does not walk meanwhile (`crate::player::flinch_holds_walk`).
     pub fn player_flinching(&self) -> bool {
@@ -1464,6 +1566,12 @@ impl Combat {
     /// The weapon the player fights with now: the equipped one, else the Fists.
     pub fn player_weapon(&self) -> Option<FormId> {
         self.weapon
+    }
+
+    /// The current weapon uses the gameplay melee/Fists blocking route.
+    /// Presentation reads this capability rather than guessing weapon IDs or names.
+    pub fn player_weapon_blocks(&self) -> bool {
+        self.melee && self.weapon.is_some_and(|id| self.forms.weapons.contains_key(&id))
     }
 
     /// The ammunition the player's weapon loads now (`None`: none, or melee).
@@ -1664,7 +1772,7 @@ impl Combat {
             }
             let p = self.forms.projectiles.get(&proj);
             let range = p.map_or(0.0, |p| if p.range > 0.0 { p.range } else { crate::vats_mode::REACH });
-            let lob = p.map_or(f32::INFINITY, |p| throw_reach(p.speed, p.gravity * gravity));
+            let lob = p.map_or(f32::INFINITY, |p| throw_reach(p.speed, p.fall() * gravity));
             return Ok(VatsWeapon { id, edid, cost, style: AttackStyle::Thrown, rounds_per_shot: 1, rounds: carried, reach: range.min(lob), melee_reach: 0.0, classic_reach: None });
         }
         if AttackKind::of(w) != AttackKind::Gun {
@@ -1711,8 +1819,14 @@ impl Combat {
     /// weapon that spends itself (grenades, thrown weapons, mines) reads 5 until it leaves
     /// the hand, 6 the frame after and 4 while the next is drawn (`anim_state::
     /// throw_action`). A round-by-round reload reads 17 while it opens the weapon, 9 for
-    /// its rounds and its close [hypothesis: `AnimAction::ReloadOpen`]. A jam reads 13
-    /// [hypothesis: the page's catch-all, "every action not included in the ones above"].
+    /// its rounds and its close [hypothesis: `AnimAction::ReloadOpen`]. A forced jam reads
+    /// 9 (`AnimAction::Jam`, with `IsAnimPlayingEx 4 == 0`) [observed: Fallout: New Vegas
+    /// 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE Plugin 184, 2026-11-23, GSDocMitchellHouse
+    /// (0x00103DF9), 10 official base masters, probe `w1_3632_onfireweapon_and_forcejam`
+    /// in #3679 (`Player.ForceWeaponJamAnim` on drawn `Weap10mmPistol` `0x0000434F` ->
+    /// `GetAnimAction == 9`, `IsAnimPlayingEx 4 == 0`)]; generalizing `Phase::Jammed ->
+    /// AnimAction::Jam` (`9` instead of `13`) to natural vanilla weapon-condition jams is
+    /// [hypothesis].
     /// The player's weapon is thrown or laid by hand (SUP's GetGrenadeTimeHeld,
     /// `crate::sup_screen`): its animation type is one of
     /// `fnv_sim::forms::THROWN_ANIM_TYPES`.
@@ -1750,7 +1864,7 @@ impl Combat {
             Phase::Cooldown { left } => cooldown_action(&cy.timing, left, self.self_ammo, cy.automatic && trigger, dt),
             Phase::ReloadOpen { .. } => Some(AnimAction::ReloadOpen),
             Phase::Reloading { .. } | Phase::ReloadRound { .. } | Phase::ReloadClose { .. } => Some(AnimAction::Reload),
-            Phase::Jammed { .. } => Some(AnimAction::ForceScriptAnim),
+            Phase::Jammed { .. } => Some(AnimAction::Jam),
             Phase::Ready => None,
         }
     }
@@ -2591,86 +2705,17 @@ fn sync_player_anim_events(
     });
 }
 
-fn init_combat(mut commands: Commands, d: Res<PlayWorld>) {
+/// Production ECS entry point exposed for authored headless integration fixtures.
+#[doc(hidden)]
+pub fn init_combat(mut commands: Commands, d: Res<PlayWorld>) {
     let t = std::time::Instant::now();
     let tracer_hold = std::env::var("NVF_PLAY_TEST_TRACERS").ok().and_then(|v| v.trim().parse().ok()).filter(|s: &f32| *s > 0.0);
     let forms = CombatForms::build(d.lo, d.schema);
-    let rules = Rules::from_forms(&forms);
-    // A thrown grenade's restitution (combat-rules.md §5).
-    let grenade_restitution = forms.setting("fGrenadeRestitution").unwrap_or(CombatTuning::default().grenade_restitution);
-    let fists = forms.by_edid("Fists");
     info!("combat: {} weapons, {} ammo, {} projectiles, {} explosions read in {:.0} ms", forms.weapons.len(), forms.ammo.len(), forms.projectiles.len(), forms.explosions.len(), t.elapsed().as_secs_f64() * 1000.0);
-    commands.insert_resource(Combat {
-        forms,
-        rules,
-        tuning: CombatTuning {
-            grenade_restitution,
-            ..CombatTuning::default()
-        },
-        weapon: None,
-        equipped: None,
-        mods: 0,
-        silenced_logged: None,
-        fists,
-        ammo: None,
-        self_ammo: false,
-        melee: false,
-        swings: Melee::default(),
-        blows: 0,
-        boom: Vec::new(),
-        meltdowns: HashSet::new(),
-        debris: Vec::new(),
-        cycle: None,
-        kick: Kick::default(),
-        flying: Vec::new(),
-        dropped_live: Vec::new(),
-        settled: Vec::new(),
-        landed: Vec::new(),
-        fire_landed: Vec::new(),
-        splashes: Vec::new(),
-        ghosts: Vec::new(),
-        looping: None,
-        ejects_seen: 0,
-        vats_throw: None,
-        last_shot: 0.0,
-        next_visual: 0,
-        pending: Vec::new(),
-        script_shots: Vec::new(),
-        guarding: HashMap::new(),
-        blocked_blows: Vec::new(),
-        fresh_reload: false,
-        guard_down_until: 0.0,
-        marks: Vec::new(),
-        rng: SplitMix(1),
-        swing_rng: SplitMix(2),
-        time: 0.0,
-        no_spread: std::env::var_os("NVF_PLAY_TEST_NO_SPREAD").is_some_and(|v| v != "0"),
-        tracer_hold,
-        load_magazine: None,
-        load_ammo: None,
-        chosen_ammo: std::collections::BTreeMap::new(),
-        crosshair_cone: None,
-        player_spread: None,
-        grenade_hold: 0.0,
-        grenade_held: false,
-        vats_cone: None,
-        vats_blast: VatsBlast::default(),
-        player_blocked_at: None,
-        special_swing: None,
-        throw_logged: None,
-        spread_perks_logged: None,
-        flinch_until: 0.0,
-        flinch_end: None,
-        flinch_rng: SplitMix(3),
-        kick_rng: SplitMix(5),
-        kick_just_settled: false,
-        kick_left: [0.0; 2],
-        kick_back_goal: [0.0; 2],
-        kick_back: [crate::ease::Spring::default(); 2],
-        spent_rng: SplitMix(4),
-        blood_rng: SplitMix(6),
-        blood_chance_logged: false,
-    });
+    let mut combat = Combat::from_forms(forms);
+    combat.no_spread = std::env::var_os("NVF_PLAY_TEST_NO_SPREAD").is_some_and(|v| v != "0");
+    combat.tracer_hold = tracer_hold;
+    commands.insert_resource(combat);
 }
 
 /// The player's spread perks for the weapon `id`: Modify Weapon Strength Req (points off
@@ -2765,7 +2810,9 @@ fn hud_ammo(magazine: u32, carried: u32, regenerates: bool) -> (u32, u32) {
 }
 
 /// Follow the equipped weapon: a new weapon gets a new cycle, loaded from what is carried.
-fn equip_sync(mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut anim: ResMut<WeaponAnim>, tweaks: Option<Res<crate::tweaks::TweakSettings>>) {
+/// Production ECS entry point exposed for authored headless integration fixtures.
+#[doc(hidden)]
+pub fn equip_sync(mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut anim: ResMut<WeaponAnim>, tweaks: Option<Res<crate::tweaks::TweakSettings>>) {
     let keep_chosen = tweaks.as_deref().is_some_and(|t| t.keep_chosen_ammo);
     equip_sync_step(&mut c, &mut sim, &mut anim, keep_chosen);
 }
@@ -2817,10 +2864,26 @@ fn equip_sync_step(c: &mut Combat, sim: &mut SimState, anim: &mut WeaponAnim, ke
         cy.magazine = n.min(cy.clip_size).min(carried);
     }
     // A save's magazine for this weapon (`crate::save`), no more than is carried.
+    let mut restored_mag = false;
     if let (Some((sw, n)), Some(cy)) = (c.load_magazine, c.cycle.as_mut()) {
         if sw == id.0 {
             cy.magazine = n.min(carried);
             c.load_magazine = None;
+            restored_mag = true;
+        }
+    }
+    // An unequipped weapon's saved loaded round count (`fnv_sim::inventory::Extra::magazine`):
+    // restored once on equip when no `load_magazine` or mod-keep override took precedence, then
+    // cleared so vanilla unequip/re-equip behavior stays unchanged.
+    if !restored_mag && kept.is_none() && !no_ammo {
+        if let (Some(n), Some(cy)) = (
+            sim.world.peek(FormId::PLAYER_REF).and_then(|s| s.inventory.as_ref()).and_then(|i| i.equipped_magazine(id)),
+            c.cycle.as_mut(),
+        ) {
+            cy.magazine = n.min(carried);
+            if let Ok(inv) = sim.world.inventory_mut(FormId::PLAYER_REF) {
+                inv.map_equipped(id, |e| fnv_sim::inventory::Extra { magazine: None, ..e });
+            }
         }
     }
     anim.attack = w.attack_anim.clone();
@@ -3629,7 +3692,27 @@ pub(crate) fn fire(
     c.player_spread = None;
     // Scripts' EjectCasing requests (`fnv_game::nvse_jg10`) are taken every frame, so
     // those made with no gun out (or for other actors) do not pile up or fire later.
-    let asked = script.as_deref_mut().and_then(|s| s.rt.as_mut()).map(|rt| rt.game.take_casing_requests()).unwrap_or_default();
+    let (asked, allow_attack, force_jam) = script
+        .as_deref_mut()
+        .and_then(|s| s.rt.as_mut())
+        .map(|rt| {
+            (
+                rt.game.take_casing_requests(),
+                rt.game.take_allow_attack(),
+                rt.game.take_force_jam_requests().contains(&FormId::PLAYER_REF),
+            )
+        })
+        .unwrap_or_default();
+    // kNVSE `AllowAttack`: clear the player's current attack/cooldown/flinch lock so
+    // the next attack may start at once [documented: GECK wiki AllowAttack; design].
+    if allow_attack.contains(&FormId::PLAYER_REF) {
+        if let Some(cycle) = c.cycle.as_mut() {
+            cycle.phase = Phase::Ready;
+        }
+        c.swings.reset();
+        anim.swing = None;
+        c.flinch_until = 0.0;
+    }
     if c.melee {
         c.vats_cone = None;
         return;
@@ -3780,6 +3863,16 @@ pub(crate) fn fire(
         info!("combat: {} {} (tweak)", w.edid.as_deref().unwrap_or("?"), if held_left.is_some() { "held at its release" } else { "let go" });
     }
     anim.throw_held = held_left.is_some();
+    // Scripted ForceWeaponJamAnim / ForceJamAnim interrupts the current reload or attack
+    // phase immediately before stepping the cycle [documented: GECK wiki ForceWeaponJamAnim].
+    if force_jam && apply_forced_player_jam(cycle, &mut anim, &mut stats, &w, &c.tuning, script.as_deref()) {
+        if c.vats_throw.take().is_some() {
+            if let Some(v) = vats.as_deref_mut() {
+                v.throw_left();
+            }
+        }
+        vats_shot = None;
+    }
     let own_dt = held_left.map_or(own_dt, |left| (left - 1e-4).max(0.0));
     let events = cycle.step(&c.tuning, Input { trigger: control.trigger && !broken_in_hand(&sim, id), reload: reload && !god, dt: own_dt, carried });
     // VATS mode's throw that wound up leaves now, at its point; one that no longer winds
@@ -3949,7 +4042,7 @@ pub(crate) fn fire(
                     // VATS mode's throw: from the eye on the low arc that lands on the mark
                     // (vats-mode.md §16.3), at 45° when it is out of reach; at the speed the
                     // throw will leave with.
-                    let (speed, g) = projectile.map_or((0.0, 0.0), |p| (p.speed * throw_mult, p.gravity * gravity));
+                    let (speed, g) = projectile.map_or((0.0, 0.0), |p| (p.speed * throw_mult, p.fall() * gravity));
                     let aim = fnv_combat::vats::lob_dir(eye, point, speed, g).unwrap_or_else(|| fnv_combat::vats::lob_far(eye, point));
                     shot::Leaving { origin: eye, aim, aim_point: point, aim_distance: vec::len(vec::sub(point, eye)), seen: Seen::ON_PATH, covered: false }
                 } else {
@@ -4076,10 +4169,8 @@ pub(crate) fn fire(
                         break;
                     }
                     if jams {
-                        // The jam clip's length, else the weapon's Jam Time, else the default.
-                        let secs = anim.timing.jam_len.or(Some(w.jam_time).filter(|&t| t > 0.0)).unwrap_or(c.tuning.jam_fallback);
-                        // The player's tweak: the jam clears at the reload's pace [design: docs/design/tweaks.md].
-                        let secs = if script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.jam_at_reload_pace) && anim.reload_rate > 0.0 { secs / anim.reload_rate } else { secs };
+                        let at_reload_pace = script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.jam_at_reload_pace);
+                        let secs = jam_duration(anim.timing.jam_len, w.jam_time, c.tuning.jam_fallback, anim.reload_rate, at_reload_pace);
                         cycle.jam(secs);
                         anim.jams += 1;
                         stats.jams += 1;
@@ -4124,6 +4215,50 @@ pub(crate) fn fire(
             Event::Cleared => info!("combat: the jam is cleared"),
         }
     }
+    // Also apply ForceWeaponJamAnim / ForceJamAnim if a handler invoked during Event::Fired
+    // (e.g. OnFire, SetOnFireWeaponEventHandler, ShowOff:OnFireWeapon) requested a jam.
+    let fired_force_jam = script
+        .as_deref_mut()
+        .and_then(|s| s.rt.as_mut())
+        .is_some_and(|rt| rt.game.take_force_jam_requests().contains(&FormId::PLAYER_REF));
+    if fired_force_jam && !broken_in_hand(&sim, id) {
+        apply_forced_player_jam(cycle, &mut anim, &mut stats, &w, &c.tuning, script.as_deref());
+    }
+}
+
+/// Duration of a weapon jam: the loaded jam clip's length, else the weapon's `DNAM/jam_time`,
+/// else `fallback`, scaled by `reload_rate` when `jam_at_reload_pace` is enabled
+/// [design: docs/design/tweaks.md].
+fn jam_duration(jam_len: Option<f32>, jam_time: f32, fallback: f32, reload_rate: f32, jam_at_reload_pace: bool) -> f32 {
+    let secs = jam_len.or(Some(jam_time).filter(|&t| t > 0.0)).unwrap_or(fallback);
+    if jam_at_reload_pace && reload_rate > 0.0 { secs / reload_rate } else { secs }
+}
+
+/// Apply a scripted `ForceWeaponJamAnim` / `ForceJamAnim` request to the player's weapon
+/// cycle and `WeaponAnim`, interrupting any active reload or attack phase [documented:
+/// GECK wiki ForceWeaponJamAnim]. Does not restart an already-active jam [design].
+fn apply_forced_player_jam(
+    cycle: &mut Cycle,
+    anim: &mut WeaponAnim,
+    stats: &mut CombatStats,
+    w: &WeaponStats,
+    tuning: &CombatTuning,
+    script: Option<&ScriptState>,
+) -> bool {
+    if cycle.no_ammo || cycle.jammed() || anim.jam.is_none() || (anim.timing.jam_len.is_none() && w.jam_time <= 0.0) {
+        return false;
+    }
+    let at_reload_pace = script.and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.jam_at_reload_pace);
+    let secs = jam_duration(anim.timing.jam_len, w.jam_time, tuning.jam_fallback, anim.reload_rate, at_reload_pace);
+    cycle.jam(secs);
+    anim.jams += 1;
+    stats.jams += 1;
+    info!(
+        "combat: {} forced jam by script (clip {}, {secs:.2} s)",
+        w.edid.as_deref().unwrap_or("?"),
+        anim.jam.as_deref().unwrap_or("none")
+    );
+    true
 }
 
 /// The target's DT and DR from the armour it wears (its carried ARMO by the wearing rule).
@@ -4157,7 +4292,7 @@ fn target_resist(script: Option<&mut ScriptState>, sim: &mut SimState, target: F
     let Some(code) = fnv_game::functions::av_by_name(name) else { return 0.0 };
     let v = actor_av(script, sim, target, code).unwrap_or(0.0);
     if v > 0.0 {
-        info!("combat: {target} takes {} damage less {v:.0} % ({name}) in place of DR", w.edid.as_deref().unwrap_or("?"));
+        info!("combat: {target} takes {} damage less {v:.0} % ({name}) as well as DR", w.edid.as_deref().unwrap_or("?"));
     }
     v
 }
@@ -4542,21 +4677,18 @@ fn hit_actor(
             info!("combat: critical effect {spell_name} ({spell}) on {name} {target}{}: {} effect(s)", if on_death { " (on death)" } else { "" }, ids.len());
         }
     }
-    // A critical by the player says so in the corner with the masters' critical icon
-    // [observed: FalloutNV.esm `sCriticalStrikeIcon`, the Critical Chance picture; design:
-    // the words are ours, the original's are not in the data]; the player's Critical Hit
-    // Messages Name the Limb tweak adds the part struck [design: docs/design/tweaks.md].
+    // A critical by the player says so in the corner with the default Vault Boy corner
+    // icon (`corner_messages::DEFAULT_ICON`, `glow_message_vaultboy_neutral.dds`).
+    // `FalloutNV.esm`'s `sCriticalStrikeIcon` (`glow_Critical_Chance.dds`, a 256x256
+    // Pip-Boy stat icon not in `InterfaceShared.tai`) is documented unused [documented:
+    // GECK wiki Unused Game Settings]; whether the original shows the neutral face or
+    // another `glow_message_vaultboy_*` face on criticals / sneak criticals is not yet
+    // observed [hypothesis]. The words are ours (the original's are not in the master
+    // data [design]); the player's Critical Hit Messages Name the Limb tweak adds the
+    // part struck [design: docs/design/tweaks.md].
     if mine && info.critical && !r.immune {
         let limb = r.limb.map(|(code, _)| limb_name(code)).filter(|_| rt.game.tweaks.crit_message_limb);
-        let text = match limb {
-            Some(l) => format!("Critical hit on {name}'s {l}"),
-            None => format!("Critical hit on {name}"),
-        };
-        let icon = match sim.world.setting_value("sCriticalStrikeIcon") {
-            Some(fnv_sim::settings::Setting::Str(s)) if !s.is_empty() => Some(s.clone()),
-            _ => None,
-        };
-        rt.game.emit(fnv_game::trace::EventKind::NoteShown { text, icon, seconds: CRIT_NOTE_SECONDS });
+        rt.game.emit(critical_hit_note(&name, limb));
     }
     if mine {
         stats.damage += r.dealt as f32;
@@ -4623,6 +4755,18 @@ pub(crate) static PLAYER_KILLS: std::sync::Mutex<Vec<(FormId, FormId, Option<u16
 
 /// How long the critical-hit corner message shows, seconds [design].
 const CRIT_NOTE_SECONDS: f32 = 2.0;
+
+/// Build the corner notification event for a player critical hit: uses the default
+/// corner-message icon (`icon: None` -> `corner_messages::DEFAULT_ICON`) rather than the
+/// documented-unused `sCriticalStrikeIcon` GMST [documented: GECK wiki Unused Game
+/// Settings; hypothesis: neutral face pending an unmodded original-game capture].
+fn critical_hit_note(name: &str, limb: Option<&str>) -> fnv_game::trace::EventKind {
+    let text = match limb {
+        Some(l) => format!("Critical hit on {name}'s {l}"),
+        None => format!("Critical hit on {name}"),
+    };
+    fnv_game::trace::EventKind::NoteShown { text, icon: None, seconds: CRIT_NOTE_SECONDS }
+}
 
 fn limb_name(code: u16) -> &'static str {
     code.checked_sub(25).and_then(|i| LIMB_NAMES.get(i as usize)).copied().unwrap_or("limb")
@@ -4948,6 +5092,7 @@ fn melee(
             // A person blocking it from the front stops part of it (combat-ai.md §14.3); a
             // power attack breaks through and staggers it (combat-rules.md §12).
             let mut guard_broken = false;
+            let mut blocked = false;
             if c.guarding.get(&target).is_some_and(|f| damage::from_front(*f, player.look_dir())) {
                 let before = d.dealt;
                 (d.dealt, guard_broken) = damage::against_block(&c.tuning, before, power.is_some());
@@ -4955,6 +5100,7 @@ fn melee(
                     stats.blocks_broken += 1;
                     info!("combat: the player's power attack breaks {target}'s block ({before:.1}, all dealt)");
                 } else {
+                    blocked = true;
                     stats.blows_blocked += 1;
                     info!("combat: {target} blocks the player's blow: {:.1} of {before:.1} stopped", before - d.dealt);
                     c.blocked_blows.push(BlockedBlow { attacker: FormId::PLAYER_REF, blocker: target, damage: before, dealt: d.dealt });
@@ -4967,7 +5113,21 @@ fn melee(
             let push = damage::knockback_force(&c.rules, d.dealt, agility);
             let location = bp.as_ref().map_or(0, BodyPart::location);
             let limb = limb_hit(bp.as_ref(), &d, &w);
-            let info = HitInfo { attacker: Some(FormId::PLAYER_REF), weapon: Some(id), location, critical: d.critical, limb };
+            let info = HitInfo {
+                attacker: Some(FormId::PLAYER_REF),
+                weapon: Some(id),
+                location,
+                critical: d.critical,
+                blocking: blocked,
+                sneak_attack: a.sneaking,
+                base_weapon_damage: f64::from(d.base + d.crit_bonus),
+                hit_pos: Some(hit.point),
+                // [design] Player melee hits record the player's unit look direction for
+                // `GetHit3DData 1` (unprobed for melee swings in the original; jip-hit-info.md §6).
+                hit_dir: fnv_game::combat::unit_hit_dir(player.look_dir()),
+                limb,
+                ..HitInfo::default()
+            };
             pushes.write(ActorPush { form_id: target.0, point: hit.point, dv: vec::scale(player.look_dir(), MELEE_PUSH * if power.is_some() { POWER_PUSH } else { 1.0 }) });
             let mut items = hit_items(c, script.as_deref_mut(), &mut sim, &mut stats, FormId::PLAYER_REF, Some(id), None);
             // A special move's effect goes on with the blow (Ranger Takedown's knockdown
@@ -5118,7 +5278,7 @@ fn gas_hit(c: &Combat, sim: &mut SimState, script: Option<&mut ScriptState>, r: 
     let weapon = weapon.filter(|w| *w != FormId(0));
     let items: Vec<FormId> = weapon.and_then(|w| c.forms.weapons.get(&w)).and_then(|w| w.enchantment).into_iter().collect();
     let (ran, dummy) = with_world(rt, sim, |rt| {
-        let info = HitInfo { attacker, weapon, location: -1, critical: false, limb: None };
+        let info = HitInfo { attacker, weapon, location: -1, ..HitInfo::default() };
         let ran = rt.game.hit_object(r, info) | rt.game.magic_effect_hits(r, &items, attacker);
         if ran || !spark {
             return (ran, false);
@@ -5327,6 +5487,7 @@ fn actor_attacks(
         let player_guard = player_guard.filter(|_| c.time >= c.guard_down_until);
         let guard = if b.target == FormId::PLAYER_REF { player_guard } else { c.guarding.get(&b.target).copied() };
         let mut guard_broken = false;
+        let mut blocked = false;
         if guard.is_some_and(|f| damage::from_front(f, b.dir)) {
             let before = d.dealt;
             (d.dealt, guard_broken) = damage::against_block(&c.tuning, before, b.anim.is_some());
@@ -5337,6 +5498,7 @@ fn actor_attacks(
                     c.guard_down_until = c.time + c.tuning.guard_break;
                 }
             } else {
+                blocked = true;
                 stats.blows_blocked += 1;
                 info!("combat: {} blocks {}'s blow: {:.1} of {before:.1} stopped", b.target, b.attacker, before - d.dealt);
                 if b.target == FormId::PLAYER_REF {
@@ -5351,7 +5513,19 @@ fn actor_attacks(
         // [hypothesis] Melee's part multipliers are unmeasured (combat-rules.md §12):
         // keep Health on HitPart::default(), but give player blows a location and limb.
         // A creature uses this path's Fists Limb Dmg Mult in the absence of its own weapon.
-        let info = HitInfo { attacker: Some(b.attacker), weapon: b.weapon, location: bp.as_ref().map_or(0, BodyPart::location), critical: d.critical, limb: limb_hit(bp.as_ref(), &d, &w) };
+        let info = HitInfo {
+            attacker: Some(b.attacker),
+            weapon: b.weapon,
+            location: bp.as_ref().map_or(0, BodyPart::location),
+            critical: d.critical,
+            blocking: blocked,
+            sneak_attack: a.sneaking,
+            base_weapon_damage: f64::from(d.base + d.crit_bonus),
+            hit_pos: Some(b.point),
+            hit_dir: fnv_game::combat::unit_hit_dir(b.dir),
+            limb: limb_hit(bp.as_ref(), &d, &w),
+            ..HitInfo::default()
+        };
         if b.target != FormId::PLAYER_REF {
             pushes.write(ActorPush { form_id: b.target.0, point: b.point, dv: vec::scale(b.dir, MELEE_PUSH) });
         }
@@ -5456,9 +5630,12 @@ fn script_shot(sim: &SimState, from: FormId, weapon: FormId, muzzle: Option<[f32
 /// would go on in the new one at the same numbers (#1986). They are dropped, their script
 /// references with them [design]. A charge or mine at rest is a reference of its cell and
 /// stays there. Not gated on play, as the loading screen is up when the travel goes out.
-fn leave_space_shots(mut travel: MessageReader<crate::Travel>, mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut script: Option<ResMut<ScriptState>>, mut visuals: ResMut<ShotVisuals>) {
+fn leave_space_shots(mut travel: MessageReader<crate::Travel>, mut c: ResMut<Combat>, mut sim: ResMut<SimState>, mut script: Option<ResMut<ScriptState>>, mut visuals: ResMut<ShotVisuals>, mut snap: Option<ResMut<crate::bullet_snap::BulletSnap>>) {
     if travel.read().count() == 0 {
         return;
+    }
+    if let Some(s) = snap.as_deref_mut() {
+        s.clear_tracking();
     }
     let n = c.flying.len() + c.pending.len() + c.boom.len();
     if n == 0 {
@@ -5554,7 +5731,7 @@ fn fly(
     anim: Res<WeaponAnim>,
     sfx: Option<Res<Sfx>>,
     mut effects: ShotEffects,
-    mut dm: ResMut<crate::dismember::Dismemberment>,
+    (mut dm, mut snap): (ResMut<crate::dismember::Dismemberment>, Option<ResMut<crate::bullet_snap::BulletSnap>>),
 ) {
     sync_condition_penalty(&mut c, script.as_deref());
     let dt = time.delta_secs();
@@ -5713,13 +5890,51 @@ fn fly(
                 if thrown { Some(f.by.weapon) } else { p.default_weapon }
             });
             let rref = f.rref;
-            let ghost = move |to: V3| Ghost { id, proj, rref, owner, from: seen_before, to, speed, travelled: 0.0, beam, left: fade, fade, fresh: true, follow: follow && beam };
+            let snap_active = snap.as_deref().is_some_and(crate::bullet_snap::BulletSnap::active);
+            let snap_damage = c.forms.weapons.get(&f.by.weapon).map_or(0.0, |w| w.base_damage as f32);
+            let snap_supersonic = c.forms.projectiles.get(&f.proj).is_some_and(|p| p.has("Supersonic"));
+            let snap_eligible = f.p.motion == Motion::Missile && !f.p.mine && !f.p.detonates && (f.p.explosion.is_none() || snap_supersonic);
+            let ghost = move |to: V3, hit_player: bool| Ghost { id, proj, rref, owner, from: seen_before, to, speed, travelled: 0.0, beam, left: fade, fade, fresh: true, follow: follow && beam, damage: snap_damage, snap_eligible, hit_player };
             let line = move |to: V3, life: f32| Mark { follow, ..Mark::tracer(seen_before, to, life) };
             let touched_before = f.p.first_contact.is_some();
             let first = f.p.age == 0.0;
             world.only.set(f.by.sure.map(|t| if t == FormId::PLAYER_REF { PLAYER } else { t.0 as ActorId }));
             let events = f.p.step(&world, dt);
             world.only.set(None);
+            if snap_active && !at_once {
+                if let Some(s) = snap.as_deref_mut() {
+                    let to = events
+                        .iter()
+                        .find_map(|e| match e {
+                            ProjEvent::Hit { point, .. } | ProjEvent::Explode { point, .. } | ProjEvent::Expired { point } => Some(*point),
+                            _ => None,
+                        })
+                        .unwrap_or(f.p.pos);
+                    let hit_player = events.iter().any(|e| matches!(e, ProjEvent::Hit { actor: Some(a), .. } if *a == PLAYER));
+                    let is_player_owned = f.by.actor == FormId::PLAYER_REF;
+                    if hit_player {
+                        s.push(crate::bullet_snap::SnapInput::PlayerImpact {
+                            id: f.id,
+                            at: to,
+                            speed: f.p.speed,
+                            damage: snap_damage,
+                            is_player_owned,
+                            eligible: snap_eligible,
+                        });
+                    } else {
+                        s.push(crate::bullet_snap::SnapInput::Segment {
+                            id: f.id,
+                            from: before,
+                            to,
+                            dir: f.dir,
+                            speed: f.p.speed,
+                            damage: snap_damage,
+                            is_player_owned,
+                            eligible: snap_eligible,
+                        });
+                    }
+                }
+            }
             // Its way this frame, from the muzzle on the first, to where it stopped.
             if !gas.is_empty() && !f.by.harmless {
                 let to = events
@@ -5807,7 +6022,7 @@ fn fly(
                             c.marks.push(line(point, hold.unwrap_or(0.08)));
                         }
                         if at_once && f.shown {
-                            c.ghosts.push(ghost(point));
+                            c.ghosts.push(ghost(point, actor == Some(PLAYER)));
                         }
                     }
                     // A harmless shot sets nothing off [design].
@@ -5828,7 +6043,7 @@ fn fly(
                             c.marks.push(line(point, hold.unwrap_or(0.08)));
                         }
                         if at_once && f.shown {
-                            c.ghosts.push(ghost(point));
+                            c.ghosts.push(ghost(point, false));
                         }
                     }
                 }
@@ -5870,6 +6085,7 @@ fn fly(
     }
     // What is drawn this frame: the projectiles in flight where they are seen, and
     // those found at once on their way.
+    let snap_active = snap.as_deref().is_some_and(crate::bullet_snap::BulletSnap::active);
     c.ghosts.retain_mut(|g| {
         if let (true, Some(m)) = (g.follow, anim.muzzle) {
             g.from = m;
@@ -5881,10 +6097,48 @@ fn fly(
             g.left -= dt;
             g.left > 0.0
         } else {
+            let prev = g.travelled;
+            let len = vec::len(vec::sub(g.to, g.from));
             g.travelled += g.speed.max(1.0) * dt;
-            g.travelled < vec::len(vec::sub(g.to, g.from))
+            let finished = g.travelled >= len;
+            if snap_active {
+                if let Some(s) = snap.as_deref_mut() {
+                    let d = vec::sub(g.to, g.from);
+                    let dir = if len > 1e-3 { vec::scale(d, 1.0 / len) } else { [0.0, 1.0, 0.0] };
+                    let is_player_owned = g.owner == FormId::PLAYER_REF;
+                    if g.hit_player {
+                        if finished {
+                            s.push(crate::bullet_snap::SnapInput::PlayerImpact {
+                                id: g.id,
+                                at: g.to,
+                                speed: g.speed,
+                                damage: g.damage,
+                                is_player_owned,
+                                eligible: g.snap_eligible,
+                            });
+                        }
+                    } else {
+                        let seg_from = vec::add(g.from, vec::scale(dir, prev));
+                        let seg_to = vec::add(g.from, vec::scale(dir, g.travelled.min(len)));
+                        s.push(crate::bullet_snap::SnapInput::Segment {
+                            id: g.id,
+                            from: seg_from,
+                            to: seg_to,
+                            dir,
+                            speed: g.speed,
+                            damage: g.damage,
+                            is_player_owned,
+                            eligible: g.snap_eligible,
+                        });
+                    }
+                }
+            }
+            !finished
         }
     });
+    if let Some(s) = snap.as_deref_mut().filter(|s| s.active()) {
+        s.retain_active(|id| c.flying.iter().any(|f| f.id == id) || c.ghosts.iter().any(|g| g.id == id));
+    }
     visuals.flying.clear();
     visuals.flying.extend(c.flying.iter().filter(|f| f.shown).map(|f| ShotVisual { id: f.id, projectile: f.proj, owner: f.by.actor, pos: f.seen.at(f.p.pos, f.p.travelled), dir: f.dir, beam: None, travelled: f.p.travelled, strength: 1.0 }));
     visuals.flying.extend(c.ghosts.iter().map(|g| {
@@ -5959,21 +6213,23 @@ fn fly(
             }
         }
         // The blast's live reference for the scripts (ShowOff's GetExplosionRefRadius and
-        // GetExplosionRefSource), gone after the frame (`fnv_game::nvse_showoff5`).
-        if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) {
-            crate::script::with_world(rt, &mut sim, |rt| rt.game.explosion_placed(id, cause.map(|c| c.actor), at, x.radius));
-        }
+        // GetExplosionRefSource, and JIP's GetHitProjectile), gone after the frame
+        // (`fnv_game::nvse_showoff5`).
+        let expl_ref = script
+            .as_deref_mut()
+            .and_then(|s| s.rt.as_mut())
+            .and_then(|rt| crate::script::with_world(rt, &mut sim, |rt| rt.game.explosion_placed(id, cause.map(|c| c.actor), at, x.radius)));
         let hits = {
             let world = view(&mut phys, script.as_deref(), Some(&sim));
             blast(&world, &c.tuning, &x, at, normal)
         };
         let always = x.flags.iter().any(|f| f == "Knock Down - Always");
         let by_formula = x.flags.iter().any(|f| f == "Knock Down - By Formula");
-        let own_blast_spares = cause.is_some_and(|c| c.actor == FormId::PLAYER_REF) && script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.no_self_explosion_damage);
+        let player_blast = cause.is_some_and(|c| c.actor == FormId::PLAYER_REF);
         for b in hits {
             let target = if b.actor == PLAYER { FormId::PLAYER_REF } else { FormId(b.actor as u32) };
-            // The player's tweak: the player's own blast spares the player [design: docs/design/tweaks.md].
-            if own_blast_spares && target == FormId::PLAYER_REF {
+            // The player's tweak: the player's own blast spares the player (and optionally non-hostiles) [design: docs/design/tweaks.md].
+            if player_blast && script.as_deref_mut().and_then(|s| s.rt.as_mut()).is_some_and(|rt| crate::script::with_world(rt, &mut sim, |rt| rt.game.own_explosion_spares(target))) {
                 continue;
             }
             // The player's tweak: a Meltdown blast spares the player and the companions [design: docs/design/tweaks.md].
@@ -5987,7 +6243,9 @@ fn fly(
             let d = damage::blast_hit(&c.rules, &c.tuning, raw, dt_v, dr, &ap, &tp);
             log_blast_perks(cause, target, &ap, &tp, &d);
             let dealt = d.dealt;
-            let info = blast_hit_info(cause);
+            // Wave 4D w4d_13_explosion_falloff_outdoor [observed]: GetHitBaseWeaponDamage
+            // includes explosion distance falloff (before difficulty scaling).
+            let info = blast_hit_info(cause, expl_ref, f64::from(raw));
             // The blast's object effect on those it catches (hit-effects.md §1).
             let items: Vec<FormId> = x.enchantment.into_iter().collect();
             // Its limb damage, on the torso and legs (crippled-limbs.md §5): from the damage
@@ -6237,7 +6495,7 @@ fn fly(
             stats.harmless_hits += 1;
             let hit = p.actor.map(|a| if a == PLAYER { FormId::PLAYER_REF } else { FormId(a as u32) }).or(p.object.map(|o| FormId(o as u32)));
             if let Some(target) = hit {
-                let info = HitInfo { attacker: Some(shooter), weapon: Some(id), location: -1, critical: false, limb: None };
+                let info = HitInfo { attacker: Some(shooter), weapon: Some(id), projectile: p.rref, location: -1, ..HitInfo::default() };
                 let ran = script.as_deref_mut().and_then(|s| s.rt.as_mut()).is_some_and(|rt| with_world(rt, &mut sim, |rt| rt.game.harmless_hit(target, info)));
                 stats.harmless_scripts += u32::from(ran);
                 if ran {
@@ -6270,7 +6528,7 @@ fn fly(
                 let r = FormId(obj as u32);
                 // The object's OnHit and OnHitWith blocks, before any damage
                 // [documented: GECK wiki Event Handling] (combat-rules.md §14).
-                let info = HitInfo { attacker: Some(shooter), weapon: Some(id), location: -1, critical: false, limb: None };
+                let info = HitInfo { attacker: Some(shooter), weapon: Some(id), projectile: p.rref, location: -1, ..HitInfo::default() };
                 let ran = script.as_deref_mut().and_then(|s| s.rt.as_mut()).is_some_and(|rt| with_world(rt, &mut sim, |rt| rt.game.hit_object(r, info)));
                 // The weapon's object effect reaches the object: its OnMagicEffectHit
                 // blocks (the Vault 22 traps catch the flamer's burn this way).
@@ -6284,6 +6542,9 @@ fn fly(
                 let impulse = vec::scale(p.dir, p.force * OBJECT_PUSH * phys.world.params.units_per_metre);
                 let pushed = phys.world.push_ref(obj as u32, p.point, impulse, OBJECT_PUSH_MAX_SPEED);
                 stats.object_scripts += ran as u32;
+                if ran && shooter == FormId::PLAYER_REF {
+                    *stats.player_object_hits.entry(r.0).or_default() += 1;
+                }
                 stats.objects_pushed += pushed.is_some() as u32;
                 if ran || pushed.is_some() {
                     info!(
@@ -6314,10 +6575,28 @@ fn fly(
         let nerve = companion_nerve(script.as_deref_mut(), &mut sim, target);
         let d = damage::hit(&c.rules, &c.tuning, &h, &a, &Target { dt: dt_v, dr, resist, nerve, ..Target::default() }, &ap, &tp, roll);
         log_hit_perks(shooter, Some(target), &ap, &tp, &d);
+        // The ammo's Fatigue Mod (AMEF type 5: the bean bag's 250) takes that much fatigue,
+        // once a hit [documented: GECK wiki GetAmmoEffectTraitNumeric effect types;
+        // hypothesis: from 0, once a hit; logic-fields.md §3]. Computed before `HitInfo` so
+        // `SetOnHitEventHandler` reads it via `GetHitFatigueDamage`.
+        let fatigue = damage::apply_effects(0.0, &ammo_effects, "Fatigue Mod").max(0.0);
         // [design] Missing body part data keeps the whole-capsule fallback (location 0).
         let location = bp.as_ref().map_or(0, BodyPart::location);
         let limb = limb_hit(bp.as_ref(), &d, &w);
-        let info = HitInfo { attacker: Some(shooter), weapon: Some(id), location, critical: d.critical, limb };
+        let info = HitInfo {
+            attacker: Some(shooter),
+            weapon: Some(id),
+            projectile: p.rref,
+            location,
+            critical: d.critical,
+            sneak_attack: a.sneaking,
+            base_weapon_damage: f64::from(d.base + d.crit_bonus),
+            fatigue_damage: f64::from(fatigue),
+            hit_pos: Some(p.point),
+            hit_dir: fnv_game::combat::unit_hit_dir(p.dir),
+            limb,
+            ..HitInfo::default()
+        };
         if target != FormId::PLAYER_REF {
             pushes.write(ActorPush { form_id: target.0, point: p.point, dv: vec::scale(p.dir, SHOT_PUSH) });
         }
@@ -6327,10 +6606,6 @@ fn fly(
         let r = apply_hit(script.as_deref_mut(), &mut sim, target, d.dealt, info, &mut stats, &mut feedback, hud.as_deref_mut(), &mut messages, &items, false, crit_effect(c, Some(id)));
         armour_lines(script.as_deref_mut(), Some(shooter), target, &d, c.tuning.dt_floor);
         spread_hit_areas(script.as_deref_mut(), &mut sim, &mut stats, target, &items, info.attacker);
-        // The ammo's Fatigue Mod (AMEF type 5: the bean bag's 250) takes that much fatigue,
-        // once a hit [documented: GECK wiki GetAmmoEffectTraitNumeric effect types;
-        // hypothesis: from 0, once a hit; logic-fields.md §3].
-        let fatigue = damage::apply_effects(0.0, &ammo_effects, "Fatigue Mod");
         if fatigue > 0.0 && r.as_ref().is_some_and(|r| !r.immune) {
             if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) {
                 with_world(rt, &mut sim, |rt| rt.game.damage_fatigue(target, f64::from(fatigue)));
@@ -6695,6 +6970,66 @@ mod tests {
     use super::*;
     use crate::phys::NpcBody;
 
+    fn presentation_fixture() -> Combat {
+        let mut app=App::new();
+        app.add_plugins(MinimalPlugins).insert_resource(PlayWorld(crate::PlayData {
+            lo:Box::leak(Box::new(fnv_esm::LoadOrder::new(&[]).unwrap())),schema:Box::leak(Box::default()),index:Box::leak(Box::default()),
+            world:1,interior:None,eye:[0.0;3],heading_deg:0.0,pitch_deg:0.0,auto_walk:0.0,start_at_cell_spot:false,packages:false,
+        })).add_systems(Startup,init_combat);
+        app.update();app.world_mut().remove_resource::<Combat>().unwrap()
+    }
+
+    #[test]
+    fn touch_aim_presentation_uses_current_melee_fists_and_real_scoped_capability() {
+        use crate::touch_action_presentation::{aim_role,AimRole};
+        let mut c=presentation_fixture();let melee=FormId(1);let gun=FormId(2);let fists=FormId(3);
+        c.forms.weapons.insert(melee,WeaponStats::default());c.forms.weapons.insert(fists,WeaponStats::default());c.fists=Some(fists);
+        c.forms.weapons.insert(gun,WeaponStats {sight_fov:35.0,scope_nif:Some("fixture-scope.nif".into()),flags:vec!["Has Scope".into()],..default()});
+        let mut control=PlayerControl {weapon_out:true,..default()};let mut anim=WeaponAnim {ready:true,..default()};
+        c.weapon=Some(melee);c.equipped=Some(Some(melee));c.melee=true;
+        assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Block);
+        c.weapon=Some(fists);c.equipped=Some(None);
+        assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Block,"runtime fists fallback, not an ID guess");
+        c.weapon=Some(gun);c.equipped=Some(Some(gun));c.melee=false;
+        for aiming in [false,true] {control.aiming=aiming;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Scope,"scope capability is independent of a held aim key");}
+        c.forms.weapons.get_mut(&gun).unwrap().scope_nif=None;
+        assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim,"a flag without a real scope model is not scoped");
+        c.weapon=Some(melee);c.melee=true;
+        anim.ready=false;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim);
+        anim.ready=true;control.weapon_out=false;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim);
+        control.weapon_out=true;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),false),AimRole::Aim,"modal context is generic");
+        c.weapon=None;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim);
+    }
+
+    #[test]
+    fn touch_scope_caption_follows_the_equipped_units_actual_scope_mod() {
+        use crate::touch_action_presentation::{aim_role,AimRole};
+        let mut c=presentation_fixture();let gun=FormId(5);
+        c.forms.weapons.insert(gun,WeaponStats {sight_fov:55.0,scope_nif:Some("fixture-scope.nif".into()),flags:vec!["Has Scope".into(),"Scope from Mod".into()],
+            mods:vec![fnv_combat::data::WeaponMod {slot:1,item:None,effect:Some("Increase Zoom".into()),value_a:10.0,value_b:0.0}],..default()});
+        c.weapon=Some(gun);c.equipped=Some(Some(gun));c.melee=false;
+        let control=PlayerControl {weapon_out:true,..default()};let anim=WeaponAnim {ready:true,..default()};
+        assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim);
+        c.mods=fnv_combat::data::mod_flag(1);
+        assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Scope);
+        c.mods=0;assert_eq!(aim_role(Some(&c),Some(&control),Some(&anim),true),AimRole::Aim);
+    }
+
+    #[test]
+    fn published_touch_role_clears_modal_state_without_mutating_the_input_owner() {
+        use crate::touch_action_presentation::{AimPresentation,AimRole,TouchActionPresentationPlugin};
+        let mut c=presentation_fixture();let weapon=FormId(8);c.weapon=Some(weapon);c.melee=true;c.forms.weapons.insert(weapon,WeaponStats::default());
+        let mut app=App::new();app.add_plugins((MinimalPlugins,bevy::state::app::StatesPlugin,TouchActionPresentationPlugin))
+            .insert_state(PlayState::Playing).insert_resource(c).insert_resource(PlayerControl {weapon_out:true,aiming:true,..default()})
+            .insert_resource(WeaponAnim {ready:true,..default()}).insert_resource(crate::pause::Paused(false));
+        app.update();assert_eq!(app.world().resource::<AimPresentation>().0,AimRole::Block);
+        app.world_mut().resource_mut::<crate::pause::Paused>().0=true;app.update();assert_eq!(app.world().resource::<AimPresentation>().0,AimRole::Aim);
+        assert!(app.world().resource::<PlayerControl>().aiming,"presentation never cancels somebody else's held action");
+        app.world_mut().resource_mut::<crate::pause::Paused>().0=false;app.insert_state(PlayState::Menu);app.update();assert_eq!(app.world().resource::<AimPresentation>().0,AimRole::Aim);
+        app.insert_state(PlayState::Playing);app.update();assert_eq!(app.world().resource::<AimPresentation>().0,AimRole::Block);
+        app.world_mut().resource_mut::<WeaponAnim>().ready=false;app.update();assert_eq!(app.world().resource::<AimPresentation>().0,AimRole::Aim);
+    }
+
     /// #2743: god mode keeps the player's weapon and armour from wearing, nobody else's.
     #[test]
     fn god_mode_keeps_the_players_condition_only() {
@@ -6972,10 +7307,17 @@ mod tests {
     #[test]
     fn a_blast_hit_is_its_causes_not_the_players() {
         let by = By { actor: FormId(0x000F5704), weapon: FormId(0x000906DA), ammo: None, harmless: false, sure: None, vats: false, sneaking: false };
-        let info = blast_hit_info(Some(Cause::of(&by)));
-        assert_eq!((info.attacker, info.weapon, info.location, info.critical), (Some(FormId(0x000F5704)), Some(FormId(0x000906DA)), -1, false));
-        let none = blast_hit_info(None);
-        assert_eq!((none.attacker, none.weapon), (None, None));
+        let expl = FormId(0xFF00_0042);
+        let info = blast_hit_info(Some(Cause::of(&by)), Some(expl), 125.0);
+        assert_eq!(
+            (info.attacker, info.weapon, info.projectile, info.location, info.critical, info.explosion, info.base_weapon_damage),
+            (Some(FormId(0x000F5704)), Some(FormId(0x000906DA)), Some(expl), -1, false, true, 125.0)
+        );
+        let none = blast_hit_info(None, None, 100.0);
+        assert_eq!(
+            (none.attacker, none.weapon, none.projectile, none.explosion, none.base_weapon_damage),
+            (None, None, None, true, 100.0)
+        );
     }
 
     /// A grenade's cooldown, played from the shot (the clip's `Release`, 0.867 s) as the
@@ -7182,7 +7524,7 @@ mod tests {
             check
         };
         let roll = |check: &crate::dismember::Check, bloody_mess: bool, r: f32| {
-            let blow = Blow { on_hit: check.on_hit, corpse: check.corpse, crippled: check.crippled, overkill: check.overkill, max_health: check.max_health, bloody_mess };
+            let blow = Blow { on_hit: check.on_hit, corpse: check.corpse, crippled: check.crippled, overkill: check.overkill, max_health: check.max_health, bloody_mess, sole_part: bptd.parts.len() == 1 };
             decide(&bptd.parts[check.part], &blow, &s, r)
         };
         // Beside its trunk: the torso faces it, and goes only with Bloody Mess (80 % on a
@@ -7570,11 +7912,12 @@ mod tests {
             bridge_player_anim_state(&mut g, &combat, &anim, false, false, Some(&run_fwd), dt, &mut had_weapon);
             assert_eq!((ui(&g, "a9"), ui(&g, "g7")), (1.0, 1.0));
 
-            // 4. Jammed -> ForceScriptAnim (13), then Ready clears weapon action cleanly.
+            // 4. Jammed -> Jam (code 9, IsAnimPlayingEx 4 == 0), then Ready clears weapon action cleanly.
             cycle.phase = Phase::Jammed { left: 0.5 };
             combat.cycle = Some(cycle.clone());
             bridge_player_anim_state(&mut g, &combat, &anim, false, false, Some(&idle_intent), dt, &mut had_weapon);
-            assert_eq!((ui(&g, "a13"), ui(&g, "g0")), (1.0, 2.0));
+            assert_eq!((ui(&g, "a9"), ui(&g, "a13"), ui(&g, "g0")), (2.0, 0.0, 2.0));
+            assert_eq!(q(&mut g, "Begin Function { }\nSetFunctionValue (PlayerREF.IsAnimPlayingEx 4)\nEnd\n"), fnv_script::vm::XVal::Num(0.0));
             cycle.phase = Phase::Ready;
             combat.cycle = Some(cycle.clone());
             bridge_player_anim_state(&mut g, &combat, &anim, false, false, Some(&idle_intent), dt, &mut had_weapon);
@@ -7886,6 +8229,111 @@ mod tests {
             sim.world.equip(FormId::PLAYER_REF, PISTOL).unwrap();
             equip_sync_step(&mut combat, &mut sim, &mut anim, false);
             assert_eq!(combat.player_ammo(), Some(AMMO_PLAIN));
+        }
+
+        /// #3433: critical-hit corner notifications must use the default corner-message
+        /// icon (`icon: None` -> `corner_messages::DEFAULT_ICON`) instead of the unused
+        /// `sCriticalStrikeIcon` GMST (`glow_Critical_Chance.dds`).
+        #[test]
+        fn critical_hit_note_uses_default_corner_icon() {
+            assert_eq!(
+                critical_hit_note("Giant Soldier Ant", None),
+                fnv_game::trace::EventKind::NoteShown {
+                    text: "Critical hit on Giant Soldier Ant".into(),
+                    icon: None,
+                    seconds: CRIT_NOTE_SECONDS,
+                }
+            );
+            assert_eq!(
+                critical_hit_note("Easy Pete", Some("torso")),
+                fnv_game::trace::EventKind::NoteShown {
+                    text: "Critical hit on Easy Pete's torso".into(),
+                    icon: None,
+                    seconds: CRIT_NOTE_SECONDS,
+                }
+            );
+        }
+
+        #[test]
+        fn allow_attack_clears_player_cooldown_and_flinch_without_affecting_vanilla() {
+            let (mut sim, mut combat) = make_sim_and_combat();
+            let mut anim = WeaponAnim::default();
+            sim.world.equip(FormId::PLAYER_REF, PISTOL).unwrap();
+            equip_sync_step(&mut combat, &mut sim, &mut anim, false);
+
+            // Put the player in attack cooldown and flinch lock.
+            combat.cycle.as_mut().unwrap().phase = Phase::Cooldown { left: 1.2 };
+            combat.flinch_until = 5.0;
+            anim.swing = Some("attackleft".into());
+
+            let mut app = App::new();
+            let script = ScriptState::over_plugins(&[]);
+            // Vanilla frame: AllowAttack not called -> cooldown & flinch remain active.
+            app.insert_resource(Time::<()>::default())
+                .insert_resource(combat)
+                .insert_resource(sim)
+                .insert_resource(PhysState::default())
+                .insert_resource(Player { heading: 0.0, pitch: 0.0, eye_height: 0.0, feet: [0.0; 3], body_eye: None, body_view: None, placed: None })
+                .insert_resource(PlayerControl::default())
+                .insert_resource(anim)
+                .insert_resource(CombatStats::default())
+                .insert_resource(script)
+                .insert_resource(PlayerLimbs::default())
+                .add_message::<ShotFired>()
+                .add_message::<PlaySound>()
+                .add_message::<CasingFx>()
+                .add_message::<LoopSound>()
+                .add_message::<ScaledSound>()
+                .add_systems(Update, fire);
+            app.update();
+            assert!(matches!(app.world().resource::<Combat>().cycle.as_ref().unwrap().phase, Phase::Cooldown { .. }), "vanilla cooldown untouched");
+            assert_eq!(app.world().resource::<Combat>().flinch_until, 5.0);
+
+            // Script calls PlayerREF.AllowAttack -> next frame clears cooldown, swing and flinch.
+            app.world_mut()
+                .resource_mut::<ScriptState>()
+                .rt
+                .as_mut()
+                .unwrap()
+                .game
+                .run_query("Begin Function {}\nPlayerREF.AllowAttack\nEnd", Default::default())
+                .unwrap();
+            app.update();
+            assert_eq!(app.world().resource::<Combat>().cycle.as_ref().unwrap().phase, Phase::Ready);
+            assert_eq!(app.world().resource::<Combat>().flinch_until, 0.0);
+            assert_eq!(app.world().resource::<WeaponAnim>().swing, None);
+            assert!(app.world_mut().resource_mut::<ScriptState>().rt.as_mut().unwrap().game.take_allow_attack().is_empty());
+        }
+
+        #[test]
+        fn saved_extra_magazine_restores_once_on_equip_and_leaves_vanilla_unchanged() {
+            let (mut sim, mut combat) = make_sim_and_combat();
+            let mut anim = WeaponAnim::default();
+
+            // Replace plain PISTOL with a unit carrying Extra::magazine = Some(4) (clip_size = 12).
+            sim.world.remove_item(FormId::PLAYER_REF, PISTOL, 1).unwrap();
+            sim.world
+                .add_item_extra(
+                    FormId::PLAYER_REF,
+                    PISTOL,
+                    1,
+                    fnv_sim::inventory::Extra { magazine: Some(4), ..Default::default() },
+                )
+                .unwrap();
+
+            sim.world.equip(FormId::PLAYER_REF, PISTOL).unwrap();
+            equip_sync_step(&mut combat, &mut sim, &mut anim, true);
+            assert_eq!(combat.magazine_for_save(), Some((PISTOL.0, 4)));
+            // Cleared on equip so re-equipping later behaves as vanilla full-clip.
+            assert_eq!(
+                sim.world.peek(FormId::PLAYER_REF).and_then(|s| s.inventory.as_ref()).and_then(|i| i.equipped_magazine(PISTOL)),
+                None
+            );
+            sim.world.equip(FormId::PLAYER_REF, KNIFE).unwrap();
+            equip_sync_step(&mut combat, &mut sim, &mut anim, true);
+            sim.world.equip(FormId::PLAYER_REF, PISTOL).unwrap();
+            equip_sync_step(&mut combat, &mut sim, &mut anim, true);
+            assert_eq!(combat.magazine_for_save(), Some((PISTOL.0, 12)));
         }
     }
 }

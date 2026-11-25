@@ -375,6 +375,9 @@ pub fn register(app: &mut App) {
     register_display(app);
     register_distances(app);
     register_graphics(app);
+    if crate::mobile_performance::enabled() {
+        crate::mobile_performance::register(app);
+    }
     // The Quality and Enhanced effects rows over the rows above (#1966).
     crate::quality::register(app, GROUP_GRAPHICS);
     // Renderer edits are latched by the shared settings setters, including Defaults.
@@ -519,9 +522,13 @@ fn register_display(app: &mut App) {
         .with_switches("--viewmodel-fov"),
     );
     // The HUD's size (#1631), kept by nvf-play's interface and fixed for the run at start.
-    let (row, list) = nvf_play::interface::ui_scale_row(GROUP_PICTURE);
-    nvf_play::settings::add_choice_list(app, row, list);
+    nvf_play::interface::register_hud_scale(app, GROUP_PICTURE);
     nvf_play::menu_scale::register(app, GROUP_PICTURE);
+    #[cfg(target_os = "android")]
+    {
+        nvf_play::menu_readability::register(app, GROUP_PICTURE);
+        nvf_play::hud_readability::register(app, GROUP_PICTURE);
+    }
     add_setting(
         app,
         Setting {
@@ -564,6 +571,10 @@ fn register_display(app: &mut App) {
         },
     );
     app.add_systems(PostStartup, read_old_vsync.after(nvf_play::settings::apply_stored));
+    register_frame_cap(app);
+}
+
+fn register_frame_cap(app: &mut App) {
     // A list of the limits [design: the menu overhaul]; the INI's older slider part loads.
     add_choice_list(
         app,
@@ -1188,7 +1199,7 @@ fn register_graphics(app: &mut App) {
         Setting { key: AO_KEY, group: GROUP_GRAPHICS, label: "Ambient occlusion", note: AO_NOTE, switches: "--graphics, --ambient-occlusion", get: |_| false, set: |_, _| {}, slider: None },
         ChoiceList { names: |_| AO_CHOICES.iter().map(|c| (*c).to_string()).collect(), chosen: ao_chosen, pick: take_ao, save: ao_chosen, load: take_ao, ask_keep: false },
     );
-    let switches: [Switch; 23] = [
+    let switches: [Switch; 24] = [
         (
             "fine-shadows",
             "Longer sun shadows",
@@ -1300,6 +1311,17 @@ fn register_graphics(app: &mut App) {
             |w| w.resource::<Graphics>().terrain_anti_tiling,
             |w, on| w.resource_mut::<Graphics>().terrain_anti_tiling = on,
         ),
+        // #3322: needs Authored materials (nvf_settings_layout NEEDS, for the next start) and
+        // the run's state of it (`parallax_status`), whose height maps it draws; switched
+        // while the game runs (terrain.rs `sync_parallax`).
+        (
+            "terrain-parallax",
+            "Terrain parallax",
+            "On: ground textures a texture pack gives height maps for (textures\\pbr\\) show depth near you, for some GPU time. Without such a pack nothing changes.",
+            "--graphics-only",
+            |w| w.resource::<Graphics>().terrain_parallax,
+            |w, on| w.resource_mut::<Graphics>().terrain_parallax = on,
+        ),
         (
             "light-shafts",
             "Sun shafts",
@@ -1387,7 +1409,31 @@ fn register_graphics(app: &mut App) {
     for (key, label, note, switches, get, set) in switches {
         add_setting(app, Setting { key, group: GROUP_GRAPHICS, label, note, switches, get, set, slider: None });
     }
+    // Read once at the start like Authored materials; the row keeps the next start's choice
+    // (gpu_occlusion.rs).
+    crate::gpu_occlusion::add_row(app, GROUP_GRAPHICS);
+    nvf_play::settings::set_needs_in_game(app, "terrain-parallax", |w| parallax_status(nvf_assets::authored::enabled(), w.get_resource::<Graphics>().is_some_and(|g| g.authored_materials)));
 }
+
+/// The Terrain parallax row's availability in the game, by the run's Authored materials
+/// state (`session`, nvf_assets `authored::enabled`, fixed at the start), not the row's
+/// saved value (`row`, which the launcher's NEEDS rule follows for the next start): free
+/// while the run has authored materials, even with the row turned off for the next start
+/// (the height maps stay loaded); greyed with a restart note while the row is on but the run
+/// started without them; the NEEDS words while both are off [design, #3322 review].
+pub(crate) fn parallax_status(session: bool, row: bool) -> Option<&'static str> {
+    match (session, row) {
+        (true, _) => None,
+        (false, true) => Some(PARALLAX_RESTART),
+        (false, false) => Some(PARALLAX_NEEDS),
+    }
+}
+
+/// The NEEDS words of the Terrain parallax row (nvf_settings_layout `NEEDS`).
+pub(crate) const PARALLAX_NEEDS: &str = "Needs Authored Materials.";
+
+/// What the Terrain parallax row says while Authored materials waits for the next start.
+pub(crate) const PARALLAX_RESTART: &str = "After a restart (Authored Materials)";
 
 /// The Authored materials row's note (#2981): it takes effect at the next start, as the run's
 /// state is fixed before the first material (main.rs).
@@ -1471,7 +1517,7 @@ fn register_pipeline_waits(app: &mut App) {
         "anti-aliasing", "shadow-filter", "upscaler", "upscaler-quality", "ambient-occlusion",
         "fine-shadows", "bloom", "glow", "eye-adaptation", "neon-glow", "sharpen",
         "light-shafts", "water-reflections", "water-effects", "water-mirror", "sun-shadows", "grade",
-        "terrain-height-blend", "terrain-anti-tiling", "cloud-shadows", "terrain-shadows", "heat-haze", MESH_BLEND_KEY, "distant-lights",
+        "terrain-height-blend", "terrain-anti-tiling", "terrain-parallax", "cloud-shadows", "terrain-shadows", "heat-haze", MESH_BLEND_KEY, "distant-lights",
         // ALC shadows' first point and spot light shadow views specialize their passes.
         "light-shadows",
     ] {
@@ -2114,6 +2160,12 @@ fn set_overlay(world: &mut World, on: bool) {
 }
 
 #[cfg(test)]
+pub(crate) fn register_mobile_test_rows(app: &mut App) {
+    register_graphics(app);
+    register_frame_cap(app);
+}
+
+#[cfg(test)]
 mod fsr_settings_tests {
     use super::*;
 
@@ -2319,6 +2371,51 @@ mod fsr_settings_tests {
         app.insert_resource(Graphics::preset(graphics::Preset::Vanilla));
         register_graphics(&mut app);
         app
+    }
+
+    #[test]
+    fn android_player_defaults_allow_the_settings_export_but_explicit_overrides_do_not() {
+        use clap::Parser;
+        use nvf_play::settings_menu::write_menu;
+        use window_mode::WindowChoice::{Borderless, Windowed};
+
+        let _offer_probe = crate::dlss_download::TestOfferProbe::new(Some(false));
+        let dir = std::env::temp_dir().join(format!("nvf-android-start-settings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = rows_app();
+        app.insert_resource(SettingsFile(Some(dir.join("NVForever.ini"))));
+        let export = dir.join("settings-menu.json");
+
+        let line = crate::android_startup_line(Vec::new());
+        let mut restart = crate::restart_args(&line[1..]);
+        restart.extend(["--load", "quicksave"].map(String::from));
+        for line in [line, crate::android_startup_line(restart)] {
+            let args = Args::try_parse_from(&line).unwrap();
+            assert!(args.play);
+            assert_eq!(args.msaa, 1);
+            assert!(args.window == Borderless);
+            app.insert_resource(given_switches(&args, &line));
+            write_menu(app.world());
+            assert!(export.is_file(), "a normal Android start publishes the settings catalogue");
+            std::fs::remove_file(&export).unwrap();
+        }
+
+        let explicit = crate::android_startup_line(["--play", "--msaa=1", "--window=borderless"].map(String::from).to_vec());
+        let args = Args::try_parse_from(&explicit).unwrap();
+        assert_eq!(args.msaa, 1);
+        assert!(args.window == Borderless);
+        let given = given_switches(&args, &explicit);
+        assert!(given.given.iter().any(|flag| flag == "--window"));
+        app.insert_resource(given);
+        write_menu(app.world());
+        assert!(!export.exists(), "an explicit switch setting the same value still blocks export");
+
+        let custom = crate::android_startup_line(vec!["--play".into()]);
+        let args = Args::try_parse_from(&custom).unwrap();
+        assert_eq!(args.msaa, 4);
+        assert!(args.window == Windowed);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn row(app: &App, key: &str) -> usize {
@@ -2981,6 +3078,7 @@ dlss-model=Preset K
             (crate::graphics::AUTHORED_REFLECTIONS_KEY, &["--graphics-only"]),
             ("terrain-height-blend", &["--graphics", "--graphics-only"]),
             ("terrain-anti-tiling", &["--graphics", "--graphics-only"]),
+            ("terrain-parallax", &["--graphics-only"]),
             ("light-shafts", &["--graphics"]),
             ("heat-haze", &["--graphics-only"]),
             ("desert-haze", &["--graphics", "--graphics-only"]),
@@ -3002,6 +3100,31 @@ dlss-model=Preset K
         assert!(settings.list().iter().all(|s| !s.note.contains("--")), "no Graphics row's note names a switch");
         assert_eq!(nvf_play::settings::note_switches(FPS_COUNTER_SWITCHES), ["--fps"]);
         assert!(nvf_play::settings::note_switches(FPS_SPLIT_SWITCHES).is_empty());
+    }
+
+    /// #3322 review: in the game the Terrain parallax row follows the run's Authored
+    /// materials state, not the row's saved value (the launcher's NEEDS rule, for the next
+    /// start): free while the run has them, even with the row turned off; greyed with a
+    /// restart note while the row is on but the run started without them.
+    #[test]
+    fn the_terrain_parallax_row_follows_this_runs_authored_materials() {
+        assert_eq!(parallax_status(true, true), None);
+        assert_eq!(parallax_status(true, false), None, "turned off for the next start: still drawn this run");
+        assert_eq!(parallax_status(false, true), Some(PARALLAX_RESTART));
+        assert_eq!(parallax_status(false, false), Some(PARALLAX_NEEDS));
+        assert_eq!(nvf_settings_layout_why("terrain-parallax"), Some(PARALLAX_NEEDS), "the same words as the shared NEEDS rule");
+        assert!(PARALLAX_RESTART.len() <= 40);
+        let mut app = rows_app();
+        let i = row(&app, "terrain-parallax");
+        let status = |app: &App| app.world().resource::<nvf_play::settings::Settings>().disabled_status(app.world(), i);
+        assert_eq!(status(&app), None, "Authored materials on, as this run's");
+        app.world_mut().resource_mut::<Graphics>().authored_materials = false;
+        assert_eq!(status(&app), None, "the saved row off does not grey it while this run has them");
+        assert!(!app.world().resource::<nvf_play::settings::Settings>().list()[i].note.contains("original"), "the page note says what the row adds, not what the original lacks (observer check 268: it draws none)");
+
+        fn nvf_settings_layout_why(key: &str) -> Option<&'static str> {
+            nvf_play::settings_layout::needs(key).first().map(|r| r.why)
+        }
     }
 
     /// #2661: the mesh terrain blend's row stands among the Graphics switches, off in a

@@ -70,6 +70,9 @@ pub struct GapsState {
     /// Actors whose special idle scripts stopped (StopIdle, ForceStopIdle), for the
     /// engine to take.
     pub idle_stops: Vec<FormId>,
+    /// POV-scoped `ForceStopIdle` requests (`1` third-person, `2` first-person), for the
+    /// engine to take without stopping the other player rig [documented: ForceStopIdle].
+    pub idle_stop_pov: Vec<(FormId, crate::idles::IdlePov)>,
     /// The placed radio stations, from the engine; `None` until the engine sets them.
     pub radio_sites: Option<Vec<RadioSite>>,
     /// The armed mines of the loaded cells that someone other than the player put down,
@@ -219,10 +222,6 @@ fn parse_json_form(v: Option<&Json>) -> Option<FormId> {
     let s = v?.as_str()?.strip_prefix("0x")?;
     let id = u32::from_str_radix(s, 16).ok()?;
     (id != 0).then_some(FormId(id))
-}
-
-fn json_form(v: Option<&Json>) -> XVal {
-    XVal::Ref(parse_json_form(v).map_or(0, |f| f.0))
 }
 
 fn parse_weapon_sound_slot(args: &[XVal], k: usize) -> Option<u8> {
@@ -941,21 +940,19 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
             zero
         }
-        // EITM; SetObjectEffect takes only an enchantment of the item's kind, a weapon's
-        // on a weapon [observed: gaps6, an apparel enchantment on the pistol is refused;
-        // hypothesis: the kinds].
-        "getobjecteffect" => {
-            let f = form(args, 0).or_else(|| subject.map(|r| base(g, r))).unwrap_or(FormId(0));
-            match g.field_overrides.get(&(f, "EITM/".to_string())) {
-                Some(v) => v.clone(),
-                None => json_form(g.data.record_field(f, "EITM", "")),
-            }
-        }
+        // EITM; SetObjectEffect takes only an enchantment of the item's kind: Apparel (3) on
+        // ARMO, Weapon (2) on WEAP or EXPL [documented: GECK wiki SetObjectEffect; observed:
+        // gaps6, an apparel enchantment on the pistol is refused].
         "setobjecteffect" => {
-            let (Some(f), e) = (form(args, 0), form(args, 1)) else { return Some(Ok(zero)) };
-            let want = if g.data.sig(f) == Some(*b"WEAP") { 2 } else { 3 };
-            if e.is_none_or(|e| g.data.enchantment_types.get(&e) == Some(&want)) {
-                g.field_overrides.insert((f, "EITM/".into()), XVal::Ref(e.map_or(0, |e| e.0)));
+            if let Some(f) = form(args, 0) {
+                let effect = match args.get(1) {
+                    None | Some(XVal::Ref(0)) => Some(None),
+                    Some(XVal::Num(x)) if *x == 0.0 => Some(None),
+                    Some(_) => form(args, 1).map(Some),
+                };
+                if let Some(effect) = effect {
+                    g.set_object_effect(f, effect);
+                }
             }
             zero
         }
@@ -996,10 +993,15 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             XVal::Num(if a == FormId::PLAYER_REF || g.package_actors().contains(&a) { 0.0 } else { 3.0 })
         }
         // `persistent:0/1`: sets or clears the persistent record flag (0x400) on the
-        // calling reference for the session [documented: GECK wiki SetPersistent;
-        // observed: gaps6, returns 0].
+        // calling reference (including `FormId::PLAYER_REF`) for the session
+        // [documented: GECK wiki SetPersistent; observed: gaps6 returns 0; Fallout: New
+        // Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse`
+        // (`0x00103DF9`), 10 official base masters, `w4d_06_player_setpersistent_0`
+        // (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+        // `PROBE|w4d_06_player_setpersistent_0|p0=1,after0=0,after1=1`; no DLL or source
+        // consulted; hypothesis: session-only lifetime across save/load].
         "setpersistent" => {
-            if let Some(r) = subject.filter(|&r| r != FormId::PLAYER_REF) {
+            if let Some(r) = subject {
                 let on = num(args, 0, 0.0) != 0.0;
                 let cur = crate::nvse_other::record_flags_of(g, r)
                     | if g.persistent(r) { fnv_sim::refs::FLAG_PERSISTENT } else { 0 };
@@ -1112,14 +1114,21 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // enter combat (though others may still attack them, and UseWeapon / Use Weapon
         // packages still work); reset on every save load [documented: GECK wiki
         // SetCombatDisabled]. Returns 0 either way [observed: gaps2]; GetCombatDisabled
-        // reads it [observed: gaps3].
+        // reads it [observed: gaps3]. Enabling SetCombatDisabled 1 on an actor already
+        // in combat leaves IsInCombat == 1 in the same frame and ends active combat on
+        // subsequent AI ticks (`Game::settle_awareness` in `awareness.rs`) [observed:
+        // Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
+        // `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, isolated
+        // clean-room staging copy (read-only `PrintToConsole` probe; zero writes to game
+        // install or Saves), `core_20_set_combat_disabled_stops_combat`
+        // (`wave4a_extenders.json`, #3679): `1,1,1` and
+        // `w4h_05_set_combat_disabled_multitick` (`wave4h_reconcile.json`, PR #3803 /
+        // #3802): `PROBE|w4h_05_set_combat_disabled_multitick|pre=1|t0(cd=1,inCmb=1)|t2(cd=1,inCmb=0)|t5(cd=1,inCmb=0)`;
+        // zero DLL, PDB, or third-party source consulted].
         "setcombatdisabled" => {
             if let Some(r) = subject {
                 if num(args, 0, 0.0) != 0.0 {
                     g.gaps.combat_disabled.insert(r);
-                    if r != FormId::PLAYER_REF {
-                        g.stop_combat(r);
-                    }
                 } else {
                     g.gaps.combat_disabled.remove(&r);
                 }
@@ -1434,9 +1443,23 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         // The explosion's form traits, 0 light … 6 image-space modifier as GetExplosion-
-        // TraitForm reads them; no form clears it [observed: gaps7]. Only EXPL forms (and
-        // their TempCloneForm clones) are accepted; typed slots reject wrong-type forms
-        // while keeping null/omitted clears [hypothesis].
+        // TraitForm reads them [observed: gaps7]. Only EXPL forms (and their TempCloneForm
+        // clones) are accepted [design]. Omitting the 3rd argument clears any slot 0..=6
+        // to 0, whereas passing an explicit null ref (`0`) is a no-op across all slots
+        // [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24,
+        // GSDocMitchellHouse (0x00103DF9), 10 official base masters,
+        // `w4h_02_explosion_slot4_reconcile` (`tools/capture/nvse/catalogs/wave4h_reconcile.json`,
+        // #3803): `PROBE|w4h_02_explosion_slot4_reconcile|esmPop4=0/223|s4(0=00000000,set=0000003B,null=0000003B,lit0(0)=0000003B,omit(1)=00000000)|s0(0=00014BFF,null=00014BFF,omit=00000000)|s5(0=001758E2,null=001758E2,omit=00000000)|s6(0=00019CED,null=00019CED,omit=00000000)`;
+        // hypothesis: slots 1, 2, 3 follow the same null-no-op / omitted-clears rule].
+        // For non-null replacement forms, typed slots clear to 0 on a wrong-type form
+        // [observed: `jip_24_expl_trait_form_type_check`
+        // (`tools/capture/nvse/catalogs/wave4a_extenders.json`):
+        // `PROBE|jip_24_expl_trait_form_type_check|s0:00014BFF->00000000(eq0=1,eqSt=0)|s4:00000000->00015169(eqSt=1)`;
+        // hypothesis: slots 1, 2, 3, 5, 6 follow the same clear-on-mismatch rule], while
+        // slot 4 (INAM) accepts any non-null form without type checking [observed:
+        // `w4d_27_expl_inam_placeable` (`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679):
+        // `PROBE|w4d_27_expl_inam_placeable|f0=00000000|stat=0000003B|misc=0000000F|alch=00015169|fac=0001B2A4|clr=0001B2A4`;
+        // no DLL or source consulted].
         "setexplosiontraitform" => {
             let Some(f) = form(args, 0).filter(|&f| g.data.sig(g.unclone(f)) == Some(*b"EXPL")) else {
                 return Some(Ok(zero));
@@ -1451,13 +1474,18 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                 6 => ("MNAM/", Some(b"IMAD")),
                 _ => return Some(Ok(zero)),
             };
-            let target = form(args, 2);
-            if let (Some(e), Some(sig)) = (target, want) {
-                if g.data.sig(g.unclone(e)) != Some(*sig) {
-                    return Some(Ok(zero));
+            let next = if args.len() < 3 {
+                0
+            } else if let Some(e) = form(args, 2) {
+                if want.is_none_or(|sig| g.data.sig(g.unclone(e)) == Some(*sig)) {
+                    e.0
+                } else {
+                    0
                 }
-            }
-            g.field_overrides.insert((f, key.into()), XVal::Ref(target.map_or(0, |e| e.0)));
+            } else {
+                return Some(Ok(zero));
+            };
+            g.field_overrides.insert((f, key.into()), XVal::Ref(next));
             zero
         }
         // EXPL DATA flags; returns 0 [observed: gaps7, 0 both ways]. Only EXPL forms (and
@@ -1562,7 +1590,11 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         "setworldspaceimagespace" => {
             if let (Some(w), Some(i)) = (form(args, 0), form(args, 1)) {
                 if g.data.sig(g.unclone(w)) == Some(*b"WRLD") && g.data.sig(g.unclone(i)) == Some(*b"IMGS") {
-                    g.field_overrides.insert((w, "INAM/".into()), XVal::Ref(i.0));
+                    let next = XVal::Ref(i.0);
+                    let prev = g.field_overrides.insert((w, "INAM/".into()), next.clone());
+                    if prev != Some(next) {
+                        g.traits.note_image_space_change();
+                    }
                 }
             }
             zero
@@ -1684,6 +1716,9 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let (text, icon, sound) = split_styled(&text(args, 1));
             if let Some(s) = sound.and_then(|s| g.data.by_edid(&s)) {
                 g.ask_sound(crate::sound::SoundRequest { sound: s, at: None, system: true, id: 0, point: None });
+            }
+            if !text.trim().is_empty() {
+                g.count_corner_message();
             }
             g.emit(crate::trace::EventKind::NoteShown { text, icon, seconds });
             zero
@@ -1884,7 +1919,7 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             }
         }
         // Return 0 [observed: gaps4].
-        "setsoundflag" | "stopsoundalt" => zero,
+        "stopsoundalt" => zero,
         // An unknown patch [observed: gaps2 and gaps4, 0 for both].
         "getoptionalpatch" | "setoptionalpatch" => zero,
         _ => return None,

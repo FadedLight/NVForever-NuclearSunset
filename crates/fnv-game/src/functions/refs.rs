@@ -73,6 +73,10 @@ pub fn disable_ref(g: &mut Game, r: FormId, fade: bool) -> Result<Value, String>
         tracing::info!("script: Disable of the player ignored: the player stays enabled (doors.md §6)");
         return none();
     }
+    // A dead actor disabled forgets when it died (GetTimeDead).
+    if let Some(e) = g.extra.get_mut(&r) {
+        e.died_day = None;
+    }
     let held = g.script_looks.fading_out.contains_key(&r);
     if fade && held {
         return none();
@@ -303,13 +307,14 @@ pub fn get_in_worldspace(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, Str
 
 /// `ref.GetInZone zone`: 1 when the calling reference is in a cell attached to the
 /// encounter zone [documented: GECK wiki GetInZone, "Returns 1 if FredRef is currently in
-/// a cell attached to the ParadiseFallsZone"]: its current cell's zone (CELL XEZN, else
-/// the worldspace's; docs/spec-notes/encounter-zones.md §1) [hypothesis: a reference's
-/// own XEZN does not count; the wiki speaks of cells].
+/// a cell attached to the ParadiseFallsZone"]: its current cell's effective zone
+/// (`World::cell_zone_of`: session `SetCellEncounterZone`, else CELL XEZN, else
+/// `SetWorldspaceEncounterZone` / WRLD XEZN; docs/spec-notes/encounter-zones.md §1)
+/// [hypothesis: a reference's own XEZN does not count; the wiki speaks of cells].
 pub fn get_in_zone(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, String> {
     let r = ctx.subject()?;
     let zone = a.form(0)?;
-    yes(g.cell_of(r).and_then(|c| g.world.placed.cell_zone(c)) == Some(zone))
+    yes(g.cell_of(r).and_then(|c| g.world.cell_zone_of(c)) == Some(zone))
 }
 
 pub fn get_in_same_cell(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, String> {
@@ -432,12 +437,22 @@ pub fn get_starting_pos(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, Stri
     Ok(Value::Num(f64::from(starting_place(g, r).0[i])))
 }
 
-/// `GetStartingAngle axis`, in degrees [documented: GECK wiki GetStartingAngle].
+/// `GetStartingAngle axis`, in degrees [documented: GECK wiki GetStartingAngle;
+/// observed: `b3_jip4_02_session_time_and_start_angle` (`wave4b_extenders.json`, #3679):
+/// `PROBE|b3_jip4_02_session_time_and_start_angle|sess=5.31,docZ=22.92,dynZ=270.00`,
+/// dynamic `PlaceAtMe` refs return their creation heading in degrees rather than 0].
 pub fn get_starting_angle(g: &mut Game, ctx: &Ctx, a: &Args) -> Result<Value, String> {
     let r = ctx.subject()?;
     let i = a.axis(0)?;
+    let rot = if r == FormId::PLAYER_REF {
+        [0.0; 3]
+    } else if let Some(p) = g.world.placed.get(r) {
+        p.rot
+    } else {
+        g.world.peek(r).and_then(|s| s.made_rot).unwrap_or([0.0; 3])
+    };
     // + 0.0: a stored -0 reads 0, as in the game [observed: jip4, DocMitchellRef Y].
-    Ok(Value::Num(f64::from(starting_place(g, r).1[i]).to_degrees() + 0.0))
+    Ok(Value::Num(f64::from(rot[i]).to_degrees() + 0.0))
 }
 
 pub fn get_linked_ref(g: &mut Game, ctx: &Ctx, _a: &Args) -> Result<Value, String> {

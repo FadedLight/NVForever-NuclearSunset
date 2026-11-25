@@ -156,6 +156,15 @@ impl Game<'_> {
     }
 }
 
+/// Sanitize an animation sequence frequency override: non-finite values (`NaN`,
+/// `±inf`) are rejected (`None`), and negative values clamp to `0.0` (paused) [design].
+pub fn sanitize_anim_frequency(f: f32) -> Option<f32> {
+    if !f.is_finite() {
+        return None;
+    }
+    Some(if f <= 0.0 { 0.0 } else { f })
+}
+
 fn num(args: &[XVal], k: usize) -> Option<f64> {
     match args.get(k) {
         Some(XVal::Num(x)) if x.is_finite() => Some(*x),
@@ -335,8 +344,6 @@ impl<'a> Game<'a> {
         std::mem::take(&mut self.other.jip14.fuse_sets)
     }
 
-    /// SetAnimSequenceFrequency's frequency for a reference's sequence (a lower-case
-    /// name or kf path), else "*"'s; `None`: its own.
     /// The engine's word on a drawn object's sequences (`None`: no longer drawn).
     pub fn set_sequences(&mut self, r: FormId, names: Option<Vec<String>>) {
         match names {
@@ -349,9 +356,37 @@ impl<'a> Game<'a> {
         }
     }
 
+    /// Whether any `SetAnimSequenceFrequency` overrides are active (zero-allocation
+    /// fast path for engine consumers).
+    pub fn has_anim_frequencies(&self) -> bool {
+        !self.other.jip14.anim_freq.is_empty()
+    }
+
+    /// `SetAnimSequenceFrequency`'s sanitized frequency for a reference's sequence
+    /// (case-insensitive sequence name or `.kf` path), falling back to `"*"` for the
+    /// same reference; `None` when unset or non-finite. Negative values clamp to `0.0`
+    /// [documented: GECK wiki SetAnimSequenceFrequency for `"*"`; hypothesis: exact
+    /// sequence takes precedence over `"*"`; design: non-finite rejection and `< 0`
+    /// clamp to `0.0`].
     pub fn anim_frequency(&self, r: FormId, sequence: &str) -> Option<f32> {
         let j = &self.other.jip14.anim_freq;
-        j.get(&(r, sequence.to_ascii_lowercase())).or_else(|| j.get(&(r, "*".to_string()))).copied()
+        if j.is_empty() {
+            return None;
+        }
+        let mut wildcard = None;
+        for ((id, key), &freq) in j.range((r, String::new())..) {
+            if *id != r {
+                break;
+            }
+            if crate::nvse_anim::same(key, sequence) {
+                if let Some(clean) = sanitize_anim_frequency(freq) {
+                    return Some(clean);
+                }
+            } else if key == "*" {
+                wildcard = sanitize_anim_frequency(freq);
+            }
+        }
+        wildcard
     }
 }
 
@@ -360,8 +395,15 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
     let v = match name {
         // ---- magic items ----
         // A new entry at the top, or appended (1), of an ingestible's, object effect's or
-        // actor effect's list; the new count, -1 when not added [documented]; for the
-        // session [hypothesis: the page says nothing of saving].
+        // actor effect's list; returns the 0-based inserted index (`n0` = `n1 - 1`) when
+        // appended, the new effect count (`n1`) when prepended (the entry itself is still
+        // placed at index 0), or -1 when not added [documented; observed: Fallout: New
+        // Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, GSDocMitchellHouse
+        // (0x00103DF9), 10 official base masters, `jip_48_addneweffect_duplicate_return`
+        // and `w4d_16_add_new_effect_edges` (`tools/capture/nvse/catalogs/wave4d_extenders.json`,
+        // #3679): n0=4 -> prepend ret=5, n=5, e0=00066EB8, e1=0000014E; duplicate append
+        // ret=5, n=6, last=00066EB8; non-MGEF ret=-1, n=6; no DLL or source consulted];
+        // for the session [hypothesis: the page says nothing of saving].
         "addneweffect" => {
             let (Some(item), Some(mgef), Some(dur), Some(mag)) = (form(args, 0), form(args, 1), num(args, 2), num(args, 3)) else { return Some(Ok(XVal::Num(-1.0))) };
             let kind_ok = g.data.sig(item).is_some_and(|s| MAGIC_ITEMS.contains(&&s));
@@ -370,13 +412,15 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             }
             // [decision: the range is not kept, as NVForever's effect entries have none]
             let e = EffectItem { effect: mgef, magnitude: mag.max(0.0) as u32, area: num(args, 5).unwrap_or(0.0).max(0.0) as u32, duration: dur.max(0.0) as u32, actor_value: None, conditions: Vec::new() };
+            let append = num(args, 6).unwrap_or(0.0) != 0.0;
             let entry = g.other.jip14.added_effects.entry(item).or_default();
-            if num(args, 6).unwrap_or(0.0) != 0.0 {
+            if append {
                 entry.1.push(e);
+                XVal::Num(g.effect_count(item).saturating_sub(1) as f64)
             } else {
                 entry.0.push(e);
+                XVal::Num(g.effect_count(item) as f64)
             }
-            XVal::Num(g.effect_count(item) as f64)
         }
         // Any effect of the list's items on the actor [documented], as IsSpellTarget.
         "isspelltargetlist" => {
@@ -578,11 +622,20 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // ---- animation sequences ----
         // The frequency a script set; else 1 for a sequence of the drawn model [hypothesis:
         // a sequence's own is 1 unless its file says otherwise]; -1 for a sequence the
-        // model lacks [observed: jip14 seqfreq.doc]. Kept, not yet played at [decision].
+        // model lacks [observed: jip14 seqfreq.doc]. Drawn object sequences are played at
+        // this frequency by `nvforever::object_anims` (actor `.kf` paths remain stored
+        // only [design]).
         // [decision: only drawn objects' sequences are told by the engine; an actor's
         // animation files are not, so an actor's unset sequence is -1]
+        // "*" is a setter-only wildcard and is not a queryable sequence name: querying "*"
+        // returns -1.0 even after `SetAnimSequenceFrequency "*" 1.5` [observed: Fallout: New
+        // Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse`
+        // (`0x00103DF9`), 10 official base masters, `w4c_b1_22_sound3d_anim_freq`].
         "getanimsequencefrequency" | "getanimseqfreq" => {
             let (Some(r), Some(s)) = (subject, text(args, 0)) else { return Some(Ok(zero)) };
+            if s == "*" {
+                return Some(Ok(XVal::Num(-1.0)));
+            }
             let lower = s.to_ascii_lowercase();
             let has = g.other.jip14.sequences.get(&r).is_some_and(|n| n.contains(&lower));
             XVal::Num(match g.anim_frequency(r, &s) {
@@ -591,10 +644,13 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
                 None => -1.0,
             })
         }
-        // "*" every sequence [documented].
+        // "*" every sequence [documented: GECK wiki SetAnimSequenceFrequency]; non-finite
+        // values are ignored and negative values clamp to 0.0 (paused) [design].
         "setanimsequencefrequency" | "setanimseqfreq" => {
             let (Some(r), Some(s), Some(f)) = (subject, text(args, 0), num(args, 1)) else { return Some(Ok(zero)) };
-            g.other.jip14.anim_freq.insert((r, s.to_ascii_lowercase()), f.max(0.0) as f32);
+            let Some(freq) = sanitize_anim_frequency(f.max(0.0) as f32) else { return Some(Ok(zero)) };
+            g.flush_script_sequence_clocks(r);
+            g.other.jip14.anim_freq.insert((r, s.to_ascii_lowercase()), freq);
             zero
         }
         // ---- extra cameras (AttachExtraCamera / ProjectExtraCamera) ----

@@ -38,6 +38,8 @@ NVForever never writes into the game folder, the MO2 folders or `Documents\My Ga
   (41), "enable JohnnyGuitar patches: JIP Fixes" (42), "problem compiling
   ScaledRecurringChallenges.gek" (43), TTW "falloutcustom.ini misconfigured" (44).
 - Engine tests (6,106) and clippy on both workspaces pass on Windows.
+- Trees in Honest Hearts (Zion) no longer draw white, and one loading screen shows: DDS
+  textures with an extra alpha flag beside DXT1/DXT5 are read (45).
 
 ## Sync with upstream, 2026-11-25
 

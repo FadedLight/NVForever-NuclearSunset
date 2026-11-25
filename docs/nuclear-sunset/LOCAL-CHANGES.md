@@ -434,3 +434,14 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
     pass; box gone after a load (`-160651-12920.log`). Left: NS's welcome pages, the 139-plugin
     warning and Functional Post Game Ending's "overwritten by" notice, which the original shows
     with this load order too [hypothesis for the last: a load-order conflict, owner's call].
+
+45. **DDS files with the alpha-pixels bit next to their FourCC are read**
+    (`crates/fnv-dds/src/lib.rs` `PixelFormat::format`). The reader matched the pixel
+    format's flags as a whole, so flags 0x5 (FourCC + alpha pixels) with `DXT5`/`DXT1` were
+    "unsupported pixel format" and the shapes drew white [observed: Honest Hearts'
+    `textures\nvdlc02\landscape\trees\nvdlc02treebark.dds`, `nvdlc02treebrnc.dds`,
+    `nvdlc02treeleaf2zv.dds`, `nvdlc02_redcedarneedlesev_lod.dds` (white trees in Zion) and
+    Nuclear Sunset's `loading_desktop06.dds`; log nvforever-20261125-185028-13396.log, 7
+    textures failed]. Checked: new test `a_fourcc_with_the_alpha_pixels_bit_reads_as_its_fourcc`,
+    fnv-dds 29 pass; Zion from above again: 0 "unsupported pixel format", textures failed 7
+    → 1, the trees textured (`results\visual\dlc\fnv-honest-hearts-zion.png` vs `-before.png`).

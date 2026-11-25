@@ -187,10 +187,16 @@ name of the event being handled, so one function can serve several events
   the handlers at higher-or-equal (lower-or-equal) priority than that handler; Ar_Null
   when the handler is not at that priority [documented: each page].
 - **IsEventHandlerFirst / IsEventHandlerLast** (same arguments): 1 or 0; 0 when the
-  handler is not at that priority. The pages define First as "nothing at lower or equal
-  priority" and Last as "nothing at higher or equal", which reads reversed against
-  "higher runs first" and would always count the handler itself [documented: each page;
-  the inconsistency is ours to flag]. Real behaviour: open (to observe).
+  handler is not at that priority. Higher priority runs first; `IsEventHandlerFirst`
+  returns 1 only when no other handler is at a higher-or-equal priority (strictly
+  highest), and `IsEventHandlerLast` returns 1 only when no other handler is at a
+  lower-or-equal priority (strictly lowest), so tied handlers return 0 for both
+  [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30,
+  `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+  `tools/capture/nvse/catalogs/wave6d1_event_handler_first_last.json` probe
+  `w6d1p2_01_priority_first_last_higher_lower`:
+  `PROBE|w6d1p2_01_priority_first_last_higher_lower|ord=S:10,5a,5b,1,|fl10=1/0|fl5a=0/0|fl1=0/1|fl99=0/0|hi=0,2,2,-1|lo=2,2,0|k5=hi(1,1),lo(1,1)`;
+  no binary, DLL, PDB, or third-party source consulted].
 
 ## 7. Order and persistence, collected
 
@@ -228,8 +234,8 @@ One row per function E1–E3 cover, then one row per built-in event, from §2–
 | DispatchEvent | — | event name; infoMap stringmap?; senderName string? | none | calls handlers of a user-defined event with one string map | default map: eventName, eventSender (the mod file); infoMap replaces the map, senderName the sender; inline or deferred: open |
 | DispatchEventAlt | — | [ref.] event name; up to 15 values any | bool | calls handlers whose filters match the arguments (6.2.8) | optional calling reference passed on; handlers may take fewer parameters than sent |
 | GetCurrentEventName | — | — | string | the event being handled | inside a SetEventHandler-style handler; outside: open |
-| IsEventHandlerFirst | — | event name; handler; startPriority int; scriptsToIgnore?; pluginsToIgnore array?; pluginHandlersToIgnore array? | bool | 1 if no handler is at lower-or-equal priority (page's wording) | 0 when the handler is not at startPriority; the wording reads reversed against "higher runs first": open (6.2.9) |
-| IsEventHandlerLast | — | as IsEventHandlerFirst | bool | 1 if no handler is at higher-or-equal priority (page's wording) | as above (6.2.9) |
+| IsEventHandlerFirst | — | event name; handler; startPriority int; scriptsToIgnore?; pluginsToIgnore array?; pluginHandlersToIgnore array? | bool | 1 if no other handler is at higher-or-equal priority (strictly highest) [observed: `w6d1p2_01_priority_first_last_higher_lower`] | 0 when the handler is not at startPriority or tied at the top (6.2.9) |
+| IsEventHandlerLast | — | as IsEventHandlerFirst | bool | 1 if no other handler is at lower-or-equal priority (strictly lowest) [observed: `w6d1p2_01_priority_first_last_higher_lower`] | 0 when the handler is not at startPriority or tied at the bottom (6.2.9) |
 | GetEventHandlers | — | eventName string?; handler?; priority int? | array | handlers matching the filters: a stringmap by event, then a map by priority, then handler arrays [script or plugin map, filters map] | only extender-managed handlers (6.2.9) |
 | Get(Higher\\|Lower)PriorityEventHandlers | — | as IsEventHandlerFirst | array (map by priority) | handlers at higher-or-equal (lower-or-equal) priority | Ar_Null when the handler is not at startPriority (6.2.9) |
 | DumpEventHandlers | — | as GetEventHandlers | none | prints them by event and priority, plugin handlers included | (6.2.9) |

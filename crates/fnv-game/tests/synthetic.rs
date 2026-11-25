@@ -3505,6 +3505,35 @@ fn event_handlers_are_set_dispatched_filtered_and_removed() {
 }
 
 #[test]
+fn is_event_handler_first_and_last_match_execution_priority_order() {
+    use fnv_script::vm::XVal;
+    let f = udf_fixture();
+    let mut g = game(&f);
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(&format!("Begin Function {{ }}\n{body}\nEnd\n"), Default::default()).unwrap()
+    };
+    q(
+        &mut g,
+        "SetEventHandler \"W6Ev\" TestSet \"priority\"::10
+         SetEventHandler \"W6Ev\" TestMap \"priority\"::5
+         SetEventHandler \"W6Ev\" TestAdd \"priority\"::5
+         SetEventHandler \"W6Ev\" TestSet \"priority\"::1",
+    );
+    // Highest priority (10) is first (1) and not last (0).
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerFirst \"W6Ev\" TestSet 10)"), XVal::Num(1.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerLast \"W6Ev\" TestSet 10)"), XVal::Num(0.0));
+    // Tied middle priority (5) is neither first nor last.
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerFirst \"W6Ev\" TestMap 5)"), XVal::Num(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerLast \"W6Ev\" TestMap 5)"), XVal::Num(0.0));
+    // Lowest priority (1) is not first (0) and is last (1).
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerFirst \"W6Ev\" TestSet 1)"), XVal::Num(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerLast \"W6Ev\" TestSet 1)"), XVal::Num(1.0));
+    // Unregistered priority (99) is 0 for both.
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerFirst \"W6Ev\" TestSet 99)"), XVal::Num(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (IsEventHandlerLast \"W6Ev\" TestSet 99)"), XVal::Num(0.0));
+}
+
+#[test]
 fn get_game_loaded_and_restarted_are_true_once_per_script() {
     // [documented: GetGameLoaded; GetGameRestarted] once per script after a load / per
     // session; a session's SetEventHandler registrations carry over a load.

@@ -175,13 +175,18 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
             }
             None => XVal::Array(0),
         },
-        // First: none at a lower-or-equal priority; last: none at a higher-or-equal one;
-        // 0 when the handler is not at that priority [documented: IsEventHandlerFirst;
-        // IsEventHandlerLast, as the pages word them].
+        // First: no other handler at a higher-or-equal priority (higher runs first);
+        // last: no other handler at a lower-or-equal priority; 0 when the handler is
+        // not registered at that priority [observed: 2026-11-24, Fallout: New Vegas
+        // 1.4.0.525, xNVSE 6.4.9, JIP LN 57.30, GSDocMitchellHouse (0x00103DF9),
+        // 10 official base masters, `tools/capture/nvse/catalogs/wave6d1_event_handler_first_last.json`
+        // probe `w6d1p2_01_priority_first_last_higher_lower`:
+        // `PROBE|w6d1p2_01_priority_first_last_higher_lower|ord=S:10,5a,5b,1,|fl10=1/0|fl5a=0/0|fl1=0/1|fl99=0/0|hi=0,2,2,-1|lo=2,2,0|k5=hi(1,1),lo(1,1)`;
+        // no DLL, PDB, or third-party source consulted].
         "iseventhandlerfirst" | "iseventhandlerlast" => match around(g, args) {
             Some((me, others)) => {
                 let first = name == "iseventhandlerfirst";
-                let none = others.iter().all(|h| if first { h.priority > me.priority } else { h.priority < me.priority });
+                let none = others.iter().all(|h| if first { h.priority < me.priority } else { h.priority > me.priority });
                 XVal::Num(f64::from(u8::from(none)))
             }
             None => XVal::Num(0.0),

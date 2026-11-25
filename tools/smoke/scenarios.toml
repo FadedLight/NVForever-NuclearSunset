@@ -13456,7 +13456,7 @@ order = [[
 
 [[scenario]]
 name = "reputation-box"
-source = "owner's playtest list 5, items 12 and 13 (docs/spec-notes/reputation.md, hud.md §11): leaving the start finds Goodsprings ('You have discovered'); fame with Goodsprings opens its 'Liked' box, infamy with the Powder Gangers their boxes up to 'Vilified'; the Pip-Boy's General page lists both"
+source = "owner's playtest list 5, items 12 and 13 (docs/spec-notes/reputation.md, hud.md §11): leaving the start finds Goodsprings ('You have discovered'); fame with Goodsprings opens its box at fame level 2, infamy with the Powder Gangers their boxes up to infamy level 3; the Pip-Boy's General page lists both"
 areas = ["hud", "pipboy"]
 paths = ["engine/nvf-play/src/reputation.rs", "engine/nvf-play/src/message_menu.rs", "engine/nvf-play/src/crime.rs", "engine/nvf-play/src/compass.rs", "engine/nvf-play/src/pipboy/stats/*", "crates/fnv-game/src/functions/reputation.rs"]
 env = { NVF_PLAY_TEST_TILE_MENUS = "", NVF_PLAY_TEST_SCRIPT_MENUS = "2.5", NVF_PLAY_TEST_CONSOLE = "12:player.addreputation 00104C22 1 5;12.3:close;17:player.addreputation 001558E6 0 5;17.2:player.addreputation 001558E6 0 5;17.4:player.addreputation 001558E6 0 5;17.6:close", NVF_PLAY_TEST_PIPBOY = "32:open,33:page=stats,34:tab=4,36:close", NVF_PLAY_TEST_SHOTS = "6,14,19,35" }
@@ -13465,8 +13465,8 @@ run_seconds = 38
 expect = [
   { re = 'quest message on screen: You have discovered: GOODSPRINGS', label = "the start's town found" },
   { re = 'compass: \d+ actors \(\d+ hostile\), [1-9]\d* map markers \([1-9]\d* found\)', label = "the found town's marker on the compass" },
-  "reputation: Goodsprings Neutral -> Liked (fame 12, infamy 0)",
-  { re = 'reputation: Powder Gangers \S.* -> Vilified', label = "the Powder Gangers' last box Vilified" },
+  "reputation: Goodsprings Neutral -> Trusted (fame 12, infamy 0)",
+  { re = 'reputation: Powder Gangers \S.* -> Reviled', label = "the Powder Gangers' last box at infamy level 3 (Reviled)" },
   { re = 'pipboy stats: .* 2 reputations', label = "both reputations in the Pip-Boy's list" },
   { re = 'pipboy stats: LVL 1, .*, XP 10/', label = "the discovery's 10 XP" },
 ]
@@ -13477,17 +13477,17 @@ source = "owner request 2026-10-30 (#1050): the reputation box and the level-up 
 note = "beside Violet's camp (as music-battle), god mode: Goodsprings fame is added at 12 s while the fight is on, the five fighters are killed at 15 s; the box waits for the fight to end and then 2 s more"
 areas = ["hud"]
 paths = ["engine/nvf-play/src/after_combat.rs", "engine/nvf-play/src/reputation.rs"]
-env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_CONSOLE = "12:player.addreputation 00104C22 1 5;12.3:close", NVF_PLAY_TEST_SCRIPT = "15:kill:0x000F570B,15:kill:0x0013E5BB,15:kill:0x000F573B,15:kill:0x000F5741,15:kill:0x0013F85F" }
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_CONSOLE = "12:player.addreputation 00104C22 1 5;12.3:close", NVF_PLAY_TEST_SCRIPT = "15:kill:0x000F570B,15:kill:0x0013E5BB,15:kill:0x000F573B,15:kill:0x000F573C,15:kill:0x000F573D,15:kill:0x000F573F,15:kill:0x000F5741,15:kill:0x0013F85F" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-46800,65000,4600", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 26
 order = [[
   "after combat: in a fight, boxes wait",
   "after combat: the fight is over",
   { re = 'after combat: settled, boxes may come up \(2\.0 s' },
-  "reputation: Goodsprings Neutral -> Liked (fame 12, infamy 0)",
+  "reputation: Goodsprings Neutral -> Trusted (fame 12, infamy 0)",
 ]]
 expect = [
-  { gap = ["after combat: the fight is over", "reputation: Goodsprings Neutral -> Liked"], range = [1.9, 4.0], label = "the box comes about 2 s after the fight ends, not at once" },
+  { gap = ["after combat: the fight is over", "reputation: Goodsprings Neutral -> Trusted"], range = [1.9, 4.0], label = "the box comes about 2 s after the fight ends, not at once" },
 ]
 forbid = [{ re = 'the player died', label = "the player dies" }]
 

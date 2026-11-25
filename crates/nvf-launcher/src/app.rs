@@ -189,7 +189,7 @@ pub struct App {
     /// DLSS: what this PC has (read at start and after a download), and the licence open.
     dlss: crate::dlss::Status,
     dlss_licence: bool,
-    reports_rx: Option<Receiver<Result<usize, String>>>,
+    reports_rx: Option<Receiver<Result<crate::reports::Deleted, String>>>,
     // News.
     news: Vec<(Post, Option<Arc<[u8]>>)>,
     news_state: NewsState,

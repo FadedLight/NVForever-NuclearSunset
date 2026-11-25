@@ -59,7 +59,14 @@ without the launcher is the same as before.
   takes its line out, the game's default; "No intro film" writes `sIntroMovie=`). A **TTW on/off**
   switch fills in TTW's values (`001FFFF8`, no film) or the base game's (`00102037` (VCG00),
   `FNVIntro.bik`; docs/spec-notes/new-game-start.md), and the card warns while the start quest is TTW's
-  and `TaleOfTwoWastelands.esm` is off or not in the load order (`start::ttw_missing`, #3229). Opening the page runs
+  and `TaleOfTwoWastelands.esm` is off or not in the load order (`start::ttw_missing`, #3229).
+  The card is one line so the load order keeps the room (#4288): the title (its note as hover
+  text), the switch, a gold "custom" tag while the start is neither TTW's nor the base game's
+  (`start::Fields::is_custom`), Save start and Undo only while there is a change, and
+  **Custom…**, a window with the start quest, the intro film (a `.bik` file in `Data\Video`)
+  and "No intro film". Its OK puts them on the card for Save start; Cancel, Escape or a click
+  outside changes nothing. The values themselves are not shown on the card. The warning has a
+  line of its own while it applies. Opening the page runs
   `fnv_install::plugins::sync`, as the game's start does, so new plugins get their lines.
 - **Game folder**: `[Game] Path` with the required-files check, the program to start
   (`[Launcher] Exe`, else `nvforever(.exe)` beside the launcher, else this checkout's

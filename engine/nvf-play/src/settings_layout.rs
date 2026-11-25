@@ -604,7 +604,7 @@ mod shared_table_tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -837,8 +837,8 @@ mod shared_table_tests {
         // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
         // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
         // Running Costs AP sneak options (#3183), Stewie 9.65-9.70 sub-options (#3184),
-        // and No Encounter Zone Level Lock (#3878).
-        assert_eq!(tweaks.len(), 574);
+        // and No Encounter Zone Level Lock (#3878), plus Faster Sleep and Wait (#3193).
+        assert_eq!(tweaks.len(), 575);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);
@@ -1312,7 +1312,7 @@ mod android_profile_tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -1462,8 +1462,8 @@ mod android_profile_tests {
         // 564 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
         // plus Keep Chosen Ammo (#3305), the four Stewie 9.45 sub-options (#3179),
         // Running Costs AP sneak options (#3183), Stewie 9.65-9.70 sub-options (#3184),
-        // and No Encounter Zone Level Lock (#3878).
-        assert_eq!(tweaks.len(), 574);
+        // and No Encounter Zone Level Lock (#3878), plus Faster Sleep and Wait (#3193).
+        assert_eq!(tweaks.len(), 575);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);

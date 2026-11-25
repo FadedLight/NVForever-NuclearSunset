@@ -84,14 +84,14 @@ Group (rows) › category (rows): row labels in the page's order.
 - **Weapons and Armour** (12): Enemies Can Disarm You; Enemy Blows Hit Where They Land; Hold and Release Throws; Keep Chosen Ammo; No Condition Damage Buffer; No Condition Damage Penalty; No Spin-Up; NPC Armour DR Ignores Condition; NPC Armour DT Ignores Condition; NPC Weapons Hit Whole; Weapon Requirements Matter; Action Points per Power Attack
 - **Companions and Blasts** (6): Companions Keep Their Weapons; Meltdown for Companions; No Self Meltdown Damage; No XP for Companion Kills; Own Blasts Spare the Player; ↳ Own Blasts Spare Non-Hostiles
 
-### Quality of Life (75)
+### Quality of Life (76)
 
 - **Controls and Movement** (10): Activate Doesn't Stand Up; Console Clicks Skip the Player; Hold to Keep Jumping; Hold to Sneak; Hold to Wait; Move While the Pip-Boy Comes Up; No Knockdowns in God Mode; No Landing Animation; Switch Device by Pressing; Turn Further While Seated
 - **Weapons and Aiming** (19): D-Pad Changes Weapon; Double-Tap Reload Changes Ammo; Fine Weapon Models for Everyone; Holster in Real Time; Hotkey Draws and Holsters; Night Vision Toggle; ↳ Night Vision Toggle: By Day Too; ↳ Night Vision Toggle: Off Until Switched On; No Iron Sight Zoom; No Weapon Movement Penalty; NPCs Drop Holstered Weapons; Reload Swaps Spent Ammo; Shift Ignores Friends in V.A.T.S.; Swap Ammo While Holstered; Unassign Hotkeys; V.A.T.S. Puts the Weapon Back; Aiming Turn Speed: Across; Aiming Turn Speed: Up and Down; Scope Delay (ms)
 - **Items and Repair** (7): Equip Broken Items; Hide Quest Items in Misc; Keep Broken Items Equipped; No Poison Confirmation; Repair Needs the Weapon's Skill; Unequip Broken Armour; Whole-Stack Pickup Figures
 - **Companions** (5): Quiet Companions; Robot Companions Heal With Scrap Metal; ↳ Scrap Metal: Health Each; ↳ Scrap Metal: Health per 10 Repair; ↳ Scrap Metal: Robotics Expert Bonus
 - **Minigames and Machines** (6): Faster Hacking Exit; No Minigame Help; Pick Locks Even With the Key; S.P.E.C.I.A.L. Machine: Straight to the Summary; Say My Skill; Slots: Hold to Spin
-- **Travel and Loading** (4): Fast Travel From Anywhere; Fast Travel in the Air; Pause On Load; Plain Screen Going Outside
+- **Travel and Loading** (5): Fast Travel From Anywhere; Fast Travel in the Air; Faster Sleep and Wait; Pause On Load; Plain Screen Going Outside
 - **Messages and Sounds** (8): Mark Strangers; No Active Quest After Completing One; No Active Quest From New Objectives; No Message for Spent Books; Quiet Landings in God Mode; Quiet Reputation; XP Sound at the Level Cap; Less Frequent Pain Sounds
 - **Conversations and Radio** (4): Click to Continue Dialogue; Keep Stations Out of Range; Music While Talking; Radio While Talking
 - **Screen and Camera** (12): Faster Controller Camera Circling; Move During V.A.T.S. Camera; No Chem Wore-Off Effect; No Explosion Blur; No Interior Fog; Scale Explosion Shake; ↳ Scale Explosion Shake: Camera; Shift Screenshot Hides the HUD; Skip Death Camera; ↳ Skip Death Camera: By Attacking After; Skip Kill Camera; Blood Only on Big Hits

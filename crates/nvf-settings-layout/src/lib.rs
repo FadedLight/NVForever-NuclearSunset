@@ -641,7 +641,7 @@ pub const SECTIONS: &[Section] = &[
         "Minigames and Machines",
         &["tweak-faster-hacking", "tweak-no-tutorials", "tweak-pick-locks-with-key", "tweak-vigor-review-first", "tweak-show-current-skill", "tweak-slots-hold-to-spin"],
     ),
-    group_section("Quality of Life", "Travel and Loading", &["tweak-unsafe-fast-travel", "tweak-midair-fast-travel", "tweak-pause-on-load", "tweak-plain-going-out"]),
+    group_section("Quality of Life", "Travel and Loading", &["tweak-unsafe-fast-travel", "tweak-midair-fast-travel", "tweak-faster-sleep-wait", "tweak-pause-on-load", "tweak-plain-going-out"]),
     group_section(
         "Quality of Life",
         "Messages and Sounds",

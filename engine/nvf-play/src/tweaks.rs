@@ -2368,6 +2368,7 @@ impl Plugin for TweaksPlugin {
         amount!(app, "objectives-gap", "Objectives on Arrival Gap (s)", "The least time, up to 300 seconds, between two showings of Objectives on Arrival. (Stewie's Tweaks bShowQuestObjectivesOnCellChange)", 300.0, f32, objectives_gap);
         // ---- rest ----
         switch!(app, "sleep-in-owned-beds", "Sleep in Owned Beds", "A bed that belongs to someone else can be slept in. (Stewie's Tweaks bSleepInOwnedBeds)", game.sleep_in_owned_beds);
+        switch!(app, "faster-sleep-wait", "Faster Sleep and Wait", "Hours count down faster while sleeping or waiting. (Stewie's Tweaks bFasterSleepWait)", game.faster_sleep_wait);
         // ---- items ----
         switch!(app, "power-armor-no-training", "Power Armor Without Training", "Power armor can be worn without Power Armor Training. (Stewie's Tweaks bPowerArmorNeedsNoTraining)", game.power_armor_needs_no_training);
         // ---- world ----
@@ -3483,6 +3484,7 @@ mod tests {
         assert!(!t.breath_activate && !t.jump_ap_danger_only && !t.jump_without_enough_ap);
         assert!(!t.game.sync_categories && t.game.prevent_switch_when_emptying_category);
         assert!(!t.game.no_lock_encounter_zone_levels);
+        assert!(!t.game.faster_sleep_wait);
         assert_eq!(t.sneak_run_ap_base, 0.0);
         assert_eq!(t.sneak_run_ap_endurance_mult, 0.0);
         assert_eq!(t.console_label(), "Console");
@@ -3605,6 +3607,7 @@ mod tests {
              bCritChanceIgnoresFireRate = 1\n\
              bMenuSearch = 1\n\
              bNoLockEncounterZoneLevels = 1\n\
+             bFasterSleepWait = 1\n\
              iDateFormat = 2\n\
              [Critical Hits]\n\
              fCriticalDamageMult = 1.5\n",
@@ -3637,6 +3640,7 @@ mod tests {
             assert!(settings.game.crit_ignores_fire_rate);
             assert!(settings.game.menu_search);
             assert!(settings.game.no_lock_encounter_zone_levels);
+            assert!(settings.game.faster_sleep_wait);
             assert_eq!(settings.date_style, 2);
             assert_eq!(settings.game.crit_damage_scale, 2.0);
         }
@@ -3649,11 +3653,15 @@ mod tests {
         assert!(final_settings.game.crit_ignores_fire_rate, "unmentioned modular key stays enabled");
         assert!(final_settings.game.menu_search, "unmentioned modular key stays enabled");
         assert!(final_settings.game.no_lock_encounter_zone_levels, "unmentioned modular key stays enabled");
+        assert!(final_settings.game.faster_sleep_wait, "unmentioned modular key stays enabled");
         assert_eq!(final_settings.date_style, 2);
         // Toggling the registered switch in NVForever.ini overrides the modular INI back to off.
         let idx = app.world().resource::<crate::settings::Settings>().index("tweak-no-lock-encounter-zone-levels").unwrap();
         crate::settings::flip(app.world_mut(), idx);
         assert!(!app.world().resource::<TweakSettings>().game.no_lock_encounter_zone_levels, "UI switch toggles off");
+        let sleep_idx = app.world().resource::<crate::settings::Settings>().index("tweak-faster-sleep-wait").unwrap();
+        crate::settings::flip(app.world_mut(), sleep_idx);
+        assert!(!app.world().resource::<TweakSettings>().game.faster_sleep_wait, "UI switch toggles off");
 
         let _ = std::fs::remove_dir_all(&root);
     }

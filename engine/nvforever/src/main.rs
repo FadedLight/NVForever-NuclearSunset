@@ -1411,13 +1411,18 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     };
     let opened = world::open_plugins(args.data(), &mods, &args.plugins);
     args.plugins = opened.plugins.iter().map(|p| p.name.clone()).collect();
-    // No setting names the code page: the plugins' own text says it (#1443).
-    if !code_page_named {
-        setup::guess_code_page(&opened.plugins);
+    // No setting names the code page: the plugins' own text says it, else the language
+    // Steam installed the game in (a translation mod on an English install keeps its
+    // Cyrillic text) (#1443).
+    let steam = setup::steam_language(args.data());
+    if !code_page_named && !setup::guess_code_page(&opened.plugins) {
+        if let Some((page, _)) = steam {
+            setup::use_code_page(page);
+        }
     }
-    // NVForever's own words in the language of the game's text, when the code page names
-    // one and a file of it was read (#1948); a `language=` in NVForever.ini still wins.
-    setup::follow_text_language();
+    // NVForever's own words in the language Steam installed the game in or of the game's
+    // text, when a file of it was read (#1948); a `language=` in NVForever.ini still wins.
+    setup::follow_text_language(steam);
     // `--load`: the save's place decides where the world starts (its worldspace before
     // the world is opened); its body waits for the scripts (nvf_play::save). It is read
     // in full now, remapped to the plugins opened and checked as the restore will

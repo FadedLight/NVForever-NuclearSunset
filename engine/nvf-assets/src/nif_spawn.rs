@@ -139,6 +139,10 @@ pub(crate) struct Props {
     vertex_alpha: bool,
     /// NiStencilProperty draw mode DRAW_BOTH; also set on dismemberment caps (actor.rs).
     pub(crate) double_sided: bool,
+    /// NiStencilProperty draw mode (`0..=3`: `DRAW_CCW_OR_BOTH` / `DRAW_CCW`, `DRAW_CW`,
+    /// `DRAW_BOTH`) [documented: nif.xml StencilDrawMode], mapped through
+    /// [`stencil_draw_mode_cull`] so load-time and live `SetStencilPropertyValue` culling match.
+    stencil_draw_mode: Option<i64>,
     vertex_colors_tint: bool,
     /// BSShaderNoLightingProperty: drawn without lighting (effects, glows).
     unlit: bool,
@@ -503,7 +507,9 @@ fn apply_property(file: &NifFile, dec: &Decoded, r: i32, p: &mut Props) {
         "NiStencilProperty" => {
             // 20.1.0.3+: draw mode in flags bits 10-11; older files: draw_mode field.
             let mode = s.int("draw_mode").or_else(|| s.int("flags").map(|f| (f >> 10) & 3)).unwrap_or(0);
-            p.double_sided = mode == 3;
+            let (double_sided, _) = stencil_draw_mode_cull(mode);
+            p.double_sided = double_sided;
+            p.stencil_draw_mode = Some(mode);
         }
         "NiVertexColorProperty" => p.vertex_colors_tint = true,
         _ => {}
@@ -536,7 +542,7 @@ pub fn is_editor_marker(name: Option<&str>) -> bool {
 /// so GREATER moves the cutoff half a step above the threshold; other functions keep ≥.
 pub(crate) const BLEND_TEST_CUT: i64 = 64;
 
-pub(crate) fn alpha_mode(flags: i64, threshold: i64) -> AlphaMode {
+pub fn alpha_mode(flags: i64, threshold: i64) -> AlphaMode {
     let (src, dst) = ((flags >> 1) & 0xF, (flags >> 5) & 0xF);
     let (blend, test) = (flags & 1 != 0, flags & 0x200 != 0);
     let strict = (flags >> 10) & 7 == 4;
@@ -548,6 +554,35 @@ pub(crate) fn alpha_mode(flags: i64, threshold: i64) -> AlphaMode {
         (true, _, 1 | 4, _) => AlphaMode::Multiply,
         (true, ..) => AlphaMode::Blend,
         _ => AlphaMode::Opaque,
+    }
+}
+
+/// Double-sided flag and face culling from a `NiStencilProperty` `StencilDrawMode`
+/// (`0/1` `DRAW_CCW_OR_BOTH`/`DRAW_CCW` -> back-face cull, `2` `DRAW_CW` -> front-face cull,
+/// `3` `DRAW_BOTH` -> double-sided / no cull) [documented: nif.xml StencilDrawMode;
+/// design: shared by load-time `NiStencilProperty` material creation and live
+/// `SetStencilPropertyValue` updates so both paths produce identical culling].
+pub fn stencil_draw_mode_cull(draw_mode: i64) -> (bool, Option<bevy::render::render_resource::Face>) {
+    match draw_mode & 3 {
+        3 => (true, None),
+        2 => (false, Some(bevy::render::render_resource::Face::Front)),
+        _ => (false, Some(bevy::render::render_resource::Face::Back)),
+    }
+}
+
+/// Double-sided flag and face culling from `NiStencilProperty` flags bits 10-11
+/// (`draw_mode`: 0/1 `DRAW_CCW`, 2 `DRAW_CW`, 3 `DRAW_BOTH`) [documented: nif.xml
+/// StencilDrawMode; design: Bevy's `StandardMaterial` does not expose per-material
+/// hardware stencil reference/mask state, so only the face-cull mode applies live].
+pub fn stencil_cull(flags: i64) -> (bool, Option<bevy::render::render_resource::Face>) {
+    stencil_draw_mode_cull((flags >> 10) & 3)
+}
+
+fn props_cull(props: &Props) -> (bool, Option<bevy::render::render_resource::Face>) {
+    if props.double_sided {
+        stencil_draw_mode_cull(3)
+    } else {
+        stencil_draw_mode_cull(props.stencil_draw_mode.unwrap_or(0))
     }
 }
 
@@ -1254,6 +1289,7 @@ fn shape_material_inner(props: &Props, mesh: &mut Mesh, textures: &mut impl Text
         .flatten()
         .and_then(|t| textures.texture(t, true));
     let (reflectance, masked) = specular(props, normal.is_some(), unmasked);
+    let (double_sided, cull_mode) = props_cull(props);
     let material = StandardMaterial {
         base_color: Color::srgba(1.0, 1.0, 1.0, props.material_alpha.unwrap_or(1.0)),
         base_color_texture: base,
@@ -1268,8 +1304,8 @@ fn shape_material_inner(props: &Props, mesh: &mut Mesh, textures: &mut impl Text
         emissive: emissive.unwrap_or(LinearRgba::BLACK),
         emissive_texture: glow,
         alpha_mode,
-        double_sided: props.double_sided,
-        cull_mode: if props.double_sided { None } else { Some(bevy::render::render_resource::Face::Back) },
+        double_sided,
+        cull_mode,
         unlit: props.unlit,
         ..default()
     };
@@ -1425,9 +1461,158 @@ pub fn refraction_material(material: &mut NifMaterial, strength: f32, fire_perio
     crate::authored::recheck_height(material);
 }
 
+/// Numeric mesh admission is an Android-only engine policy; see nif-numeric-admission.md.
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NumericStream {
+    Position,
+    Normal,
+    Uv,
+    Tangent,
+    Color,
+    Weight,
+    NormalizedWeight,
+    InverseBind,
+}
+
+#[cfg(any(target_os = "android", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NumericError {
+    stream: NumericStream,
+    element: usize,
+}
+
+#[cfg(any(target_os = "android", test))]
+fn finite_stream<const N: usize>(values: &[[f32; N]], stream: NumericStream) -> Result<(), NumericError> {
+    match values.iter().position(|v| v.iter().any(|x| !x.is_finite())) {
+        Some(element) => Err(NumericError { stream, element }),
+        None => Ok(()),
+    }
+}
+
+/// Check the actual streams after material preparation, including repaired colours
+/// and generated tangents. Does not rewrite values or discard individual vertices.
+#[cfg(any(target_os = "android", test))]
+fn finite_mesh(mesh: &Mesh) -> Result<(), NumericError> {
+    for (attribute, stream) in [
+        (Mesh::ATTRIBUTE_POSITION, NumericStream::Position),
+        (Mesh::ATTRIBUTE_NORMAL, NumericStream::Normal),
+        (Mesh::ATTRIBUTE_UV_0, NumericStream::Uv),
+        (Mesh::ATTRIBUTE_TANGENT, NumericStream::Tangent),
+        (Mesh::ATTRIBUTE_COLOR, NumericStream::Color),
+        (Mesh::ATTRIBUTE_JOINT_WEIGHT, NumericStream::NormalizedWeight),
+    ] {
+        match mesh.attribute(attribute) {
+            Some(VertexAttributeValues::Float32x2(v)) => finite_stream(v, stream)?,
+            Some(VertexAttributeValues::Float32x3(v)) => finite_stream(v, stream)?,
+            Some(VertexAttributeValues::Float32x4(v)) => finite_stream(v, stream)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+pub(crate) struct AdmittedShape {
+    pub mesh: Mesh,
+    pub triangles: usize,
+    pub skin: Option<Skin>,
+    pub stored: StoredArrays,
+}
+
+/// Numeric errors are separate from absent/unusable optional skin data. A numeric
+/// failure must not become an ordinary unskinned shape in any of the three loaders.
+#[cfg(any(target_os = "android", test))]
+fn admit_shape(dec: &Decoded, shape: &Struct, data: &Struct) -> Result<Option<AdmittedShape>, NumericError> {
+    let Some((mesh, triangles, stored)) = build_mesh(data)? else { return Ok(None) };
+    let skin = shape_skin(dec, shape, mesh.count_vertices())?;
+    Ok(Some(AdmittedShape { mesh, triangles, skin, stored }))
+}
+
+#[cfg(not(target_os = "android"))]
+fn admit_shape_desktop(dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+    let (mesh, triangles, stored) = build_mesh_desktop(data)?;
+    let skin = shape_skin_desktop(dec, shape, mesh.count_vertices());
+    Some(AdmittedShape { mesh, triangles, skin, stored })
+}
+
+#[derive(Default)]
+pub(crate) struct NumericRejections {
+    #[cfg(any(target_os = "android", test))]
+    total: usize,
+    #[cfg(any(target_os = "android", test))]
+    first: Vec<(usize, NumericError)>,
+}
+
+impl NumericRejections {
+    #[cfg(any(target_os = "android", test))]
+    fn record(&mut self, block: usize, error: NumericError) {
+        self.total = self.total.saturating_add(1);
+        if self.first.len() < 8 {
+            self.first.push((block, error));
+        }
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn admit_android(&mut self, block: usize, dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+        match admit_shape(dec, shape, data) {
+            Ok(shape) => shape,
+            Err(error) => {
+                self.record(block, error);
+                None
+            }
+        }
+    }
+
+    pub fn admit(&mut self, block: usize, dec: &Decoded, shape: &Struct, data: &Struct) -> Option<AdmittedShape> {
+        #[cfg(target_os = "android")]
+        {
+            self.admit_android(block, dec, shape, data)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = block;
+            admit_shape_desktop(dec, shape, data)
+        }
+    }
+
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn accept_mesh_android(&mut self, block: usize, mesh: &Mesh) -> bool {
+        match finite_mesh(mesh) {
+            Ok(()) => true,
+            Err(error) => {
+                self.record(block, error);
+                false
+            }
+        }
+    }
+
+    pub fn accept_mesh(&mut self, block: usize, mesh: &Mesh) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            self.accept_mesh_android(block, mesh)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (block, mesh);
+            true
+        }
+    }
+
+    pub fn report(&self, source: &str) {
+        #[cfg(any(target_os = "android", test))]
+        if self.total > 0 {
+            let source: String = source.chars().take(240).collect();
+            warn!("NIF numeric admission: {source}: {} shape(s) rejected; first block/reasons: {:?}", self.total, self.first);
+        }
+        #[cfg(not(any(target_os = "android", test)))]
+        let _ = source;
+    }
+}
+
 /// The mesh of a shape-data block, its triangle count, and the tangent arrays it stores
-/// (for [`Tangents::Stored`]; empty when it stores none).
-pub(crate) fn build_mesh(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
+/// (for [`Tangents::Stored`]; empty when it stores none) — desktop path matching `main`.
+#[cfg(not(target_os = "android"))]
+fn build_mesh_desktop(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
     let md = mesh_data(data);
     if md.positions.is_empty() || md.triangles.is_empty() {
         return None;
@@ -1446,8 +1631,7 @@ pub(crate) fn build_mesh(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
     if md.colors.len() == n {
         mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, md.colors);
     }
-    let max = n as u32;
-    let idx: Vec<u32> = md.triangles.iter().filter(|t| t.iter().all(|&i| i < max)).flatten().copied().collect();
+    let idx: Vec<u32> = md.triangles.into_iter().filter(|&[a, b, c]| (a as usize) < n && (b as usize) < n && (c as usize) < n).flatten().collect();
     mesh.insert_indices(Indices::U32(idx));
     if !has_normals {
         mesh.compute_normals();
@@ -1455,11 +1639,46 @@ pub(crate) fn build_mesh(data: &Struct) -> Option<(Mesh, usize, StoredArrays)> {
     Some((mesh, tris, StoredArrays { tangents: md.tangents, bitangents: md.bitangents }))
 }
 
+/// The mesh of a shape-data block, its triangle count, and the tangent arrays it stores
+/// (for [`Tangents::Stored`]; empty when it stores none) — Android finite-admission path.
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn build_mesh(data: &Struct) -> Result<Option<(Mesh, usize, StoredArrays)>, NumericError> {
+    let md = mesh_data(data);
+    if md.positions.is_empty() || md.triangles.is_empty() {
+        return Ok(None);
+    }
+    finite_stream(&md.positions, NumericStream::Position)?;
+    let n = md.positions.len();
+    let tris = md.triangles.len();
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, md.positions);
+    let has_normals = md.normals.len() == n;
+    if has_normals {
+        finite_stream(&md.normals, NumericStream::Normal)?;
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, md.normals);
+    }
+    if let Some(uv) = md.uv_sets.first().filter(|u| u.len() == n) {
+        finite_stream(uv, NumericStream::Uv)?;
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv.clone());
+    }
+    if md.colors.len() == n {
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, md.colors);
+    }
+    let max = n as u32;
+    let idx: Vec<u32> = md.triangles.iter().filter(|t| t.iter().all(|&i| i < max)).flatten().copied().collect();
+    mesh.insert_indices(Indices::U32(idx));
+    if !has_normals {
+        mesh.compute_normals();
+    }
+    Ok(Some((mesh, tris, StoredArrays { tangents: md.tangents, bitangents: md.bitangents })))
+}
+
 /// Per-vertex joint indices and normalised weights (four influences per vertex).
 type SkinWeights = (Vec<[u16; 4]>, Vec<[f32; 4]>);
 
-/// Joint indices and weights per vertex from NiSkinData (top four influences).
-fn skin_weights(skin_data: &Struct, vertices: usize) -> Option<SkinWeights> {
+/// Joint indices and weights per vertex from NiSkinData (top four influences) — desktop path.
+#[cfg(not(target_os = "android"))]
+fn skin_weights_desktop(skin_data: &Struct, vertices: usize) -> Option<SkinWeights> {
     let bones = skin_data.list("bone_list")?;
     let mut infl: Vec<Vec<(u16, f32)>> = vec![Vec::new(); vertices];
     for (b, bone) in bones.iter().enumerate() {
@@ -1496,6 +1715,60 @@ fn skin_weights(skin_data: &Struct, vertices: usize) -> Option<SkinWeights> {
     Some((joints, weights))
 }
 
+/// Joint indices and weights per vertex from NiSkinData (top four influences) — Android path.
+#[cfg(any(target_os = "android", test))]
+fn skin_weights(skin_data: &Struct, vertices: usize) -> Result<Option<SkinWeights>, NumericError> {
+    let Some(bones) = skin_data.list("bone_list") else { return Ok(None) };
+    let mut infl: Vec<Vec<(u16, f32)>> = vec![Vec::new(); vertices];
+    for (b, bone) in bones.iter().enumerate() {
+        let Value::Struct(bone) = bone else { continue };
+        for w in bone.list("vertex_weights").unwrap_or_default() {
+            let Value::Struct(w) = w else { continue };
+            let (Some(i), Some(wt)) = (w.int("index"), w.float("weight")) else { continue };
+            if let Some(v) = infl.get_mut(i as usize) {
+                if !wt.is_finite() {
+                    return Err(NumericError { stream: NumericStream::Weight, element: i as usize });
+                }
+                v.push((b as u16, wt));
+            }
+        }
+    }
+    if infl.iter().all(|v| v.is_empty()) {
+        return Ok(None);
+    }
+    let mut joints = Vec::with_capacity(vertices);
+    let mut weights = Vec::with_capacity(vertices);
+    for (vertex, mut v) in infl.into_iter().enumerate() {
+        v.sort_by(|a, b| b.1.total_cmp(&a.1));
+        v.truncate(4);
+        // Four finite f32 values cannot overflow f64. Compensation also preserves
+        // a small residual when finite signed influences nearly cancel.
+        let (mut sum, mut correction) = (0.0_f64, 0.0_f64);
+        for &(_, weight) in &v {
+            let weight = f64::from(weight);
+            let next = sum + weight;
+            correction += if sum.abs() >= weight.abs() { (sum - next) + weight } else { (weight - next) + sum };
+            sum = next;
+        }
+        let sum = sum + correction;
+        let mut j = [0u16; 4];
+        let mut w = [0f32; 4];
+        for (k, (b, wt)) in v.iter().enumerate() {
+            j[k] = *b;
+            w[k] = if sum > 0.0 { (f64::from(*wt) / sum) as f32 } else { 0.0 };
+            if !w[k].is_finite() {
+                return Err(NumericError { stream: NumericStream::NormalizedWeight, element: vertex });
+            }
+        }
+        if sum <= 0.0 {
+            w[0] = 1.0;
+        }
+        joints.push(j);
+        weights.push(w);
+    }
+    Ok(Some((joints, weights)))
+}
+
 /// A shape's skin: the bone blocks it binds to, per bone the inverse bind matrix in
 /// shape space (the bone's stored skin transform, docs/spec-notes/nif.md §6), and per
 /// vertex the joint indices and weights.
@@ -1515,8 +1788,9 @@ impl Skin {
     }
 }
 
-/// The skin of `shape` (with `vertices` vertices), if it has a usable one.
-pub(crate) fn shape_skin(dec: &Decoded, shape: &Struct, vertices: usize) -> Option<Skin> {
+/// The skin of `shape` (with `vertices` vertices), if it has a usable one — desktop path.
+#[cfg(not(target_os = "android"))]
+fn shape_skin_desktop(dec: &Decoded, shape: &Struct, vertices: usize) -> Option<Skin> {
     let si = shape.block_ref("skin_instance").and_then(|r| dec.get(r))?;
     let bones: Vec<usize> = si.refs("bones").unwrap_or_default().iter().map(|&b| usize::try_from(b).ok()).collect::<Option<_>>()?;
     let sd = si.block_ref("data").and_then(|r| dec.get(r))?;
@@ -1532,7 +1806,30 @@ pub(crate) fn shape_skin(dec: &Decoded, shape: &Struct, vertices: usize) -> Opti
     if inverse_binds.len() != bones.len() {
         return None;
     }
-    Some(Skin { bones, inverse_binds, weights: skin_weights(sd, vertices)? })
+    Some(Skin { bones, inverse_binds, weights: skin_weights_desktop(sd, vertices)? })
+}
+
+/// The skin of `shape` (with `vertices` vertices), if it has a usable one — Android path.
+#[cfg(any(target_os = "android", test))]
+fn shape_skin(dec: &Decoded, shape: &Struct, vertices: usize) -> Result<Option<Skin>, NumericError> {
+    let Some(si) = shape.block_ref("skin_instance").and_then(|r| dec.get(r)) else { return Ok(None) };
+    let Some(sd) = si.block_ref("data").and_then(|r| dec.get(r)) else { return Ok(None) };
+    let weights = skin_weights(sd, vertices)?;
+    let Some(bones) = si.refs("bones").unwrap_or_default().iter().map(|&b| usize::try_from(b).ok()).collect::<Option<Vec<usize>>>() else { return Ok(None) };
+    let mut inverse_binds = Vec::new();
+    for (element, bone) in sd.list("bone_list").unwrap_or_default().iter().enumerate() {
+        let Value::Struct(bone) = bone else { return Ok(None) };
+        let Some(transform) = bone.strukt("skin_transform").and_then(NifTransform::from_struct) else { return Ok(None) };
+        let bind = Mat4::from(affine(&transform));
+        if !bind.is_finite() {
+            return Err(NumericError { stream: NumericStream::InverseBind, element });
+        }
+        inverse_binds.push(bind);
+    }
+    if inverse_binds.len() != bones.len() {
+        return Ok(None);
+    }
+    Ok(weights.map(|weights| Skin { bones, inverse_binds, weights }))
 }
 
 impl SpawnCtx<'_, '_> {
@@ -1626,11 +1923,12 @@ impl SpawnCtx<'_, '_> {
         let to_y_up = Affine3A::from_rotation_x(-FRAC_PI_2);
 
         // Pass 2: geometry and materials.
+        let mut rejected = NumericRejections::default();
         for o in objects.iter().filter(|o| !o.is_node) {
             let Ok(shape) = &dec.blocks[o.block] else { continue };
             let Some(data_ref) = shape.block_ref("data") else { continue };
             let Some(data) = dec.get(data_ref) else { continue };
-            let Some((mut mesh, tris, _)) = build_mesh(data) else { continue };
+            let Some(AdmittedShape { mut mesh, triangles: tris, skin, .. }) = rejected.admit(o.block, &dec, shape, data) else { continue };
 
             let mut props = shape_props(&file, &dec, o, &by_block);
             // Landscape LOD takes no authored set (#2981), as in the model loader.
@@ -1643,6 +1941,9 @@ impl SpawnCtx<'_, '_> {
                 &mut self.images,
                 self.formats.as_deref(),
             );
+            if !rejected.accept_mesh(o.block, &mesh) {
+                continue;
+            }
             report.textures_missing.extend(missing);
             if props.is_helper(shaded) {
                 self.commands.entity(entity_of[&o.block]).insert((NifHidden, Visibility::Hidden));
@@ -1654,7 +1955,7 @@ impl SpawnCtx<'_, '_> {
                 by_name.or_else(|| entity_of.get(b)).copied()
             };
             let mut skinned = None;
-            if let Some(skin) = shape_skin(&dec, shape, mesh.count_vertices()) {
+            if let Some(skin) = skin {
                 if let Some(joints) = skin.bones.iter().map(joint).collect::<Option<Vec<Entity>>>() {
                     let binds = skin.insert_into(&mut mesh);
                     skinned = Some(SkinnedMesh { inverse_bindposes: self.bindposes.add(binds), joints });
@@ -1688,6 +1989,7 @@ impl SpawnCtx<'_, '_> {
             report.shapes += 1;
             report.triangles += tris;
         }
+        rejected.report(path);
         Ok(report)
     }
 }
@@ -2640,7 +2942,7 @@ mod tests {
         let by_block: HashMap<usize, &SceneObject> = objects.iter().map(|o| (o.block, o)).collect();
         let shape = objects.iter().find(|o| !o.is_node).expect("the shape");
         let props = shape_props(&file, &dec, shape, &by_block);
-        let (mut mesh, ..) = build_mesh(dec.get(4).unwrap()).unwrap();
+        let (mut mesh, ..) = build_mesh(dec.get(4).unwrap()).unwrap().unwrap();
         let material = shape_material_with(&props, &mut mesh, &mut AllTextures, Tangents::Generate).0;
         (props, material)
     }
@@ -2916,6 +3218,9 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+#[path = "nif_numeric_admission_tests.rs"]
+mod numeric_admission_tests;
 
 #[cfg(test)]
 mod authored_tests;
@@ -2961,5 +3266,23 @@ mod bc5_material_tests {
         assert!(refused.base.normal_map_texture.is_none());
         assert!(refused.base.specular_texture.is_none());
         assert_eq!(refused.base.reflectance, 0.3);
+    }
+
+    #[test]
+    fn stencil_cull_maps_draw_mode_bits() {
+        assert_eq!(stencil_cull(0), (false, Some(bevy::render::render_resource::Face::Back)));
+        assert_eq!(stencil_cull(1 << 10), (false, Some(bevy::render::render_resource::Face::Back)));
+        assert_eq!(stencil_cull(2 << 10), (false, Some(bevy::render::render_resource::Face::Front)));
+        assert_eq!(stencil_cull(3 << 10), (true, None));
+        for mode in 0..=3i64 {
+            let flags = (mode << 10) | 0x0015;
+            let expected = stencil_cull(flags);
+            let props = Props {
+                double_sided: mode == 3,
+                stencil_draw_mode: Some(mode),
+                ..Default::default()
+            };
+            assert_eq!(props_cull(&props), expected, "load-time props_cull must match stencil_cull for mode {mode}");
+        }
     }
 }

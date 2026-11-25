@@ -412,10 +412,16 @@ impl TargetPicker<'_,'_,'_>{
     let furniture_seen = hit.and_then(|h| h.form_id).into_iter().chain(bounds.iter().map(|b| b.0)).any(is_furniture);
     // Beds among the boxes (FURN marker flags with Sleep, bit 31, furniture.md §1) may
     // yield to what lies in them (`pick::set_aside_enclosing`, #3323).
-    // The containers among the boxes: only they give way to what lies inside them
-    // (`pick::choose_inside`, #3351).
-    let containers: std::collections::HashSet<u32> =
-        bounds.iter().map(|b| b.0).filter(|&id| sim.base_of(id).and_then(|b| sim.forms.get(b)).is_some_and(|f| matches!(f.data, BaseData::Container(_)))).collect();
+    // The containers among the boxes give way to what lies inside them (#3351), activators
+    // to an item lying in their box (the note on a radio, #3937), nothing else
+    // (`pick::choose_inside`).
+    let of_kind = |kind: fn(&BaseData) -> bool| -> std::collections::HashSet<u32> {
+        bounds.iter().map(|b| b.0).chain(hit.and_then(|h| h.form_id)).filter(|&id| sim.base_of(id).and_then(|b| sim.forms.get(b)).is_some_and(|f| kind(&f.data))).collect()
+    };
+    let containers = of_kind(|d| matches!(d, BaseData::Container(_)));
+    let activators = of_kind(|d| matches!(d, BaseData::Activator));
+    let items = of_kind(|d| matches!(d, BaseData::Item(_)));
+    let yields = |outer: u32, inner: u32| containers.contains(&outer) || (activators.contains(&outer) && items.contains(&inner));
     let beds: std::collections::HashSet<u32> = match script.as_deref().and_then(|s| s.rt.as_ref()) {
         Some(rt) if furniture_seen => {
             let bed = |id: u32| sim.base_of(id).and_then(|b| rt.game.data.furniture.get(&b)).is_some_and(|f| f & fnv_game::package::furniture::SLEEP != 0);
@@ -501,10 +507,10 @@ impl TargetPicker<'_,'_,'_>{
     });
     let raw_hit = hit;
     let hit = pick::door_behind(hit, behind, |id| describe_once(id).is_some());
-    // What is inside a container wins over it (an open locker's shelves, #3351), among the
-    // boxes the bed rule kept.
+    // What is inside a container wins over it (an open locker's shelves, #3351), an item
+    // over the activator it lies on (#3937), among the boxes the bed rule kept.
     let kept: Vec<pick::BoxSpan> = bounds.iter().filter(|b| kept.iter().any(|k| k.0 == b.0)).copied().collect();
-    let picked = pick::choose_inside(hit, raw_hit, kept, REACH, |id| containers.contains(&id), |id| describe_once(id).is_some());
+    let picked = pick::choose_inside(hit, raw_hit, kept, REACH, yields, |id| describe_once(id).is_some());
     // How far the sleeper's body is from the eye: its posed bones (`crate::hitvol::ActorParts`,
     // which follow the lying body), else its render boxes (rough: the bind pose).
     let body_distance = |actor: u32| {

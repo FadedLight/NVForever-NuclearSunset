@@ -176,7 +176,7 @@ impl Game<'_> {
             return;
         }
         let base = crate::functions::base_of(self, r).unwrap_or(r);
-        let ty = self.data.sig(base).and_then(|s| crate::functions::items::form_type_code(&s)).map_or(-1.0, f64::from);
+        let ty = self.data.sig(base).and_then(|s| fnv_script::vm::form_type_code(&s)).map_or(-1.0, f64::from);
         self.jg8_fire(Ev::Crosshair, &[XVal::Ref(r.0), XVal::Num(ty)], vec![XVal::Ref(r.0)]);
     }
 
@@ -459,9 +459,17 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
             };
             let Some(func) = args.get(1).cloned().filter(|f| !matches!(f, XVal::Num(n) if *n == 0.0)) else { return Some(Ok(zero)) };
             // The filters that are numbers (a limb, a level, an actor value code, an
-            // emotion, a form type, the sleep/wait mode) keep 0 as a value; a 0 where a
-            // form goes (or a menu ID for KeyboardSelection) is no filter [hypothesis:
-            // scripts pass 0 for "any"].
+            // emotion, a form type, the sleep/wait mode) keep 0 as a value; a 0 or
+            // XMarker (0x3B) where a form goes (or a menu ID <= 0 for KeyboardSelection)
+            // is no filter [observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE
+            // 6.4.9 + JohnnyGuitarNVSE 528 + JIP LN 57.30, 10 official base masters,
+            // GSDocMitchellHouse (`0x00103DF9`), isolated clean-room staging copy,
+            // committed probe `w6t2p2_12_jg_reputation_and_crosshair_xmarker`
+            // (`tools/capture/nvse/catalogs/wave6c_jg8_xmarker_wildcard.json`):
+            // `PROBE|w6t2p2_12_jg_reputation_and_crosshair_xmarker|xh(0,0)|fame(n=0,rOk=0,ax=0,v=0.0)|inf(n=1,ax=1.08423e+09,v=3.0)|xm=1`;
+            // no DLL or source consulted; hypothesis: numeric 0 in a form slot also acts
+            // as wildcard].
+            const XMARKER: u32 = 0x0000_003B;
             let numeric: &[usize] = match ev {
                 Ev::LimbGone | Ev::ProcessLevel | Ev::NpcActorValue | Ev::Crosshair => &[1],
                 Ev::NpcResponse | Ev::SleepWait | Ev::KeyboardSelection => &[0],
@@ -473,6 +481,7 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
                 .enumerate()
                 .map(|(k, a)| match a {
                     XVal::Ref(0) => None,
+                    XVal::Ref(XMARKER) if !numeric.contains(&k) => None,
                     XVal::Num(n) if !numeric.contains(&k) && *n == 0.0 => None,
                     XVal::Num(n) if ev == Ev::KeyboardSelection && *n <= 0.0 => None,
                     XVal::Num(n) if numeric.contains(&k) && ev != Ev::SleepWait && *n < 0.0 => None,

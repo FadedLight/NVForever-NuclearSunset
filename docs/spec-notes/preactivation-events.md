@@ -15,8 +15,16 @@ per-invocation setter flag preserves that distinction for conditional consumers.
 The new activation path consumes it without changing Call's values, receivers,
 closures, error handling, or string/array cleanup. Base-aware form and array filters
 reuse the existing registry. Priority and registration order remain the same as
-other event handlers. Filter arrays owned by a dispatch snapshot stay alive until
-that dispatch finishes, including when an earlier callback unregisters a later one.
+other event handlers. Filter arrays owned by a dispatch snapshot stay alive until that dispatch finishes so
+mid-dispatch unregistration releases them cleanly, while a later callback unregistered
+mid-dispatch via `RemoveEventHandler` is skipped in that dispatch; expression-only
+lambdas returning `0` (`({args} => 0)`) veto activation just like explicit
+`SetFunctionValue 0`, while `=> 1` allows it [observed: 2026-11-24, Fallout: New Vegas
+1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, `GSDocMitchellHouse` (`0x00103DF9`), 10
+official base masters, `tools/capture/nvse/catalogs/wave6d1_pre_event_lambda_and_unreg.json`
+probe `w6d1_13_pre_scripted_lambda_and_unregister`:
+`PROBE|w6d1_13_pre_scripted_lambda_and_unregister|lam0=0->0|lam1=0->1|lateRan=0`; no
+binary, DLL, PDB, or third-party source consulted].
 
 [hypothesis: engineering mapping] The core regular Hand activation and the engine's
 regular default-by-hand path dispatch this event before their block/default action.
@@ -24,10 +32,9 @@ They retain OnActivate observers first. Explicit cancellation leaves the default
 world action unperformed while permitting the callback's own custom trade event.
 The engine reports a canceled scripted target as refused. A callback execution
 error retains its ordinary handler diagnostic and does not manufacture a numeric
-veto. Expression-only lambda returns without SetFunctionValue and interrupted/error
-return behavior still need original-game controls; no broader native contract is
-inferred from the existing setter flag. The autonomous NPC-door crossing/cache path
-is separate and remains unqualified by this initial regular hand-activation cut.
+veto. Interrupted/error return behavior still needs original-game controls; no broader native
+contract is inferred from the existing setter flag. The autonomous NPC-door crossing/cache
+path is separate and remains unqualified by this initial regular hand-activation cut.
 
 [documented] [HasKeyword](https://geckwiki.com/index.php?title=HasKeyword)
 accepts a reference when its base has the keyword, while

@@ -4092,7 +4092,14 @@ impl<'a> Game<'a> {
         }
         self.close_run();
         let frame = self.udf.pop();
-        self.udf_value_set = frame.as_ref().is_some_and(|f| f.value.is_some());
+        // Expression-only lambdas (`({args} => 0)`) explicitly return a value and count
+        // as setting the function value for pre-event vetoes [observed: 2026-11-24,
+        // Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184, GSDocMitchellHouse
+        // (0x00103DF9), 10 official base masters,
+        // `tools/capture/nvse/catalogs/wave6d1_pre_event_lambda_and_unreg.json` probe
+        // `w6d1_13_pre_scripted_lambda_and_unregister`: `lam0=0->0|lam1=0->1|lateRan=0`;
+        // no DLL, PDB, or third-party source consulted].
+        self.udf_value_set = lambda_value.is_some() || frame.as_ref().is_some_and(|f| f.value.is_some());
         let v = match lambda_value {
             Some(v) => v,
             None => {
@@ -6285,6 +6292,9 @@ impl<'a> Game<'a> {
         let door_run = self.npc_door_run.take();
         let mut allowed = initial_allowed;
         for handler in &handlers {
+            // Skip any later handler unregistered mid-dispatch by an earlier handler
+            // [observed: `w6d1_13_pre_scripted_lambda_and_unregister`, `lateRan=0`].
+            if !self.handlers.iter().any(|live| live.seq == handler.seq) { continue; }
             let args = build_args(allowed);
             if !self.handler_matches(handler, &args, on) { continue; }
             let ctx = RunCtx { self_ref: on, action_ref, ..RunCtx::default() };

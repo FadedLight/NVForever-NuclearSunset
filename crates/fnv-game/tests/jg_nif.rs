@@ -106,8 +106,9 @@ fn distances_and_bounds() {
     assert!((n(&mut g, "PlayerREF.Get3DDistanceFromHitToNiNode \"Bip01 Head\"") - 40.0).abs() < 1e-3);
     // The root's bound without a block.
     assert_eq!(n(&mut g, "let aR := PlayerREF.GetNiBound\nSetFunctionValue aR[2] * 1000 + aR[3]"), 60_070.0);
-    // A block it does not have: the root's.
-    assert_eq!(n(&mut g, "let aR := PlayerREF.GetNiBound \"NVFNoSuchBlock\"\nSetFunctionValue aR[2] * 1000 + aR[3]"), 60_070.0);
+    // A missing block returns a 4-element zero-radius array [observed: w4c_b3_11b_jgnif_nodes_bounds].
+    assert_eq!(n(&mut g, "let aR := PlayerREF.GetNiBound \"NVFNoSuchBlock\"\nSetFunctionValue (ar_Size aR)"), 4.0);
+    assert_eq!(n(&mut g, "let aR := PlayerREF.GetNiBound \"NVFNoSuchBlock\"\nSetFunctionValue aR[3]"), 0.0);
 }
 
 #[test]

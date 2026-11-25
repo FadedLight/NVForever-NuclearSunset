@@ -2108,6 +2108,72 @@ fn a_goodbye_greeting_ends_as_said_when_its_speaker_fights() {
     assert!(!h.events.iter().any(|e| matches!(e.kind, EventKind::LineEnded { cut: true, .. })));
 }
 
+/// Issue #3663: a Goodbye greeting started through the player's activation while its
+/// speaker is already searching (`State::Alert` or `State::Lost`) must play out rather
+/// than ending on the same frame, while entering a fight (`State::Combat`) mid-line still
+/// ends it at once with its end script and Add Topics.
+#[test]
+fn a_goodbye_greeting_while_searching_plays_out_and_still_ends_on_combat() {
+    use fnv_game::awareness::{Awareness, State};
+    use fnv_sim::world::Outcome;
+
+    let f = fixture();
+    // 1. Already searching (Alert, then Lost): player activation starts the Goodbye
+    //    greeting and it plays out across frames before running its end script.
+    for state in [State::Alert, State::Lost] {
+        let mut g = game(&f);
+        set_global(&mut g, G_GATE, 7.0);
+        g.frames(3);
+        g.awareness.actors.insert(actor(), Awareness { state, ..Default::default() });
+        assert_eq!(g.awareness.state(actor()), state);
+
+        let hand = g.default_activation_by_hand(actor()).unwrap().expect("player activates searching actor");
+        assert_eq!(hand.activation.outcome, Outcome::Talk { actor: actor() });
+        assert_eq!(g.start_dialogue(actor(), None), Ok(FormId(A_BARK)));
+        // Must NOT end in the same frame or after a few ticks while still searching.
+        g.frames(5);
+        assert_eq!(g.speech.len(), 1, "{state:?}: Goodbye greeting must stay active while searching");
+        assert!(g.greets_player(actor()), "{state:?}: searching speaker pauses for its Goodbye greeting");
+        assert_eq!(out(&g), 3.0, "{state:?}: begin script ran, end script must wait for line end");
+        assert!(!g.events.iter().any(|e| matches!(e.kind, EventKind::LineEnded { info, .. } if info == FormId(A_BARK))));
+
+        // Plays out to completion and then runs its end script and Add Topics.
+        let f0 = g.frame;
+        for _ in 0..20_000 {
+            if g.speech.is_empty() {
+                break;
+            }
+            g.tick();
+        }
+        assert!(g.speech.is_empty() && g.frame - f0 > 30, "{state:?}: line must play out over time");
+        assert_eq!(out(&g), 4.0, "{state:?}: end script runs when line finishes");
+        assert!(g.player.topics.contains(&FormId(T_ADDED)));
+        assert!(g.events.iter().any(|e| matches!(e.kind, EventKind::LineEnded { info, cut: false, .. } if info == FormId(A_BARK))));
+    }
+
+    // 2. Starting while searching (Alert), then drawn into a fight (Combat) mid-line:
+    //    ends at once as if said to the end, running its end script and Add Topics.
+    let mut g = game(&f);
+    set_global(&mut g, G_GATE, 7.0);
+    g.frames(3);
+    g.awareness.actors.insert(actor(), Awareness { state: State::Alert, ..Default::default() });
+    let hand = g.default_activation_by_hand(actor()).unwrap().expect("player activates Alert actor");
+    assert_eq!(hand.activation.outcome, Outcome::Talk { actor: actor() });
+    assert_eq!(g.start_dialogue(actor(), None), Ok(FormId(A_BARK)));
+    g.frames(2);
+    assert_eq!(g.speech.len(), 1);
+    assert!(g.greets_player(actor()) && out(&g) == 3.0);
+
+    g.start_combat(actor(), FormId::PLAYER_REF);
+    assert_eq!(g.awareness.state(actor()), State::Combat);
+    assert!(!g.greets_player(actor()));
+    g.frames(1);
+    assert!(g.speech.is_empty());
+    assert!(g.events.iter().any(|e| matches!(e.kind, EventKind::LineEnded { info, cut: false, .. } if info == FormId(A_BARK))));
+    assert_eq!(out(&g), 4.0);
+    assert!(g.player.topics.contains(&FormId(T_ADDED)));
+}
+
 #[test]
 fn a_goodbye_greeting_is_said_at_the_player_without_a_conversation() {
     let f = fixture();

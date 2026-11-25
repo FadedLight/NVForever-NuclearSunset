@@ -34,8 +34,8 @@ pub fn user_language(acf: &str) -> Option<String> {
     let mut depth = 0usize;
     let mut in_user = None;
     let mut last_key: Option<String> = None;
-    let mut tokens = Tokens(acf.chars().peekable());
-    while let Some(t) = tokens.next() {
+    let tokens = Tokens(acf.chars().peekable());
+    for t in tokens {
         match t {
             Token::Open => {
                 if in_user.is_none() && last_key.as_deref().is_some_and(|k| k.eq_ignore_ascii_case("UserConfig")) {

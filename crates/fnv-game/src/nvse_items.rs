@@ -268,12 +268,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // NVForever has no such setting].
         "getgridstoload" => XVal::Num(5.0),
         // [documented: GetInGrid; GetInGridInCell] the target within `depth` grid squares
-        // of the centre cell (the player's): returns 1 for a reference in the same cell
-        // with default depth or depth 0 [observed 2026-11-24: Fallout: New Vegas 1.4.0.525
-        // + xNVSE 6.4.9 + JIP LN 57.30, 10 official base masters, `GSDocMitchellHouse`,
-        // committed probe `w6t2_31_xnvse_items_ammo_rounds_and_ingrid`
-        // (`tools/capture/nvse/catalogs/wave6_t2_observed_matches.json`): `grid(def=1,0=1)`;
-        // hypothesis: omitted exterior depth defaults to the loaded grid's half, 2].
+        // of the centre cell (the player's) [hypothesis: depth defaults to the loaded
+        // grid's half, 2].
         "getingrid" | "getingridincell" => {
             let k = usize::from(name == "getingridincell");
             let center = if k == 1 { form(args, 0) } else { g.cell_of(FormId::PLAYER_REF) };

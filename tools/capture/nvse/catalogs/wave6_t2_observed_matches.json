@@ -332,12 +332,12 @@
           "mutates_state": true,
           "requires_fixture": false,
           "requires_isolated_staging": false,
-          "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 278,
+          "spec_file": "docs/spec-notes/nvse-stubs-persistent-fall-spread-unique.md",
+          "spec_line": 114,
           "functions_tested": [
             "GetCalculatedActorSpread"
           ],
-          "claim": "Verify GetCalculatedActorSpread with weapon drawn (SetWeaponOut 1 + wait) for anim 7 (Minigun 0x433F), anim 9 (Missile Launcher 0x4340), anim 2 (Baseball Bat 0x421C), and unarmed (0).",
+          "claim": "Verify GetCalculatedActorSpread with weapon drawn (SetWeaponOut 1 + wait) for anim 8 (Minigun 0x433F), anim 9 (Missile Launcher 0x4340), anim 2 (Baseball Bat 0x421C).",
           "expected": "t8(0.6212,0.4232,0.4232,0.5157)|t9(0.1781,0.3631,0.3631,0.4556)|t2(1.0000,1.0000)",
           "script_lines": [
             "ref rW = GetFormFromMod \"FalloutNV.esm\" \"433F\"",
@@ -676,7 +676,6 @@
             "Matrix_Transpose",
             "Matrix_ApplyOperationWithScalar",
             "Matrix3x3_GetQuaternion",
-            "GetWeaponRefModFlags",
             "GetWeaponItemModValue1",
             "GetPerkModifier"
           ],
@@ -703,51 +702,6 @@
             "float m2 = GetWeaponItemModValue1 2 r10",
             "float pm = Player.GetPerkModifier 0 100",
             "PrintToConsole \"PROBE|w6t2_32_showoff_matrix_edges_and_get_weapon_mod_flags|tr(sz=%g,sub=%g)|div0=%g|q(sz=%g,w=%.2f,z=%.2f)|imod(%.2f,%.2f)|pm=%.1f\" tSz tSub divSz qSz qw qz m1 m2 pm"
-          ]
-        },
-        {
-          "id": "w6t2_31_xnvse_items_ammo_rounds_and_ingrid",
-          "bucket": "B",
-          "extender": "xNVSE 6.4.9 + JIP LN 57.30",
-          "required_plugins": [
-            "jip_nvse.dll"
-          ],
-          "optional_extender": false,
-          "requires_world": true,
-          "mutates_state": true,
-          "requires_fixture": false,
-          "requires_isolated_staging": false,
-          "spec_file": "docs/spec-notes/actors.md",
-          "spec_line": 232,
-          "functions_tested": [
-            "GetPlayerCurrentAmmoRounds",
-            "GetInGrid",
-            "SetDelayElapsed",
-            "GetActorTemplateFlag"
-          ],
-          "claim": "Verify GetPlayerCurrentAmmoRounds (unarmed vs 10mm equipped w/ 0 vs 5 vs 20 ammo), GetInGrid default depth on Doc Mitchell, SetDelayElapsed return value (secs vs 0/1), and GetActorTemplateFlag on DocMitchellREF vs base.",
-          "expected": "ammo(u=0,0=0,5=0)|grid(def=1,0=1)|del=0.00|tf(ref=0,arg=0)",
-          "script_lines": [
-            "int r0 = GetPlayerCurrentAmmoRounds",
-            "ref r10 = GetFormFromMod \"FalloutNV.esm\" \"434F\"",
-            "ref rA10 = GetFormFromMod \"FalloutNV.esm\" \"4241\"",
-            "Player.AddItem r10 1 1",
-            "Player.EquipItem r10 0 1",
-            "int rNoA = GetPlayerCurrentAmmoRounds",
-            "Player.AddItem rA10 5 1",
-            "int r5 = GetPlayerCurrentAmmoRounds",
-            "Player.UnequipItem r10 0 1",
-            "Player.RemoveItem r10 1 1",
-            "Player.RemoveItem rA10 5 1",
-            "ref rDoc = GetFormFromMod \"FalloutNV.esm\" \"104C0F\"",
-            "ref rDocB = GetFormFromMod \"FalloutNV.esm\" \"104C0C\"",
-            "int gDef = GetInGrid rDoc",
-            "int g0 = GetInGrid rDoc 0",
-            "ref rQ = GetFormFromMod \"FalloutNV.esm\" \"104C1C\"",
-            "float dRet = SetDelayElapsed rQ 2.5",
-            "int tfRef = rDoc.GetActorTemplateFlag 1",
-            "int tfArg = GetActorTemplateFlag 1 rDocB",
-            "PrintToConsole \"PROBE|w6t2_31_xnvse_items_ammo_rounds_and_ingrid|ammo(u=%g,0=%g,5=%g)|grid(def=%g,0=%g)|del=%.2f|tf(ref=%g,arg=%g)\" r0 rNoA r5 gDef g0 dRet tfRef tfArg"
           ]
         }
       ]

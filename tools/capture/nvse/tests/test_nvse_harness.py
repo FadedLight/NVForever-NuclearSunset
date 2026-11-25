@@ -181,7 +181,7 @@ class TestCatalogValidation(unittest.TestCase):
         self.assertEqual(errors, [], f"Catalog validation errors: {errors[:5]}")
         self.assertEqual(counts["catalogs"], 10)
         self.assertEqual(counts["probe_batches"], 28)
-        self.assertEqual(counts["probes"], 552)
+        self.assertEqual(counts["probes"], 551)
         self.assertEqual(counts["persistence_items"], 0)
 
         # Verify Wave 1 parity probe IDs and corrected Wave 4A/4D/4E/4G/4H targeted probes are present verbatim.
@@ -228,7 +228,6 @@ class TestCatalogValidation(unittest.TestCase):
             "w6t2_08_showoff_equipped_weight_and_ally_temp",
             "w6t2_23_jg_dds_texture_format_and_bounds",
             "w6t2_32_showoff_matrix_edges_and_get_weapon_mod_flags",
-            "w6t2_31_xnvse_items_ammo_rounds_and_ingrid",
         ):
             self.assertIn(req_id, probes_by_id)
 

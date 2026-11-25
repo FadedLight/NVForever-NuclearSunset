@@ -112,6 +112,8 @@ pub struct App {
     game_edit: String,
     /// The Mods page's new-game start fields (src/start.rs), as typed.
     start_edit: crate::start::Fields,
+    /// The start card's quest and film fields are open (its Edit toggle; closed by default).
+    start_open: bool,
     // Mods.
     mods: Option<plugins::PluginList>,
     mods_dirty: bool,
@@ -178,6 +180,7 @@ impl App {
             edits: BTreeMap::new(),
             game_edit: String::new(),
             start_edit: crate::start::Fields::default(),
+            start_open: false,
             mods: None,
             mods_dirty: false,
             mods_drag: None,
@@ -1585,35 +1588,38 @@ impl App {
         ui.add_space(4.0);
         card(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("New game start").strong());
-            ui.label(
-                RichText::new("For mods that start somewhere else (their install guide gives the values). TTW off is the New Vegas opening and its film. Saved to NVForever.ini's [General].")
-                    .small()
-                    .color(WEAK),
-            );
-            let w = (ui.available_width() - 120.0).max(120.0);
-            egui::Grid::new("start_fields").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-                ui.label("Start quest");
-                ui.add(egui::TextEdit::singleline(&mut self.start_edit.quest).hint_text("VCG00 (New Vegas opening); TTW: 001FFFF8").desired_width(w));
-                ui.end_row();
-                ui.label("Intro film");
-                ui.add_enabled(!self.start_edit.no_film, egui::TextEdit::singleline(&mut self.start_edit.film).hint_text(r"fnvintro.bik (a file in Data\Video)").desired_width(w));
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut self.start_edit.no_film, "No intro film");
-                ui.end_row();
-            });
-            ui.horizontal(|ui| {
-                save = ui.add_enabled(self.start_edit != saved, egui::Button::new("Save start")).clicked();
+            // One line while closed, so the load order below keeps the room (#4288).
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("New game start").strong()).on_hover_text("For mods that start somewhere else (their install guide gives the values). TTW off is the New Vegas opening and its film. Saved to NVForever.ini's [General].");
                 let mut ttw_on = self.start_edit.is_ttw();
                 let label = if ttw_on { "TTW on" } else { "TTW off" };
                 if ui.checkbox(&mut ttw_on, label).on_hover_text("On: quest 001FFFF8 and no intro film. Off: the base game, quest 00102037 and FNVIntro.bik. Save to keep it.").changed() {
                     self.start_edit = if ttw_on { start::Fields::ttw() } else { start::Fields::original() };
                 }
-                if self.start_edit != saved && ui.button("Undo").clicked() {
-                    self.start_edit = saved.clone();
-                }
+                ui.label(RichText::new(start::summary(&self.start_edit)).small().color(WEAK));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let toggle = if self.start_open { "Done" } else { "Edit" };
+                    if ui.small_button(toggle).on_hover_text("Show or hide the start quest and intro film").clicked() {
+                        self.start_open = !self.start_open;
+                    }
+                    if self.start_edit != saved {
+                        if ui.small_button("Undo").clicked() {
+                            self.start_edit = saved.clone();
+                        }
+                        save = ui.add(gold_button("Save start", true)).clicked();
+                    }
+                });
             });
+            if self.start_open {
+                ui.horizontal_wrapped(|ui| {
+                    let w = ((ui.available_width() - 330.0) / 2.0).clamp(90.0, 260.0);
+                    ui.label(RichText::new("Quest").small());
+                    ui.add(egui::TextEdit::singleline(&mut self.start_edit.quest).hint_text("VCG00; TTW: 001FFFF8").desired_width(w));
+                    ui.label(RichText::new("Film").small());
+                    ui.add_enabled(!self.start_edit.no_film, egui::TextEdit::singleline(&mut self.start_edit.film).hint_text(r"fnvintro.bik (Data\Video)").desired_width(w));
+                    ui.checkbox(&mut self.start_edit.no_film, "No intro film");
+                });
+            }
             if let Some(why) = start::ttw_missing(&self.start_edit, ttw) {
                 ui.label(RichText::new(why).small().color(BAD));
             }

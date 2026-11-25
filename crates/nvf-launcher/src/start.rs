@@ -122,6 +122,23 @@ pub fn ttw_missing(fields: &Fields, ttw_active: Option<bool>) -> Option<String> 
     Some(format!("{TTW_PLUGIN} {state}: New Game starts the New Vegas opening instead. Turn it on, or turn TTW off."))
 }
 
+/// The start card's short words for `fields` while its quest and film boxes are closed
+/// (#4288): which start it is, then the quest and the film as they would be saved.
+pub fn summary(fields: &Fields) -> String {
+    let quest = fields.quest.trim();
+    let quest = if quest.is_empty() { DEFAULT_QUEST } else { quest };
+    let film = fields.film.trim();
+    let film = if fields.no_film { "no film" } else if film.is_empty() { DEFAULT_FILM } else { film };
+    let which = if fields.is_ttw() {
+        "Tale of Two Wastelands"
+    } else if quest.eq_ignore_ascii_case(DEFAULT_QUEST) && !fields.no_film && film.eq_ignore_ascii_case(DEFAULT_FILM) {
+        "New Vegas opening"
+    } else {
+        "Custom"
+    };
+    format!("{which}: {quest}, {film}")
+}
+
 /// `text` without the `key=` lines of `[section]` (names without case); every other line kept.
 fn ini_remove(text: &str, section: &str, key: &str) -> String {
     let mut in_section = false;
@@ -219,5 +236,16 @@ mod tests {
         let back = Fields::original().write(&out);
         assert_eq!(ini_get(&back, "General", "sCharGenQuest").as_deref(), Some("00102037"));
         assert_eq!(ini_get(&back, "General", "sIntroMovie").as_deref(), Some("FNVIntro.bik"));
+    }
+
+    #[test]
+    fn the_closed_card_names_the_start() {
+        assert_eq!(summary(&Fields::ttw()), "Tale of Two Wastelands: 001FFFF8, no film");
+        assert_eq!(summary(&Fields::original()), "New Vegas opening: 00102037, FNVIntro.bik");
+        assert_eq!(summary(&Fields::default()), "New Vegas opening: 00102037, FNVIntro.bik");
+        let other = Fields { quest: " MyStart ".into(), film: "Mine.bik".into(), no_film: false };
+        assert_eq!(summary(&other), "Custom: MyStart, Mine.bik");
+        let quiet = Fields { no_film: true, ..Fields::original() };
+        assert_eq!(summary(&quiet), "Custom: 00102037, no film");
     }
 }

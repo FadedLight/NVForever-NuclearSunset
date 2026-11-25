@@ -4153,7 +4153,11 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     (and `far`), once a run each, when its trace first drew with one. GPU spans `nvf_cloud_light_far`, `nvf_cloud_light_near`, `nvf_medium_trace`.
   - The producer's own `cloud shadows: layers ...` line comes with the volume alone too.
 - **Debug aids** (variables `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_<KEY>`, `..._CLOUDS=<0..4>` for `DENSITY`;
-  read once at the start; they do not make a run unattended). The start values (`START_VALUES`,
+  read once at the start; they do not make a run unattended). Developer aids: they exist only in tests, in
+  debug builds and in a build with the `dev-aids` feature (engine/nvforever/src/dev_aids.rs; in engine/:
+  `cargo build --release -p nvforever --features dev-aids`). A release build reads none of them, has no tune
+  file follower and starts from the values below; nor does it know `--preview-weather <EDID>` (with `--play
+  --weather`: a fade to that weather and back), which it answers as any unknown option. The start values (`START_VALUES`,
   `START_LIGHT`, `START_WISP`; test `a_default_run_is_the_accepted_launch`) are the look judged by eye on
   2026-11-23:
 
@@ -4187,8 +4191,9 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     (`NVF_PLAY_DEBUG_MEDIUM=reference`) for figures: the default mode blends them with the history.
   - Cloud shadows' `NVF_PLAY_DEBUG_CLOUD_SHADOW` (plane, repeat) and `NVF_PLAY_DEBUG_CLOUD_PHASE` (a frozen
     drift, for pictures) apply to the volume too; the medium's own aids are in §6.
-  - Smoke: `volumetric-clouds`, `-light-volume`, `-light-model`, `-taa-turn`, `-fsr-turn`, `-live-change`,
-    `-level-change`.
+  - Smoke: `volumetric-clouds`, `-light-volume`, `-live-change`, `-level-change`, `-no-aids` (a release build
+    ignores the aids); `-light-model`, `-taa-turn`, `-fsr-turn` with `NVF_SMOKE_DEV_AIDS` set (an exe built
+    with the feature).
 - **The sun over the fair volume sky** [design; judged by eye from stills and a play test, 2026-11-24] (sky.rs
   `FairSun`, sky.wesl `sun_texel`), by the fair weather's weight (`fair_daylight_weight`; the disc by the
   same weight without the sun's elevation, so it stays to the horizon): the climate's sun texture is spread
@@ -4201,7 +4206,7 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   that the disc shows against its halo. The warp reads the middle enlarged and eases back to the texture's
   own scale outside it. Without the fair volume sky the sun is as on main.
   `NVF_PLAY_DEBUG_FAIR_SUN=size=..,glare=..,gain=..,lowsize=..,lowglare=..,lowgain=..,from=..,to=..,disc=..,halo=..`
-  sets any of them, for pictures.
+  sets any of them, for pictures (a developer aid, as above).
 - **Not done**: clouds in front of the world; the clouds' own texture colours (only their alpha reaches
   the CPU, so the PNAM colours alone colour the volume, as if the textures were white); the lightning
   flash and the sun's glare on the clouds (the flat layers drew the glare; the dome still does). Which
@@ -4556,7 +4561,8 @@ the grey replaces the HDR picture and still passes through the upscaler and tone
 `NVF_AO_BEFORE_FSR=0` shows it after tonemapping instead. Its pass's GPU time is the
 `nvf_ambient_occlusion` span of `--log-frame-times`.
 
-Debug switches of the volumetric medium (§3.23, docs/design/volumetric-medium.md; read once at
+Debug switches of the volumetric medium (§3.23, docs/design/volumetric-medium.md; developer aids
+that only tests, debug builds and builds with the `dev-aids` feature have, §3.23; read once at
 the start, usable in a played run, each logged once as `debug switch ...` when it changes
 the default, `NVF_PLAY_DEBUG_MEDIUM_CLAMP_K` set alone included, since it changes the default
 clip's band):

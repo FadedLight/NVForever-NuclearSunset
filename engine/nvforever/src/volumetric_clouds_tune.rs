@@ -23,9 +23,12 @@
 //! height (`HEIGHT`) and the horizon (`HORIZON`), which the cloud map of stage 2d may key on; the noise (its seeds, sizes and
 //! baked levels) is no aid. Names may be the short ones or the variables' full names, in any case;
 //! `#` starts a comment; a later line for the same key wins.
+//!
+//! The module is compiled only with the developer aids (dev_aids.rs): a release build has no tune
+//! file, nothing that looks for one, and the values of its start.
 
-use crate::volumetric_clouds::{debug_type, debug_view, CloudType, CloudView, VolumeInputs, MAX_DEBUG_DENSITY, MAX_STEPS, MIN_STEPS};
-use crate::volumetric_clouds_light::{try_share, try_weight, LightAids, LightWeight, LIGHT_WEIGHTS, SUN_COLOR_VAR, SUN_COLOUR_VAR};
+use crate::volumetric_clouds::{debug_type, debug_view, CloudAids, CloudType, CloudView, MAX_DEBUG_DENSITY, MAX_STEPS, MIN_STEPS};
+use crate::volumetric_clouds_light::{try_share, try_weight, LightWeight, LIGHT_WEIGHTS, SUN_COLOR_VAR, SUN_COLOUR_VAR};
 use crate::volumetric_clouds_wisp::try_wisp;
 use bevy::prelude::*;
 use std::path::{Path, PathBuf};
@@ -36,25 +39,6 @@ pub const TUNE_VAR: &str = "NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE";
 /// The file is looked at no more often than this, in real time [design: twice a
 /// second; a stat of one small file].
 pub const POLL_EVERY: Duration = Duration::from_millis(500);
-
-/// The aids the volume follows: the start configuration (volumetric_clouds.rs `start_aids`, the
-/// statics as read once) or the effective values with a tune file's overrides on top.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CloudAids {
-    pub density: f32,
-    pub steps: u32,
-    pub view: CloudView,
-    pub forced: Option<CloudType>,
-    pub shape: f32,
-    pub erosion: f32,
-    /// The light's weights (#3032 stage 2e, L2).
-    pub light: LightAids,
-    /// The wisps' strength (live).
-    pub wisp: f32,
-    /// Start-only.
-    pub height: f32,
-    pub horizon: f32,
-}
 
 impl CloudAids {
     /// These values with a file's live overrides on top.
@@ -79,12 +63,6 @@ impl CloudAids {
             wisp: o.wisp.unwrap_or(self.wisp),
             ..self
         }
-    }
-
-    /// The uniform's inputs with these live values (volumetric_clouds.rs `inputs` reads the start
-    /// values; the start-only ones are left as they are).
-    pub fn apply(&self, i: VolumeInputs) -> VolumeInputs {
-        VolumeInputs { density: self.density, steps: self.steps, view: self.view, forced: self.forced, shape_aid: Some(self.shape), erosion_aid: Some(self.erosion), light_aids: self.light, wisp_aid: Some(self.wisp), ..i }
     }
 }
 
@@ -390,7 +368,7 @@ pub struct CloudTune {
 impl Default for CloudTune {
     /// The statics as read at the start and the variable's file.
     fn default() -> Self {
-        CloudTune::new(crate::volumetric_clouds::start_aids(), tune_path(std::env::var_os(TUNE_VAR)))
+        CloudTune::new(crate::volumetric_clouds::start_aids(), tune_path(crate::dev_aids::var_os(TUNE_VAR)))
     }
 }
 
@@ -475,7 +453,8 @@ pub fn poll_tune(graphics: Option<Res<crate::graphics::Graphics>>, real: Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::volumetric_clouds::{debug_density, debug_steps, debug_strength};
+    use crate::volumetric_clouds::{debug_density, debug_steps, debug_strength, VolumeInputs};
+    use crate::volumetric_clouds_light::LightAids;
     use std::cell::{Cell, RefCell};
 
     /// A start at the designed values.

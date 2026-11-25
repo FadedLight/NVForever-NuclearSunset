@@ -403,7 +403,7 @@ pub fn lv_config_from(get: impl Fn(&str) -> Option<String>) -> LvConfig {
     }
 }
 
-static LV_CONFIG: std::sync::LazyLock<LvConfig> = std::sync::LazyLock::new(|| lv_config_from(|n| std::env::var(n).ok()));
+static LV_CONFIG: std::sync::LazyLock<LvConfig> = std::sync::LazyLock::new(|| lv_config_from(crate::dev_aids::var));
 
 pub fn lv_config() -> LvConfig {
     *LV_CONFIG
@@ -683,7 +683,7 @@ impl LvSchedule {
                     event = Some("the weather's inputs jumped");
                 }
                 self.levels = [LvLevelState::default(); 2];
-            } else if lv_angle(last.light_dir.truncate(), light) > LV_RESTART_DEG || lv_tune_changed(&last, u) {
+            } else if lv_angle(last.light_dir.truncate(), light) > LV_RESTART_DEG || (crate::dev_aids::ON && lv_tune_changed(&last, u)) {
                 for level in &mut self.levels {
                     level.back = None;
                 }

@@ -73,7 +73,7 @@
 //! `MaterialGate`) and the producer is not started for it.
 //!
 //! Debug aids (read once at the start; development tools, they do not make a run
-//! unattended): `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS=<multiplier>` scales the density (0 to
+//! unattended; dev_aids.rs: not in release builds): `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS=<multiplier>` scales the density (0 to
 //! [`MAX_DEBUG_DENSITY`]), `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS=<n>` the march's quality
 //! ([`MIN_STEPS`] to [`MAX_STEPS`], [`step_near`]), `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_VIEW=
 //! cover|vigour|count` draws the placement field against its threshold or the local height's
@@ -1928,11 +1928,39 @@ fn start_light_reuse(value: Option<&str>, start: bool) -> bool {
     }
 }
 
+/// The aids the volume follows: the start configuration ([`START`], read once) or, in a build with the
+/// developer aids (dev_aids.rs), the effective values with a tune file's overrides on top
+/// (volumetric_clouds_tune.rs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CloudAids {
+    pub density: f32,
+    pub steps: u32,
+    pub view: CloudView,
+    pub forced: Option<CloudType>,
+    pub shape: f32,
+    pub erosion: f32,
+    /// The light's weights (#3032 stage 2e, L2).
+    pub light: crate::volumetric_clouds_light::LightAids,
+    /// The wisps' strength (live).
+    pub wisp: f32,
+    /// Start-only.
+    pub height: f32,
+    pub horizon: f32,
+}
+
+impl CloudAids {
+    /// The uniform's inputs with these live values ([`inputs`] reads the start
+    /// values; the start-only ones are left as they are).
+    pub fn apply(&self, i: VolumeInputs) -> VolumeInputs {
+        VolumeInputs { density: self.density, steps: self.steps, view: self.view, forced: self.forced, shape_aid: Some(self.shape), erosion_aid: Some(self.erosion), light_aids: self.light, wisp_aid: Some(self.wisp), ..i }
+    }
+}
+
 /// The run's start configuration: the aids (the live tuning's start, volumetric_clouds_tune.rs) and the
 /// start-only strengths, each a start variable's value or [`START_VALUES`]'.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CloudStart {
-    pub aids: crate::volumetric_clouds_tune::CloudAids,
+    pub aids: CloudAids,
     pub puff: f32,
     pub refined_stride: u32,
     pub light_reuse: bool,
@@ -1944,7 +1972,7 @@ pub fn cloud_start_from(get: impl Fn(&str) -> Option<String>) -> CloudStart {
     let m = START_VALUES;
     let v = |name: &str| get(&format!("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS{name}"));
     CloudStart {
-        aids: crate::volumetric_clouds_tune::CloudAids {
+        aids: CloudAids {
             density: start_density(v("").as_deref(), m.density),
             steps: debug_steps(v("_STEPS").as_deref()),
             view: debug_view(v("_VIEW").as_deref()),
@@ -1964,7 +1992,7 @@ pub fn cloud_start_from(get: impl Fn(&str) -> Option<String>) -> CloudStart {
 }
 
 /// The start configuration, the variables read once.
-static START: std::sync::LazyLock<CloudStart> = std::sync::LazyLock::new(|| cloud_start_from(|n| std::env::var(n).ok()));
+static START: std::sync::LazyLock<CloudStart> = std::sync::LazyLock::new(|| cloud_start_from(crate::dev_aids::var));
 
 impl CloudStart {
     /// A sky's uniform inputs with the start configuration's own inputs set.
@@ -1984,7 +2012,8 @@ impl CloudStart {
 
 /// The aids as read at the start, the live tuning's start configuration (#3032 stage 2e, L1;
 /// volumetric_clouds_tune.rs: a tune file's values go on top of these).
-pub fn start_aids() -> crate::volumetric_clouds_tune::CloudAids {
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+pub fn start_aids() -> CloudAids {
     START.aids
 }
 
@@ -2086,9 +2115,6 @@ impl Plugin for VolumetricCloudsPlugin {
             .init_resource::<FlatLayersMoved>()
             .init_resource::<crate::underwater::CameraSubmerged>()
             .init_resource::<CloudNoise>()
-            // The live tuning (#3032 stage 2e): the tune file looked at before the cuts are counted.
-            .init_resource::<crate::volumetric_clouds_tune::CloudTune>()
-            .add_systems(Update, crate::volumetric_clouds_tune::poll_tune.run_if(volume_in_use).before(count_sky_jumps))
             // While the row is on and on the frame it goes off (its images released); nothing otherwise.
             .add_systems(Update, follow_noise.run_if(noise_in_use).before(follow_volume))
             // After the cover is published.
@@ -2109,6 +2135,10 @@ impl Plugin for VolumetricCloudsPlugin {
                     .before(bevy::asset::AssetEventSystems)
                     .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
             );
+        // The live tuning (#3032 stage 2e): the tune file looked at before the cuts are counted.
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        app.init_resource::<crate::volumetric_clouds_tune::CloudTune>()
+            .add_systems(Update, crate::volumetric_clouds_tune::poll_tune.run_if(volume_in_use).before(count_sky_jumps));
     }
 }
 
@@ -2381,8 +2411,9 @@ fn follow_volume(
     mut proxy: Query<&mut Transform, (With<CloudVolumeProxy>, Without<FlyCam>)>,
     mut active: ResMut<VolumeActive>,
     streamer: Option<Res<crate::world::Streamer>>,
-    (noise_set, tune): (Option<Res<CloudNoise>>, Option<Res<crate::volumetric_clouds_tune::CloudTune>>),
-    mut state: Local<Follow>,
+    (noise_set, mut state): (Option<Res<CloudNoise>>, Local<Follow>),
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+    tune: Option<Res<crate::volumetric_clouds_tune::CloudTune>>,
 ) {
     let (on, level) = graphics.map_or((false, CloudLevel::default()), |g| (g.volumetric_clouds, g.volumetric_clouds_level));
     if wanted.0 != on {
@@ -2496,12 +2527,17 @@ fn follow_volume(
         }
         // The march's figures (#3032 stage 2c, checkpoint C1).
         info!(
-            "volumetric clouds: march: the refined march (the support probed every {COARSE_THIN:.0} units up to amount {COARSE_THIN_UP_TO}, {COARSE_FAIR:.0} above, with the domain, times the level's factor, wider where the finest placement octave is gone; entries and exits bracketed to one fine cell; fine steps within half the finest detail at each block, NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_STEPS scaling them (28 = 1); the lowest {:.0} units always fine; at most {RAY_BUDGET} evaluations a ray)",
+            "volumetric clouds: march: the refined march (the support probed every {COARSE_THIN:.0} units up to amount {COARSE_THIN_UP_TO}, {COARSE_FAIR:.0} above, with the domain, times the level's factor, wider where the finest placement octave is gone; entries and exits bracketed to one fine cell; fine steps within half the finest detail at each block, the quality scaling them ({VIEW_STEPS} = 1); the lowest {:.0} units always fine; at most {RAY_BUDGET} evaluations a ray)",
             BASE_RISE + SHEET
         );
         // The light model in force at the start, one line either way (#3032 stage 2e, L2).
         info!("volumetric clouds: light: {}", aids.light.model_text());
     }
+    // The aids in force: the start's, with a tune file's values on top where there can be one.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+    let aids = tune.as_deref().map_or(START.aids, |t| t.effective());
+    #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+    let aids = START.aids;
     let Ok(temporal) = cam.single() else { return };
     // The proxy is the dome's mesh (drawn depth-Equal on it), made again when the dome is
     // (another worldspace).
@@ -2560,7 +2596,7 @@ fn follow_volume(
         (_, None) if cloudless => Some("a weather without cloud layers"),
         (_, None) => Some("no cloud cover"),
         _ if blended.is_none() => Some("a live weather's own cover is not composed yet: the weather is shown flat"),
-        _ if blended.is_some_and(|b| !has_cover(b.amount)) && !matches!(tune.as_deref().map_or(START.aids.view, |t| t.effective().view), CloudView::Cover | CloudView::Vigour) => Some("a clear sky: the cover is empty"),
+        _ if blended.is_some_and(|b| !has_cover(b.amount)) && !matches!(aids.view, CloudView::Cover | CloudView::Vigour) => Some("a clear sky: the cover is empty"),
         _ => None,
     };
     if let Some(r) = reason {
@@ -2576,7 +2612,7 @@ fn follow_volume(
     let (Some(sky), Some(c), Some(blended)) = (sky.as_deref(), cover.0.as_ref(), blended) else { return };
     // The live tuning's effective aids on top of the start values (#3032 stage 2e).
     let input = inputs(sky, c, &blended, temporal);
-    let input = tune.as_deref().map_or(input, |t| t.effective().apply(input));
+    let input = aids.apply(input);
     // The level's probe spacing (the far buffer's scale is the medium's, by the request's level).
     let input = drawn_inputs(VolumeInputs { probe: Some(level.probe_factor()), ..input });
     // A weather the medium cannot use is shown flat, not repaired.
@@ -2753,6 +2789,7 @@ fn count_sky_jumps(
     mut request: ResMut<MediumRequest>,
     mut last: Local<Option<crate::medium::SkyMark>>,
     mut cuts: Local<u32>,
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     tune: Option<Res<crate::volumetric_clouds_tune::CloudTune>>,
 ) {
     let Some(s) = sky.as_deref() else { return };
@@ -2773,8 +2810,10 @@ fn count_sky_jumps(
         *cuts = cuts.wrapping_add(1);
     }
     *last = Some(mark);
+    let total = *cuts;
     // Each change of a tune file's effective values drops the history once too (#3032 stage 2e).
-    let total = cuts.wrapping_add(tune.as_ref().map_or(0, |t| t.edits()));
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+    let total = total.wrapping_add(tune.as_ref().map_or(0, |t| t.edits()));
     if request.sky_cuts != total {
         request.sky_cuts = total;
     }
@@ -2836,7 +2875,7 @@ pub(crate) mod tests {
         assert!(tune.bad.is_empty(), "{:?}", tune.bad);
         let launch = cloud_start_from(accepted);
         // Over aids of other values, so that every live value is the tune file's.
-        let other = crate::volumetric_clouds_tune::CloudAids { shape: 3.0, erosion: 3.0, density: 3.0, wisp: 3.0, light: crate::volumetric_clouds_light::LightAids { weights: [3.0; crate::volumetric_clouds_light::LIGHT_WEIGHTS], sun_colour: 1.0 }, ..launch.aids };
+        let other = CloudAids { shape: 3.0, erosion: 3.0, density: 3.0, wisp: 3.0, light: crate::volumetric_clouds_light::LightAids { weights: [3.0; crate::volumetric_clouds_light::LIGHT_WEIGHTS], sun_colour: 1.0 }, ..launch.aids };
         let launch = CloudStart { aids: other.with(&tune.overrides), ..launch };
         assert_eq!(default, launch);
         assert_eq!((default.puff, default.refined_stride, default.light_reuse, default.air, default.aids.height), (1.0, 4, true, 0.82, 24_000.0));

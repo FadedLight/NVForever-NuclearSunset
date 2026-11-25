@@ -11,7 +11,7 @@ struct Asked {
 }
 
 @group(1) @binding(0) var<storage, read> asked: array<Asked>;
-// One for each, E and v, and one more, which is 1 once they are written.
+// One for each: E and v.
 @group(1) @binding(1) var<storage, read_write> answers: array<vec4<f32>>;
 
 @compute @workgroup_size(32)
@@ -19,7 +19,4 @@ fn answer(@builtin(global_invocation_id) id: vec3<u32>) {
     let a = asked[id.x];
     let found = nvf_rtgi_read(a.p.xyz, a.g.xyz, a.n.xyz);
     answers[id.x] = vec4(found.e, found.v);
-    if id.x == 0u {
-        answers[arrayLength(&answers) - 1u] = vec4(1.0);
-    }
 }

@@ -13,7 +13,7 @@ use super::{place, Did, Fit, Place, RtgiCounts, RtgiRequest, RtgiVolumeUniform};
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::pbr::NvfRtgiVolumeBindings;
 use bevy::prelude::*;
-use bevy::render::gpu_readback::{Readback, ReadbackComplete};
+use bevy::render::gpu_readback::{ReadbackComplete, ReadbackOnce};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::binding_types::{sampler, storage_buffer_read_only_sized, storage_buffer_sized, texture_3d, uniform_buffer};
 use bevy::render::render_resource::{
@@ -40,7 +40,7 @@ const POINTS: [u32; 3] = [3, 2, 4];
 const SPACING: f32 = 64.0;
 const OFFSET: f32 = 24.0;
 /// The light's constants of the aid alone.
-pub(super) const FIT: Fit = Fit { b: 0.3, g: 1.25, pay: 0.8, least: 0.2, pull: 0.4 };
+pub(super) const FIT: Fit = Fit { b: 0.25, g: 1.0, pay: 1.0, least: 0.25, pull: 0.25 };
 /// The points that do not count, and one that does and is black.
 pub(super) const UNSUPPORTED: [[u32; 3]; 3] = [[1, 0, 0], [0, 1, 2], [2, 1, 3]];
 const BLACK: [u32; 3] = [2, 0, 1];
@@ -255,12 +255,14 @@ pub(super) fn checks(v: &SolvedVolume) -> Result<Vec<Check>, String> {
     Ok(places().into_iter().enumerate().map(check).collect())
 }
 
-/// The largest difference over its bound, of each of [`KINDS`]; none before the pass has run.
-pub(super) fn judge(answers: &[[f32; 4]], checks: &[Check]) -> Option<[f32; KINDS.len()]> {
-    let (found, done) = answers.split_at_checked(checks.len())?;
-    if done.first()?[0] != 1.0 {
+/// The largest difference over its bound, of each of [`KINDS`]; none of bytes that are not as many as
+/// the answers'.
+pub(super) fn judge(answers: &[u8], checks: &[Check]) -> Option<[f32; KINDS.len()]> {
+    if answers.len() != 16 * checks.len() {
         return None;
     }
+    let floats: Vec<f32> = answers.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+    let found = floats.as_chunks::<4>().0;
     Some(KINDS.map(|(kind, _)| {
         let of = found.iter().zip(checks).filter(|(_, c)| c.kind == kind);
         let over = of.flat_map(|(found, c)| (0..4).map(move |k| (found[k] - c.want[k]).abs() / c.bound[k]));
@@ -279,7 +281,7 @@ impl Plugin for MadePlugin {
         info!("rtgi: NVF_PLAY_DEBUG_RTGI_MADE: a volume made by hand in every interior, its read checked once on the GPU");
         load_internal_asset!(app, SHADER, "../rtgi_readback.wesl", |s, _| Shader::from_wesl(s, "embedded://nvforever/rtgi_readback.wesl"));
         let told = Told::default();
-        app.init_resource::<Aid>().insert_resource(told.clone()).add_systems(PostUpdate, (follow, ask).chain());
+        app.init_resource::<Aid>().insert_resource(told.clone()).add_systems(PostUpdate, (ask, follow).chain());
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app.insert_resource(told).init_resource::<Pass>().add_systems(ExtractSchedule, take).add_systems(RenderGraph, dispatch.in_set(RenderGraphSystems::Begin));
     }
@@ -287,18 +289,18 @@ impl Plugin for MadePlugin {
 
 /// Main world: the run's one readback, of the bound key it is for.
 #[derive(Resource, Default)]
-struct Aid {
-    done: bool,
-    job: Option<Job>,
+pub(super) struct Aid {
+    pub(super) done: bool,
+    pub(super) job: Option<Job>,
 }
 
-struct Job {
-    key: Key,
-    checks: Arc<Vec<Check>>,
+pub(super) struct Job {
+    pub(super) key: Key,
+    pub(super) checks: Vec<Check>,
     /// The reads and the answers, once the texture is bound.
-    buffers: Option<[Handle<ShaderBuffer>; 2]>,
+    pub(super) buffers: Option<[Handle<ShaderBuffer>; 2]>,
     /// The readback, once the pass is on its way.
-    reader: Option<Entity>,
+    pub(super) reader: Option<Entity>,
 }
 
 /// What the render world tells of it.
@@ -306,6 +308,8 @@ struct Job {
 pub(super) struct Said {
     pub(super) bound: Option<Key>,
     pub(super) dispatched: Option<Key>,
+    /// The visit that has the stock light to its end.
+    pub(super) ended: Option<Place>,
     /// The pass has no pipeline, for good.
     pub(super) failed: bool,
 }
@@ -325,10 +329,10 @@ pub(super) enum Step {
 }
 
 /// What a job does next: it is of one key, made when that is bound, and gone with it, with the
-/// request or with its pipeline.
+/// request, the visit's light or its pipeline.
 pub(super) fn step(key: Key, (made, reading): (bool, bool), wanted: Option<Key>, said: &Said) -> Step {
     let bound = said.bound == Some(key);
-    if wanted != Some(key) || said.failed || (made && !bound) {
+    if wanted != Some(key) || said.failed || said.ended == Some(key.place) || (made && !bound) {
         Step::Retire
     } else if !made && bound {
         Step::Make
@@ -346,20 +350,11 @@ fn follow(mut commands: Commands, mut aid: ResMut<Aid>, told: Res<Told>, request
         Step::Wait => {}
         Step::Make => {
             let asked: Vec<[f32; 4]> = job.checks.iter().flat_map(|c| [c.p, c.g, c.n]).map(|[x, y, z]| [x, y, z, 0.0]).collect();
-            job.buffers = Some([asked, vec![[0.0; 4]; job.checks.len() + 1]].map(|of| buffers.add(ShaderBuffer::from(of))));
+            job.buffers = Some([asked, vec![[0.0; 4]; job.checks.len()]].map(|of| buffers.add(ShaderBuffer::from(of))));
         }
         Step::Read => {
             let Some([_, answers]) = &job.buffers else { return };
-            let checks = job.checks.clone();
-            let mut reader = commands.spawn((Name::new("RTGI readback"), Readback::buffer(answers.clone())));
-            job.reader = Some(reader.id());
-            reader.observe(move |read: On<ReadbackComplete>, mut commands: Commands, mut aid: ResMut<Aid>| {
-                let floats: Vec<f32> = read.data.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
-                let Some(worst) = judge(floats.as_chunks::<4>().0, &checks) else { return };
-                commands.entity(read.entity).try_despawn();
-                *aid = Aid { done: true, job: None };
-                say(checks.len(), worst);
-            });
+            job.reader = Some(commands.spawn((Name::new("RTGI readback"), ReadbackOnce::buffer(answers.clone()))).observe(complete).id());
         }
         Step::Retire => {
             if let Some(e) = job.reader {
@@ -371,19 +366,29 @@ fn follow(mut commands: Commands, mut aid: ResMut<Aid>, told: Res<Told>, request
     }
 }
 
-/// Whether the worst of each kind is within its bound: of the numbers as they are, not as they are shown.
-pub(super) fn passes(worst: &[f32]) -> bool {
-    worst.iter().all(|w| *w <= 1.0)
-}
-
-fn say(reads: usize, worst: [f32; KINDS.len()]) {
+/// The one answer after the pass: whatever it is, it ends the job it is of, while that is the
+/// request's; one of an earlier request says nothing.
+pub(super) fn complete(read: On<ReadbackComplete>, mut commands: Commands, mut aid: ResMut<Aid>, request: Option<Res<RtgiRequest>>) {
+    commands.entity(read.entity).try_despawn();
+    let wanted = request.map(|r| r.key());
+    let Some(job) = aid.job.take_if(|j| j.reader == Some(read.entity) && wanted == Some(j.key)) else { return };
+    aid.done = true;
+    let Some(worst) = judge(&read.data, &job.checks) else {
+        warn!("rtgi: readback FAILED: {} bytes for {} reads", read.data.len(), job.checks.len());
+        return;
+    };
     let of: Vec<String> = KINDS.iter().zip(worst).map(|((_, name), w)| format!("{name} {w:.3}")).collect();
-    let line = format!("{reads} reads, the largest difference over its bound: {}", of.join(", "));
+    let line = format!("{} reads, the largest difference over its bound: {}", job.checks.len(), of.join(", "));
     if passes(&worst) {
         info!("rtgi: readback passed: {line}");
     } else {
         warn!("rtgi: readback FAILED: {line}; a wrong slab, place or uniform, or a coarser filter than is let through: this adapter is to be looked at");
     }
+}
+
+/// Whether the worst of each kind is within its bound: of the numbers as they are, not as they are shown.
+pub(super) fn passes(worst: &[f32]) -> bool {
+    worst.iter().all(|w| *w <= 1.0)
 }
 
 /// The request of the place the player is in: the empty texture, and the made one once no screen is up.
@@ -412,7 +417,7 @@ fn ask(
     match show(here, camera.translation()) {
         Ok((request, checks)) => {
             if !aid.done {
-                aid.job = Some(Job { key: request.key(), checks: Arc::new(checks), buffers: None, reader: None });
+                aid.job = Some(Job { key: request.key(), checks, buffers: None, reader: None });
             }
             commands.insert_resource(request);
         }
@@ -463,7 +468,9 @@ fn dispatch(
     mut ctx: RenderContext,
 ) {
     let mut said = told.0.lock().unwrap();
-    said.bound = state.and_then(|s| s.held.as_ref().map(|h| h.key));
+    let state = state.as_deref();
+    said.bound = state.and_then(|s| s.held.as_ref()).map(|h| h.key);
+    said.ended = state.and_then(|s| s.ended).map(|e| e.0);
     let Some((key, [asked, answers])) = pass.job.clone().filter(|j| said.bound == Some(j.0) && said.dispatched != Some(j.0) && !said.failed) else { return };
     let [volume, reads] = layouts();
     let id = *pass.pipeline.get_or_insert_with(|| {

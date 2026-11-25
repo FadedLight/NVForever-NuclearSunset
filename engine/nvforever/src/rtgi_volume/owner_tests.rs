@@ -10,6 +10,7 @@ use crate::sky::cartographer_live_tests::test_streamer;
 use crate::sun_visibility::{view_counts, StageCounts};
 use crate::world::Streamer;
 use bevy::app::SubApp;
+use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
 use bevy::pbr::{check_views_need_specialization, init_mesh_pipeline_view_layouts, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshPipelineViewLayouts, NvfRtgiVolumeBindings, ViewKeyCache};
 use bevy::render::camera::DirtySpecializations;
 use bevy::render::render_resource::CachedPipelineState;
@@ -235,7 +236,12 @@ fn the_extraction_without_a_request_and_with_one() {
     let render = app.sub_app_mut(RenderApp).world_mut();
     render.run_schedule(RenderStartup);
     let ours = views(render);
-    let camera = |app: &mut App, view: usize| app.world_mut().spawn((Camera3d::default(), crate::fly::FlyCam { yaw: 0.0, pitch: 0.0, speed: 0.0 }, RenderEntity::from(ours[view].0))).id();
+    // Drawn on a target of 64 x 64.
+    let camera = |app: &mut App, view: usize| {
+        let target_info = Some(RenderTargetInfo { physical_size: UVec2::splat(64), scale_factor: 1.0 });
+        let drawn = Camera { computed: ComputedCameraValues { target_info, ..default() }, ..default() };
+        app.world_mut().spawn((Camera3d::default(), drawn, crate::fly::FlyCam { yaw: 0.0, pitch: 0.0, speed: 0.0 }, RenderEntity::from(ours[view].0))).id()
+    };
     let cameras = [0, 1].map(|view| camera(&mut app, view));
     // The player's place after `travels` travels, and a screen: none, up, or settling.
     let go = |app: &mut App, interior, travels| {
@@ -255,10 +261,11 @@ fn the_extraction_without_a_request_and_with_one() {
         assert_eq!(frame(&mut app), nothing([0; 4]));
     }
     assert!(!app.world().contains_resource::<RtgiRequest>() && app.sub_app(RenderApp).world().resource::<RtgiGpu>().asked.is_none());
-    assert_eq!([go(&mut app, None, 2), go(&mut app, Some(5), 2), go(&mut app, Some(5), 3)], [None, Some(Place { cell: 5, travels: 2, game: None }), Some(Place { cell: 5, travels: 3, game: None })]);
 
-    // Asked for before there is a device, then with one and no camera: not yet.
+    // Asked for before there is a device, then with one and no view (no camera, one that is not
+    // active or has no target): not yet.
     let here = go(&mut app, Some(5), 3).unwrap();
+    assert_eq!(here, Place { cell: 5, travels: 3, game: None });
     set_hook_state(HookState::Installed);
     screen(&mut app, Some(false));
     app.insert_resource(RtgiRequest::empty(here, 1));
@@ -276,6 +283,14 @@ fn the_extraction_without_a_request_and_with_one() {
         app.world_mut().despawn(c);
     }
     assert_eq!(frame(&mut app), nothing([0; 4]));
+    let unseen = camera(&mut app, 0);
+    for (active, target) in [(false, Some(UVec2::splat(64))), (true, None), (true, Some(UVec2::new(64, 0)))] {
+        let mut c = app.world_mut().get_mut::<Camera>(unseen).unwrap();
+        c.is_active = active;
+        c.computed.target_info = target.map(|physical_size| RenderTargetInfo { physical_size, scale_factor: 1.0 });
+        assert_eq!(frame(&mut app), nothing([0; 4]));
+    }
+    app.world_mut().despawn(unseen);
 
     // The empty texture, once; a solved one in its place (buffer and sampler stay) when the screen
     // is down; another share.
@@ -323,8 +338,21 @@ fn the_extraction_without_a_request_and_with_one() {
     assert_eq!(frame(&mut app), nothing([4, 5, 3, 0]));
     screen(&mut app, Some(false));
     assert_eq!(frame(&mut app), nothing([4, 5, 3, 0]));
-    // The one after it has a screen of its own; no request, and it is gone.
-    let last = go(&mut app, Some(5), 5).unwrap();
+    // The one after it has no view under its screen, and one when that has settled: late too.
+    let unseen = go(&mut app, Some(5), 5).unwrap();
+    let activate = |app: &mut App, on| app.world_mut().query::<&mut Camera>().single_mut(app.world_mut()).unwrap().is_active = on;
+    app.insert_resource(RtgiRequest::empty(unseen, 1));
+    activate(&mut app, false);
+    assert_eq!(frame(&mut app), nothing([4, 5, 3, 0]));
+    screen(&mut app, Some(true));
+    activate(&mut app, true);
+    assert_eq!(frame(&mut app), nothing([4, 5, 3, 0]));
+    assert_eq!(app.sub_app(RenderApp).world().resource::<RtgiGpu>().ended, Some((unseen, Why::Late)));
+    screen(&mut app, None);
+    assert_eq!(frame(&mut app), nothing([4, 5, 3, 0]));
+    // The last has a screen of its own; no request, and it is gone.
+    let last = go(&mut app, Some(5), 6).unwrap();
+    screen(&mut app, Some(false));
     app.insert_resource(RtgiRequest::empty(last, 1));
     assert_eq!(frame(&mut app).2, Some(key(last, 1, false)));
     app.world_mut().remove_resource::<RtgiRequest>();

@@ -118,7 +118,7 @@ Each extraction makes a plan of it (`rtgi_volume/plan.rs`, a pure function) and 
 (`gpu.rs`), before anything is specialised:
 
 - **First bind** of a visit: only under the loading screen of a start or a travel, until it first
-  settles, and only with a world camera's view. The screen waits for pipelines that were asked for, so those of what is loaded, in range
+  settles, and only with a world camera whose view is drawn in that frame. The screen waits for pipelines that were asked for, so those of what is loaded, in range
   and not culled are asked for while it is up. A request that comes later waits for the next visit,
   in the stock light. What comes into view later asks for its pipeline then and is skipped until it
   is ready, as any other.
@@ -133,7 +133,8 @@ Each extraction makes a plan of it (`rtgi_volume/plan.rs`, a pure function) and 
   extraction). A reader whose stock twin is broken too counts as well, as it is told by the def. The
   log has one line a visit for it, beside one for what was unbound and the pipeline cache's own.
 - **Late at a start**: a run begins without a game, so the visit is another one when the scripts have
-  made it. If that is the frame in which the screen settles, the request is late.
+  made it. If that is the frame in which the screen settles, the request is late: the stock light for
+  that visit. Known, how often is not measured; left to the part that has the job and the fade.
 
 A texture that is not used any more is let go; the GPU has it until it is done with it. A run
 counts what it makes, sends, binds and dispatches, and bevy_pbr's patch counts the view bind groups
@@ -181,7 +182,8 @@ difference over its bound of each kind. That e is a threshold for the machines t
 a miss alone does not tell coarse filtering from a wrong slab, place or uniform; right exact centres
 with wrong fractions point at the filter. The light's formula and the surfaces that read are not
 checked there: the tests have them. The job belongs to the visit and the revision it was made for: its
-buffers are made when that is bound and go with it.
+buffers are made when that is bound and go with it, and one answer ends it. One of another length is
+a failure.
 
 **Pending**: both smoke scenarios on a GPU; pictures of off against main at three views; turning and
 walking with the made volume under DLSS, FSR and multisampling. What the smoke test sees is that

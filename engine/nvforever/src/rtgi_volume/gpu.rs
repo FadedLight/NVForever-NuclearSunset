@@ -39,7 +39,7 @@ pub(super) struct RtgiGpu {
     latch: Latch,
     pub(super) asked: Option<Asked>,
     /// The visit that has the stock light to its end; the log has why.
-    ended: Option<(Place, Why)>,
+    pub(super) ended: Option<(Place, Why)>,
     /// The visit whose pipelines the log has.
     told_ready: Option<Place>,
 }
@@ -51,7 +51,13 @@ struct Main<'w, 's> {
     streamer: Option<Res<'w, crate::world::Streamer>>,
     script: Option<Res<'w, nvf_play::script::ScriptState>>,
     loading: Option<Res<'w, nvf_play::loading::Loading>>,
-    cams: Query<'w, 's, RenderEntity, crate::fly::WorldCamera>,
+    cams: Query<'w, 's, (RenderEntity, &'static Camera), crate::fly::WorldCamera>,
+}
+
+/// Whether a camera has a view in this frame, as bevy_render's `extract_cameras` decides it; the
+/// render entity stays without one.
+fn drawn(camera: &Camera) -> bool {
+    camera.is_active && camera.physical_viewport_rect().is_some() && camera.physical_target_size().is_some_and(|s| s.x > 0 && s.y > 0)
 }
 
 /// The device, and what the question of admission needs beside it.
@@ -82,6 +88,7 @@ impl Device<'_> {
     }
 }
 
+/// The device is needed for [`Plan::Bind`] alone, which is never planned without (it is admitted first).
 fn extract(mut commands: Commands, main: Extract<Main>, mut bound: Query<(Entity, &mut NvfRtgiVolumeBindings)>, mut state: ResMut<RtgiGpu>, gpu: Device, counts: Res<RtgiCounts>) {
     let state = &mut *state;
     let loading = main.loading.as_deref();
@@ -91,17 +98,69 @@ fn extract(mut commands: Commands, main: Extract<Main>, mut bound: Query<(Entity
         return;
     }
     let here = place(main.streamer.as_deref(), main.script.as_deref());
-    let cams: Vec<Entity> = main.cams.iter().collect();
+    let cams: Vec<Entity> = main.cams.iter().map(|(e, _)| e).collect();
+    let views = main.cams.iter().any(|(_, camera)| drawn(camera));
     let admission = match (request.filter(|r| here == Some(r.place)), &state.held) {
         (None, _) => Admission::Deferred,
         // What would stay bound is what is asked about.
         (Some(r), Some(h)) if older(r.key(), h.key) => gpu.admission(&mut state.asked, h.atlas),
         (Some(r), _) => gpu.admission(&mut state.asked, r.atlas().0),
     };
-    let now = Now { here, hook: hook_state(), admission, open, views: !cams.is_empty(), ended: state.ended };
+    let now = Now { here, hook: hook_state(), admission, open, views, ended: state.ended };
     let plan = plan(request.map(RtgiRequest::key), &now, state.held.as_ref().map(|h| h.key));
     tell(state, request, plan);
-    carry_out(plan, request, &cams, &mut commands, &mut bound, &mut state.held, gpu.device.as_deref().zip(gpu.queue.as_deref()), &counts);
+    match (plan, request) {
+        (Plan::Bind { new }, Some(request)) => {
+            let (device, queue) = gpu.device.as_deref().zip(gpu.queue.as_deref()).expect("a device that granted it");
+            let uniform = request.uniform();
+            if new {
+                // The GPU lets go of what was held when it is done with it; the buffer and the
+                // sampler stay.
+                let atlas = request.atlas();
+                let texture = make_texture(device, queue, atlas);
+                counts.add(Did::Allocation, 1);
+                counts.add(Did::Upload, 1);
+                match &mut state.held {
+                    Some(h) => (h.key, h.atlas, h.texture) = (request.key(), atlas.0, texture),
+                    held => {
+                        let mut buffer = UniformBuffer::from(uniform);
+                        buffer.set_label(Some("nvf_rtgi_volume"));
+                        buffer.write_buffer(device, queue);
+                        counts.add(Did::Allocation, 2);
+                        counts.add(Did::Upload, 1);
+                        *held = Some(Held { key: request.key(), atlas: atlas.0, buffer, written: uniform, texture, sampler: make_sampler(device) });
+                    }
+                }
+            }
+            if let Some(h) = state.held.as_mut().filter(|h| h.written != uniform) {
+                h.buffer.set(uniform);
+                h.buffer.write_buffer(device, queue);
+                h.written = uniform;
+                counts.add(Did::Upload, 1);
+            }
+        }
+        (Plan::Keep, _) => {}
+        _ => state.held = None,
+    }
+    let shown = state.held.as_ref().and_then(|h| Some((h, h.buffer.buffer()?)));
+    for (e, mut b) in bound.iter_mut() {
+        match shown.filter(|_| cams.contains(&e)) {
+            Some((h, buffer)) => {
+                if b.texture.id() != h.texture.id() || b.uniform.id() != buffer.id() {
+                    *b = NvfRtgiVolumeBindings { uniform: buffer.clone(), texture: h.texture.clone(), sampler: h.sampler.clone() };
+                    counts.add(Did::Bind, 1);
+                }
+            }
+            None => {
+                commands.entity(e).try_remove::<NvfRtgiVolumeBindings>();
+            }
+        }
+    }
+    let Some((h, buffer)) = shown else { return };
+    for e in cams.iter().filter(|e| !bound.contains(**e)) {
+        commands.entity(*e).try_insert(NvfRtgiVolumeBindings { uniform: buffer.clone(), texture: h.texture.clone(), sampler: h.sampler.clone() });
+        counts.add(Did::Bind, 1);
+    }
 }
 
 /// The log's line of a change, and the end of a visit's light.
@@ -125,72 +184,6 @@ fn tell(state: &mut RtgiGpu, request: Option<&RtgiRequest>, plan: Plan) {
             }
         }
         _ => {}
-    }
-}
-
-/// `gpu` is needed for [`Plan::Bind`] alone, which is never planned without (it is admitted first).
-#[allow(clippy::too_many_arguments)]
-fn carry_out(
-    plan: Plan,
-    request: Option<&RtgiRequest>,
-    cams: &[Entity],
-    commands: &mut Commands,
-    bound: &mut Query<(Entity, &mut NvfRtgiVolumeBindings)>,
-    held: &mut Option<Held>,
-    gpu: Option<(&RenderDevice, &RenderQueue)>,
-    counts: &RtgiCounts,
-) {
-    match (plan, request) {
-        (Plan::Bind { new }, Some(request)) => {
-            let (device, queue) = gpu.expect("a device that granted it");
-            let uniform = request.uniform();
-            if new {
-                // The GPU lets go of what was held when it is done with it; the buffer and the
-                // sampler stay.
-                let atlas = request.atlas();
-                let texture = make_texture(device, queue, atlas);
-                counts.add(Did::Allocation, 1);
-                counts.add(Did::Upload, 1);
-                match held {
-                    Some(h) => (h.key, h.atlas, h.texture) = (request.key(), atlas.0, texture),
-                    None => {
-                        let mut buffer = UniformBuffer::from(uniform);
-                        buffer.set_label(Some("nvf_rtgi_volume"));
-                        buffer.write_buffer(device, queue);
-                        counts.add(Did::Allocation, 2);
-                        counts.add(Did::Upload, 1);
-                        *held = Some(Held { key: request.key(), atlas: atlas.0, buffer, written: uniform, texture, sampler: make_sampler(device) });
-                    }
-                }
-            }
-            if let Some(h) = held.as_mut().filter(|h| h.written != uniform) {
-                h.buffer.set(uniform);
-                h.buffer.write_buffer(device, queue);
-                h.written = uniform;
-                counts.add(Did::Upload, 1);
-            }
-        }
-        (Plan::Keep, _) => {}
-        _ => *held = None,
-    }
-    let shown = held.as_ref().and_then(|h| Some((h, h.buffer.buffer()?)));
-    for (e, mut b) in bound.iter_mut() {
-        match shown.filter(|_| cams.contains(&e)) {
-            Some((h, buffer)) => {
-                if b.texture.id() != h.texture.id() || b.uniform.id() != buffer.id() {
-                    *b = NvfRtgiVolumeBindings { uniform: buffer.clone(), texture: h.texture.clone(), sampler: h.sampler.clone() };
-                    counts.add(Did::Bind, 1);
-                }
-            }
-            None => {
-                commands.entity(e).try_remove::<NvfRtgiVolumeBindings>();
-            }
-        }
-    }
-    let Some((h, buffer)) = shown else { return };
-    for e in cams.iter().filter(|e| !bound.contains(**e)) {
-        commands.entity(*e).try_insert(NvfRtgiVolumeBindings { uniform: buffer.clone(), texture: h.texture.clone(), sampler: h.sampler.clone() });
-        counts.add(Did::Bind, 1);
     }
 }
 

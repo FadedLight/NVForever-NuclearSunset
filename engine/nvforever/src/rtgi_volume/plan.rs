@@ -30,7 +30,7 @@ pub(super) struct Now {
     pub(super) admission: Admission,
     /// A view may get the bindings now ([`Latch`]).
     pub(super) open: bool,
-    /// There is a world camera's view.
+    /// A world camera's view is drawn in this frame.
     pub(super) views: bool,
     /// The visit that has the stock light to its end.
     pub(super) ended: Option<(Place, Why)>,
@@ -43,7 +43,7 @@ pub(super) enum Why {
     Nothing,
     /// Asked for another cell, travel or game than the player is in, or outdoors.
     Elsewhere,
-    /// The hook or the device cannot say yet, or there is no view.
+    /// The hook or the device cannot say yet, or no view is drawn.
     Waiting,
     Hook,
     Failed,

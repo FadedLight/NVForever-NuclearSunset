@@ -4,6 +4,7 @@
 use super::made::*;
 use super::*;
 use crate::mesh_blend_shader_tests::compose;
+use bevy::render::gpu_readback::ReadbackComplete;
 use nvf_rtgi::{Reader, V3};
 use std::collections::BTreeSet;
 
@@ -136,7 +137,7 @@ fn the_made_volume_is_packed_and_described() {
     let turned: Vec<u8> = (0..24 * 20).flat_map(|i| texel(i / 20 * 20 + (i % 4) * 5 + i % 20 / 4)).collect();
     assert!(!packed_right(&turned));
 
-    let u = RtgiVolumeUniform::new(&v, FIT, 0.7);
+    let u = RtgiVolumeUniform::new(&v, Fit { b: 0.3, g: 1.25, pay: 0.8, least: 0.2, pull: 0.4 }, 0.7);
     assert_eq!(u.origin, Vec4::new(-64.0, 192.0, -128.0, 1.0 / 64.0));
     assert_eq!(u.dimensions, Vec4::new(3.0, 2.0, 4.0, 24.0));
     assert_eq!(u.atlas, Vec4::new(1.0 / 5.0, 1.0 / 4.0, 1.0 / 24.0, 6.0));
@@ -226,6 +227,10 @@ fn the_light_is_the_formula() {
     close(light(&u(0.0), Vec3::splat(0.6), Vec3::splat(0.6), Vec3::ONE, (Vec3::ZERO, 0.0)), Vec3::splat((0.8125f32 * 0.6).powf(2.2)));
 }
 
+fn bytes(floats: &[f32]) -> Vec<u8> {
+    floats.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
 /// What the readback lets through and what it does not: the same numbers and 8 fractional bits,
 /// rounded, cut or up, pass; a wrong slab, place or support and no filter do not.
 #[test]
@@ -234,8 +239,8 @@ fn the_readback_tells_a_wrong_read() {
     let all = checks(&v).unwrap();
     let right = RtgiVolumeUniform::new(&v, FIT, 1.0);
     let judged = |u: &RtgiVolumeUniform, filter: fn(f32) -> f32| {
-        let found = all.iter().map(|c| read(&v, u, c, filter)).map(|(e, of_v)| e.extend(of_v).to_array());
-        judge(&found.chain([[1.0; 4]]).collect::<Vec<_>>(), &all).unwrap()
+        let found: Vec<f32> = all.iter().map(|c| read(&v, u, c, filter)).flat_map(|(e, of_v)| e.extend(of_v).to_array()).collect();
+        judge(&bytes(&found), &all).unwrap()
     };
     assert!(passes(&judged(&right, exact)));
     for filter in COARSE {
@@ -256,13 +261,12 @@ fn the_readback_tells_a_wrong_read() {
     assert!(judged(&thinner, exact)[3] > 1.0, "the support");
     let nearest = judged(&right, f32::round);
     assert!(passes(&nearest[..2]) && nearest[2..].iter().all(|w| *w > 1.0), "{nearest:?}");
-    // Not a number, and an answer that is not there yet.
-    let mut answers = vec![[f32::NAN; 4]; READS];
-    assert_eq!(judge(&answers, &all), None);
-    answers.push([0.0; 4]);
-    assert_eq!(judge(&answers, &all), None);
-    answers[READS] = [1.0; 4];
-    assert_eq!(judge(&answers, &all), Some([f32::INFINITY; 5]));
+    // Not a number, nothing written, and not as many as there are to be.
+    assert_eq!(judge(&bytes(&[f32::NAN; 4 * READS]), &all), Some([f32::INFINITY; 5]));
+    assert!(!passes(&judge(&bytes(&[0.0; 4 * READS]), &all).unwrap()));
+    for n in [0, 4 * READS - 1, 4 * READS + 4] {
+        assert_eq!(judge(&bytes(&vec![0.0; n]), &all), None);
+    }
 }
 
 /// The readback is of one bound key: made when that is bound, read when its pass is on its way, gone
@@ -272,8 +276,9 @@ fn the_readback_goes_with_its_key() {
     let place = Place { cell: 5, travels: 1, game: None };
     let key = plan::Key { place, revision: 1, solved: true };
     let other = plan::Key { place: Place { travels: 2, ..place }, ..key };
-    let said = |bound, dispatched, failed| Said { bound, dispatched, failed };
+    let said = |bound, dispatched, failed| Said { bound, dispatched, ended: None, failed };
     let bound = said(Some(key), None, false);
+    let ended = |place: Place| Said { ended: Some(place), ..default() };
     for (made, wanted, said, want) in [
         ((false, false), Some(key), said(None, None, false), Step::Wait),
         ((false, false), Some(key), said(Some(other), Some(other), false), Step::Wait),
@@ -285,10 +290,41 @@ fn the_readback_goes_with_its_key() {
         ((true, true), Some(key), said(None, Some(key), false), Step::Retire),
         ((true, false), Some(key), said(Some(other), None, false), Step::Retire),
         ((true, false), Some(key), said(Some(key), None, true), Step::Retire),
+        // Refused, late or failed before it was made; another visit's end is none of it.
+        ((false, false), Some(key), ended(place), Step::Retire),
+        ((false, false), Some(key), ended(other.place), Step::Wait),
         ((false, false), Some(other), bound, Step::Retire),
         ((true, true), None, bound, Step::Retire),
     ] {
         assert_eq!(step(key, made, wanted, &said), want, "{made:?} {wanted:?} {said:?}");
+    }
+}
+
+/// One answer ends a job, good or malformed, while it is the request's and its own reader's; after a
+/// travel it says nothing.
+#[test]
+fn an_answer_counts_for_its_own_request() {
+    let place = Place { cell: 5, travels: 1, game: None };
+    let (request, next) = (RtgiRequest::empty(place, 1), RtgiRequest::empty(Place { travels: 2, ..place }, 1));
+    let all = checks(&made(LOWS[0])).unwrap();
+    for (now, own, floats, done) in [
+        (Some(&request), true, 4 * READS, true),
+        (Some(&request), true, 3, true),
+        (Some(&next), true, 4 * READS, false),
+        (None, true, 4 * READS, false),
+        (Some(&request), false, 4 * READS, false),
+    ] {
+        let mut world = World::new();
+        let reader = world.spawn_empty().observe(complete).id();
+        let of = if own { reader } else { world.spawn_empty().id() };
+        world.insert_resource(Aid { done: false, job: Some(Job { key: request.key(), checks: all.clone(), buffers: None, reader: Some(of) }) });
+        if let Some(now) = now {
+            world.insert_resource(now.clone());
+        }
+        world.trigger(ReadbackComplete { entity: reader, data: bytes(&vec![0.0; floats]) });
+        world.flush();
+        let aid = world.resource::<Aid>();
+        assert_eq!((aid.done, aid.job.is_none(), world.get_entity(reader).is_err()), (done, done, true));
     }
 }
 

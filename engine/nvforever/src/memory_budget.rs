@@ -71,7 +71,9 @@
 //! of their own from the driver, so dropping them returns their memory [observed:
 //! `gpu-sheds-over-budget`, 2026-11-25: 4096 to 2048 maps took the use from 1,444 to
 //! 1,204 MB]; smaller ones go back into blocks the allocator keeps (#898) and return
-//! nothing: multisampled targets at 1280x720 gave back 0-1 MB, at 1920x1080 see the PR. When this process holds over
+//! nothing. At 1920x1080 the steps gave back 240 MB (maps), 128 MB (8x to 4x) and 0 MB
+//! (4x to 2x); at 1280x720 the multisampling steps gave back 0-1 MB. The last step is kept
+//! for larger windows (a 4x target at 2560x1440 is past the largest block) [hypothesis]. When this process holds over
 //! [`SHED_SHARE`] of the GPU budget at [`SHED_AFTER_CHECKS`] checks in a row, one step of
 //! [`next_shed`] is taken (shadow maps 4096 to 2048, then multisampling 8x to 4x, then 4x
 //! to 2x), at most one every [`SHED_WAIT_SECS`]; each is logged with the use before, the

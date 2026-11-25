@@ -3655,6 +3655,58 @@ fn refresh_items_list_sets_one_shot_transient_request() {
 }
 
 #[test]
+fn get_event_handlers_showoff_known_and_filter_keys() {
+    // [observed 2026-11-24: w6t2_16_xnvse_get_event_handlers_filter_keys ->
+    // empty(cross=-1,soAdd=0)|std(first,second)|alt(0,1)]
+    use fnv_script::vm::XVal;
+    let f = udf_fixture();
+    let mut g = game(&f);
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(&format!("Begin Function {{ }}\n{body}\nEnd\n"), Default::default()).unwrap()
+    };
+
+    // Known ShowOff:* events return an empty Map (size 0), while OnCrosshairOn and unknown
+    // event names return ar_Null (size -1).
+    assert_eq!(q(&mut g, "SetFunctionValue (ar_Size (GetEventHandlers \"ShowOff:OnAdd\"))"), XVal::Num(0.0), "ShowOff:OnAdd empty Map");
+    assert_eq!(q(&mut g, "SetFunctionValue (ar_Size (GetEventHandlers \"ShowOff:OnFireWeapon\"))"), XVal::Num(0.0), "ShowOff:OnFireWeapon empty Map");
+    assert_eq!(q(&mut g, "SetFunctionValue (ar_Size (GetEventHandlers \"OnCrosshairOn\"))"), XVal::Num(-1.0), "OnCrosshairOn returns ar_Null when unregistered");
+    assert_eq!(q(&mut g, "SetFunctionValue (ar_Size (GetEventHandlers \"UnknownUserEvent\"))"), XVal::Num(-1.0), "unknown event returns ar_Null");
+    assert_eq!(q(&mut g, "SetFunctionValue (ar_Size (GetEventHandlers \"\"))"), XVal::Num(0.0), "unfiltered GetEventHandlers remains empty");
+
+    // Standard SetEventHandler stores filter StringMap keys as "first"/"second".
+    assert_eq!(
+        q(
+            &mut g,
+            "SetEventHandler \"OnActivate\" TestAdd \"first\"::PlayerREF \"second\"::TestGlobal\n\
+             array_var aAct = GetEventHandlers \"OnActivate\" TestAdd 1\n\
+             array_var aF = aAct[0][1]\n\
+             array_var aK = ar_Keys aF\n\
+             string_var sOut = sv_Construct \"%z,%z\" (aK[0]) (aK[1])\n\
+             RemoveEventHandler \"OnActivate\" TestAdd\n\
+             SetFunctionValue sOut",
+        ),
+        XVal::Str("first,second".into()),
+        "SetEventHandler filter keys are first,second"
+    );
+
+    // SetEventHandlerAlt stores filter StringMap keys as numeric index strings "0"/"1".
+    assert_eq!(
+        q(
+            &mut g,
+            "SetEventHandlerAlt \"OnActivate\" TestAdd 0::PlayerREF 1::TestGlobal\n\
+             array_var aAlt = GetEventHandlers \"OnActivate\" TestAdd 1\n\
+             array_var aF = aAlt[0][1]\n\
+             array_var aK = ar_Keys aF\n\
+             string_var sOut = sv_Construct \"%z,%z\" (aK[0]) (aK[1])\n\
+             RemoveEventHandler \"OnActivate\" TestAdd\n\
+             SetFunctionValue sOut",
+        ),
+        XVal::Str("0,1".into()),
+        "SetEventHandlerAlt filter keys are 0,1"
+    );
+}
+
+#[test]
 fn queries_run_function_scripts_and_keep_what_they_change() {
     // The runner's `query` action (Game::run_query): JIP's auxiliary variables set by one
     // query are read by the next, and the saved ones are in the snapshot.

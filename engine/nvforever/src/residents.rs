@@ -1178,6 +1178,9 @@ struct Core {
     clock: Clock,
     /// The game's clock was set and its periodic choice switched on.
     prepared: bool,
+    /// The NPCs a load found seated, with their furniture (`Game::take_saved_seats`):
+    /// each is put back on at once when it becomes a resident (#3991).
+    saved_seats: HashMap<u32, u32>,
     /// The game's time of day at the last frame the choice ran.
     clock_text: String,
     /// Trips, arrivals, unreachable places, packages chosen.
@@ -1500,6 +1503,7 @@ impl Residents {
             loaded_seen: BTreeSet::new(),
             clock,
             prepared: false,
+            saved_seats: HashMap::new(),
             clock_text: String::new(),
             counts: [0; 4],
             unstuck: HashMap::new(),
@@ -1778,7 +1782,7 @@ impl Core {
             last_feet: pos,
             drawn_feet: pos,
             standing_frames: StopRun::default(),
-            seat: Seat::None,
+            seat: self.saved_seats.remove(&id.0).map_or(Seat::None, |f| Seat::Wanted(f, true)),
             may_ask_again: false,
             stand: None,
             last_drawn: None,
@@ -2729,6 +2733,19 @@ impl Core {
         }
         self.prepared = true;
         game.cfg.package_interval = Some(PACKAGE_INTERVAL);
+        // The seats the save had NPCs on: back on at once, no walk and no getting-on
+        // clip, when the body is drawn and its package still wants that furniture (#3991,
+        // observer check 220). Residents already known take theirs now, the rest when
+        // they join (`Core::add_resident`).
+        self.saved_seats = game.take_saved_seats().into_iter().map(|(a, f)| (a.0, f.0)).collect();
+        if !self.saved_seats.is_empty() {
+            info!("ai: {} NPC(s) the save had seated go back on their furniture at once", self.saved_seats.len());
+        }
+        for r in &mut self.list {
+            if let Some(f) = self.saved_seats.remove(&r.actor.0) {
+                r.seat = Seat::Wanted(f, true);
+            }
+        }
         if !restored {
             for (edid, v) in [(clock::GAME_HOUR, self.clock.hour.rem_euclid(24.0)), (clock::GAME_DAYS_PASSED, self.clock.days_passed)] {
                 if let Err(e) = set_global(game, edid, v) {
@@ -3286,6 +3303,7 @@ type Moves<'w, 's> = (
     Option<MessageReader<'w, 's, nvf_play::combat::Knockback>>,
     Option<MessageReader<'w, 's, nvf_play::Travel>>,
     Option<ResMut<'w, nvf_play::loading::Loading>>,
+    Option<MessageReader<'w, 's, nvf_play::loading::TravelRequest>>,
 );
 
 type Held<'w, 's> = (
@@ -3316,7 +3334,7 @@ pub fn drive(
     mut doors: ResMut<nvf_play::doors::Doors>,
     (script, mut sim, mut phys, mut blocks): PlayState,
     (seated, hours, flinches, fighters, idle_holds, mut refusals, stances): Held,
-    (mut door_fades, mut door_sounds, mut travel, mut knocks, trips, mut screen): Moves,
+    (mut door_fades, mut door_sounds, mut travel, mut knocks, trips, mut screen, asked): Moves,
 ) {
     // Hours passed in the Wait menu since the last frame (`--play` only: without it
     // there is no menu and no such message).
@@ -3340,7 +3358,12 @@ pub fn drive(
     // travel (not a script's MoveTo: `Loading::arriving`): who was in the loaded area
     // shortly before stays put; the others near the destination are put at their
     // package's place (`Core::arrive`).
-    if trips.is_some_and(|mut t| t.read().count() > 0) {
+    // A travel asked for this frame counts too: a door whose script runs Activate (Gomorrah's
+    // inner door, SCPT 0x00127959) asks in the scripts' pass, and its trip is sent only
+    // after this system has run; the guard started its weapons check in that frame again
+    // (#2835, pilot sweep 2026-11-18).
+    let asked = asked.is_some_and(|mut t| t.read().count() > 0);
+    if trips.is_some_and(|mut t| t.read().count() > 0) || asked {
         let arriving = screen.is_some_and(|mut s| std::mem::take(&mut s.arriving));
         if arriving {
             res.core.begin_trip();

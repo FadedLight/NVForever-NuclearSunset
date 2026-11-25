@@ -1371,6 +1371,37 @@ fn a_door_that_closed_the_way_opening_brings_the_package_back() {
     assert_eq!(s.ai.agents[&actor].walker.space, B);
 }
 
+/// #3472 (Rex in Jacobstown): a package set aside as out of reach comes back the moment a
+/// script puts the actor somewhere else, not an hour later: here the way to its place is
+/// shut by a locked door, and a scripted door puts the actor on the far side.
+#[test]
+fn a_package_set_aside_comes_back_when_a_script_moves_the_actor() {
+    let mut f = fixture();
+    let actor = FormId(R_TRAVEL);
+    let door = FormId(M1);
+    f.refs.refs.get_mut(&door).unwrap().lock = Some(fnv_sim::refs::Lock { level: 255, key: None, leveled: false });
+    let mut s = sim(&f, &[R_TRAVEL]);
+    s.nav.set_in_place_doors(vec![fnv_nav::InPlaceDoor {
+        door: M1, space: A, position: [200.0, 200.0, 0.0],
+        rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], scale: 1.0,
+        bounds: ([-4.0, -200.0, 0.0], [4.0, 200.0, 200.0]),
+    }], |_| Some(DoorLock { level: 255, key: None }));
+    s.ai.apply_door_locks(&mut s.game, &mut s.nav);
+    s.run(1.0);
+    assert!(s.events(R_TRAVEL).iter().any(|e| matches!(e, AiEvent::Unreachable { package, .. } if package.0 == P_TRAVEL_B)));
+    assert!(s.game.extra.get(&actor).is_some_and(|e| e.package_blocked.contains_key(&FormId(P_TRAVEL_B))), "set aside");
+    s.run(5.0);
+    assert_eq!(s.feet(R_TRAVEL), START, "set aside, it stays");
+    // A script puts it in cell B, where its package's place is.
+    s.game.run_source("ScriptDoor.Activate TravellerRef", Default::default()).unwrap();
+    assert_eq!(s.game.cell_of(actor), Some(FormId(CELL_B)));
+    assert_eq!(s.ai.moved_by_scripts(&mut s.game), vec![(actor, true)]);
+    assert!(s.game.extra.get(&actor).is_none_or(|e| e.package_blocked.is_empty()), "the move lifts the block");
+    assert_eq!(s.game.extra.get(&actor).and_then(|e| e.current_package), Some(FormId(P_TRAVEL_B)), "chosen again at once");
+    s.run(40.0);
+    assert!(dist(s.feet(R_TRAVEL), [5250.0, 5250.0, 50.0]) < 5.0, "{:?} {:?}", s.feet(R_TRAVEL), s.events(R_TRAVEL));
+}
+
 /// A scripted door that does not let the actor through (its OnActivate block called no
 /// `Activate` for it, `fnv_game::npc_doors`) shuts the way as a lock does: asked as the
 /// actor comes near, it plans again without the door and, with no other way, sets the
@@ -1644,7 +1675,7 @@ fn arrival_heading_needs_an_existing_link() {
     assert_eq!(s.ai.agents[&FormId(R_TO_HEADING)].face_to, None);
 }
 
-// [hypothesis, #2526, observer check 213] Travel and standing Guard restore the
+// (#2526, observer check 213; see crates/fnv-ai/src/carry.rs) Travel and standing Guard restore the
 // editor heading on returning to a small editor location, using the standing turn.
 #[test]
 fn arrival_heading_at_small_editor_locations_restores_editor_rotation() {
@@ -3107,7 +3138,7 @@ fn an_actor_going_into_combat_stands_a_moment_then_turns_at_the_combat_rate() {
 #[test]
 fn a_creature_going_into_combat_turns_at_once() {
     // People only stand 1.1 s on going into combat (#1352); a creature turns to its
-    // target at once, as before [hypothesis: a creature's reaction is unmeasured].
+    // target at once, as before (see crates/fnv-ai/src/carry.rs).
     let f = fixture();
     let mut s = sim(&f, &[R_HOUND]);
     s.run(1.0);
@@ -4165,7 +4196,7 @@ fn weapon_worlds(f: &mut Fixture, sibling: bool) -> Space {
     Space::World(a.0)
 }
 
-/// [hypothesis, #2652] Only non-actor targets with a shared immediate parent project;
+/// (#2652; see crates/fnv-ai/src/goal.rs) Only non-actor targets with a shared immediate parent project;
 /// [design] ordinary place_of_ref and actor/interior space checks stay unchanged.
 #[test]
 fn weapon_target_place_projects_only_sibling_objects() {
@@ -5080,8 +5111,8 @@ fn a_cornered_fighter_with_only_an_explosive_weapon_fights_with_its_fists_until_
 }
 
 /// Stay-at locations given by an object, and a Guard that remains near what it guards
-/// (#961, `goal::stay_at`, packages.md §7.7) [hypothesis: no source says how either
-/// chooses its place]: Near Object ID walks to the nearest reference of the base (the
+/// (#961, `goal::stay_at`, see docs/spec-notes/packages.md §7.7): Near Object ID walks
+/// to the nearest reference of the base (the
 /// idle marker, 500 units off); Remain Near Reference to Guard walks to the guarded
 /// reference, within the target's distance (120), though the location is "near current".
 #[test]

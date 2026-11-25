@@ -61,6 +61,7 @@
 //! plugin knows only [`draw`]).
 
 pub mod marker;
+pub mod touch_map;
 mod model;
 pub(crate) mod outline;
 pub(crate) mod read;
@@ -396,6 +397,8 @@ pub struct DataState {
     /// Each tab's selected row and first row shown, and how many rows fit when last drawn.
     sel: [usize; 5],
     first: [usize; 5],
+    /// Direct scrollbar view movement, independent of the selected gameplay row.
+    manual_list: Option<(usize, usize)>,
     fit: [usize; 5],
     /// The selected row is boxed (the pointer is on it, or a key moved it).
     boxed: bool,
@@ -738,6 +741,12 @@ pub(crate) struct WorldParts {
     /// outside the window too (the hand-built page leaves them out, [`MapShown::marks`]), so a pan
     /// keeps their rows; none on the World Map, whose rows are its marks.
     pub(crate) rows: Option<Vec<MapMark>>,
+    /// The World Map's companions (`map_companions`): each teammate's FormID, texture
+    /// coordinates, display name, and knocked-out state; empty on the Local Map.
+    pub(crate) companions: Vec<(u32, [f32; 2], String, bool)>,
+    /// The font number for companion names on the World Map (2 by default, 1 with
+    /// `bCompanionsUseLocationFontOnMap`).
+    pub(crate) companion_font: u8,
 }
 
 impl MapShown {
@@ -816,6 +825,13 @@ pub struct Game<'w> {
 pub struct Input<'w, 's> {
     keys: crate::pad::ActionButtons<'w, KeyCode>,
     wheel: MessageReader<'w, 's, MouseWheel>,
+    touch_wheel: Option<Res<'w,super::touch_scroll::WheelFrame>>,
+    physical:Option<Res<'w,super::touch_scroll::PhysicalPriority>>,
+    touch_pip: Option<Res<'w,super::PipBoy>>,
+    touch_map: Option<ResMut<'w,touch_map::TouchMap>>,
+    map_gate: touch_map::Gate<'w,'s>,
+    // Separate from the raw bridge's shared gate: its parent owns this overlay mutably.
+    map_overlay: Option<Res<'w, super::touch_items::OverlayCapture>>,
     menu: MessageReader<'w, 's, MenuInput>,
     pip_out: MessageWriter<'w, PipBoyInput>,
     time: Res<'w, Time<Real>>,
@@ -1010,6 +1026,7 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
         track(st, game);
     }
     let Some(tab) = open else {
+        if let Some(touch)=input.touch_map.as_deref_mut() {touch.cancel();}
         st.was_open = false;
         st.popup = None;
         st.note_shown = None;
@@ -1043,10 +1060,13 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
     }
     // With Controller chosen the controls answer the controller only (pad.rs): the mouse
     // pointer is ignored so it cannot take the highlight box back from the stick.
-    let pointer = screen.and_then(|s| s.pointer).filter(|_| !input.bindings.as_ref().is_some_and(|b| b.device == InputDevice::Controller));
-    st.pointer_now = screen.and_then(|s| s.pointer);
-    st.aiming = pointer.is_some();
+    let mouse_pointer = screen.and_then(|s| s.pointer).filter(|_| !input.bindings.as_ref().is_some_and(|b| b.device == InputDevice::Controller));
     let e = early.unwrap_or_default();
+    let map_allowed = !e.hold && touch_map::source_allows(game.script.as_deref());
+    let direct_map = touch_map::take(st,tab,screen,input,map_allowed);
+    let pointer = direct_map.map(|frame|frame.0).or(mouse_pointer);
+    st.pointer_now = pointer.or_else(||screen.and_then(|s|s.pointer));
+    st.aiming = pointer.is_some();
     if e.hold {
         hold_input(st, tab, &lists, input);
     } else {
@@ -1065,6 +1085,7 @@ fn step(st: &mut DataState, open: Option<usize>, screen: Option<&PipBoyScreen>, 
     // it was, and with it the Travel hint's marker (#1897).
     let on_map = pointer.filter(|_| !on_button(st, tab, pointer));
     let mut view = build(st, tab, &lists, game, on_map, pointer.is_some());
+    touch_map::finish(st, &view, direct_map.and_then(|frame| frame.1));
     // A click on a map is resolved against the highlight box as drawn for good (#3324): here for
     // the hand-built page; the page drawn from the file may lay the map out again (its refit,
     // `DataState::refit_map`, or the fall back to the hand-built window), so with the early
@@ -1195,6 +1216,25 @@ fn hold_input(st: &mut DataState, tab: usize, l: &Lists, input: &mut Input) {
 /// Note the order quests are listed in, the markers the player finds, and where the
 /// player was last outdoors.
 impl DataState {
+    #[cfg(test)]
+    pub(crate) fn take_touch_test_actions(&mut self) -> Vec<Act> { std::mem::take(&mut self.acts) }
+
+    /// Identity of actions deferred by a native touch contact. No action or state changes here.
+    pub(crate) fn touch_action_context(&self, tab: usize) -> super::touch_scroll::DataActionContext {
+        let marker = |m: CustomMarker| (m.space, m.pos.map(f32::to_bits));
+        let selection = self.sel.get(tab).copied().unwrap_or(0);
+        super::touch_scroll::DataActionContext {
+            selection,
+            key: self.prepared.as_ref().filter(|p| p.view.tab == tab).and_then(|p| p.keys.get(selection)).copied(),
+            challenges: self.challenges,
+            filtered: self.notes_of_active,
+            quest: self.active_quest,
+            travel: self.travel_marker,
+            custom: self.custom.map(marker),
+            spot: self.spot.get(tab).copied().flatten().map(marker),
+        }
+    }
+
     /// What the page shows as last prepared, for the drawing from the file
     /// (`crate::tiles::map_menu`).
     pub(crate) fn prepared(&self) -> Option<&Prepared> {
@@ -1266,6 +1306,9 @@ impl DataState {
         }
     }
 
+    /// Whether the DATA page currently owns a popup; external input must leave it in control.
+    pub fn has_popup(&self) -> bool { self.popup().is_some() }
+
     /// The question box over the map (fast travel's or Place Marker's), while it is up.
     pub(crate) fn popup(&self) -> Option<&Popup> {
         self.popup.as_ref()
@@ -1287,6 +1330,20 @@ impl DataState {
     /// (`super::sounds`).
     pub fn selection(&self, tab: usize) -> (usize, bool) {
         (self.sel.get(tab).copied().unwrap_or(0), self.challenges)
+    }
+    pub fn list_scroll(&self, tab: usize) -> Option<usize> {
+        (tab >= QUESTS && tab < self.first.len()).then(|| self.first[tab])
+    }
+    pub(crate) fn scroll_list_by(&mut self, tab: usize, by: super::scrollbar::ScrollBy) -> bool {
+        let Some(view) = self.shown.as_ref().filter(|v| v.tab == tab).or_else(|| self.prepared.as_ref().map(|p|&p.view).filter(|v|v.tab==tab)) else { return false };
+        let Body::List { rows, .. } = &view.body else { return false };
+        let now = self.first[tab];
+        let page = self.fit[tab].max(1);
+        let Some(to) = by.value(now as f64, rows.len().saturating_sub(page) as f64, page as f64) else { return false };
+        self.first[tab] = to as usize;
+        self.manual_list = Some((tab, self.sel[tab]));
+        self.pointer_pick = true;
+        now != self.first[tab]
     }
 
     /// [design, #2403 / file refs] Read-only logical list/pane/map progress. Excludes
@@ -1734,7 +1791,8 @@ fn take_input(st: &mut DataState, tab: usize, l: &Lists, game: &mut Game, input:
         }
     }
     // The wheel zooms a map, scrolls the right pane under the pointer, else the list.
-    let mut notches = 0.0;
+    let mut notches = if input.physical.as_ref().is_some_and(|p|p.active) {0.0} else {input.touch_wheel.as_ref().zip(input.touch_pip.as_deref()).map_or(0.0,|(w,pip)|w.lines(pip))};
+    let pointer=input.touch_wheel.as_ref().filter(|_|notches!=0.0).and_then(|w|w.at).or(pointer);
     for w in input.wheel.read() {
         notches += match w.unit {
             MouseScrollUnit::Line => w.y,
@@ -1823,7 +1881,15 @@ fn take_input(st: &mut DataState, tab: usize, l: &Lists, game: &mut Game, input:
     }
     if len > 0 {
         st.sel[tab] = st.sel[tab].min(len - 1);
-        st.first[tab] = model::keep_in_view(st.sel[tab], st.first[tab].min(len - 1), st.fit[tab]);
+        if st.manual_list.is_some_and(|(old_tab, selected)| old_tab != tab || (selected != st.sel[tab] && !st.pointer_pick)) {
+            st.manual_list = None;
+        }
+        if st.manual_list.is_some() {
+            st.first[tab] = st.first[tab].min(len.saturating_sub(st.fit[tab].max(1)));
+            st.manual_list = Some((tab, st.sel[tab]));
+        } else {
+            st.first[tab] = model::keep_in_view(st.sel[tab], st.first[tab].min(len - 1), st.fit[tab]);
+        }
     }
     let shows = pane_key(st, tab, l);
     scroll_pane(st, tab, shows, pane);
@@ -2757,7 +2823,7 @@ const LOCATION_FONT: usize = 1;
 /// the arrow].
 pub const COMPANION_MIN_DISTANCE: f32 = 4096.0;
 /// How far above its place a companion's name stands (canvas units) [design].
-const COMPANION_NAME_RISE: f32 = 14.0;
+pub(crate) const COMPANION_NAME_RISE: f32 = 14.0;
 /// How near the highlight box's middle a companion's place must be for a click to summon it,
 /// under the player's Map Selectable Companions tweak (canvas units) [design].
 const SUMMON_REACH: f32 = 24.0;
@@ -2791,22 +2857,29 @@ struct MapCompanion {
 
 /// The player's companions (teammates) in an exterior cell, with their worldspace; those
 /// within [`COMPANION_MIN_DISTANCE`] of `player` (worldspace, place) left out when it is
-/// given, and the knocked-out ones unless `show_down`.
+/// given, and the knocked-out ones unless `show_down`. Unmaterialized placed teammates
+/// fall back to their placement cell and position (`sim.refs`), as `quest_targets` does.
 fn map_companions(game: &Game, player: Option<(u32, [f32; 3])>, show_down: bool) -> Vec<MapCompanion> {
     let (Some(rt), Some(sim)) = (game.script.as_ref().and_then(|s| s.rt.as_ref()), game.sim.as_ref()) else { return Vec::new() };
     let mut out = Vec::new();
     for id in rt.game.teammates() {
-        let Some(s) = sim.world.peek(id) else { continue };
-        let Some(world) = s.cell.and_then(|c| sim.refs.cell_world.get(&c)).map(|w| w.0) else { continue };
+        let (cell, pos) = match sim.world.peek(id) {
+            Some(s) => (s.cell, s.pos),
+            None => match sim.refs.get(id) {
+                Some(p) => (p.cell, p.pos),
+                None => continue,
+            },
+        };
+        let Some(world) = cell.and_then(|c| sim.refs.cell_world.get(&c)).map(|w| w.0) else { continue };
         let down = rt.game.knockout(id).is_some();
         if (down && !show_down) || !sim.present(id.0) {
             continue;
         }
-        if player.is_some_and(|(w, p)| w == world && (s.pos[0] - p[0]).hypot(s.pos[1] - p[1]) < COMPANION_MIN_DISTANCE) {
+        if player.is_some_and(|(w, p)| w == world && (pos[0] - p[0]).hypot(pos[1] - p[1]) < COMPANION_MIN_DISTANCE) {
             continue;
         }
         let name = sim.ref_name(Some(&rt.game), id.0).map(str::to_string).unwrap_or_else(|| rt.game.data.name(id));
-        out.push(MapCompanion { form: id, world, pos: s.pos, name, down });
+        out.push(MapCompanion { form: id, world, pos, name, down });
     }
     out
 }
@@ -2921,11 +2994,14 @@ fn world_map(st: &mut DataState, game: &Game, pointer: Option<Vec2>, aiming: boo
     let (no_min, show_down, location_font) = tw.unwrap_or_default();
     let summon = game.script.as_ref().and_then(|s| s.rt.as_ref()).map(|rt| (rt.game.tweaks.map_summon_companions, rt.game.tweaks.summon_unconscious));
     let mut companions = Vec::new();
+    let mut companion_uvs = Vec::new();
     let mut forms_shown = Vec::new();
     for c in map_companions(game, player.filter(|_| !no_min).map(|(p, _)| (world, p)), show_down) {
         let Some(projection) = map_for(st, game, c.world).filter(|p| p.root == m.root) else { continue };
+        let uv = projection.uv(c.pos[0], c.pos[1]);
         forms_shown.push((c.form, c.down));
-        companions.push((on_map(projection.uv(c.pos[0], c.pos[1])), c.name, c.down));
+        companions.push((on_map(uv), c.name.clone(), c.down));
+        companion_uvs.push((c.form.0, uv, c.name, c.down));
     }
     // The player's Map Selectable Companions tweak: the companions under the highlight box,
     // which a click summons [design: docs/design/tweaks.md].
@@ -2942,9 +3018,10 @@ fn world_map(st: &mut DataState, game: &Game, pointer: Option<Vec2>, aiming: boo
         st.companions_logged = Some(companions.len());
         info!("pipboy data: world map shows {} companions", companions.len());
     }
+    let companion_font = if location_font { LOCATION_FONT } else { COMPANION_FONT };
     MapShown {
         companions,
-        companion_font: if location_font { LOCATION_FONT } else { COMPANION_FONT },
+        companion_font,
         picture: Some((m.texture.clone(), Rect::from_corners(left, left + size))),
         outline: None,
         reset_cells: Arc::default(),
@@ -2957,7 +3034,20 @@ fn world_map(st: &mut DataState, game: &Game, pointer: Option<Vec2>, aiming: boo
         cursor,
         label,
         detail,
-        world: Some(WorldParts { view, texture: m.texture.clone(), mag, quests: target_uvs, custom: custom_uv, arrow: arrow_uv, ends, outline: None, rows: None, want: st.cursor[WORLD].unwrap_or(view.mid()) }),
+        world: Some(WorldParts {
+            view,
+            texture: m.texture.clone(),
+            mag,
+            quests: target_uvs,
+            custom: custom_uv,
+            arrow: arrow_uv,
+            ends,
+            outline: None,
+            rows: None,
+            want: st.cursor[WORLD].unwrap_or(view.mid()),
+            companions: companion_uvs,
+            companion_font: companion_font as u8,
+        }),
     }
 }
 
@@ -3223,7 +3313,20 @@ fn local_map(st: &mut DataState, game: &Game, pointer: Option<Vec2>) -> MapShown
     st.custom_on_map[LOCAL] = custom.map(|c| on_map(c.pos[0], c.pos[1]));
     let custom_uv = custom.map(|c| view.local_uv(c.pos[0], c.pos[1]));
     let custom = custom.map(|c| local_quest_corner(on_map(c.pos[0], c.pos[1])));
-    let world = WorldParts { view, texture: String::new(), mag, quests: target_uvs, custom: custom_uv, arrow: Some((view.local_uv(feet[0], feet[1]), heading)), ends: Vec::new(), outline: outline_texels, rows: st.tile_rows.then_some(rows), want: st.cursor[LOCAL].unwrap_or(view.mid()) };
+    let world = WorldParts {
+        view,
+        texture: String::new(),
+        mag,
+        quests: target_uvs,
+        custom: custom_uv,
+        arrow: Some((view.local_uv(feet[0], feet[1]), heading)),
+        ends: Vec::new(),
+        outline: outline_texels,
+        rows: st.tile_rows.then_some(rows),
+        want: st.cursor[LOCAL].unwrap_or(view.mid()),
+        companions: Vec::new(),
+        companion_font: COMPANION_FONT as u8,
+    };
     MapShown { picture: None, outline, reset_cells: Arc::new(reset_cells), marks, player: Some((on_map(feet[0], feet[1]), heading)), quests, custom, nodes: Arc::default(), lines: Arc::default(), cursor, label, detail: None, world: Some(world) , companions: Vec::new(), companion_font: COMPANION_FONT }
 }
 
@@ -3706,7 +3809,15 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, origin: Vec2, height: f32, ba
         }
         if first > 0 || first + fit < rows.len() {
             let bar_x = if bar_left { 0.0 } else { LIST_W - SCROLLBAR };
-            scroll_bar(p, c, bar_x, height, first as f32 / rows.len() as f32, fit as f32 / rows.len() as f32);
+            let from = first as f32 / rows.len() as f32;
+            let part = fit as f32 / rows.len() as f32;
+            scroll_bar(p, c, bar_x, height, from, part);
+            if let Some(tab) = tab {
+                let (top, h) = bar_marker(height, from, part);
+                let track = Rect::new(bar_x, ARROW_H+4.0, bar_x+SCROLLBAR, height-ARROW_H-4.0);
+                super::scrollbar::hits(p, Page::Data, tab, Rect::new(bar_x,0.0,bar_x+SCROLLBAR,height),track,
+                    Rect::new(bar_x,top,bar_x+SCROLLBAR,(top+h).min(track.max.y)),origin);
+            }
         }
     });
     fit
@@ -3773,10 +3884,11 @@ fn bar_run(height: f32) -> f32 {
 
 /// A scroll bar's marker in a bar `height` high: its top and height for the part shown
 /// (`part`) from `from` (shares of the whole).
-fn bar_marker(height: f32, from: f32, part: f32) -> (f32, f32) {
+pub(super) fn bar_marker(height: f32, from: f32, part: f32) -> (f32, f32) {
     let run = bar_run(height);
     (ARROW_H + 4.0 + run * from.clamp(0.0, 1.0), (run * part.clamp(0.0, 1.0)).max(8.0))
 }
+pub(super) fn bar_track(height: f32) -> (f32, f32) { (ARROW_H+4.0, height-ARROW_H-4.0) }
 
 /// The places on a scroll bar at `x`, `height` high ([`scroll_bar`]) that take the
 /// pointer: the arrows, the track above and below the marker, and the marker (as wide as
@@ -6115,6 +6227,21 @@ mod tests {
     }
 
     #[test]
+    fn projected_mobile_wheel_reaches_native_data_list_channel_and_stale_tab_is_refused(){
+        use bevy::ecs::system::RunSystemOnce;
+        fn read(mut st:ResMut<DataState>,mut game:Game,mut input:Input){
+            take_input(&mut st,NOTES,&Lists::default(),&mut game,&mut input,None,true);
+        }
+        let mut world=page_world(true,data_open(NOTES));
+        let mut wheel=super::super::touch_scroll::WheelFrame::default();
+        wheel.set(world.resource::<PipBoy>(),Vec2::new(100.,100.),-60.);world.insert_resource(wheel);
+        world.run_system_once(read).unwrap();assert_eq!(world.resource_mut::<DataState>().take_list_notches(),-3.0);
+        world.resource_mut::<PipBoy>().tabs[Page::Data.index()]=QUESTS;
+        world.run_system_once(read).unwrap();assert_eq!(world.resource_mut::<DataState>().take_list_notches(),0.0);
+        assert!(world.resource::<Messages<FastTravelAsk>>().is_empty());
+    }
+
+    #[test]
     fn script_map_marker_overrides_reach_world_local_discovery_compass_and_hud() {
         use bevy::ecs::system::SystemState;
         use model::MapTransform;
@@ -6455,7 +6582,7 @@ mod tests {
 
         // Before discovery (#3468 check 252 + 2026-11-22 live map-marker probe for script
         // values; Pip-Boy drawing an undiscovered FNAM=3 marker as discovered with its own
-        // icon is [hypothesis]):
+        // icon follows `known_marker` above and docs/spec-notes/ext-lutana.md §9):
         // - Visible | Can Travel To (FNAM=3) is known and travelable (Some(true)).
         // - Visible alone (FNAM=1) is known as undiscovered (Some(false)).
         // - Can Travel To alone (FNAM=2) is unknown (None) and stays in unmapped_of (Hide Unmapped Places).
@@ -6524,6 +6651,139 @@ mod tests {
             let game = state.get_mut(&mut world).unwrap();
             assert_eq!(known(&st, &game, &m_vis_only), Some(true));
             assert_eq!(known(&st, &game, &m_travel_only), Some(true));
+        }
+    }
+
+    #[test]
+    fn world_map_discovers_materialized_and_placed_teammates_and_excludes_inactive() {
+        use bevy::ecs::system::SystemState;
+        use model::MapTransform;
+
+        const WORLD_ID: u32 = 0x800;
+        const EXT_CELL: u32 = 0x801;
+        const NPC_A: u32 = 0x810;
+        const NPC_B: u32 = 0x811;
+        const NPC_DEAD: u32 = 0x812;
+        const NPC_DISABLED: u32 = 0x813;
+        const NPC_NON_TEAM: u32 = 0x814;
+        const NPC_NEAR: u32 = 0x815;
+        const REF_PLACED_ONLY: u32 = 0x820;
+        const REF_MATERIALIZED: u32 = 0x821;
+        const REF_DEAD: u32 = 0x822;
+        const REF_DISABLED: u32 = 0x823;
+        const REF_NON_TEAM: u32 = 0x824;
+        const REF_NEAR: u32 = 0x825;
+
+        let sub = |sig: &[u8; 4], data: &[u8]| [sig.as_slice(), &(data.len() as u16).to_le_bytes(), data].concat();
+        let rec = |sig: &[u8; 4], flags: u32, id: u32, subs: &[Vec<u8>]| {
+            let body: Vec<u8> = subs.iter().flat_map(|s| s.iter().copied()).collect();
+            [sig.as_slice(), &(body.len() as u32).to_le_bytes(), &flags.to_le_bytes(), &id.to_le_bytes(), &0u32.to_le_bytes(), &0u32.to_le_bytes(), &body].concat()
+        };
+        let grp = |label: [u8; 4], kind: u32, body: &[u8]| [b"GRUP".as_slice(), &((24 + body.len()) as u32).to_le_bytes(), &label, &kind.to_le_bytes(), &0u64.to_le_bytes(), body].concat();
+        let top = |sig: &[u8; 4], body: &[u8]| grp(*sig, 0, body);
+        let pos_bytes = |x: f32, y: f32, z: f32| [x, y, z, 0.0, 0.0, 0.0].into_iter().flat_map(f32::to_le_bytes).collect::<Vec<u8>>();
+        let npc = |id: u32, edid: &[u8], full: &[u8]| rec(b"NPC_", 0, id, &[sub(b"EDID", edid), sub(b"FULL", full)]);
+        let achr = |id: u32, flags: u32, edid: &[u8], base: u32, pos: [f32; 3]| {
+            rec(b"ACHR", flags, id, &[sub(b"EDID", edid), sub(b"NAME", &base.to_le_bytes()), sub(b"DATA", &pos_bytes(pos[0], pos[1], pos[2]))])
+        };
+
+        let tes4 = rec(b"TES4", 0, 0, &[sub(b"HEDR", &[1.34f32.to_le_bytes().as_slice(), &0u32.to_le_bytes(), &0x800u32.to_le_bytes()].concat())]);
+        let npcs = [
+            npc(0x7, b"Player\0", b"Player\0"),
+            npc(NPC_A, b"PlacedMate\0", b"Scout Alpha\0"),
+            npc(NPC_B, b"MatMate\0", b"Scout Bravo\0"),
+            npc(NPC_DEAD, b"DeadMate\0", b"Fallen Scout\0"),
+            npc(NPC_DISABLED, b"DisMate\0", b"Hidden Scout\0"),
+            npc(NPC_NON_TEAM, b"Bystander\0", b"Town Drifter\0"),
+            npc(NPC_NEAR, b"NearMate\0", b"Close Scout\0"),
+        ]
+        .concat();
+        let persistent = [
+            achr(REF_PLACED_ONLY, 0x400, b"PlacedMateRef\0", NPC_A, [8000.0, 0.0, 0.0]),
+            achr(REF_MATERIALIZED, 0x400, b"MatMateRef\0", NPC_B, [-8000.0, 2048.0, 0.0]),
+            achr(REF_DEAD, 0x400, b"DeadMateRef\0", NPC_DEAD, [9000.0, 0.0, 0.0]),
+            achr(REF_DISABLED, 0x400 | 0x800, b"DisMateRef\0", NPC_DISABLED, [10000.0, 0.0, 0.0]),
+            achr(REF_NON_TEAM, 0x400, b"BystanderRef\0", NPC_NON_TEAM, [11000.0, 0.0, 0.0]),
+            achr(REF_NEAR, 0x400, b"NearMateRef\0", NPC_NEAR, [500.0, 0.0, 0.0]),
+        ]
+        .concat();
+        let wrld = [
+            rec(b"WRLD", 0, WORLD_ID, &[sub(b"EDID", b"TestWasteland\0")]),
+            grp(
+                WORLD_ID.to_le_bytes(),
+                1,
+                &[
+                    rec(b"CELL", 0, EXT_CELL, &[sub(b"EDID", b"TestExtCell\0"), sub(b"DATA", &[0])]),
+                    grp(EXT_CELL.to_le_bytes(), 6, &grp(EXT_CELL.to_le_bytes(), 8, &persistent)),
+                ]
+                .concat(),
+            ),
+        ]
+        .concat();
+        let bytes = [tes4, top(b"NPC_", &npcs), top(b"WRLD", &wrld)].concat();
+        let plugin = fnv_esm::Plugin::parse(&bytes, "CompanionMap.esm".into()).unwrap();
+        let mut script = crate::script::ScriptState::over_plugins(&[plugin]);
+
+        // Build matching SimState from the same plugin.
+        let sim_plugin = fnv_esm::Plugin::parse(&bytes, "CompanionMap.esm".into()).unwrap();
+        let plugins: &'static [fnv_esm::Plugin] = Box::leak(Box::new([sim_plugin]));
+        let lo = fnv_esm::LoadOrder::new(plugins).unwrap();
+        let schema = fnv_esm::Schema::load_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/fnv")).unwrap();
+        let forms: &'static fnv_sim::FormStore = Box::leak(Box::new(fnv_sim::FormStore::build(&lo, &schema)));
+        let refs: &'static fnv_sim::RefTable = Box::leak(Box::new(fnv_sim::RefTable::build(&lo, &schema)));
+        let mut sim = SimState { forms, refs, world: fnv_sim::World::new(forms, refs, fnv_sim::SimConfig::default()) };
+
+        // Materialize only REF_MATERIALIZED (moving it to a new exterior position); leave REF_PLACED_ONLY unmaterialized!
+        sim.world.get(FormId(REF_MATERIALIZED)).unwrap().pos = [-9000.0, 4096.0, 0.0];
+        assert!(sim.world.peek(FormId(REF_PLACED_ONLY)).is_none(), "REF_PLACED_ONLY must remain unmaterialized");
+
+        // Mark teammates in script state (leaving REF_NON_TEAM untagged, REF_DEAD dead, REF_DISABLED initially disabled).
+        {
+            let g = &mut script.rt.as_mut().unwrap().game;
+            for r in [REF_PLACED_ONLY, REF_MATERIALIZED, REF_DEAD, REF_DISABLED, REF_NEAR] {
+                g.extra.entry(FormId(r)).or_default().teammate = true;
+            }
+            g.extra.entry(FormId(REF_DEAD)).or_default().dead = true;
+        }
+
+        let root = WorldMap { root: WORLD_ID, transform: MapTransform::default(), texture: "world.dds".into(), usable: [2048.0; 2], nw: [-4, 4], se: [4, -4] };
+        let mut st = DataState {
+            tile_rows: true,
+            maps: [(WORLD_ID, Some(root))].into_iter().collect(),
+            markers: Some(Vec::new()),
+            ..DataState::default()
+        };
+
+        let mut world = World::new();
+        world.insert_resource(Location { world: WORLD_ID, interior: None });
+        world.insert_resource(Player { heading: 0.0, pitch: 0.0, eye_height: 0.0, feet: [0.0; 3], body_eye: None, body_view: None, placed: None });
+        world.insert_resource(script);
+        world.insert_resource(sim);
+        let mut state = SystemState::<Game>::new(&mut world);
+
+        {
+            let game = state.get_mut(&mut world).unwrap();
+            let shown = world_map(&mut st, &game, None, false);
+            let names: Vec<&str> = shown.companions.iter().map(|c| c.1.as_str()).collect();
+            assert_eq!(names, vec!["Scout Alpha", "Scout Bravo"], "discovers both unmaterialized and materialized exterior teammates; excludes dead, disabled, non-teammate, and too-near");
+            let parts = shown.world.as_ref().expect("world parts");
+            assert_eq!(parts.companion_font, COMPANION_FONT as u8);
+            assert_eq!(parts.companions.iter().map(|c| (c.0, c.2.as_str(), c.3)).collect::<Vec<_>>(), vec![(REF_PLACED_ONLY, "Scout Alpha", false), (REF_MATERIALIZED, "Scout Bravo", false)]);
+        }
+
+        // Enabling bNoMinCompanionMapDistance + bCompanionsUseLocationFontOnMap reveals the nearby teammate and switches to font 1.
+        {
+            let mut script = world.resource_mut::<crate::script::ScriptState>();
+            let g = &mut script.rt.as_mut().unwrap().game;
+            g.tweaks.no_min_companion_distance = true;
+            g.tweaks.companions_location_font = true;
+        }
+        {
+            let game = state.get_mut(&mut world).unwrap();
+            let shown = world_map(&mut st, &game, None, false);
+            let names: Vec<&str> = shown.companions.iter().map(|c| c.1.as_str()).collect();
+            assert_eq!(names, vec!["Scout Alpha", "Scout Bravo", "Close Scout"]);
+            assert_eq!(shown.world.as_ref().unwrap().companion_font, LOCATION_FONT as u8);
         }
     }
 }

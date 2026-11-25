@@ -1,5 +1,10 @@
 # Observer checks: gameplay guesses the original game can settle
 
+**This file takes no new checks** (#3674). A new check is a file of its own in
+[observer-checks/](observer-checks/README.md), so that pull requests adding checks do not
+conflict here. The numbered checks below stay until they are settled, keep their numbers,
+and get their partial answers here.
+
 Guesses about how the original behaves that a capture can settle without the owner.
 The observer can run scripts, take screenshots, record video, and tap keys, so it can
 also drive menus. Sorted by how much of the game each check moves, most first.
@@ -121,7 +126,9 @@ engine if needed, and delete the item here.
    or it starts alerted. Answers #1341's question.
 3. **Damage numbers.** Ours:
    - Power attacks do 3× standing and 2× moving.
-   - A damage type uses its resistance in place of DR (capped at 85 %, after DT).
+   - A damage type uses its resistance (capped at 85 %, after DT) as well as DR. That DR
+     cuts laser and plasma hits is answered [observed 2026-11-21: damage-armour.md §4,
+     #3218]; whether the resistance itself cuts them is still open.
    - Rippers, Chainsaw and Thermic Lance ignore DT/DR.
    - `fCombatPlayerLimbDamageMult` halves damage to the player's limbs.
    - Difficulty multipliers are 2/1.5/1/0.75/0.5 dealt and the inverse taken, including
@@ -3174,20 +3181,24 @@ already talking takes over at once, same topic or another; nothing is queued or 
      Guard05 (their health). Also: does a Securitron help when the player alone fights
      Oliver before the guards are down (it has its guard then)?
 
-## Added 2026-11-16 (SayTo's noTargetLookFlag, #2796)
+## Answered 2026-11-25 (SayTo's noTargetLookFlag, #2796)
+
 
 218. **Does `SayTo` with `noTargetLookFlag` 1 turn the speaker to its target?** (P2; #2796,
-     dialogue-play.md §9.2.) When an NPC runs `SayTo player <topic> 0 1`, does the speaker
-     turn to face the player? Ours: nobody turns, body or head [hypothesis]; without the
-     flag the speaker turns head and body to the target [owner decision 2026-10-11]. The
-     GECK wiki says only that the target "is not forced to look at the speaker"
-     [documented: GECK wiki SayTo]. Two places to watch: Camp McCarran's tower at night
-     during I Put a Spell on You (VMS08), entering the tower trigger with Curtis
-     (`CaptainCurtisREF` 0x000F6283) on the walkway behind the player's back: does he turn
-     for "Lupa, this is Frumentarius Picus, over." (VMS08CurtisRadio1) or keep talking
-     into the radio; and one of the McCarran monorail guards' warnings to the player.
-     Read his heading (`GetAngle Z`) and `GetHeadingAngle player` before and at the end of
-     the line. If he turns, the flag is the wiki's alone (only the target stays still).
+     dialogue-play.md §9.2.) Answered [observed, base game, 2026-11-25: capture jobs `o31_218_sayto_flag`, `o31_218b_sayto_flag` (outputs in the private capture folder)]:
+     **yes, the flag does not stop the speaker turning.** Ringo (nvftest, GSGasStation)
+     was moved 150 units in front of the player and faced away (GetHeadingAngle player
+     180), then `RingoRef.SayTo player GREETING 0 <flag>`: standing, he turned his body
+     to the player in about 0.8 s (≈ 30° per 6 frames, GetHeadingAngle 180 → 0) with flag 1
+     in 3 of 3 runs and with flag 0 in 2 of 2, the same rate; with no SayTo he stayed at 180.
+     Walking on his own package (his position changing every sample, procedure 48) he did
+     not turn with either flag (2 runs each). So the turn depends on whether the speaker is
+     free to turn, not on the flag; the flag can only be the wiki's (the *target* is not
+     made to look) [documented: GECK wiki SayTo]. Ours turns nobody with flag 1
+     (`crates/fnv-game/src/functions/misc.rs` `say_to`, test
+     `say_to_with_no_target_look_turns_nobody`): it differs. Still open: why Curtis does
+     not turn for VMS08CurtisRadio1 in the original (#2796's case: his package or idle at
+     the walkway, not the flag), and what the flag does to the target.
 
 ## Added 2026-11-16 (a talking activator's Say and SayTo, #2768)
 
@@ -3206,44 +3217,45 @@ already talking takes over at once, same topic or another; nothing is queued or 
      read `<activator>.IsTalking` and `<actor>.IsTalking`, and note whether a SayToDone
      block in the activator's script runs when it ends (a script print).
 
-## Added 2026-11-16 (an NPC saved while seated, #2797)
+## Answered 2026-11-25 (an NPC saved while seated, #2797)
+
 
 220. **Does an NPC saved while seated come back seated after a load?** (P2; #2797,
-     save-load.md §3.4, furniture.md.) Ours: a load stands every actor up (the saved
-     furniture use is cleared, GetSitting reads 0) and the NPC's AI seats it again from
-     where it stands if its package still sends it to a seat; the provisional reading of
-     the original is the same, it stands up and re-seats through its AI [hypothesis].
-     In Goodsprings at 09:00, with Easy Pete (`EasyPeteRef`) on his porch chair
-     (0x0010634A, `GetSitting` 3), save, load that save at once and log
-     `EasyPeteRef.GetSitting` every half second from the first frame for 20 s, with
-     `GetPos x/y`. If it reads 3 from the first frame with no getting-on, the original
-     keeps the seat in the save and puts the body straight back on it; if it reads 0
-     then 2, 3 (or he walks first), ours matches. The same with Colonel Hsu on his office
-     chair (0x000FB33A, CampMCTermInt02) gives a second case.
+     save-load.md §3.4, furniture.md.) Answered [observed, base game, 2026-11-25: capture jobs `o31_220a_pete_save`, `o31_220b_pete_load` (outputs in the private capture folder)]:
+     **yes, the original keeps the seat in the save.** Easy Pete (nvftest, GameHour set to
+     9, `GetSitting` 3 on his porch chair at -67968.8, 3450.4, 8387.3) was saved
+     (`save nvfo31pete`); on loading that save his `GetSitting` read 3 at the same position
+     to the tenth of a unit from the first sample (about 2 s after the load, when the
+     capture job could start) through 40 samples over 20 s: no 0, no getting-on (2), no
+     step. Ours stands every actor up on a load and lets the AI seat them again
+     (`Game::stand_everyone_up`): it differs. Not covered: the first 2 s after the load
+     (a re-seat that fast would also have moved him), Colonel Hsu's chair.
 
 ## Added 2026-11-16 (sentry bot missile pause, #2739)
 
+
 221. **How long does a sentry bot wait between two missile shots, and does it switch to its
-     gun between them?** (P1; #2739, combat-rules.md §4.1, combat-ai.md §19.) The owner saw
-     a pause between missiles in the original and none in NVForever [observed: owner
-     playtest]. The launcher `SentryBotMissileLauncher2HL` (0x00057E8F) has Clip Size 1,
-     Reload Animation ReloadB, 1.5789 Attack Shots/Sec and a Semi-Automatic Fire Delay of
-     0.1-0.5 s [documented: fnvtool esm decode, FalloutNV.esm]; the sentry bot's
-     `2hlattackleft.kf` runs 2.0 s with `Hit` at 0.067 s and `a:R` at 0.967 s, and its
-     folder has no reload clip [documented: fnvtool bsa list / nif decode, Fallout -
-     Meshes.bsa]. Ours now: a missile every 0.967 s (the player's rule: the next shot from
-     the `a:` key), no reload, the launcher kept until distance or a crippled limb makes
-     another gun suit [hypothesis]. Place a Hardened Sentry Bot (`CrSentryBotGLHard`
-     0x000E585D, launcher and laser gatling) about 1,500 units from the player in the
-     open, in combat with the player (god mode), and record a video of at least 30 s; then
-     the same with `CrSentryBotMGArmy` (0x000A5C6F, launcher and minigun), and once with
-     its gun arm crippled if the console allows. What to read off: the time from one
-     missile's launch to the next (0.97 s, 2.0 s for the whole clip, or longer); whether
-     anything like a reload plays between them; whether the gun fires between two
-     missiles and for how long; at what distances it uses the launcher at all; and how
-     many missiles it fires in a fight (does it run out: its inventory holds AmmoMissile
-     x1 plus up to four from AmmoMissilelauncher75). Also whether a robot whose folder has
-     no reload clip (Mister Gutsy's plasma gun or flamer) ever pauses as if reloading.
+     gun between them?** (P1; #2739, combat-rules.md §4.1, combat-ai.md §19.) Answered
+     [observed, base game, 2026-11-25: capture jobs `o31_221_sentry_missiles`, `o31_221b_sentry_hits` (outputs in the private capture folder)], no video: nvfairport,
+     player in god mode standing on the runway, each bot placed 1,500 units off with
+     StartCombat, `GetEquippedObject 5` every 2 frames, the hits on the player by weapon
+     from xNVSE's OnHitWith. **It fires one missile, then switches to its gun.**
+     - `CrSentryBotGLHard` (launcher and laser gatling), 40 s: launcher and gatling take
+       turns, 4.4-4.6 s with the launcher (the first turn 6.9 s) and 5.7-5.8 s with the
+       gatling (switches at
+       1.1, 8.0, 13.7, 18.3, 24.0, 28.6, 34.4, 38.8 s). Each launcher turn gives **one**
+       missile hit, 1.6-4.3 s after it was equipped (hits at 5.4, 15.8, 25.7, 36.0 s:
+       a missile every 9.9-10.4 s). Each gatling turn gives two bursts of 5-11 hits about
+       1.1-1.5 s apart.
+     - `CrSentryBotMGArmy` (launcher and minigun), 40 s: launcher 0-6.3 s (no hit seen),
+       minigun 6.3-12.5, launcher 12.5-17.1 (one missile, 14.4 s), minigun 17.1-35.0
+       (bursts every 4.5-5.5 s), launcher 35.0 (one missile, 36.9 s): missiles 22.5 s apart.
+     - Neither bot's `GetItemCount AmmoMissile` (4 and 2), Electron Charge Pack or 5mm count
+       went down: the fight spends none of its inventory, so it does not run out in 40 s.
+     - Both stopped closing in at about 1,110-1,330 units and held there.
+     Ours fires a missile every 0.967 s and keeps the launcher: it differs. Not covered:
+     a crippled gun arm, Mister Gutsy's guns, what plays between the missile and the switch
+     (the video).
 
 ## Answered 2026-11-16 (sky and grade, Capital Wasteland against the Mojave)
 
@@ -3320,39 +3332,42 @@ already talking takes over at once, same topic or another; nothing is queued or 
      and 10 (`player.setav perception`), to confirm Perception plays no part.
 
 
-## Added 2026-11-17 (OK on a message box without buttons, #2925)
+## Answered 2026-11-25 (OK on a message box without buttons, #2925)
+
 
 240. **What does GetButtonPressed give after OK on a message box that has no buttons?**
-     (P2; #2925, scripts.md §7.2 engine API.) The GECK wiki says a message box with no
-     buttons shows a default OK button and that GetButtonPressed gives the pressed
-     button's index from zero once, then -1 [documented: GECK wiki ShowMessage,
-     GetButtonPressed]; it does not say what the default OK gives. Ours: 0, once, then -1,
-     to the script that showed the box; a corner message (no Message Box flag) gives -1
-     [hypothesis: inferred from SCPT 0x000E9483, the Broken Mr. Handy in
-     BlackMountainTreasure, whose GameMode block waits for button 0 after BMRhondaFixMsg,
-     0x000E9551, a box without buttons]. In the Black Mountain treasure room with Science
-     60, activate REFR 0x000E84A4, pick "[Science] Check the robot's circuitry.", press OK
-     on the second box: if the robot gets up (`000E84A4.GetDead` 0, its new name, the
-     prompt no longer "Search"), the original gives 0. For a direct reading, a test
-     plugin's script that shows a buttonless message box and prints GetButtonPressed every
-     frame for a second after the OK (PrintC) gives the value and how many times it comes.
+     (P2; #2925, scripts.md §7.2 engine API.) Answered [observed, base game, 2026-11-25: capture jobs `o31_240_buttonless_ok` (outputs in the private capture folder)]:
+     **0.** In BlackMountainTreasure with Science 100, `RhondaREF.Activate player 1` opened
+     BMRhondaBrokenMsg (MenuMode 1001, two rows); JIP's ClickMenuButton on
+     `MessageMenu/NOGLOW_BRANCH/MM_MainRect/MM_ButtonList/MM_Button:0` (the lower row,
+     `_y` 52: "[Science] Check the robot's circuitry.", button 1) opened BMRhondaFixMsg
+     (one row, the default OK); a click on its OK closed it and Rhonda's GameMode block
+     took button 0: `RhondaREF.GetDead` went from 1 to 0 within a second. Ours gives 0:
+     the same. Two traps for the next run: a scripted `Activate player` skips the
+     OnActivate block (a dead creature's loot menu, 1008, opened); `Activate player 1` runs
+     it. The rows' names count from the bottom: `MM_Button:0` is the last row.
 
-## Added 2026-11-17 (SendAssaultAlarm on a faction with no member present, #2926)
+## Answered 2026-11-25 (SendAssaultAlarm on a faction with no member present, #2926)
+
 
 241. **What does `SendAssaultAlarm Player <faction>` do when no member of the faction is
-     present and alive?** (P3; #2926, crime-karma.md §3.5.) The wiki says only that it picks
-     "an NPC in the … faction" in place of the player [documented: GECK wiki
-     SendAssaultAlarm]. Ours: nobody turns and no crime is counted; the calling actor is
-     never the stand-in [hypothesis]. In Techatticup Mine, kill every raider of
-     `CaesarsLegionTechMineFaction` (0x001400F9) with the console, then free an NCR
-     hostage (`TechMineNCRHostage2REF`, button "Untie him."): log
-     `TechMineNCRHostage2REF.GetAlarmed`, `player.IsInCombat` and the hostage's combat
-     target for 10 s, and whether the second hostage's message box still opens. Then once
-     with the raiders alive: which raider turns (the nearest, the first in some order, or
-     all of them) and whether the guards at the entrance join. Ours picks the first member
-     in FormID order: TecLegionaryRaider5REF (0x0011F654) of 17 present and alive
-     [observed: our headless walkthrough techatticup-hostages-2926, #2926 probe].
-
+     present and alive?** (P3; #2926, crime-karma.md §3.5.) Answered
+     [observed, base game, 2026-11-25: capture jobs `o31_241a_alarm_dead`, `o31_241b_alarm_alive` (outputs in the private capture folder)]: nvftest, god mode, `coc
+     TechatticupMineInterior`, then `TechMineNCRHostage2REF.SendAssaultAlarm player
+     CaesarsLegionTechMineFaction` (the hostage script's line, run from a job).
+     - **All 17 members killed first** (`Kill`, no killer; two runs): nothing. For 10 s no
+       member, the hostage nor the player was in combat; afterwards
+       `TechMineNCRHostage1REF.Activate player 1` opened its message box (MenuMode 1001),
+       so the second hostage can still be freed. Ours: the same.
+     - **Members alive**: not one member but every one within about 1,900 units. 7 of the 17
+       were in combat 0.5 s later (6 on the player), 9 by 1.5 s, and the same 9 for the
+       rest of the 10 s, all with the player as their target: those 145-1,872 units from the
+       player (TecLegionaryRaider5REF 0x0011F654 among them); none of the 8 at 2,038 units
+       and more joined. None had been in combat before the call. Ours turns the first member
+       in FormID order (0x0011F654) and lets the combat-group alarm spread it: whether that
+       gives the same 9 is to be checked in a headless run.
+     Not covered: crime gold (the job's `player.GetCrimeGold` did not compile), the
+     guards at the entrance outside the cell.
 
 ## Added 2026-11-15 (radscorpion spacing and melee cadence, #2535)
 
@@ -3599,23 +3614,49 @@ already talking takes over at once, same topic or another; nothing is queued or 
      stands sizes it. Not in the list: the original's way is the theft (or a speech or
      barter line not in our list).
 
-## Added 2026-11-21 (the compass's actor ticks against the strip, #3310)
+## Added 2026-11-23 (two navmeshes of one cell with no link, #3473)
 
-261. **Where does an actor's tick on the compass end against the strip's line?** (P3;
-     #3310, hud.md §11.) The HUD file's box puts the tick's top at the compass window's
-     top (the group's run-time y 10, read from the original, over the template's 5, and
-     the tick's y -10); ours since #3310 draws the 26-unit tick so its bar ends 22 units
-     down the window, about 4 above the strip's upper line, where it ended on that line
-     before [hypothesis: the picture's bar is its top 22 texel rows, drawn a texel a
-     unit]. Outdoors at 1920 x 1080, HUD scale 100 % (1.125 pixels a unit, hud.md §4),
-     with a neutral NPC about 300 units ahead (Goodsprings, the settler of §14.5) and a
-     hostile one (a gecko), take one frame each, heading steady, and measure on the raw
-     1920 x 1080 capture, not a resized one: the tick's solid end, the top of its fade
-     and the span between, against the strip's doubled line and the bracket's long line
-     above it, in pixels. A fade and bar spanning about 25 pixels (22 units) agree with
-     the 22-row hypothesis, about 20 pixels (17.9 units) with our 26-unit size; a bar
-     ending about 4-5 pixels above the strip's upper line agrees with the new place, one
-     touching it says the old place was right.
+279. **Do actors walk up the stairs to the Sunset Sarsaparilla HQ's prize room?** (P2:
+     #3473, the quest pilot cannot reach Allen Marks' terminal in Legend of the Star;
+     navmesh.md §1.2.) The stairs and the two rooms are a navmesh of their own with no
+     link to the rest of the cell [observed: records]. In the original, with VMS09a at
+     stage 10 or later (the door unlocked) and a follower (Boone, or ED-E), walk from the
+     lobby up the stairs into the prize room and wait there 30 s: does the follower come
+     up after the player, wait at the foot of the stairs, or appear in the room some other
+     way (a jump to the player)? Then wait outside the room and `prid` the follower,
+     `MoveTo` it into the prize room, and see whether it walks back down to the player.
+     If it climbs, the original joins such navmeshes by a rule the records do not hold
+     (say how near the two edges are: 17 to 31 units across, a step of 31 or more); if
+     it does not, the rooms are the player's alone in the original too.
+
+## Added 2026-11-23 (Harland's greeting as the player leaves, #3464)
+
+280. **Does Harland greet a player who leaves his room in the REPCONN basement?** (P2:
+     #3464, a player could not leave; packages.md §3.) His Dialogue package has an
+     activate distance of 1200 and the doorway trigger as its trigger location; a second
+     trigger 370 units out on the way to the stairs calls `ResetAI` on him. In the
+     original, with VMS01 at stage 30 (the ghouls' friend not found yet): talk to Harland
+     and say goodbye, then walk out of his room towards the stairs and on past the reset
+     trigger. Say whether he greets again on the way out (where: in the doorway, past the
+     reset trigger, not at all), whether the player is walked back towards the doorway
+     or held, and whether coming back into the doorway greets again. If he greets past
+     the reset trigger without walking the player back, NVForever's 30 s rule matches;
+     if he never greets on the way out, the activate distance or sight is read
+     differently by the original.
+
+## Added 2026-11-22 (ammo the equipped weapon cannot fire, #3442)
+
+288. **Does the Pip-Boy's Ammo tab dim the ammo the equipped weapon cannot fire?** (P3:
+     #3442, a player expected it; with check 193, the mark on the loaded ammo.) Ours
+     [design]: every row at full strength; the loaded ammo's row carries the equipped
+     square. In the original, carry four kinds of ammo (12 gauge, 20 gauge, 9mm, .357)
+     and equip a 12 gauge shotgun, then open ITEMS, Ammo and take a frame; equip the 9mm
+     pistol and take another; holster the weapon and take a third; equip nothing (fists)
+     and take a fourth. For each frame say which rows are dimmer than the others (sample
+     the text's colour of a full-strength row and of a dim one), which row carries the
+     square, and whether a dim row can still be selected, dropped or put on a hotkey.
+     With a weapon that takes several kinds (12 gauge and its slugs, or the .357 with
+     .38 Special), say whether the other kinds it can fire are at full strength.
 
 ## Added 2026-11-21 (placing the custom map marker with the mouse, #3324)
 
@@ -3704,6 +3745,33 @@ already talking takes over at once, same topic or another; nothing is queued or 
        world shows through the fill while it flashes and from what condition it starts.
      And what is the slider's default?
 
+## Added 2026-11-21 (the game's own parallax height maps, #2979)
+
+265. **How deep is the original's parallax on shapes with a slot-3 height map, and is it one
+     offset or stepped?** (P2; #2979, nif.md §6 "Parallax height maps", pbr-materials.md
+     "The game's own height maps".) What NVForever implements since #2979 [design]: a lit
+     shape with BSShaderFlags bit 11 and a slot-3 texture draws it as parallax, on by
+     default, at 0.015 UV units, with relief mapping (at most 8 layers, then 4 refinement
+     steps), the step's divisor held at a view steepness of at least 0.15 (about 81 degrees
+     from the normal; the grazing clamp), no fade with distance, and only on opaque,
+     single-sided, non-decal, lit shapes; cut-outs (alpha-tested shapes) stay flat unless
+     the development switch `NVF_PBR_PARALLAX_MASK=1` is set. Whether the original draws
+     them anything like this is the [hypothesis] this check settles; the GECK wiki calls bit
+     11 alone "pretty weak" [documented: GECK wiki "NIF Shader Properties"]. In the
+     original, take frames of (a) a McCarran flagstone floor and (b) a rubble pile (one of
+     the seven `_p` texture sets nif.md §6 "Normal maps" lists), each at a steep view
+     (looking almost straight down), a shallow one (eye height, the surface running away
+     from the camera) and a grazing one (the eye a few centimetres above the floor, looking
+     along it), close (under 2 m) and far (about 15 m). Compare with NVForever at the same
+     views, once at the default and once with `NVF_GAME_PARALLAX_DEPTH=0` (flat). Read: how
+     far a stone's edge moves between the steep and shallow frames (in texels of the floor
+     texture), whether stones hide the grout behind them at the shallow view (stepped or
+     occlusion mapping) or only slide (a single offset), what the grazing view does (the
+     texture smeared, the relief flattened, or nothing odd), whether the relief is gone in
+     the far frames (a distance fade), whether a cut-out with a height map shows relief, and
+     whether the concrete impact decal shows any. The depth switch (0 to 0.08) and
+     `NVF_PBR_PARALLAX_METHOD=occlusion|relief:<n>` let the default be fitted to the frames.
+
 ## Added 2026-11-21 (the music under the Pip-Boy radio, #3311)
 
 266. **What does the Pip-Boy radio do to the music?** (P2; #3311, audio.md §13.2 item 9,
@@ -3726,6 +3794,20 @@ already talking takes over at once, same topic or another; nothing is queued or 
      altogether, the Pip-Boy still on, does the music come back (ours: yes)? Last, with
      the Radio volume at 0 and a station playing: is the music still turned down (ours:
      no)?
+
+## Added 2026-11-21 (relief on the landscape's texture layers, #3322)
+
+268. **Does the original draw any parallax or relief on the landscape's texture layers?**
+     (P3; #3322, pbr-materials.md "Terrain layers: parallax".) NVForever's terrain
+     parallax is an addition of its own until this is answered; ours assumes the original
+     draws none, as no landscape texture set is known to name a height texture
+     [hypothesis]. Outside Goodsprings at noon, stand on a stony layer (gravel or rocks
+     painted over the dirt base), look down at about 30 degrees and strafe slowly sideways
+     for a few seconds, then crouch and repeat closer: stones whose painted bumps slide
+     against each other as the view moves say the original draws relief; texels that move
+     rigidly with the ground say it draws none. The data offers none: no LTEX texture set
+     of FalloutNV.esm names a `TX04` map [documented: counted with fnvtool, 2026-11-21;
+     pbr-materials.md "Terrain layers: parallax"].
 
 ## Added 2026-11-21 (a lakelurk standing on a deep lake bed, #2980)
 
@@ -3769,6 +3851,45 @@ already talking takes over at once, same topic or another; nothing is queued or 
        observed: the placed lakelurk again landed on the deep bed.
      Still open: the pose at rest on the bed (standing idle or swim idle) and the
      T-pose question, which need someone at the controls.
+
+## Added 2026-11-21 (Dead Money's hologram colours, #3017)
+
+270. **How does a Dead Money hologram look in each threat state, and does its membrane
+     fade with its flicker?** (P2; #3017, effect-shaders.md §4, §5, §9.) The three shaders
+     (`NVDLC01HologramNeutral` blue, `NVDLC01HologramAttention` yellow,
+     `NVDLC01HologramAggressive` red) are additive membranes with "Edge Effect Inverse"
+     [observed: the maintainer's decode in #3017]. Ours since #3017: the edge darkens the
+     rim instead of adding a pale one, the membrane stays on through SetActorAlpha and
+     fades with the actor's alpha (gone at 0), a threat colour played on a hologram ends
+     its other colour, and a neutral play over a threat colour is not played [hypothesis,
+     each]. In the Sierra Madre casino (or the Villa),
+     take one 1280 x 720 frame of one hostile hologram calm (blue, the player beyond 600
+     units), noticing (yellow, within 600) and attacking (red); then (a) whether the rim
+     of each is darker or brighter than the middle; (b) during a flicker (the hologram
+     blinks out), whether the coloured glow stays visible while the body is gone; (c) after
+     a save loaded with the hologram in combat (its ability script plays the red shader
+     without stopping the blue one), whether one colour shows or a blue-red mix. Ours
+     shows red alone [hypothesis]; (d) after a save loaded with the hologram alerted but
+     not fighting, whether it stays yellow or turns blue about a second later (ours: stays
+     yellow) [hypothesis].
+     **Partly answered 2026-11-22** [observed: the maintainer's run in #3423, base game + all
+     DLC + xNVSE + JIP LN, save `nvfdoc`, `coc NVDLC01Vault`, 1280 x 720; job
+     `o270_holograms`]. No Dead Money save: a hologram (CREA `NVDLC01CrHologramVaultMale`)
+     was placed with `PlaceAtMe` in the Sierra Madre vault and never turned hostile.
+     - **Calm look:** at 200 units pale cyan, about (167, 233, 241) over its pixels; by eye
+       its edges read brighter than its middle, which carries horizontal scan lines.
+       Whether the blue membrane or the model's own texture makes the bright edge was not
+       separated, so it neither confirms nor rules out ours (a darkening edge).
+     - **Yellow and red: not seen.** With `pms` of `NVDLC01HologramAttention` and then
+       `NVDLC01HologramAggressive` (after `sms` of the others) it stayed pale cyan, only
+       dimmer or brighter between frames.
+     - **SetActorAlpha:** at 0.5 unchanged by eye, at 0.1 still plainly visible (about 0.7
+       of its brightness), at 0 nothing drawn and no glow left without the body, also
+       after `sms`. Ours agrees at 0; ours fades the membrane in step with the alpha
+       between, which the 0.1 frame does not show.
+     Still open: (b) the colours during its own flicker, (c) and (d) after a save loaded
+     in combat or alert, and the threat colours; they need a hostile security hologram
+     with its emitter, in the casino or the Villa, from a Dead Money save.
 
 ## Added 2026-11-16 (environment maps on other shapes, #2841)
 
@@ -3996,3 +4117,128 @@ capture setup, so every part of a check that needs an interior is still open.
        neither plant's reading changed. Whether a bullet struck the plant itself was not
        confirmed: the crosshair read no reference at 150 units. These positions are
        meaningful because the same reading followed the grabbed nettles above.
+
+## Added 2026-11-23 (enemies left behind in another cell, #3390)
+
+281. **How long does an enemy left in an unloaded cell stay in combat with the player?**
+     (P2: #3390; alert.md §2.) Ours [design]: it is hidden 1 s after it was last measured,
+     Lost at 15 s without detecting the player (fCombatDetectionLostTime), Normal once
+     hidden for 30 s (fCombatTargetLostRemoveTime), since nothing searches there. In the
+     original, have an interior enemy (the Broc Flower cave's rats) fight the player, read
+     its `IsInCombat`, `GetCombatTarget` and `GetCurrentAIProcedure` and the player's
+     `IsInCombat` once a second, leave by the load door and go on reading for 5 minutes,
+     sneaking now and then to see the sneak word. Say when each ends, whether the enemy
+     follows through the door, and whether it fights on at once when the player goes back
+     in after 20 s and after 2 minutes. Then the same outdoors: outrun an enemy until its
+     cell unloads.
+
+## Added 2026-11-23 (the GOODBYE topic without the Goodbye flag, #3477)
+
+283. **Does a GOODBYE line without the Goodbye flag end the conversation?** (P2; #3477,
+     dialogue.md §5.) Ours since #3477 [hypothesis]: yes, when the line is over, if
+     nothing it links to can be said (none in the data links anywhere). Talk to Keith (NPC
+     1EKeith 000F839C, reference 000F83A5, Aerotech Suite 200, cell
+     AerotechOfficeInterior02) and pick the generic Goodbye at the end of his topic list
+     (INFO 0014E019): does the dialogue menu close after the line, or does his topic list
+     come back? Note also whether the generic Goodbye is offered at all, as his only
+     flagged entry is the game of Caravan. Jerry the Punk (reference 001413BF) has the
+     other line, 0014C483; in Fallout 3, Pronto (Paradise Falls) has 000384CF.
+
+## Added 2026-11-23 (fast travel from an interior, #3434)
+
+285. **Does an interior refuse fast travel, and does CELL DATA bit 2 turn that round?**
+     (P2: #3434; fast-travel.md §2.) Ours: every interior refuses with the map's box and
+     `sNoFastTravelCell`'s text [documented: GECK wiki EnableFastTravel]; with bit 2 set
+     an interior allows travel and an exterior refuses it [hypothesis: "Invert Fast
+     Travel Behavior" on the wiki's GetCellFlag page, against the editor's "Can't Travel
+     From Here"]. No cell of the masters sets the bit, so set it by script.
+     - Needs xNVSE, JIP LN and ShowOff; a save in Goodsprings with no hostile near, the
+       player not over-encumbered. First `EnableFastTravel 1` and `ShowMap` with
+       canTravel 1 on Primm's marker (000CDF46), then `coc GSGeneralStore` (001057F1).
+     - (a) **Unflagged interior**: read `GetCellFlag` 2 and 7 of the cell (expect 0, 0)
+       and `GetPCCanFastTravel`; then open the Pip-Boy's World Map, click Primm, and take
+       a screenshot: the question, or a refusal? If a refusal, its text, whether it is a
+       box with a button or a corner message, and whether the map stays up; compare with
+       `GetGameSetting sNoFastTravelCell`. Expect 0 and that text.
+     - (b) **Flagged interior**: `SetCellFlag GSGeneralStore 2 1`, read both again and
+       click Primm again. Expect 1 and the question; 0 and the refusal mean the bit does
+       not invert. Answer No. If (b) reads as (a), leave by the door, come back with the
+       flag still set and read once more (it may be read only on entry). Clear the flag.
+     - (c) **Flagged exterior**: in Goodsprings read `GetPCCanFastTravel` (expect 1), set
+       the bit on the player's parent cell, read again, click Primm and take a
+       screenshot; clear it. Expect 0 and the same text.
+     - (d) **Fake exterior**: in GSGeneralStore with bit 2 clear, `SetCellFlag
+       GSGeneralStore 7 1` (leave and re-enter if nothing changes) and read
+       `GetPCCanFastTravel`. Ours: 1 [hypothesis]. With Dead Money loaded,
+       `coc NVDLC01stealthTest` (bit 7 in its record) reads the same with no script.
+
+## Added 2026-11-23 (unlit shapes faded by vertex alpha alone, #3443)
+
+286. **Is an unlit shape with a fading vertex alpha, no texture and no NiAlphaProperty
+     see-through?** (P3: #3443; nif.md §6 "Unlit shapes faded by vertex alpha alone".)
+     Ours [hypothesis]: yes, blended by its vertex alpha. Two places in the original:
+     - base game: a bare gurney in the Camp McCarran Concourse (`CampMCTermInt01`,
+       `gurney01.nif`, 000FBA8F at 4032, -616, 18240), from standing height beside it. Its
+       shape `Gurney01:2` is a black sheet of 144 × 64 units lying under it, alpha 0.6 to 0
+       towards the edges. Say whether the floor under the gurney shows a soft dark patch, a
+       hard-edged black rectangle or nothing.
+     - Lonesome Road: the end of the silo lift (`NVDLC04Silo2Elevator`), from -87, 3502,
+       2069 facing 167°. Ride the lift, or play `Right` on
+       `NVDLC04SiloElevatorShaft01Ref` to `06Ref` and enable
+       `NVDLC04SiloElevatorLightsEndREF`. Say whether the cone of light (350 units wide,
+       500 high, from 0, 3126, 2575 down) lets the hall behind it through, how bright it
+       is, and whether it lightens the floor under it.
+
+## Added 2026-11-23 (a thrown Lobber with gravity 0, #3441)
+
+289. **Does a thrown Nuka-grenade arc like a frag grenade?** (P2; #3441, combat-rules.md
+     "A Lobber whose gravity is 0".) Its PROJ (`NVDLC05GrenadeNukaProjectile`, GRA) is a
+     Lobber with gravity 0.0; the frag grenade's (`GrenadeFragProjectile` 000043F9) has
+     1.0. Ours [hypothesis]: a Lobber of 0 falls under the full gravity, so both arcs
+     match at the same speed. On flat open ground (the Goodsprings playground), aim level
+     and throw one of each: does the Nuka-grenade drop and land at about the frag's
+     distance, or fly straight on? Throw a plasma mine (`MinePlasmaProjectile`, also 0)
+     and a frag mine (1.0) the same way and say whether they land at the same distance.
+
+## Added 2026-11-23 (the meal on the table eating idles, #3610)
+
+290. **Where is the plate of a table eating idle?** (P3; #3610, idles.md §10 "Objects
+     hung from the accumulation root".) Ours [hypothesis]: `aogenericmeal.nif` hangs from
+     `Bip01` in its bind pose, so the plate sits about 70 units in front of the seated
+     actor and 71 above the floor. In Primm's NCR tent (cell PrimmTentsHayes), when Lt.
+     Hayes (PrimmHayesREF) sits at the table and plays `SitTableChairEatB` (or
+     `PrimmHayesREF.PlayIdle SitTableChairEatB` once he is seated), say whether a plate
+     of food appears on the table in front of him, and roughly where it sits relative to
+     his chest and to the table top. A student's `aostudenttestpaper.nif` hangs the same
+     way, if one is easier to find.
+
+## Added 2026-11-23 (how long the quest lines stay, #3436)
+
+291. **How long do "Quest added", "Quest completed" and "Location discovered" stay on
+     screen, and how do they come and go?** (P2; #3436, quest-messages.md §5–§6, hud.md
+     "Location discovered".) Ours [design]: each banner 4 s, an objective list 4 s and
+     1.5 s more for each objective after the first, each fading in and out over 0.25 s,
+     the name's letters coming in over 0.6 s; a player found them too fast against the
+     original (#3436). The data does not say: `hud_main_menu.xml` gives the HUD's
+     `menufade` 0.25 and no times for `QuestReminder`, and `fDefaultNoticeTextDisplayTime`
+     (0.5) is not known to apply. Record at 60 fps, from the first frame a line shows to
+     the last: (a) the first "Quest added" of a new game (Ain't That a Kick in the Head, at
+     Doc Mitchell's); (b) its
+     objective line after the banner, and a list of two or more objectives; (c) "Quest
+     completed"; (d) "Location discovered" with its name and "+10 XP" (walk into
+     Goodsprings Source from the town). For each: when the words appear, when the name
+     has fully come in (and whether it comes letter by letter or fades), when it starts
+     to go and how long the fade lasts, and the gap before the next line.
+
+## Added 2026-11-23 (HasFriendDisposition's friend level, #3615)
+
+292. **At what disposition does HasFriendDisposition turn 1, and towards whom?** (P3;
+     #3615, `crates/fnv-game/src/functions/actor.rs` `FRIEND_DISPOSITION`.) Ours
+     [hypothesis]: 1 when the actor's disposition towards the player is 70 or more. The
+     GECK wiki speaks of a "friend disposition game setting" without naming it, and no
+     GMST in FalloutNV.esm is one. In the console, select an NPC (Sunny Smiles in the
+     Prospector Saloon), `SetDisposition player 100`, then `GetDisposition player` and
+     `HasFriendDisposition`; lower it in steps (`SetDisposition player 80`, 70, 60, 50 ...)
+     and note the lowest value at which it still reads 1. Then `SetDisposition` towards
+     another actor at 100 with the player's at 0: does it read 1 (not towards the player
+     only)?

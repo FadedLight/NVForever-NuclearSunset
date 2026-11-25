@@ -9,6 +9,7 @@
 //!   (handoff.rs: loading a save starts a new process) follows the stored answer and never
 //!   asks; it is where the player plays after a load, so it collects and sends like any. `NVF_REPORTS=1` turns it on without asking (tests; such a run sends
 //!   only to `NVF_REPORTS_ENDPOINT`, never to the project's server).
+//!   Android never collects or sends player reports, regardless of saved or test settings.
 //! - **Official builds only** [owner 2026-11-11]: a build is official when the release
 //!   workflow made it (`NVF_OFFICIAL_BUILD=1` at build time). A local build never asks and
 //!   never sends to the project's server, as development sessions would skew what reports
@@ -218,6 +219,9 @@ pub fn decide(developer_data: bool, handoff: bool) {
 }
 
 fn choose(developer_data: bool, handoff: bool) -> Option<Active> {
+    if cfg!(target_os = "android") {
+        return None;
+    }
     let home = EngineHome::user()?;
     let test_on = std::env::var("NVF_REPORTS").is_ok_and(|v| v.trim() == "1");
     let endpoint_env = std::env::var("NVF_REPORTS_ENDPOINT").ok().filter(|v| !v.trim().is_empty());
@@ -909,6 +913,12 @@ fn write_summary(mut exit: MessageReader<AppExit>, script: Option<Res<nvf_play::
             info!("reports: no summary for this run (it never reached the world)");
         }
         return;
+    }
+    // What the last frame's log lines found: a GPU error that stops the game (`gpu_error`)
+    // is logged in the frame the game exits in, after `detect` ran (#2758).
+    if exiting {
+        let t_s = c.started.elapsed().as_secs();
+        c.detectors.drain_log(&mut c.summary, &c.here, t_s);
     }
     bring_up_to_date(c, script.as_deref(), exiting);
     let bytes = c.summary.to_bytes(redact);

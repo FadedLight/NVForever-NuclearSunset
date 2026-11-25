@@ -178,6 +178,28 @@ pub fn targets(ui: &Ui, t: TileId) -> bool {
     flag(ui, t, "target")
 }
 
+/// The tile a script click (`ClickMenuTile`) acts on: `t` itself when its own `target` is
+/// true, else the nearest `<hotrect>` above it whose `target` is true [documented:
+/// Hotrect, "Hotrect with Target set to 1 will enforce it to its childs even if child
+/// Target is set 0"; ClickMenuTile, "should work with any interactable UI tile"].
+pub fn clickable_target(ui: &Ui, t: TileId) -> Option<TileId> {
+    if !ui.is_live(t) {
+        return None;
+    }
+    if targets(ui, t) {
+        return Some(t);
+    }
+    let mut at = ui.tile(t).parent;
+    while let Some(id) = at {
+        let tile = ui.tile(id);
+        if tile.kind == "hotrect" && targets(ui, id) {
+            return Some(id);
+        }
+        at = tile.parent;
+    }
+    None
+}
+
 /// The tile itself, or the nearest above it, whose own `target` is true.
 fn event_tile(ui: &Ui, t: TileId) -> Option<TileId> {
     let mut at = Some(t);
@@ -868,7 +890,7 @@ mod tests {
         let r = p.step(&mut ui, &[menu], &at(120.0, 115.0), &no_measure);
         assert_eq!(r.over, Some((None, Some(ok))));
         assert_eq!(ui.get_float("TestMenu/Main/OkButton/mouseover"), Some(1.0));
-        // The parent rect and the child label get none [hypothesis].
+        // The parent rect and the child label get none (see production `Pointer::step` above).
         assert_eq!(ui.get_float("TestMenu/Main/mouseover"), None);
         assert_eq!(ui.get_float("TestMenu/Main/OkButton/label/mouseover"), None);
         // A still pointer: no change, nothing reported.
@@ -897,7 +919,7 @@ mod tests {
         assert_eq!(ui.get_float("TestMenu/Main/OkButton/clicked"), Some(1.0));
         ui.update();
         assert_eq!(ui.get_float("TestMenu/Main/OkButton/_times"), Some(1.0));
-        // The next frame, the button still held or not: back to 0 [hypothesis: the press].
+        // The next frame, the button still held or not: back to 0 (see production `Pointer::step` above).
         let r = p.step(&mut ui, &[menu], &at(120.0, 115.0), &no_measure);
         assert!(r.clicks.is_empty());
         assert_eq!(ui.get_float("TestMenu/Main/OkButton/clicked"), Some(0.0));

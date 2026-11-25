@@ -689,14 +689,15 @@ class RequiresTests(unittest.TestCase):
         self.assertEqual([(v.status, v.reason) for v in verdicts], [("SKIP", f"unset {self.VAR}")])
 
     def test_repo_developer_aid_scenarios(self):
-        """A scenario of the volumetric clouds that sets a developer aid (a debug variable a release
+        """A scenario of the volumetric clouds or the light in the air that sets a developer aid (a debug variable a release
         build does not read: engine/nvforever/src/dev_aids.rs) says which build it is for."""
         suite = load(HERE / "scenarios.toml")
-        aids = ("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", "NVF_PLAY_DEBUG_MEDIUM", "NVF_PLAY_DEBUG_FAIR_SUN", "NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE")
+        aids = ("NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS", "NVF_PLAY_DEBUG_MEDIUM", "NVF_PLAY_DEBUG_FAIR_SUN", "NVF_PLAY_DEBUG_CLOUD_SHADOWS_SOURCE",
+                "NVF_PLAY_DEBUG_SOLID_CORES", "NVF_PLAY_TEST_SHOT_DIFF")
         using = [s for s in suite.scenarios if any(k.startswith(aids) for k in s.env)]
         self.assertTrue(using)
         for s in using:
-            if s.name == "volumetric-clouds-no-aids":
+            if s.name in ("volumetric-clouds-no-aids", "volumetric-light-no-aids"):
                 self.assertEqual(s.requires, ["!NVF_SMOKE_DEV_AIDS"])
             else:
                 self.assertEqual(s.requires, ["NVF_SMOKE_DEV_AIDS"], s.name)

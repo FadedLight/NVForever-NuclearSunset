@@ -70,6 +70,10 @@ mod cell_resets;
 mod cloud_noise;
 mod cloud_shadows;
 mod medium;
+mod medium_air;
+mod medium_air_compose;
+mod medium_air_grid;
+mod medium_air_light;
 mod volumetric_clouds;
 mod volumetric_clouds_light;
 mod volumetric_clouds_lightvol;
@@ -77,6 +81,7 @@ mod volumetric_clouds_model2;
 #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 mod volumetric_clouds_tune;
 mod volumetric_clouds_wisp;
+mod medium_air_demand;
 mod alert;
 mod anim_sounds;
 mod dev_aids;
@@ -215,6 +220,7 @@ mod sun_heightfield;
 mod imagespace;
 mod imposters;
 mod sky;
+mod solid_cores;
 mod night_sky;
 mod start_times;
 mod sun_visibility;
@@ -633,7 +639,7 @@ struct Args {
     dlss_model: Option<upscaler::DlssModel>,
     /// Instead of --graphics: exactly these improvements on, by the settings page's keys
     /// (ambient-occlusion, fine-shadows, bloom, sharpen, anisotropic, light-shafts,
-    /// water-reflections, water-effects, terrain-height-blend, terrain-anti-tiling, terrain-parallax, cloud-shadows, terrain-shadows, heat-haze, desert-haze, volumetric-clouds, aerial-perspective, night-sky-detail, distant-lights, and
+    /// water-reflections, water-effects, terrain-height-blend, terrain-anti-tiling, terrain-parallax, cloud-shadows, terrain-shadows, heat-haze, desert-haze, volumetric-clouds, volumetric-light, aerial-perspective, night-sky-detail, distant-lights, and
     /// mesh-terrain-blend, which no look turns on) and choices (fxaa, smaa or taa instead of --msaa;
     /// shadow-filter-hardware or shadow-filter-temporal; full-detail-7x7 or full-detail-9x9;
     /// distant-objects-8 or distant-objects-12; volumetric-clouds-performance or
@@ -2002,6 +2008,10 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)
     .add_plugins((imagespace::ImageSpacePlugin, sky::SkyPlugin, cloud_shadows::CloudShadowsPlugin, volumetric_clouds::VolumetricCloudsPlugin, graphics::GraphicsPlugin(graphics, msaa, frame_times), minimap_render::MinimapRenderPlugin))
+    // The volumetric medium's light in the air (#3032 stage 3; off unless its row or its debug aid asks).
+    .add_plugins((medium_air_grid::MediumAirPlugin, medium_air_light::AirLightPlugin))
+    // Its solid cores of blended shapes (only while the light is drawn).
+    .add_plugins(solid_cores::SolidCoresPlugin)
     // The sun visibility factor: cloud and terrain shadows on the sun (off until a producer sets it).
     .add_plugins(sun_visibility::SunVisibilityPlugin)
     // The ambient occlusion's shader for the lighting (imported only under its def).

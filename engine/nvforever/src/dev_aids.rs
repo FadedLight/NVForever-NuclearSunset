@@ -12,7 +12,8 @@
 //! `#[cfg(any(test, debug_assertions, feature = "dev-aids"))]`.
 //!
 //! The debug switches older than this module are read in every build, as is `NVF_PLAY_TEST_*`
-//! (nvf-play's test_aid.rs).
+//! (nvf-play's test_aid.rs) but for `NVF_PLAY_TEST_SHOT_DIFF`, which nvf-play compiles in under the
+//! same condition (its own `dev-aids` feature, which this crate's turns on).
 
 /// Whether this build has the developer aids.
 pub const ON: bool = cfg!(any(test, debug_assertions, feature = "dev-aids"));
@@ -37,6 +38,12 @@ mod tests {
         let read = ["env", "::var"].concat();
         for (name, text) in [
             ("medium.rs", include_str!("medium.rs")),
+            ("medium_air.rs", include_str!("medium_air.rs")),
+            ("medium_air_compose.rs", include_str!("medium_air_compose.rs")),
+            ("medium_air_demand.rs", include_str!("medium_air_demand.rs")),
+            ("medium_air_grid.rs", include_str!("medium_air_grid.rs")),
+            ("medium_air_light.rs", include_str!("medium_air_light.rs")),
+            ("solid_cores.rs", include_str!("solid_cores.rs")),
             ("volumetric_clouds.rs", include_str!("volumetric_clouds.rs")),
             ("volumetric_clouds_light.rs", include_str!("volumetric_clouds_light.rs")),
             ("volumetric_clouds_lightvol.rs", include_str!("volumetric_clouds_lightvol.rs")),

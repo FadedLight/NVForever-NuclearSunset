@@ -1196,6 +1196,25 @@ below cover them all.
 - More: docs/design/graphics-enhanced.md §3.19
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `volumetric-light`: Volumetric light (experimental)
+
+- On the page: On: sunlight shows in the air as rays and a glow toward a low sun, shaded by
+  hills and clouds. Best with Cloud shadows and Terrain shadows on. An addition of
+  NVForever's.
+- While it is on at a strength above 0, Sun shafts are greyed on the game's page (they give way to it where
+  it draws). A prototype. Outdoors by day
+  only, in the main view only. Off in every preset; not in the original.
+- Command-line switches: `--graphics-only`
+- More: docs/design/volumetric-medium.md
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `volumetric-light-strength`: Volumetric light strength
+
+- On the page: How strongly the light in the air brightens lit air and darkens shaded air:
+  100% is the look as tuned, 0% none.
+- 0 % to 200 % in steps of 10 %, 100 % by default; greyed while Volumetric light is off.
+- Registered in `engine/nvforever/src/settings.rs`
+
 ### `bloom`: Bloom
 
 - On the page: On: light brighter than a sunlit white wall (the sun, lamps, windows) glows

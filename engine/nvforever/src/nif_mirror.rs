@@ -1117,6 +1117,51 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
 
+    /// The light in the air draws solid cores of some shapes (solid_cores.rs, #3032), loose
+    /// entities of their own: switching it on and off leaves the shapes' components (their
+    /// archetype) and children, the reference's root, the node walk and a dropped item's flat
+    /// look as they were.
+    #[test]
+    fn the_lights_solid_cores_leave_the_model_as_it_is() {
+        use crate::solid_cores::tests as cores;
+        const R: u32 = 7;
+        let mut app = cores::app(Some(true));
+        let m = cores::add(&mut app, cores::tank());
+        let plain = cores::add(&mut app, nvf_assets::nif_material(StandardMaterial::default()));
+        // A reference drawn as two flat shapes of its cell, one with a core; one with nodes.
+        let w = app.world_mut();
+        let cell = w.spawn((Transform::IDENTITY, Visibility::Inherited)).id();
+        let root = w.spawn((nvf_play::RefVisual(8), Transform::IDENTITY, Visibility::Inherited)).id();
+        let item = w.spawn((nvf_play::dropped::DroppedRoot(9), nvf_play::dropped::DroppedModel("meshes\\item.nif".into()), Transform::IDENTITY, Visibility::Inherited)).id();
+        let shapes = [(&m, cell, R), (&plain, cell, R), (&m, root, 8), (&m, item, 9)].map(|(m, parent, r)| {
+            let e = cores::place(&mut app, m);
+            app.world_mut().entity_mut(e).insert((nvf_play::RefVisual(r), Name::new("Shape"), ChildOf(parent)));
+            e
+        });
+        app.world_mut().spawn((Transform::IDENTITY, Visibility::Inherited, Name::new("Below"), ChildOf(shapes[2])));
+        let mut told = |on: bool| {
+            app.insert_resource(crate::medium_air_demand::AirDraws(on));
+            app.update();
+            assert_eq!(cores::cores(&mut app).len(), if on { 3 } else { 0 });
+            let w = app.world_mut();
+            let kept = [cell, root, item, shapes[0], shapes[1], shapes[2], shapes[3]].map(|e| (w.entity(e).archetype().id(), w.get::<Children>(e).map(|c| c.to_vec())));
+            let seen = w
+                .run_system_once(move |rigs: Rigs, visuals: Visuals, nodes: NodeQuery, dropped: Dropped| {
+                    let tops = [R, 8, 9].map(|r| root_of(r, ModelView::Reference, &rigs, &visuals));
+                    let drawn: Vec<Entity> = visuals.iter().map(|v| v.0).collect();
+                    (tops, drawn, walk(root, &nodes, &RigNames::default()), drawn_flat(9, &dropped))
+                })
+                .unwrap();
+            (kept, seen)
+        };
+        let off = told(false);
+        assert_eq!(off.1.2.len(), 2, "the shape and the node below it");
+        assert_eq!(off.1.3.as_deref(), Some("item.nif"));
+        for on in [true, false, true] {
+            assert!(told(on) == off, "light {on}");
+        }
+    }
+
     /// #2981: a script's alpha-only edit writes every value back, glossiness included; on an
     /// authored material the set's roughness and reflectance stay, the glossiness goes to the
     /// legacy look and applies when the look is restored. A legacy material takes it at once.

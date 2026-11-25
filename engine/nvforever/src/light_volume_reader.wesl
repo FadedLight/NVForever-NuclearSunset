@@ -2,7 +2,7 @@
 // `LightVolumeReader`, docs/design/graphics-enhanced.md §3.23 "Ground shadows from the light
 // volume"): the optical depth toward the light at a world position, from the completed front sets
 // of the volumetric clouds' light volume. One module for every reader outside the trace (the
-// ground cloud shadows; reflections later); the trace keeps its own
+// ground cloud shadows and the light in the air, medium_air_grid.wesl; reflections later); the trace keeps its own
 // reader (volumetric_clouds_march.wesl `vc_light_handoff`), whose addressing this one repeats.
 //
 // The contract (what a reader may assume):

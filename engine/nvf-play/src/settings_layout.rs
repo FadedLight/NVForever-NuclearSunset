@@ -332,8 +332,9 @@ mod shared_table_tests {
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
     /// shadows row; #2981's authored materials row and its reflections row; #2701's
     /// full-detail scenery row; #3014's distant objects row; #2993's aerial perspective row;
-    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row; #2991's volumetric clouds row; #3783's occlusion culling row), by the group it registers with.
-    const KNOWN: [(&str, &str); 155] = [
+    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row; #2991's volumetric clouds row; #3783's occlusion culling row; #3032's volumetric light row and its
+    /// strength), by the group it registers with.
+    const KNOWN: [(&str, &str); 157] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -470,6 +471,8 @@ mod shared_table_tests {
         ("aerial-perspective", "Graphics"),
         ("night-sky-detail", "Graphics"),
         ("distant-lights", "Graphics"),
+        ("volumetric-light", "Graphics"),
+        ("volumetric-light-strength", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-effects", "Graphics"),
         ("water-mirror", "Graphics"),
@@ -747,6 +750,13 @@ mod shared_table_tests {
         assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
         assert_eq!(at("light-shadows"), "Graphics > Shadows", "after Terrain shadows (light_shadows.rs)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
+        assert_eq!(at("volumetric-light"), "Graphics > Lighting and Effects", "with the other experimental effects (#3032)");
+        assert_eq!(at("volumetric-light-strength"), "Graphics > Lighting and Effects", "right after its switch");
+        // The strength is greyed while its switch is off.
+        assert_eq!(needs("volumetric-light-strength"), vec![Rule { parent: "volumetric-light", choices: &[], why: "Needs Volumetric Light." }]);
+        // Sun shafts have no shared rule: whether Volumetric light replaces them depends on its
+        // strength (nvforever settings.rs `shafts_status`, the game's page alone).
+        assert_eq!(needs("light-shafts"), vec![]);
         assert_eq!(l.control_placement("bind:Jump").unwrap().path(), "Controls > Movement");
         assert_eq!(l.control_placement("bind:Sprint").unwrap().path(), "Controls > Movement", "beside the movement controls (#3000)");
         // Sprint is not greyed under the Global Toggle, as its Advanced Movement neighbours
@@ -961,7 +971,7 @@ mod android_profile_tests {
     /// overhaul's menu font, the Advanced Movement rows of tech/movement-inertia, Weapon
     /// Inertia and Camera Motion in place of weapon sway and head bob, and the Quick Loot
     /// rows), by the group it registers with.
-    const KNOWN: [(&str, &str); 226] = [
+    const KNOWN: [(&str, &str); 228] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -1098,6 +1108,8 @@ mod android_profile_tests {
         ("aerial-perspective", "Graphics"),
         ("night-sky-detail", "Graphics"),
         ("distant-lights", "Graphics"),
+        ("volumetric-light", "Graphics"),
+        ("volumetric-light-strength", "Graphics"),
         ("water-reflections", "Graphics"),
         ("water-effects", "Graphics"),
         ("water-mirror", "Graphics"),

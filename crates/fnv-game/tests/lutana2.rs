@@ -288,10 +288,20 @@ fn hotkeys_ini_writers_and_forms() {
     assert_eq!(n(&mut g, r#"GetINIFloat "Main:fA" "NVFTestLU2""#), 1.5);
     q(&mut g, r#"RemoveINISection "Main" "NVFTestLU2""#);
     assert_eq!(n(&mut g, r#"GetINIFloat "Main:fA" "NVFTestLU2""#), 0.0);
-    // The food flag off, as the page's example [documented].
+    // The food flag off, as the page's example [documented], and Medicine (4) + bitmask tests
+    // [observed: w6d2p2_25_ingestible_flag_and_skill_magazine].
     assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 2"), 1.0, "Food");
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 4"), 0.0, "Food is not Medicine");
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 6"), 1.0, "any-bit mask 2|4 matches Food");
+    q(&mut g, "SetIngestibleFlag TestFood 4 1");
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 4"), 1.0, "Medicine flag set");
+    assert_eq!(n(&mut g, "GetEffectFlag TestFood 2"), 1.0, "Medicine is ENIT bit 2");
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 5"), 1.0, "mask 1|4 matches Medicine");
+    q(&mut g, "SetIngestibleFlag TestFood 4 0");
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 4"), 0.0, "Medicine flag cleared");
     q(&mut g, "SetIngestibleFlag TestFood 2 0");
     assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 2"), 0.0);
+    assert_eq!(n(&mut g, "GetIngestibleFlag TestFood 0"), 0.0);
     assert_eq!(n(&mut g, "IsSkillMagazine TestFood"), 0.0);
     assert_eq!(n(&mut g, "GetShowQuestItems"), 1.0);
     q(&mut g, "SetShowQuestItems 0");

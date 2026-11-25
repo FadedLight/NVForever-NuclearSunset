@@ -108,6 +108,7 @@ option.
 | Skill Book Effects | `bShowBookEffects` | `pipboy::items::info_of` (the points with the perks applied) |
 | Map Remembers Its Place | `bMapRemembersPosition` | `pipboy::data::opened` |
 | Faster Hacking Exit | `bFasterHackingTransition` | `terminal::timers`: 0.5 s instead of 2 s |
+| Faster Sleep and Wait | `bFasterSleepWait` | `wait::pass_hours`: `FASTER_HOUR_SECONDS` (0.15 s) instead of `HOUR_SECONDS` (0.5 s); vanilla pace unchanged when off (`Tweaks::faster_sleep_wait`, also exposed via `StewVal`/`StewieGetValue`) |
 
 ## Fourth batch (2026-11-08)
 
@@ -628,7 +629,7 @@ unless the player binds them, so nothing changes until then.
 | Revive Unconscious Companions (+ On Changing Cells) | `bReviveUnconsciousCompanions` (`bReviveWhenChangingCells`) | `fnv_game::unconscious` (`can_revive`, `revive`: the master's Stimpak used up, then the usual getting up; `essential_down` for the time; `revive_companions_on_cell_change` wired from `tweaks::revive_companions_on_arrival`); `activate::actor_action_in` gives `Action::Revive`, Activate calls `revive`. The switches: `Tweaks::revive_companions`, `revive_down_seconds`, `revive_on_cell_change` |
 | Clicking the Tab Sorts | `bClickingActiveTabTogglesSorting` | `pipboy::apply_input` steps `PipBoy::item_sort` on a click on the open tab; `pipboy::items::keys` hands it to the model (`Command::SetSort`); `menu::model::SortBy::apply` orders the player's list after the category filter. The switch: `TweakSettings::tab_click_sorts` |
 | Repair Items Preview | `bRepairItemsPreview` | `pipboy::repair::keys` opens a `Session` with `preview` when Alt is held (the full-condition and skill checks skipped), and refuses Use in it. The switch: `Tweaks::repair_preview` |
-| WASD as Arrow Keys in Menus | `bUseWASDAsArrowKeys` | `menu::menu_keys` (Barter `A`/`D` column focus), `menu::quantity_keys` (`A`/`D` step, `Space`/`Enter` confirm), `wait::keys` (`Space` accept), and `crafting::keys` (`A`/`D` filter/quantity step, `Space` accept); vanilla bindings stay unchanged when off (`Tweaks::wasd_as_arrow_keys`, also exposed via `StewVal`/`StewieGetValue`) |
+| WASD as Arrow Keys in Menus | `bUseWASDAsArrowKeys` | `menu::menu_keys` (Barter adds `A`/`D` on top of `ArrowLeft`/`ArrowRight` for column focus and maps `Space` to Accept while `Enter`/`NumpadEnter` keep picking items), `menu::quantity_keys` (`A`/`D` added to arrows, `Space`/`Enter` confirm), `wait::keys` (`Space` accept), and `crafting::keys` (`A`/`D` added to arrows for filter/quantity step, `Space` accept); vanilla bindings stay unchanged when off (`Tweaks::wasd_as_arrow_keys`, also exposed via `StewVal`/`StewieGetValue`) |
 | Crippled Legs: Pain When Falling | `bCrippledLimbsPlayPainSoundWhenFalling` | `falls::hurt` says the player's `Hit` combat line (`Game::combat_line`) when the fall's height reaches `Tweaks::crippled_fall_pain` and either leg is crippled (`falls::crippled_leg`) |
 | Quantity Menu Respects Companion Carry Cap | `bQuantityMenuRespectsCompanionCarryCap` | `menu::apply_input` sets `MenuModel::companion_carry` (the teammate's CarryWeight) before a store; `asks_quantity` caps the prompt by `menu::model::carry_cap` against the container list's weight. The switch: `Tweaks::quantity_companion_cap` |
 | Skip Death Camera | `bSkipDeathcamHotkey` | nvforever `death_cam::watch` moves the camera's clock to `SKIPPED` (past the fade and the slow motion) on Left Alt or a late left click. The switches: `TweakSettings::skip_death_cam`, `skip_death_cam_attack` |
@@ -920,6 +921,7 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 | `bFasterControllerPOVRotate` | done | yes |  | Faster Controller Camera Circling (twice as fast, ours) |
 | `bFasterEnterLockpickMenu` | done | yes |  | already so: the lockpick menu opens at once |
 | `bFasterHackingTransition` | done | yes |  | Faster Hacking Exit (0.5 s instead of 2 s) |
+| `bFasterSleepWait` | done | yes |  | Faster Sleep and Wait: shortens the Sleep/Wait hour countdown (`wait::pass_hours`, `FASTER_HOUR_SECONDS` = 0.15 s vs default `HOUR_SECONDS` = 0.5 s; [documented: lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini` `[Tweaks]`: `; increase the hour countdown speed while waiting or sleeping` / `bFasterSleepWait = 1`; no DLL or source consulted]; [design: NVForever's own 0.15 s pace and `StewVal` binding]) |
 | `bFasterSaveMenuClose` | done | yes |  | already so: saving leaves the pause menu open, no wait |
 | `bGodmodePreventsLegCrippleSound` | done | yes |  | Quiet Landings in God Mode (NVForever's pain sound on a fall is the hard-landing sound) |
 | `bHideCrosshairInKillcams` | done | yes |  | already so: no crosshair in a kill camera |

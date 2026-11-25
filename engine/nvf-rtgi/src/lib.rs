@@ -1,15 +1,16 @@
-//! A cell's triangles, what a ray that light could take meets among them, and what the cell's lamps bounce off
-//! them to points in the air. These are the first parts of a solver for a cell's bounce light (#3009,
+//! A cell's bounce light: what its lamps in sight add to what the surfaces show, gathered around points in the air
+//! and packed as a small 3D texture. These are the first parts of a solver for it (#3009,
 //! `docs/design/rtgi-solver.md`). Plain data in and out: no Bevy, no files, no GPU, no state between calls. The
-//! same input gives the same result on any number of threads.
+//! same input gives the same bytes on any number of threads.
 //!
-//! [`prepare`] makes the ray scene once; `bvh`, `texture` and `trace` are its parts. [`reach()`] finds the points
-//! and their light, for one state of the light: `light` is the formula of the engine's light sum, `gather` the
-//! bounce light around a point, `grid` the points that can be reached.
+//! [`prepare`] makes the ray scene once; `bvh`, `texture` and `trace` are its parts. [`solve()`] makes the texture,
+//! for one state of the light: `light` is the formula of the engine's light sum, `gather` the bounce light around a
+//! point, `grid` the points that can be reached, `volume` the texture and its reading. [`reach()`] gives the points
+//! and their light as they are.
 //!
 //! Space is Bevy's world in game units: y up, -z north. Colours are linear unless called display values.
 //!
-//! A room with a lamp: what a ray meets on its floor, and the light in its air.
+//! A room with a lamp: what a ray meets on its floor, the light in its air, and what is read of it on the floor.
 //!
 //! ```
 //! use nvf_rtgi::*;
@@ -46,6 +47,13 @@
 //! assert!(reached.coverage.parts == 1 && reached.points.len() == 27);
 //! let [mean, ..] = reached.points[&[0, 1, 0]].moments.c;
 //! assert!(mean.0[0] > mean.0[2] && mean.0[2] > 0.0);
+//!
+//! let config = SolveConfig { gather: GatherConfig { rays: 64, ..GatherConfig::default() }, ..SolveConfig::default() };
+//! let volume = solve(&scene, &light, &Seeds::at(vec![eye]), &config, &|| false)?;
+//! assert!(volume.dimensions == [3, 3, 3] && volume.low == [-1, 1, -1]);
+//! let up = V3::new(0.0, 1.0, 0.0);
+//! let read = Reader::new(&volume).unwrap().read(hit.p, hit.facing(), up);
+//! assert!(read.e().0[0] > read.e().0[2] && read.v() > 0.0);
 //! # Ok::<(), Failed>(())
 //! ```
 
@@ -59,9 +67,11 @@ mod light;
 mod parallel;
 mod reach;
 mod scene;
+mod solve;
 mod texture;
 mod trace;
 mod vec3;
+mod volume;
 
 pub use bvh::Ray;
 pub use failed::{Cancel, Failed, Reason};
@@ -70,9 +80,11 @@ pub use grid::{Coverage, Place};
 pub use light::{Cone, Directional, Lamp, LightState};
 pub use reach::{GatherConfig, GatherLimits, Reached, MOST_RAYS};
 pub use scene::{Cull, Instance, Level, Material, Mesh, SceneInput, Texture, Wrap};
+pub use solve::{Counts, Seeds, SolveConfig, SolvedVolume, Stats};
 pub use texture::Lookup;
 pub use trace::{lift, Hit, PreparedScene, SceneLimits, SceneStats, MOST_THREADS};
 pub use vec3::V3;
+pub use volume::{Read, Reader, SLABS, THIN};
 
 /// The ray scene of a cell. What is not sound is left out or replaced, and counted ([`SceneStats`]). `cancel`
 /// is asked between pieces of the work, of a large tree on its threads too.
@@ -85,6 +97,12 @@ pub fn prepare(scene: SceneInput, limits: &SceneLimits, threads: usize, cancel: 
 /// segments of one start, and now and then during the rest, on any thread.
 pub fn reach(scene: &PreparedScene, light: &LightState, seeds: &[V3], config: &GatherConfig, cancel: Cancel) -> Result<Reached, Failed> {
     failed::guarded(|| Reached::of(scene, light, seeds, config, cancel))
+}
+
+/// The bounce light of the points the seeds reach, as a texture. `cancel` as for [`reach()`], and now and then
+/// during the packing.
+pub fn solve(scene: &PreparedScene, light: &LightState, seeds: &Seeds, config: &SolveConfig, cancel: Cancel) -> Result<SolvedVolume, Failed> {
+    failed::guarded(|| SolvedVolume::of(scene, light, &seeds.points, config, cancel))
 }
 
 #[cfg(test)]

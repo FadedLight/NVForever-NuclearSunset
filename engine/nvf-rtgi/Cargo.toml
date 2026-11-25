@@ -1,6 +1,6 @@
 [package]
 name = "nvf-rtgi"
-description = "The ray scene of a cell and the bounce light of its lamps around points in it, on the CPU"
+description = "A cell's bounce light from its lamps, solved on the CPU into a small texture"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

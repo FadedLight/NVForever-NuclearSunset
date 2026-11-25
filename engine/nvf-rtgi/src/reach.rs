@@ -1,4 +1,5 @@
-//! From a prepared scene, its light and the seeds to the points of the air and their light.
+//! From a prepared scene, its light and the seeds to the points of the air and their light. What `reach` and
+//! `solve` both do first is here, so that they refuse the same.
 
 use crate::failed::{unavailable, Cancel, Failed, Reason};
 use crate::gather::Probe;
@@ -6,15 +7,17 @@ use crate::grid::{point, Coverage, Grid, Place, Work};
 use crate::light::{LightState, Lights};
 use crate::trace::{PreparedScene, MOST_THREADS};
 use crate::vec3::V3;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+/// The spacings there may be: their reciprocals and a room's coordinates over them are numbers.
+pub(crate) const SPACINGS: std::ops::RangeInclusive<f32> = 1e-3..=1e6;
 /// The most rays of a point.
 pub const MOST_RAYS: usize = 4096;
 
 /// How the light is gathered.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GatherConfig {
-    /// Between the points, in units.
+    /// Between the points, in units, 0.001 to 1,000,000.
     pub spacing: f32,
     /// Of a point, 1 to [`MOST_RAYS`].
     pub rays: usize,
@@ -48,7 +51,7 @@ impl Default for GatherLimits {
 impl GatherConfig {
     fn check(&self) -> Result<(), Failed> {
         let fine = [
-            ("spacing", self.spacing.is_finite() && self.spacing > 0.0),
+            ("spacing", SPACINGS.contains(&self.spacing)),
             ("rays", (1..=MOST_RAYS).contains(&self.rays)),
             ("emission", (0.0..=1.0).contains(&self.emission)),
             ("threads", (1..=MOST_THREADS).contains(&self.threads)),
@@ -57,6 +60,33 @@ impl GatherConfig {
             Some((what, _)) => unavailable(Reason::Input(what)),
             None => Ok(()),
         }
+    }
+
+    /// The light as the rays ask for it. What may not be is refused before its table is made.
+    pub(crate) fn lights<'a>(&self, light: &'a LightState, seeds: &[V3], cancel: Cancel) -> Result<Lights<'a>, Failed> {
+        self.check()?;
+        let GatherLimits { points, seeds: most } = self.limits;
+        if seeds.is_empty() {
+            return unavailable(Reason::NoSeeds);
+        }
+        if seeds.len() > most {
+            return unavailable(Reason::TooMany { what: "seeds", limit: most });
+        }
+        if points == 0 {
+            return unavailable(Reason::TooManyPoints { limit: 0 });
+        }
+        Lights::new(light, cancel)
+    }
+
+    /// The grid after its flood, and what is reached: one point at least. The config is one that gave the lights.
+    pub(crate) fn flood<'a>(&self, world: &'a PreparedScene, lights: &'a Lights<'a>, seeds: &[V3], cancel: Cancel<'a>) -> Result<(Grid<'a>, BTreeSet<Place>, Coverage), Failed> {
+        let GatherConfig { spacing: space, rays, emission, limits, threads } = *self;
+        let mut grid = Grid::new(Work { world, lights, emission, rays, space, threads, limit: limits.points, cancel });
+        let (reached, coverage) = grid.flood(seeds)?;
+        if reached.is_empty() {
+            return unavailable(Reason::NothingReached { seeds: seeds.len() });
+        }
+        Ok((grid, reached, coverage))
     }
 }
 
@@ -78,30 +108,15 @@ impl Reached {
     }
 
     pub(crate) fn of(scene: &PreparedScene, light: &LightState, seeds: &[V3], config: &GatherConfig, cancel: Cancel) -> Result<Reached, Failed> {
-        config.check()?;
-        let GatherConfig { spacing, rays, emission, limits, threads } = *config;
-        if seeds.is_empty() {
-            return unavailable(Reason::NoSeeds);
-        }
-        if seeds.len() > limits.seeds {
-            return unavailable(Reason::TooMany { what: "seeds", limit: limits.seeds });
-        }
-        if limits.points == 0 {
-            return unavailable(Reason::TooManyPoints { limit: 0 });
-        }
-        let lights = Lights::new(light, cancel)?;
-        let mut grid = Grid::new(Work { world: scene, lights: &lights, emission, rays, space: spacing, threads, limit: limits.points, cancel });
-        let (reached, coverage) = grid.flood(seeds)?;
-        if reached.is_empty() {
-            return unavailable(Reason::NothingReached { seeds: seeds.len() });
-        }
+        let lights = config.lights(light, seeds, cancel)?;
+        let (grid, reached, coverage) = config.flood(scene, &lights, seeds, cancel)?;
         let points = grid.made().filter(|(at, _)| reached.contains(*at)).map(|(at, p)| (*at, *p)).collect();
-        Ok(Reached { spacing, points, coverage, gathered: grid.made().count() })
+        Ok(Reached { spacing: config.spacing, points, coverage, gathered: grid.made().count() })
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::gather::directions;
     use crate::gather::tests::{lamp, plain, rectangle, sides, state, traced_again, Part, AMBIENT};
@@ -116,21 +131,21 @@ mod tests {
     const NEVER: Cancel = &|| false;
 
     /// Two closed rooms, 20 units between them, with no point of the grid there.
-    fn walled() -> Vec<Part> {
+    pub fn walled() -> Vec<Part> {
         let room = |x: f32| sides(V3::new(x, 100.0, 100.0), V3::new(210.0, 150.0, 150.0), plain(), |_, _| true);
         [room(-190.0), room(250.0)].concat()
     }
 
     /// The lamp is in the left one.
-    fn light() -> LightState {
+    pub fn light() -> LightState {
         state(AMBIENT, vec![lamp(V3::new(-60.0, 100.0, 100.0))])
     }
 
-    fn left() -> V3 {
+    pub fn left() -> V3 {
         V3::new(-100.0, 100.0, 100.0)
     }
 
-    fn right() -> V3 {
+    pub fn right() -> V3 {
         V3::new(200.0, 100.0, 100.0)
     }
 
@@ -139,7 +154,7 @@ mod tests {
     }
 
     /// Cutouts, a double-sided wall, a mirrored copy, a solid block, an unlit ceiling, a spot and a sun.
-    fn furnished() -> (SceneInput, LightState) {
+    pub fn furnished() -> (SceneInput, LightState) {
         let mut parts = walled();
         let cut = Material { texture: Some(0), cutoff: 0.5, cull: Cull::None, double_sided: true, ..plain() };
         let (mut fence, place, material) = rectangle(V3::new(-150.0, 100.0, 100.0), V3::new(0.0, 100.0, 0.0), V3::new(0.0, 0.0, 100.0), cut);
@@ -210,7 +225,7 @@ mod tests {
             other => panic!("{other:?}"),
         };
         let of = |config: GatherConfig| why(&world, &light(), &[left()], &config);
-        for spacing in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        for spacing in [0.0, -1.0, f32::from_bits(1), 9.9e-4, 1.1e6, f32::NAN, f32::INFINITY] {
             assert_eq!(of(GatherConfig { spacing, ..config() }), Reason::Input("spacing"));
         }
         for emission in [-1.0, 1.001, f32::MAX, f32::NAN, f32::INFINITY] {
@@ -220,8 +235,6 @@ mod tests {
             assert_eq!(of(GatherConfig { rays: n, ..config() }), Reason::Input("rays"));
             assert_eq!(of(GatherConfig { threads: n, ..config() }), Reason::Input("threads"));
         }
-        // So close that the places have no numbers.
-        assert_eq!(of(GatherConfig { spacing: 1e-30, ..config() }), Reason::NothingReached { seeds: 1 });
         let limits = |points, seeds| GatherConfig { limits: GatherLimits { points, seeds }, ..config() };
         assert_eq!(of(limits(20, 1)), Reason::TooManyPoints { limit: 20 });
         assert_eq!(of(limits(111, 1)), Reason::TooManyPoints { limit: 111 });

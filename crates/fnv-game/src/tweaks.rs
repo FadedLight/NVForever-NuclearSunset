@@ -711,6 +711,13 @@ pub struct Tweaks {
     /// `bArmorConditionLabel`: the body armour's condition row under the weapon's on the
     /// HUD (queried live by mods via `StewVal`/`StewieGetValue`).
     pub armor_condition: bool,
+    /// `bNoLockEncounterZoneLevels`: encounter zones do not freeze their level on first
+    /// visit; entering or querying a zone recomputes its level against the current player
+    /// level [documented: lStewieAl's Tweaks 10.05
+    /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
+    /// `[Tweaks]`: `; don't freeze the level of encounter zones when they are first
+    /// visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted].
+    pub no_lock_encounter_zone_levels: bool,
 }
 
 /// The factor on a vendor's repair price under the Barter Affects Repair Costs tweak:
@@ -1116,6 +1123,7 @@ impl Default for Tweaks {
             prevent_switch_when_emptying_category: true,
             vendor_lists_both: false,
             armor_condition: false,
+            no_lock_encounter_zone_levels: false,
         }
     }
 }

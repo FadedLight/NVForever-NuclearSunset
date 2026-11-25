@@ -2004,12 +2004,6 @@ pub struct Game<'a> {
     /// menus and loading screens, conversations included [hypothesis: as the lines of a
     /// conversation do; image-modifiers.md §3].
     pub image_modifiers: Vec<ActiveImageModifier>,
-    /// Extra stacked instance count per non-animatable IMAD form beyond the single entry
-    /// kept in [`Game::image_modifiers`] (capped at `MAX_IMOD_STACK - 1`), so repeated
-    /// non-animatable re-applies never grow `image_modifiers` without bound while
-    /// `remove_image_modifier` still fires `OnRemoveIMOD` once per stacked instance
-    /// [design]. Not saved.
-    image_modifier_extra_stacks: BTreeMap<FormId, u32>,
     /// ScriptEffectElapsedSeconds inside a ScriptEffectUpdate block (0 elsewhere).
     pub effect_elapsed: f64,
     pub(crate) depth: u32,
@@ -2872,7 +2866,6 @@ impl<'a> Game<'a> {
             syncing_effects: false,
             condition_check_due: 0.0,
             image_modifiers: Vec::new(),
-            image_modifier_extra_stacks: BTreeMap::new(),
             effect_elapsed: 0.0,
             depth: 0,
             runs_open: 0,
@@ -4721,6 +4714,8 @@ impl<'a> Game<'a> {
         self.world.set_power_armor_training(self.player.power_armor || self.tweaks.power_armor_needs_no_training);
         // The player's Equip Broken Items tweak [design: docs/design/tweaks.md].
         self.world.set_player_equips_broken(self.tweaks.equip_broken_items);
+        // The player's No Encounter Zone Level Lock tweak [design: docs/design/tweaks.md].
+        self.world.set_no_lock_encounter_zone_levels(self.tweaks.no_lock_encounter_zone_levels);
         // Cannibal's and Mister Sandman's acts that are over (`crate::activate_choices`).
         if !self.perk_acts.is_empty() {
             self.finish_perk_acts();
@@ -6892,40 +6887,33 @@ impl<'a> Game<'a> {
     /// IMAD in a loop cannot grow memory or `OnRemoveIMOD` loops without bound [design].
     pub const MAX_IMOD_STACK: usize = 64;
 
-    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance for
-    /// `OnRemoveIMOD` counting if already active (`image-modifiers.md §3`). Non-animatable
-    /// re-applies keep a single [`ActiveImageModifier`] entry and track extra stacked
-    /// instances in `image_modifier_extra_stacks` (capped at `MAX_IMOD_STACK - 1`), while
-    /// animatable re-applies keep up to `MAX_IMOD_STACK` independent timers and the
-    /// renderer draws one instance per form [design]. Dispatches xNVSE `OnApplyIMOD`
-    /// PRE-update with `(modifier)` and `on = None` when handled so `IsImageSpaceActive`
-    /// reads `0` on first apply and `1` when stacking onto an already-active modifier
-    /// [documented: GECK wiki NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525,
-    /// xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base
-    /// masters, probes `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice +
-    /// `rimod` twice on `WhiteNonAnimated` `0x000C9AFA`) and
-    /// `b3_core_ex_06_on_apply_imod_event` (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier`
-    /// on `0x00144C41`) in #3679].
+    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance in
+    /// exact application order (`image-modifiers.md §3`, `jip-world-12.md §2`). Both
+    /// animatable and non-animatable re-applies push an [`ActiveImageModifier`] entry
+    /// capped at `MAX_IMOD_STACK` per form (evicting the oldest matching entry once at
+    /// capacity so repeated script re-applies stay bounded), while the renderer draws at
+    /// most one instance per form [design]. Dispatches xNVSE `OnApplyIMOD` PRE-update with
+    /// `(modifier)` and `on = None` when handled so `IsImageSpaceActive` reads `0` on first
+    /// apply and `1` when stacking onto an already-active modifier [documented: GECK wiki
+    /// NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9,
+    /// 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters, probes
+    /// `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice + `rimod` twice on
+    /// `WhiteNonAnimated` `0x000C9AFA`) and `b3_core_ex_06_on_apply_imod_event`
+    /// (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier` on `0x00144C41`) in #3679;
+    /// application-order non-animatable duplicates observed: 2026-11-24, JIP LN 57.30,
+    /// probe `w4d_24_active_imods_order` in `tools/capture/nvse/catalogs/wave4d_extenders.json`
+    /// (`n=3,0=00054E13,1=001736A8,2=00054E13`)].
     pub fn apply_image_modifier(&mut self, modifier: FormId) {
         if self.handled("onapplyimod") {
             self.dispatch_event("OnApplyIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
         }
-        let animatable = self.data.image_modifiers.get(&modifier).is_some_and(|d| d.animatable);
-        if animatable {
-            let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
-            if active >= Self::MAX_IMOD_STACK {
-                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
-                    self.image_modifiers.remove(pos);
-                }
+        let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if active >= Self::MAX_IMOD_STACK {
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
             }
-            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
-        } else if let Some(existing) = self.image_modifiers.iter_mut().find(|m| m.modifier == modifier) {
-            existing.elapsed = 0.0;
-            let extra = self.image_modifier_extra_stacks.entry(modifier).or_insert(0);
-            *extra = (*extra).saturating_add(1).min((Self::MAX_IMOD_STACK - 1) as u32);
-        } else {
-            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
         }
+        self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
         self.emit(EventKind::ImageModifierApplied { modifier });
     }
 
@@ -6939,26 +6927,21 @@ impl<'a> Game<'a> {
     /// `WhiteNonAnimated` `0x000C9AFA` -> 2 `OnRemoveIMOD` callbacks with `IsActive=1`,
     /// then 0 on inactive `rimod`) in #3679].
     pub fn remove_image_modifier(&mut self, modifier: FormId) -> bool {
-        let vec_count = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
-        if vec_count == 0 {
-            self.image_modifier_extra_stacks.remove(&modifier);
+        let total = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if total == 0 {
             return false;
         }
-        let extra = self.image_modifier_extra_stacks.remove(&modifier).unwrap_or(0) as usize;
-        let total = vec_count.saturating_add(extra);
         let mut removed = false;
-        for i in 0..total {
+        for _ in 0..total {
             if !self.image_modifiers.iter().any(|m| m.modifier == modifier) {
                 break;
             }
             if self.handled("onremoveimod") {
                 self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
             }
-            if i >= extra {
-                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
-                    self.image_modifiers.remove(pos);
-                    removed = true;
-                }
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
+                removed = true;
             }
         }
         if removed {

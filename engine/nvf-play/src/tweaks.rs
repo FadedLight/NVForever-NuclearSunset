@@ -1213,9 +1213,15 @@ impl Plugin for TweaksPlugin {
             .add_systems(Startup, read_help_console_label)
             .add_systems(PostStartup, apply_modular_stewie_inis.before(crate::settings::apply_stored))
             .add_systems(Update, remember_item_places.after(crate::menu::MenuSystems))
-            .add_systems(Update, sync.in_set(crate::PlaySet::Input))
-            .add_systems(Update, (keys, drop_weapon, radio_volume_keys, last_weapon, hold_breath, repeat_activate, toggle_sight, place_marker_here, clear_near_marker, hide_hud_key, skip_radio_song, toggle_device).in_set(crate::PlaySet::Input))
-            .add_systems(Update, (objectives_on_arrival, revive_companions_on_arrival).in_set(crate::PlaySet::Ui))
+            .add_systems(Update, sync.in_set(crate::PlaySet::Input)
+                .before(crate::player::read_input).before(crate::control::read_controls))
+            .add_systems(Update, (keys, drop_weapon, radio_volume_keys, last_weapon, hold_breath, repeat_activate, toggle_sight, place_marker_here, clear_near_marker, hide_hud_key, skip_radio_song).in_set(crate::PlaySet::Input))
+            .add_systems(Update, (objectives_on_arrival, revive_companions_on_arrival).in_set(crate::PlaySet::Ui));
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(Update, toggle_device.in_set(crate::PlaySet::Input));
+        app
+            // On Android, Switch Device by Pressing is admitted by pad::device::automatic,
+            // through the same consumed edge/cancellation/save path as the selector.
             .add_systems(PreUpdate, trigger_dead_zones.before(bevy::input::InputSystems))
             .add_systems(Update, ap_costs.after(crate::PlaySet::Input).after(crate::player::encumbered_walks).before(crate::PlaySet::Physics));
         sound_list!(app, "discovered-sound", "Location Discovered Sound", "The sound a newly discovered place plays: the game's own, or another of its interface sounds. (Stewie's Tweaks bCustomLocationDiscoveredSound)", discovered_sound);
@@ -2305,6 +2311,8 @@ impl Plugin for TweaksPlugin {
         switch!(app, "sleep-in-owned-beds", "Sleep in Owned Beds", "A bed that belongs to someone else can be slept in. (Stewie's Tweaks bSleepInOwnedBeds)", game.sleep_in_owned_beds);
         // ---- items ----
         switch!(app, "power-armor-no-training", "Power Armor Without Training", "Power armor can be worn without Power Armor Training. (Stewie's Tweaks bPowerArmorNeedsNoTraining)", game.power_armor_needs_no_training);
+        // ---- world ----
+        switch!(app, "no-lock-encounter-zone-levels", "No Encounter Zone Level Lock", "Encounter zones recompute their level from the player's current level instead of freezing on first visit. (Stewie's Tweaks bNoLockEncounterZoneLevels)", game.no_lock_encounter_zone_levels);
     }
 }
 
@@ -2560,6 +2568,7 @@ fn place_marker_here(
 /// working the controls, a controller's A switches them to the controller; with the
 /// controller, a left click switches them back. Written to the INI only with the controls'
 /// next save (`crate::bindings::with_controls`) [design: docs/design/tweaks.md].
+#[cfg(not(target_os = "android"))]
 fn toggle_device(tweaks: Res<TweakSettings>, mouse: Res<ButtonInput<MouseButton>>, pads: Query<&Gamepad>, bindings: Option<ResMut<crate::bindings::Bindings>>, listening: Option<Res<crate::pause::Listening>>) {
     use crate::bindings::InputDevice;
     let Some(mut b) = bindings else { return };
@@ -3196,7 +3205,7 @@ fn apply_modular_stewie_inis(mut tweaks: ResMut<TweakSettings>) {
 /// Hand the game's part to the running game when it differs, and log the change.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn sync(
+pub(crate) fn sync(
     tweaks: Res<TweakSettings>,
     mut script: Option<ResMut<ScriptState>>,
     quests: Option<ResMut<crate::quest_messages::QuestMessages>>,
@@ -3414,6 +3423,7 @@ mod tests {
         assert!(!t.no_karma_messages && !t.disable_fast_travel && !t.keep_chosen_ammo);
         assert!(!t.breath_activate && !t.jump_ap_danger_only && !t.jump_without_enough_ap);
         assert!(!t.game.sync_categories && t.game.prevent_switch_when_emptying_category);
+        assert!(!t.game.no_lock_encounter_zone_levels);
         assert_eq!(t.sneak_run_ap_base, 0.0);
         assert_eq!(t.sneak_run_ap_endurance_mult, 0.0);
         assert_eq!(t.console_label(), "Console");
@@ -3535,6 +3545,7 @@ mod tests {
              bNoKarmaMessages = 1\n\
              bCritChanceIgnoresFireRate = 1\n\
              bMenuSearch = 1\n\
+             bNoLockEncounterZoneLevels = 1\n\
              iDateFormat = 2\n\
              [Critical Hits]\n\
              fCriticalDamageMult = 1.5\n",
@@ -3566,6 +3577,7 @@ mod tests {
             assert!(settings.no_karma_messages);
             assert!(settings.game.crit_ignores_fire_rate);
             assert!(settings.game.menu_search);
+            assert!(settings.game.no_lock_encounter_zone_levels);
             assert_eq!(settings.date_style, 2);
             assert_eq!(settings.game.crit_damage_scale, 2.0);
         }
@@ -3577,7 +3589,12 @@ mod tests {
         assert_eq!(final_settings.game.crit_damage_scale, 0.5, "explicit NVForever.ini slider 0.25 -> x0.5 wins");
         assert!(final_settings.game.crit_ignores_fire_rate, "unmentioned modular key stays enabled");
         assert!(final_settings.game.menu_search, "unmentioned modular key stays enabled");
+        assert!(final_settings.game.no_lock_encounter_zone_levels, "unmentioned modular key stays enabled");
         assert_eq!(final_settings.date_style, 2);
+        // Toggling the registered switch in NVForever.ini overrides the modular INI back to off.
+        let idx = app.world().resource::<crate::settings::Settings>().index("tweak-no-lock-encounter-zone-levels").unwrap();
+        crate::settings::flip(app.world_mut(), idx);
+        assert!(!app.world().resource::<TweakSettings>().game.no_lock_encounter_zone_levels, "UI switch toggles off");
 
         let _ = std::fs::remove_dir_all(&root);
     }

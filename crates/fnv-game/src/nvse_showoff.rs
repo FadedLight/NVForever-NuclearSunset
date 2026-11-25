@@ -272,8 +272,9 @@ impl Game<'_> {
     }
 
     /// `ShowOff:OnPOVChange`, fired when the player's camera perspective transitions
-    /// between first-person (`1`) and third-person (`0`) [documented: GECK wiki
-    /// ShowOff:OnPOVChange].
+    /// between first-person (`1`) and third-person (`0`), with calling reference
+    /// `Player` (`0x14`) [documented: GECK wiki ShowOff:OnPOVChange; observed 2026-11-24:
+    /// `w6t2p2_03_showoff_on_pov_change_toggle`: `s0=0,sP=1`].
     pub(crate) fn showoff_on_pov_change(&mut self, first_person: bool) {
         if !self.handled(ON_POV_CHANGE) {
             return;
@@ -281,7 +282,7 @@ impl Game<'_> {
         self.dispatch_event(
             "ShowOff:OnPOVChange",
             vec![XVal::Num(if first_person { 1.0 } else { 0.0 })],
-            None,
+            Some(FormId::PLAYER_REF),
         );
     }
 

@@ -526,7 +526,11 @@ fn pov_change_dispatches_showoff_on_pov_change_only_on_transitions() {
 SetModLocalData "pov.calls" ((GetModLocalData "pov.calls") + 1)
 SetModLocalData "pov.last" iPOV
 SetModLocalData "pov.getter" IsPC1stPerson
+SetModLocalData "pov.self_is_player" (GetSelfAlt == PlayerREF)
 End)
+SetEventHandlerAlt "ShowOff:OnPOVChange" (Begin Function {int iPOV}
+SetModLocalData "pov.player_only" ((GetModLocalData "pov.player_only") + 1)
+End) 0::Player
 SetEventHandlerAlt "ShowOff:OnPOVChange" (Begin Function {int iPOV}
 SetModLocalData "pov.third_only" ((GetModLocalData "pov.third_only") + 1)
 End) 1::0
@@ -539,11 +543,15 @@ End) 1::1"#,
     g.set_first_person(true);
     assert_eq!(num(&mut g, "pov.calls"), 0.0);
 
-    // First -> Third fires once with 0, and IsPC1stPerson already reads 0.
+    // First -> Third fires once with arg=0, calling ref Player (0::Player),
+    // IsPC1stPerson == 1 inside callback and 0 after [observed 2026-11-24: w6t2p2_03].
     g.set_first_person(false);
     assert_eq!(num(&mut g, "pov.calls"), 1.0);
     assert_eq!(num(&mut g, "pov.last"), 0.0);
-    assert_eq!(num(&mut g, "pov.getter"), 0.0);
+    assert_eq!(num(&mut g, "pov.getter"), 1.0);
+    assert_eq!(num(&mut g, "pov.self_is_player"), 1.0);
+    assert_eq!(num(&mut g, "pov.player_only"), 1.0);
+    assert_eq!(query(&mut g, "SetFunctionValue IsPC1stPerson"), XVal::Num(0.0));
     assert_eq!(num(&mut g, "pov.third_only"), 1.0);
     assert_eq!(num(&mut g, "pov.first_only"), 0.0);
 
@@ -553,11 +561,14 @@ End) 1::1"#,
     }
     assert_eq!(num(&mut g, "pov.calls"), 1.0);
 
-    // Third -> First fires once with 1, and IsPC1stPerson already reads 1.
+    // Third -> First fires once with arg=1, calling ref Player, and IsPC1stPerson == 1 inside and after.
     g.set_first_person(true);
     assert_eq!(num(&mut g, "pov.calls"), 2.0);
     assert_eq!(num(&mut g, "pov.last"), 1.0);
     assert_eq!(num(&mut g, "pov.getter"), 1.0);
+    assert_eq!(num(&mut g, "pov.self_is_player"), 1.0);
+    assert_eq!(num(&mut g, "pov.player_only"), 2.0);
+    assert_eq!(query(&mut g, "SetFunctionValue IsPC1stPerson"), XVal::Num(1.0));
     assert_eq!(num(&mut g, "pov.third_only"), 1.0);
     assert_eq!(num(&mut g, "pov.first_only"), 1.0);
     no_errors(&g);

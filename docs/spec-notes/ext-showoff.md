@@ -305,13 +305,21 @@ RemoveAllItemsShowOff.
 ## 9. `ShowOff:OnPOVChange` and preactivation events
 
 - **`ShowOff:OnPOVChange`** [documented: GECK wiki,
-  [ShowOff:OnPOVChange](https://geckwiki.com/index.php?title=ShowOff%3AOnPOVChange)]:
-  fires when the player's camera perspective switches between first-person and
-  third-person, passing one integer argument (`1` = first-person, `0` = third-person).
-  NVForever dispatches it from `Game::set_first_person` (fed every frame by
-  `nvf_play::control::tell_scripts`) only when `senses.first_person` actually changes,
-  with `IsPC1stPerson` already reflecting the new perspective and no calling reference
-  [hypothesis: calling reference and getter visibility during callback unobserved].
+  [ShowOff:OnPOVChange](https://geckwiki.com/index.php?title=ShowOff%3AOnPOVChange);
+  observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 +
+  ShowOffNVSE Plugin 184, 10 official base masters, `GSDocMitchellHouse` (`0x00103DF9`),
+  isolated clean-room staging copy, committed probe
+  `w6t2p2_03_showoff_on_pov_change_toggle`
+  (`tools/capture/nvse/catalogs/wave6c_showoff_on_pov_change_thisalt.json`):
+  `PROBE|w6t2p2_03_showoff_on_pov_change_toggle|init=1|to3p(n=1,arg=0,inCb=1,aft=0,s0=0,sP=1)|to1p(n=2,arg=1,inCb=1,aft=1)`;
+  no DLL or source consulted]: fires when the player's camera perspective switches
+  between first-person and third-person, with calling reference `Player` (`0x00000014`,
+  `GetSelfAlt == Player`, `0::Player` filterable) and one integer argument (`1` =
+  first-person, `0` = third-person). NVForever dispatches it from
+  `Game::set_first_person` (fed every frame by `nvf_play::control::tell_scripts`) only
+  when `senses.first_person` actually changes; on 1P -> 3P (`0`) it fires before
+  clearing `senses.first_person` so `IsPC1stPerson` still reads `1` inside the callback
+  and `0` afterward, while on 3P -> 1P (`1`) `IsPC1stPerson` reads `1` inside and after.
   Save restore syncs `senses.first_person` directly to the restored camera POV without
   emitting a spurious transition [design]. Free when no handler is registered.
 - **`ShowOff:OnPreScriptedActivate`**, **`ShowOff:OnPreActivateInventoryItem`**, and

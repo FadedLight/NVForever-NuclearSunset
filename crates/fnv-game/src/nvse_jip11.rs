@@ -655,12 +655,21 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             let record = g.data.need_stages.values().flatten().find(|s| s.stage == st).map(|s| s.spell);
             reff(record.and_then(|sp| g.stage_spell(st, sp)))
         }
-        // `stage [effect]`: no effect leaves the stage without one [hypothesis]; the
-        // player gets the new one at the next change of stage [hypothesis].
+        // `stage [effect]`: omitted arg clears the stage's effect to None; explicit null 0
+        // and non-SPEL forms are no-ops [observed: `w6d2_30_actor_unarmed_and_hardcore_stage_effect`];
+        // the player gets the new one at the next change of stage [hypothesis].
         "sethardcorestageeffect" => {
             let Some(st) = form(args, 0).filter(|&st| g.data.need_stages.values().flatten().any(|s| s.stage == st)) else { return Some(Ok(zero)) };
-            let e = form(args, 1).filter(|&e| g.data.sig(e) == Some(*b"SPEL"));
-            g.other.jip11.stage_effects.insert(st, e);
+            match args.get(1) {
+                None => {
+                    g.other.jip11.stage_effects.insert(st, None);
+                }
+                Some(_) => {
+                    if let Some(e) = form(args, 1).filter(|&e| g.data.sig(g.unclone(e)) == Some(*b"SPEL")) {
+                        g.other.jip11.stage_effects.insert(st, Some(e));
+                    }
+                }
+            }
             zero
         }
         // The multiplier of the weapon damage penalty below 75 % condition [documented];

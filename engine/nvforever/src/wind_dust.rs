@@ -16,7 +16,8 @@
 //! **What the next slice must do for [`Precipitation`]** (nothing here knows a particle): tag
 //! every birth that comes from a weather's precipitation in particles.rs, the model's own
 //! systems' and its add-on nodes', whichever model it was; count the tagged ones alive after
-//! the frame's simulation; and say whether weather_fx.rs has a model placed. A caller without
+//! the frame's simulation; and say whether weather_fx.rs has a model placed (a holder entity that exists: a model that failed to
+//! load leaves `Entity::PLACEHOLDER`, which is not placed). A caller without
 //! the count passes 0 and `false`, and gets the weather's own rule only (the dust then begins
 //! to come back while the last drops fall).
 
@@ -231,8 +232,9 @@ pub fn wind_velocity(sky: &SkyState) -> Option<Vec2> {
     v.is_finite().then_some(v)
 }
 
-/// How far the wind has carried the dust: its velocity summed exactly over the game's clock, so
-/// the frames it is cut into change nothing; in f64, kept within one [`DRIFT_PERIOD`] on each
+/// How far the wind has carried the dust: its velocity summed exactly over the game's clock for a wind held through each frame,
+/// so the frames a held wind is cut into change nothing (a wind that changes within a frame is taken at
+/// its end); in f64, kept within one [`DRIFT_PERIOD`] on each
 /// axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Drift {
@@ -246,9 +248,13 @@ impl Drift {
     /// `dt` seconds of `wind` (all of them: a hitch does not hold the dust still). The velocity
     /// goes toward the wind with the time constant T = [`TURN_SECONDS`], v(t) = w + (v0 - w)
     /// e^(-t/T), and the place by its integral, w t + (v0 - w) T (1 - e^(-t/T)). The first
-    /// wind is taken whole; without one (`None`, or not finite) the velocity stays as it is.
+    /// wind is taken whole; without one (`None`, or not finite) the velocity stays as it is. A frame of no
+    /// time (a pause, a broken clock) changes nothing, a first wind included.
     pub fn advance(&mut self, wind: Option<Vec2>, dt: f32) {
         let t = if dt.is_finite() { f64::from(dt.max(0.0)) } else { 0.0 };
+        if t <= 0.0 {
+            return;
+        }
         let wind = wind.filter(|w| w.is_finite()).map(|w| w.as_dvec2());
         let Some(from) = self.velocity.or(wind) else { return };
         let to = wind.unwrap_or(from);
@@ -702,6 +708,12 @@ mod tests {
         d.advance(Some(Vec2::new(0.0, 500.0)), f32::NAN);
         d.advance(Some(Vec2::new(0.0, 500.0)), -1.0);
         assert_eq!(d, before, "a paused or broken clock");
+        // Nor does a fresh drift take its first wind in a frame of no time.
+        let mut fresh = Drift::default();
+        for dt in [0.0, -1.0, f32::NAN] {
+            fresh.advance(Some(Vec2::new(0.0, 500.0)), dt);
+        }
+        assert_eq!(fresh, Drift::default());
         // No direction: the velocity it had, and it goes on.
         d.advance(Some(Vec2::new(f32::NAN, 1.0)), 1.0);
         d.advance(None, 1.0);

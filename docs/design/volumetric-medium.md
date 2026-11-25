@@ -1516,7 +1516,8 @@ wind direction that is not leaves the dust the velocity it had.
   SetWindDirection]) at 600 units a second for byte 255 (118 at 50); the velocity follows the wind's
   with a time constant of two seconds, and the place is its exact integral in f64 (the closed form, over
   the whole frame however long), so a turn, a cut or a stop changes the way from then on and never the
-  place, and the frame rate changes neither. It wraps after 96,000 units, 48 cells of 2,000 and 160 of
+  place, and the frame rate changes neither for a wind held through the frame (one that changes within it, as in a weather fade, is
+  taken once a frame). It wraps after 96,000 units, 48 cells of 2,000 and 160 of
   600. **Required of the next slice:** its shader must hash both octaves' lattices periodically (every
   48 and every 160 cells on each axis); only then is the wrap seamless.
 - **Colour.** The fog colour now, tinted by the hue of the light on it (ambient plus sunlight

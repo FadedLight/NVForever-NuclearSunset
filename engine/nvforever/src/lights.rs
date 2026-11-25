@@ -180,6 +180,7 @@ fn patch_display_sum(mut state: ResMut<FunctionsShader>, mut shaders: ResMut<Ass
     let bevy::shader::Source::Wesl(source) = &shader.source else {
         error!("{PBR_FUNCTIONS}: not WESL; surfaces keep Bevy's linear lighting sum");
         crate::ssao_lighting::set_hook_state(crate::ssao_lighting::HookState::Failed);
+        crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Failed);
         reflection_gate_failed();
         return;
     };
@@ -187,6 +188,7 @@ fn patch_display_sum(mut state: ResMut<FunctionsShader>, mut shaders: ResMut<Ass
     let Some(patched) = display_patched(&source) else {
         error!("{PBR_FUNCTIONS}: apply_pbr_lighting not as expected (Bevy changed?); surfaces keep Bevy's linear lighting sum");
         crate::ssao_lighting::set_hook_state(crate::ssao_lighting::HookState::Failed);
+        crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Failed);
         reflection_gate_failed();
         return;
     };
@@ -209,6 +211,16 @@ fn patch_display_sum(mut state: ResMut<FunctionsShader>, mut shaders: ResMut<Ass
             (patched, false)
         }
     };
+    // The bounce light's hook goes in after the ambient occlusion's, whose names it uses; it
+    // too acts only under its shader def (rtgi_volume.rs).
+    let (patched, rtgi_hooked) = match crate::rtgi_volume::hook_patched(&patched) {
+        Some(hooked) => (hooked, true),
+        None => {
+            error!("{PBR_FUNCTIONS}: the RTGI volume hook's anchors not found (Bevy or an earlier patch changed?); no view gets a bounce light volume");
+            crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Failed);
+            (patched, false)
+        }
+    };
     // The reflection gate last (lights/reflection_gate.rs): the view's environment map light
     // reaches only fragments that opt in. Made whether or not reflections are on in this run;
     // without the opt-in def its text compiles to what Bevy's did without a cube.
@@ -222,6 +234,7 @@ fn patch_display_sum(mut state: ResMut<FunctionsShader>, mut shaders: ResMut<Ass
     if let Err(e) = shaders.insert(&state.handle, patched) {
         error!("{PBR_FUNCTIONS}: the patched shader could not be stored ({e:?}); surfaces keep Bevy's lighting sum");
         crate::ssao_lighting::set_hook_state(crate::ssao_lighting::HookState::Failed);
+        crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Failed);
         reflection_gate_failed();
         return;
     }
@@ -229,6 +242,10 @@ fn patch_display_sum(mut state: ResMut<FunctionsShader>, mut shaders: ResMut<Ass
     if ao_hooked {
         crate::ssao_lighting::set_hook_state(crate::ssao_lighting::HookState::Installed);
         info!("lights: ambient occlusion hook installed");
+    }
+    if rtgi_hooked {
+        crate::rtgi_volume::set_hook_state(crate::rtgi_volume::HookState::Installed);
+        info!("lights: RTGI volume hook installed");
     }
     if gated {
         nvf_assets::reflection_cube::set_gate_state(nvf_assets::reflection_cube::GateState::Installed);

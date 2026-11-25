@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn password_hash_vector() {
-        // Python: hashlib.sha256(b"lobby-password v1 K7QM2X hunter2").hexdigest()
+        // Python: hashlib.sha256(b"lobby-password v1\x00K7QM2X\x00hunter2").hexdigest()
         let code = crate::code::Code::parse("k7q-m2x").unwrap();
         assert_eq!(password_hash(&code, "hunter2"), "49ce5c210b7ef838407a97bfdc3908a71bcde231f8eb62f935691da069e60ad2");
         assert_eq!(key_fingerprint(&"ab".repeat(32)), "abababababababab");

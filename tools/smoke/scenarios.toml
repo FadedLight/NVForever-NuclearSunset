@@ -7565,12 +7565,13 @@ run_seconds = 34
 expect = [
   "CheyenneREF listens to SunnyRef",
   { re = 'speech look: line [0-9A-F]+ over: SunnyRef has .* (?P<n>[+-]\d+)° off its front', range = [-5, 5], all = true, label = "each line over: SunnyRef has … off its front within a few degrees of 0" },
-  { re = 'speech look summary: 2 lines' },
+  { re = 'speech look summary: 3 lines' },
   # Line 1 is said to Cheyenne (she listens), line 2 to the player, line 3 to Cheyenne
-  # with noTargetLookFlag 1, which turns nobody (#2796): one "listens" line in all, and
-  # Sunny turns for two lines only.
+  # with noTargetLookFlag 1, where the target is not made to look and the speaker still
+  # turns (observer check 218, #3989): one "listens" line in all, and Sunny turns for all
+  # three lines.
   { re = 'listens to', count = 1, label = "no listens line for the last one (one listens line in all)" },
-  { re = 'speech look: SunnyRef says a line to', count = 2, label = "Sunny turns for lines 1 and 2, not for the flagged line 3 (#2796)" },
+  { re = 'speech look: SunnyRef says a line to', count = 3, label = "Sunny turns for all three lines, the flagged line 3 too (observer check 218, #3989)" },
   # All three lines start: the aid logs its call without an error only when the line is
   # being said (nvf-play script.rs ScriptAid::SayTo), and each start logs "script: … says".
   { re = 'test aid: script SayTo\("0x00104E85", "0x0010588E", "GREETING", false\)(?!:)', count = 1, label = "line 1 (to Cheyenne) starts" },
@@ -11588,7 +11589,7 @@ expect = [
   { re = 'save: not now', count = 0, label = "no save is refused" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf answered box\|Ok" >> ran' },
+  { re = 'console: MessageBoxEx "nvf answered box\|Ok" >> 0' },
   { re = 'script: menu 1001 .*answered' },
   { re = 'save: wrote .*nvf-after-box\.nvfsave' },
 ]]
@@ -12014,16 +12015,17 @@ forbid = [
 
 [[scenario]]
 name = "npc-seated-save-resits"
-source = "issue #2797: the third part: --load the same save with Easy Pete's package running: his AI walks him back to his chair and the engine reports the new seat (a new furniture line), after which GetSitting reads 3 again"
+source = "issue #2797: the third part: --load the same save with Easy Pete's package running: he is put back on his chair at once (#3991), as the original keeps him seated from the first moment after the load (observer check 220): no walk and no getting-on clip (the engine's 'is back on' line), after which GetSitting reads 3; before #3991 his AI walked him back from where he stood"
 areas = ["save", "furniture"]
-paths = ["engine/nvf-play/src/script.rs", "engine/nvforever/src/furniture.rs", "crates/fnv-game/src/functions/furniture.rs"]
-env = { NVFOREVER_HOME = "npc-seated-save-home", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "40:call:EasyPeteRef:GetSitting" }
+paths = ["engine/nvf-play/src/script.rs", "engine/nvforever/src/furniture.rs", "engine/nvforever/src/residents.rs", "crates/fnv-game/src/functions/furniture.rs"]
+env = { NVFOREVER_HOME = "npc-seated-save-home", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "8:call:EasyPeteRef:GetSitting,40:call:EasyPeteRef:GetSitting" }
 args = ["--play", "--load", "npcseated", "--npc-packages", "EasyPeteRef", "--no-voice", "--no-messages"]
 run_seconds = 45
 order = [[
   { re = 'load: restored .*npcseated\.nvfsave', label = "the save is restored" },
-  { text = "furniture: 00104C80 is on 0010634A", label = "the engine seats him again and says so" },
-  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "seated again" },
+  { text = "furniture: 00104C80 is back on 0010634A", label = "the engine puts him back on his chair at once (#3991)" },
+  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "seated within seconds of the load" },
+  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "and still seated at 40 s" },
 ]]
 
 [[scenario]]
@@ -12484,10 +12486,10 @@ order = [["pipboy stats: used Stimpak on the body", "Stimpak not used: the right
 [[scenario]]
 name = "pipboy-stats-heal-hardcore"
 source = "owner 2026-10-23: in Hardcore the CND page refuses a Stimpak aimed at a limb (FalloutNV.esm help text: a Doctor's Bag or a doctor is required), still uses one on the body, and the Doctor's Bag mends the limb part way (engine/nvf-play/src/pipboy/stats/, docs/spec-notes/pipboy.md 5.1)"
-note = "Hardcore on by the script aid; the console cripples the left arm and takes 50 health; on CND a Stimpak on the left arm (refused), one on the body, then the bag"
+note = "Hardcore on by the script aid; the console cripples the left arm and takes 50 health; the page switch to STATS waits to 22 s, since a script opens the Healing Limbs tutorial (menu 1059) about 1.0 s after the Pip-Boy comes up and a page step in that frame is lost under it (#3504); on CND a Stimpak on the left arm (refused), one on the body, then the bag"
 areas = ["pipboy", "aid"]
 paths = ["engine/nvf-play/src/pipboy/stats/*", "crates/fnv-game/src/needs.rs", "crates/fnv-game/src/functions/player.rs"]
-env = { NVF_PLAY_TEST_TILE_MENUS = "", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "3:hardcore:1", NVF_PLAY_TEST_CONSOLE = "8:player.DamageAV LeftAttackCondition 100;8.3:player.DamageAV Health 50;9:close", NVF_PLAY_TEST_PIPBOY = "20:open,21:page=stats,29:close", NVF_PLAY_TEST_PIPBOY_STATS = "23:limb=2,23.5:use=stimpak,24.5:limb=none,25:use=stimpak,26.5:use=bag" }
+env = { NVF_PLAY_TEST_TILE_MENUS = "", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "3:hardcore:1", NVF_PLAY_TEST_CONSOLE = "8:player.DamageAV LeftAttackCondition 100;8.3:player.DamageAV Health 50;9:close", NVF_PLAY_TEST_PIPBOY = "20:open,22:page=stats,29:close", NVF_PLAY_TEST_PIPBOY_STATS = "23:limb=2,23.5:use=stimpak,24.5:limb=none,25:use=stimpak,26.5:use=bag" }
 args = ["--cell", "GSGeneralStore", "--play", "--hour", "12", "--no-voice", "--no-messages"]
 run_seconds = 31
 expect = [
@@ -18031,7 +18033,7 @@ timeout = 180
 order = [[
   { re = '''sky: the camera's far plane at (?!32123\b)(?P<n>\d+) units \(the cell's fog clip distance\)''', range = [500, 100000], label = "ordinary cold camera clipping is present and differs from the authored target" },
   { re = 'console: lighting-smoke template (?!00000000\b)[0-9A-Fa-f]{8}$', label = "the donor cell resolves a non-null LoadOrder template" },
-  { text = 'console: SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite) >> ran', label = "the real console compiles the template assignment" },
+  { text = 'console: SetCellLightingTemplate GSDocMitchellHouse (GetCellLightingTemplate 2ETopsPresidentialSuite) >> 0', label = "the real console compiles the template assignment" },
   { re = 'console: lighting-smoke positive clip 32123(?:\.0+)?$', label = "the selected template trait getter sees the authored positive clip" },
   { re = 'console: lighting-smoke inherit 1(?:\.0+)?$', label = "clip inheritance is enabled" },
   { text = "console: Travelling to Goodsprings", label = "leave through the real console travel path" },
@@ -20162,7 +20164,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:s
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 14
 expect = [
-  { re = 'console: set TimeScale to 10 \+ 2 \* 10 >> ran', label = "the expression line is compiled and run" },
+  { re = 'console: set TimeScale to 10 \+ 2 \* 10 >> 30', label = "the expression line is compiled and run" },
   { re = 'console: GetGlobalValue >> 30\.00', label = "the global holds the expression's value" },
 ]
 
@@ -26469,7 +26471,7 @@ expect = [
   { re = 'ui: game strings: [1-9]\d* read, 1 without text', label = "the six menus' game strings all have text but sModffects, empty in the original too: the load order, then NVForever's labels (T10, menu-xml.md §2.4)" },
   { re = 'script: print "nvf hud depth -?\d+(?:\.\d+)?"', label = "GetUIFloat prints the HUD file's depth" },
   { re = 'script: print "nvf hud depth -999(?:\.0+)?"', count = 0, label = "the HUD depth exists" },
-  { re = 'console: SetUIFloat "HUDMainMenu/depth" 37 >> ran', label = "the console compiles and runs SetUIFloat" },
+  { re = 'console: SetUIFloat "HUDMainMenu/depth" 37 >> 1', label = "the console compiles and runs SetUIFloat" },
   { re = 'script: print "nvf hud set 37"', label = "GetUIFloat reads the written depth on a later frame" },
 ]
 
@@ -26486,7 +26488,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:S
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice"]
 run_seconds = 16
 expect = [
-  { re = 'console: SetUIFloatGradual "HUDMainMenu/depth" 0 100 2 >> ran', label = "the console compiles and runs SetUIFloatGradual" },
+  { re = 'console: SetUIFloatGradual "HUDMainMenu/depth" 0 100 2 >> 1', label = "the console compiles and runs SetUIFloatGradual" },
   { re = 'script: print "nvf gradual mode 0"', label = "the change runs half a second in (mode 0)" },
   { re = 'script: print "nvf gradual 100 -1"', label = "after its two seconds the depth is 100 and nothing changes it" },
 ]
@@ -26539,7 +26541,7 @@ env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_CONSOLE = "10:I
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--size", "1280x800"]
 run_seconds = 16
 expect = [
-  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> ran', label = "the console compiles and runs InjectUIComponent" },
+  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> 1', label = "the console compiles and runs InjectUIComponent" },
   { re = 'tiles: HUDMainMenu: 1 mod tiles drawn \(3 items\)', label = "the injected box, its picture and its text draw once the console closes", known_failing = "bench install 2026-11-12: the owner put Just Assorted Mods's loose menus/prefabs/J*/ files in the game's Data, which every run includes in HUDMainMenu (7 more mod tiles: JBT, JDC, JHI, JHM, JLM, JVO, JWH); main the same" }
 ]
 forbid = [
@@ -26674,7 +26676,7 @@ env = { NVF_PLAY_TEST_TILE_MENUS = "HUDMainMenu", NVF_PLAY_TEST_GOTO = "1:-68375
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--size", "1280x800"]
 run_seconds = 22
 expect = [
-  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> ran', label = "the console compiles and runs InjectUIComponent" },
+  { re = 'console: InjectUIComponent "HUDMainMenu" .* >> 1', label = "the console compiles and runs InjectUIComponent" },
   { re = 'tiles: pointer over HUDMainMenu/NVFSmokeButton \(id 7\), mouseover 1', count = 1, label = "the pointer finds the target hotrect and writes its mouseover" },
   { re = 'tiles: clicked HUDMainMenu/NVFSmokeButton \(id 7\) by the pointer, clicked 1', count = 1, label = "a press clicks it" },
   { re = 'tiles: clicked HUDMainMenu/NVFSmokeButton \(id 7\) by key O, clicked 1', count = 1, label = "the O key clicks the tile the menu's _PCButton_O names" },
@@ -26796,7 +26798,7 @@ expect = [
   { re = 'script: print "nvf message closed -999"', label = "the closed menu is absent" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf lifetime\|Ok" >> ran' },
+  { re = 'console: MessageBoxEx "nvf lifetime\|Ok" >> 0' },
   { re = 'ui: built MessageMenu \(menus\\[^,]+\.xml, [1-9]\d* tiles\)' },
   { re = 'script: print "nvf message width -?\d+(?:\.\d+)?"' },
   "ui: dropped MessageMenu",
@@ -26828,7 +26830,7 @@ expect = [
   { re = 'ui: dropped MessageMenu', label = "the answered box drops its tiles" },
 ]
 order = [[
-  { re = 'console: MessageBoxEx "nvf tiles box\|Yes\|No" >> ran' },
+  { re = 'console: MessageBoxEx "nvf tiles box\|Yes\|No" >> 0' },
   { re = 'tiles: MessageMenu drawn from tiles: "nvf tiles box"' },
   { re = 'tiles: MessageMenu button 1 picked on its tiles' },
   { re = 'script: menu 1001 .*answered \(button 1\)' },
@@ -27046,7 +27048,7 @@ paths = [
   "crates/fnv-game/src/ui_loading.rs", "crates/fnv-ui/src/tree.rs", "crates/fnv-ui/src/input.rs",
 ]
 env = { NVF_PLAY_TEST_TILE_MENUS = "ContainerMenu", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_GIVE = "00004241:20,000E9C3B,0008F21A,0003307F,00015169:2,00022102,000E3778,00020423,00034045,0008C214,0008ED0B,0001519E", NVF_PLAY_TEST_EQUIP = "000E3778", NVF_PLAY_TEST_KEYS = "12:f10,17.5:e,18.5:a,20:a,20.5:d,22:a,22.2:down,22.4:down,22.6:down,22.8:down,23:down,23.2:down,23.4:down,23.6:down,25:wheel-down,25.5:wheel-up,30:mouse-left:1.2,32:wheel-down,35:f10", NVF_PLAY_TEST_POINTER = "14:600:186,16:600:186:click,18:600:186:click,19.5:1150:186,26:362:517:click,26.5:362:168:click,27:362:480:click,28:362:178:click,29.8:361:264,30.5:361:400,31.5:400:108:click,32.5:450:100:click,33:1320:690,33.2:1320:690:click,36.5:1340:738,36.7:1340:738:click,37:off", NVF_PLAY_TEST_SHOTS = "13:tiles_container_open.png,15:tiles_container_row.png,17:tiles_container_prompt.png,21:tiles_container_right.png,22.5:tiles_container_card_weapon.png,22.7:tiles_container_card_armour.png,23.1:tiles_container_card_aid.png,24:tiles_container_scrolled.png,27.5:tiles_container_paged.png,36:tiles_container_reopened.png" }
-args = ["--cell", "GSSchoolHouse", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
+args = ["--cell", "GSSchoolHouse", "--pos", "1000,-560,3340", "--heading", "0", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
 run_seconds = 40
 expect = [
   { re = 'tiles: \[UI\] TileMenus=ContainerMenu \(from test aid NVF_PLAY_TEST_TILE_MENUS\): ContainerMenu drawn from tiles; its QuantityMenu prompt follows', label = "the switch is read from the test aid, and says the prompt follows" },
@@ -27127,7 +27129,7 @@ paths = [
   "engine/nvf-play/src/tiles/menus.rs", "engine/nvf-play/src/menu.rs", "engine/nvf-play/src/menu/**",
 ]
 env = { NVF_PLAY_TEST_TILE_MENUS = "ContainerMenu,QuantityMenu", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_GIVE = "00004241:20", NVF_PLAY_TEST_KEYS = "12:f10", NVF_PLAY_TEST_POINTER = "14:600:186,15:600:186:click,17:600:238:click,18:644:470,18.5:644:470:click,19.5:1155:515,20:1155:515:click,20.5:1150:186,21:off", NVF_PLAY_TEST_SHOTS = "16:tiles_container_quantity.png" }
-args = ["--cell", "GSSchoolHouse", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
+args = ["--cell", "GSSchoolHouse", "--pos", "1000,-560,3340", "--heading", "0", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
 run_seconds = 24
 expect = [
   { re = 'how many\? \(70 of 70\)', count = 1, label = "the prompt asks once" },
@@ -27156,7 +27158,7 @@ paths = [
   "engine/nvf-play/src/tiles/menus.rs", "engine/nvf-play/src/menu.rs", "engine/nvf-play/src/menu/**",
 ]
 env = { NVF_PLAY_TEST_TILE_MENUS = "ContainerMenu", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_GIVE = "00004241:20", NVF_PLAY_TEST_KEYS = "12:f10", NVF_PLAY_TEST_POINTER = "14:600:186,15:600:186:click,17:600:238:click,18:644:470,18.5:644:470:click,19.5:1155:515,20:1155:515:click,20.5:1150:186,21:off", NVF_PLAY_TEST_SHOTS = "16:tiles_container_quantity_alone.png" }
-args = ["--cell", "GSSchoolHouse", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
+args = ["--cell", "GSSchoolHouse", "--pos", "1000,-560,3340", "--heading", "0", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
 run_seconds = 24
 expect = [
   { re = 'how many\? \(70 of 70\)', count = 1, label = "the prompt asks once, with its switch off" },
@@ -27183,7 +27185,7 @@ note = "the same give and times as tiles-container, by keys alone (the aid's poi
 areas = ["ui", "menu", "items"]
 paths = ["engine/nvforever/src/imagespace.rs", "engine/nvf-play/src/menu.rs", "engine/nvf-play/src/menu/**", "engine/nvf-play/src/tiles/container_menu.rs", "engine/nvf-play/src/tiles/item_menu.rs", "engine/nvf-play/src/tiles/list.rs", "engine/nvf-play/src/tiles/input.rs", "engine/nvf-play/src/pad.rs"]
 env = { NVF_PLAY_TEST_TILE_MENUS = "", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_GIVE = "00004241:20,000E9C3B,0008F21A,0003307F,00015169:2,00022102,000E3778,00020423,00034045,0008C214,0008ED0B,0001519E", NVF_PLAY_TEST_EQUIP = "000E3778", NVF_PLAY_TEST_KEYS = "12:f10,14:a,16:enter,17.5:e,18:enter,18.5:a,20:d,22:a,22.2:down,22.4:down,22.6:down,22.8:down,23:down,23.2:down,23.4:down,23.6:down,25:wheel-down,25.5:wheel-up,33:r,35:f10,36.5:e", NVF_PLAY_TEST_SHOTS = "13:default_container_open.png,15:default_container_row.png,17:default_container_prompt.png,21:default_container_right.png,22.5:default_container_card_weapon.png,22.7:default_container_card_armour.png,23.1:default_container_card_aid.png,24:default_container_scrolled.png,27.5:default_container_paged.png,36:default_container_reopened.png" }
-args = ["--cell", "GSSchoolHouse", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
+args = ["--cell", "GSSchoolHouse", "--pos", "1000,-560,3340", "--heading", "0", "--play", "--no-voice", "--no-messages", "--size", "1280x720"]
 run_seconds = 40
 expect = [
   { re = 'tiles: ContainerMenu', count = 0, label = "nothing of the tile menu runs without its switch" },
@@ -30658,6 +30660,32 @@ forbid = [
 ]
 
 [[scenario]]
+name = "dlssg-variable-refresh"
+source = "docs/spec-notes/display-sync.md, docs/design/dlss-frame-generation.md: Display sync Variable refresh picked on the settings page while Frame generation is DLSS: DLSS-G, dimmed under the start's Vertical sync, runs; the window presents with vsync off while it is asked for and variable refresh's cap stays (through Reflex)"
+note = "needs NVF_DLSS_DIR with the four DLSS Frame Generation files (docs/dlss.md), an RTX 40 series or newer and Windows' GPU scheduling on; front = true as dlssg-on. The home of its own starts at the default Vertical sync, so DLSS-G is held off until the page's choice; the page picks Vertical sync first (as display-sync-write), so a home that kept Variable refresh from an earlier run ends up the same way (a rerun found nothing to change and logged no choice, 2026-11-23)."
+areas = ["graphics", "settings"]
+paths = ["engine/nvforever/src/dlss/**", "engine/nvforever/src/frame_gen.rs", "engine/nvforever/src/frame_pace.rs"]
+requires = ["NVF_DLSS_DIR"]
+front = true
+env = { WGPU_BACKEND = "vulkan", NVFOREVER_HOME = "dlssg-variable-refresh-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:14", NVF_PLAY_TEST_SETTINGS = "11:page,12:display-sync=Vertical sync,13:display-sync=Variable refresh" }
+args = ["--cell", "Goodsprings", "--play", "--size", "1280x720", "--upscaler", "dlss", "--upscaler-quality", "quality", "--frame-generation", "dlss", "--no-voice", "--no-lodgen"]
+run_seconds = 30
+expect = [
+  { text = "settings: display-sync Variable refresh", label = "Variable refresh is chosen" },
+  { re = 'frame pace: vsync off \(variable refresh with DLSS Frame Generation', label = "the window presents with vsync off for DLSS-G" },
+  { re = 'frame pace: variable refresh, at most \d+ fps \(the monitor.s \d+ Hz\), vsync off for DLSS Frame Generation', label = "variable refresh's cap kept" },
+  { re = 'DLSS-G: options: mode On, 1 generated frame\(s\) per real frame', label = "frame generation on in play" },
+  { re = 'DLSS-G: Reflex options: mode eLowLatency, frame limit \d+ us a frame shown: eOk', label = "variable refresh's cap handed to Reflex whole, on frames shown" },
+]
+order = [["settings: display-sync Variable refresh", "frame pace: vsync off (variable refresh with DLSS Frame Generation"]]
+forbid = [
+  { text = "Couldn't get swap chain texture", label = "an acquire timeout or failure after the present mode changed" },
+  { text = "Validation Error", label = "a Vulkan validation error" },
+  { text = "Caught rendering error", label = "a rendering error while DLSS-G switched on" },
+  { re = 'present and acquire errors since last: [1-9]', label = "a VkResult error from DLSS-G over the vsync-off swapchain" },
+]
+
+[[scenario]]
 name = "dlssg-4x"
 source = "#2317, docs/design/dlss-frame-generation.md: Generated frames 4x picked on the settings page during play: three generated frames per real frame where the GPU offers them (DLSSGState::numFramesToGenerateMax), else as many as it offers"
 note = "needs NVF_DLSS_DIR with the frame generation files; front = true as dlssg-on. Tolerant of the GPU by the state line's limit: with 'frames to generate at most 1' (RTX 40 series) 4x is held back and 2x runs; from 3 up (RTX 50 series) 4x runs. The home of its own keeps the choice between runs, so the settings line is not expected."
@@ -30686,7 +30714,7 @@ forbid = [
 
 [[scenario]]
 name = "dlssg-cap-menu"
-source = "#2731, docs/design/dlss-frame-generation.md \"Frame pacing\": a frame rate limit of 144 (the test aid --frame-cap, as --log-frame-times leaves the page's row out) divided by the two frames DLSS-G presents per real frame in play, handed to Reflex in full while the pause menu has DLSS-G's mode off, and divided again once play goes on"
+source = "#2731, docs/design/dlss-frame-generation.md \"Frame pacing\": a frame rate limit of 144 (the test aid --frame-cap, as --log-frame-times leaves the page's row out) handed to Reflex whole, on frames shown, in play and while the pause menu has DLSS-G's mode off; never divided by the frames DLSS-G presents (Reflex's limit holds the frames shown, generated ones included: dividing it held 2x at half the real frames, 2026-11-23)"
 note = "needs NVF_DLSS_DIR with the frame generation files; front = true as dlssg-on. Generated frames stays at its default, 2x."
 areas = ["graphics"]
 paths = ["engine/nvforever/src/dlss/**", "crates/nvf-dlss-files/**", "engine/nvforever/src/frame_pace.rs", "engine/nvforever/src/nv_low_latency.rs"]
@@ -30696,30 +30724,22 @@ env = { WGPU_BACKEND = "vulkan", NVFOREVER_HOME = "dlssg-cap-menu-home", NVF_PLA
 args = ["--cell", "Goodsprings", "--play", "--size", "1280x720", "--upscaler", "dlss", "--upscaler-quality", "quality", "--frame-generation", "dlss", "--log-frame-times", "10", "--frame-cap", "144", "--no-voice", "--no-lodgen"]
 run_seconds = 36
 expect = [
-  { re = "DLSS-G: frame cap: real frames at the full limit, was divided by 2 \\(menus: DLSS-G's mode off for 8 frames\\)", label = "the full limit in the pause menu" },
-  { re = 'DLSS-G: Reflex options: mode eLowLatency, frame limit 6944 us a real frame: eOk \(swapchains made: \d+\)', label = "the whole limit of 144 handed to Reflex in the menu" },
-  { re = 'DLSS-G: Reflex options: mode eLowLatency, frame limit 13889 us a real frame: eOk \(swapchains made: \d+\)', label = "144 divided by the two frames presented per real frame in play" },
+  { re = 'DLSS-G: Reflex options( set again for a new swapchain)?: mode eLowLatency, frame limit 6944 us a frame shown: eOk \(swapchains made: [1-9]\d*\)', label = "the whole limit of 144 handed to Reflex once a swapchain exists" },
+  { re = 'DLSS-G: options: mode Off \(resources kept\)', label = "the pause menu turned DLSS-G's mode off" },
 ]
-order = [[
-  { text = "DLSS-G: Reflex options: mode eLowLatency, frame limit 13889 us a real frame: eOk", label = "divided in play before the menu" },
-  { re = "DLSS-G: frame cap: real frames at the full limit, was divided by 2 \\(menus" },
-  { text = "DLSS-G: Reflex options: mode eLowLatency, frame limit 6944 us a real frame: eOk" },
-  { re = "DLSS-G: frame cap: real frames at the limit divided by 2, was the full limit \\(generation starting: DLSS-G's mode on\\)", label = "divided again once play goes on" },
-  { text = "DLSS-G: Reflex options: mode eLowLatency, frame limit 13889 us a real frame: eOk" },
-]]
 forbid = [
   { re = '\]\[streamline\]\[error\]', label = "an error from Streamline in dlssg-cap-menu (e.g. a tagged image's format it cannot read)" },
   { text = "Validation Error", label = "a Vulkan validation error" },
   { re = 'Reflex options( set again for a new swapchain)?: mode \w+, frame limit [^:]+: e(?!Ok)', label = "slReflexSetOptions refused" },
+  { re = 'Reflex options( set again for a new swapchain)?: mode \w+, frame limit (?!6944 us)\d+ us', label = "a limit other than 144's whole (divided by the frames DLSS-G presents)" },
   { text = "DLSS-G: status ", label = "a DLSS-G status other than eOk (frame generation ended)" },
-  { re = 'DLSS-G: frame cap: real frames at the full limit, was divided by \d \(presented', label = "generation paused while the window is in front" },
   { text = "tried again each frame", label = "slDLSSGSetOptions or slReflexSetOptions failing" },
   { re = 'present and acquire errors since last: [1-9]', label = "a VkResult error from DLSS-G's error callback (out of date counted apart)" },
 ]
 
 [[scenario]]
 name = "dlssg-cap-start"
-source = "#2732, #2731, docs/design/dlss-frame-generation.md \"Frame pacing\": DLSS Frame Generation and a frame rate limit of 144 (the test aid --frame-cap) both from the start: the limit reaches Reflex once the window's swapchain exists (sent again for the new swapchain, or as a change), and real frames hold 72 a second at 2x in play, where the limit sent before the swapchain alone was lost"
+source = "#2732, #2731, docs/design/dlss-frame-generation.md \"Frame pacing\": DLSS Frame Generation and a frame rate limit of 144 (the test aid --frame-cap) both from the start: the whole limit reaches Reflex once the window's swapchain exists (sent again for the new swapchain, or as a change), and real frames hold 72 a second at 2x in play (Reflex's limit holds the frames shown), where the limit sent before the swapchain alone was lost"
 note = "needs NVF_DLSS_DIR with the frame generation files; front = true as dlssg-on. The real-frame check takes only whole ten-second lines (10.0-10.5 s) at 1.9-2.1 presented per real frame, so a line that also counts loading or menu time at the full limit is left out; each must hold at most 800 real frames (72 a second over 10.5 s, and a quarter second at 144). A GPU slower than 72 real frames a second at 1280x720 over DLSS Quality passes it without testing the limit."
 areas = ["graphics"]
 paths = ["engine/nvforever/src/dlss/**", "crates/nvf-dlss-files/**", "engine/nvforever/src/frame_pace.rs", "engine/nvforever/src/nv_low_latency.rs", "engine/vendor/wgpu-hal/src/vulkan/**"]
@@ -30729,23 +30749,17 @@ env = { WGPU_BACKEND = "vulkan", NVFOREVER_HOME = "dlssg-cap-start-home", NVF_PL
 args = ["--cell", "Goodsprings", "--play", "--size", "1280x720", "--upscaler", "dlss", "--upscaler-quality", "quality", "--frame-generation", "dlss", "--log-frame-times", "10", "--frame-cap", "144", "--no-voice", "--no-lodgen"]
 run_seconds = 48
 expect = [
-  { re = 'DLSS-G: Reflex options( set again for a new swapchain)?: mode eLowLatency, frame limit 6944 us a real frame: eOk \(swapchains made: [1-9]\d*', label = "the whole limit of 144 sent while a swapchain exists, before play (#2732)" },
-  { re = 'DLSS-G: Reflex options( set again for a new swapchain)?: mode eLowLatency, frame limit 13889 us a real frame: eOk \(swapchains made: [1-9]\d*', label = "144 divided by two in play" },
+  { re = 'DLSS-G: Reflex options( set again for a new swapchain)?: mode eLowLatency, frame limit 6944 us a frame shown: eOk \(swapchains made: [1-9]\d*', label = "the whole limit of 144 sent while a swapchain exists, before play (#2732)" },
   { re = 'DLSS-G: 10\.[0-5] s: (?P<n>\d+) real frames, \d+ presented \((1\.9|2\.0|2\.1)\d* per real frame\), status eOk', min = 2, label = "at least two whole ten-second lines of generation at 2x" },
   { re = 'DLSS-G: 10\.[0-5] s: (?P<n>\d+) real frames, \d+ presented \((1\.9|2\.0|2\.1)\d* per real frame\), status eOk', range = [0, 800], all = true, label = "each of them about 72 real frames a second or fewer (no floor: a slow GPU or a load stall is not a cap failure)" },
 ]
-order = [[
-  { re = 'DLSS-G: Reflex options( set again for a new swapchain)?: mode eLowLatency, frame limit 6944 us a real frame: eOk \(swapchains made: [1-9]' },
-  { re = "DLSS-G: frame cap: real frames at the limit divided by 2, was the full limit \\(generation starting: DLSS-G's mode on\\)", label = "divided once play starts" },
-  { re = 'DLSS-G: Reflex options: mode eLowLatency, frame limit 13889 us a real frame: eOk' },
-]]
 forbid = [
   { re = '\]\[streamline\]\[error\]', label = "an error from Streamline in dlssg-cap-start (e.g. a tagged image's format it cannot read)" },
   { text = "Validation Error", label = "a Vulkan validation error in dlssg-cap-start" },
   { re = 'Reflex options( set again for a new swapchain)?: mode \w+, frame limit [^:]+: e(?!Ok)', label = "slReflexSetOptions refused in dlssg-cap-start" },
   { re = 'Reflex options( set again for a new swapchain)?: mode \w+, frame limit none: eOk \(swapchains made: [1-9]', label = "no limit sent once a swapchain exists" },
+  { re = 'Reflex options( set again for a new swapchain)?: mode \w+, frame limit (?!6944 us)\d+ us', label = "a limit other than 144's whole in dlssg-cap-start (divided by the frames DLSS-G presents)" },
   { text = "DLSS-G: status ", label = "a DLSS-G status other than eOk in dlssg-cap-start" },
-  { re = 'DLSS-G: frame cap: real frames at the full limit, was divided by \d \(presented', label = "generation paused in dlssg-cap-start, the window in front" },
   { text = "tried again each frame", label = "slDLSSGSetOptions or slReflexSetOptions failing in dlssg-cap-start" },
 ]
 
@@ -34024,9 +34038,9 @@ args = ["--cell", "Lucky38ControlRoom", "--play", "--pos=1024,-2400,8010", "--he
 run_seconds = 38
 order = [[
   { re = 'idle: NVCRMrHouse01REF plays MRHouseSleepingLoop', label = "the chamber plays its sealed loop from the start" },
-  { re = 'console: nvf pod sealed shell (?P<n>-?\d+) ', range = [110, 140], label = "the shell is closed over him (about 126 degrees; 25, open, before the fix)" },
+  { re = 'console: nvf pod sealed shell (?P<n>-?\d+) ', range = [-140, -110], label = "the shell is closed over him (about 126 degrees, read as -126: GetNifBlockRotation gives the angles of the drawn rotation's transpose since a00a539b5, observed on the 10mm pistol's ProjectileNode, #3712; 25, open, before the fix)" },
   { re = 'idle: NVCRMrHouse01REF plays MrHouseOpen', label = "the unsealing plays the opening" },
-  { re = 'console: nvf pod opened shell (?P<n>-?\d+) ', range = [15, 35], label = "and leaves the shell open (about 25 degrees)" },
+  { re = 'console: nvf pod opened shell (?P<n>-?\d+) ', range = [-35, -15], label = "and leaves the shell open (about 25 degrees, read as -25 for the same reason)" },
 ]]
 manual = "house_pod_sealed.png: the chamber closed, House not to be seen; house_pod_opened.png: open, House in it"
 

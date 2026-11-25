@@ -107,9 +107,8 @@ pub const MIN_CLOUD_LUMA: f64 = 1e-6;
 /// attenuation only: the hues, and the weathers whose night sunlight is no brighter than their clouds, stay.
 /// Why: in many weathers the night sunlight is far brighter than the cloud layers, which the flat sky draws nearly
 /// black, so clouds lit at the sunlight's luminance glowed [hypothesis: stills of 2026-11-25 at Goodsprings
-/// with a development build, the views not kept]. [engineering choice: one half, the geometric mean of the two
-/// luminances, the starting value, to be set with pictures.]
-pub const NIGHT_PULL: f32 = 0.5;
+/// with a development build, the views not kept]. [engineering choice: the contributor's pick from stills, 2026-11-25, at Goodsprings and in Zion's weather.]
+pub const NIGHT_PULL: f32 = 0.45;
 /// The most the `NIGHTPULL` aid asks (1: the cloud layers' luminance itself).
 pub const MAX_NIGHT_PULL: f32 = 2.0;
 /// The variable of the night pull (`NIGHTPULL` in a tune file).
@@ -121,12 +120,12 @@ pub const NIGHT_LUMA_RAMP: f64 = 8.0;
 /// place of FORWARD's and BACKSCATTER's by the night's share ([`LightAids::phase_weight`]), so moonlit clouds can
 /// have a brighter edge near the moon and darker bodies away from it; `None`: the day's weights [engineering
 /// choice: the starting values, to be set with pictures].
-pub const MOON_FORWARD: Option<f32> = None;
-pub const MOON_BACK: Option<f32> = None;
+pub const MOON_FORWARD: Option<f32> = Some(1.6);
+pub const MOON_BACK: Option<f32> = Some(0.1);
 /// The phase's cap by moonlight (the `MOONCAP` aid), in place of [`PHASE_CAP`](crate::volumetric_clouds::PHASE_CAP)
 /// by the night's share ([`LightAids::phase_cap`]): above it the cloud right at the moon outshines the rest;
 /// `None`: the day's cap [engineering choice: the starting value, to be set with pictures].
-pub const MOON_CAP: Option<f32> = None;
+pub const MOON_CAP: Option<f32> = Some(9.0);
 /// The most the `MOONCAP` aid asks.
 pub const MAX_MOON_CAP: f32 = 16.0;
 pub const MOON_CAP_VAR: &str = "NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_MOONCAP";
@@ -1625,7 +1624,7 @@ mod tests {
         }
         let lower = bounce * f64::from(HEMISPHERE * a.weight(LightWeight::Lower)) * level * lean_gain;
         let shade = shade_colour(i, upper);
-        let k = light_bound(light, direct, ambient, upper.max(shade), lower, f64::from(a.weight(LightWeight::Sun)), 0.0, PHASE_CAP);
+        let k = light_bound(light, direct, ambient, upper.max(shade), lower, f64::from(a.weight(LightWeight::Sun)), 0.0, a.phase_cap(night_share(i.sky.elevation)));
         [direct, upper, lower].map(|v| (v * k).as_vec3())
     }
 
@@ -1699,7 +1698,7 @@ mod tests {
                     let back = aids.weight(LightWeight::Backscatter);
                     assert_eq!((u.loct.w.to_bits(), u.lfloor.x.to_bits(), u.lfloor.y.to_bits()), (aids.weight(LightWeight::Forward).to_bits(), (FLOOR_LENGTH * back).to_bits(), (FLOOR_MAX * back * LEAN_FLOOR).to_bits()));
                     // The night's keys reach nothing else of the uniform.
-                    let other = uniform(&VolumeInputs { light_aids: LightAids { night_pull: 1.3, moon_forward: Some(2.5), moon_back: Some(0.25), ..aids }, ..i });
+                    let other = uniform(&VolumeInputs { light_aids: LightAids { night_pull: 1.3, moon_forward: Some(2.5), moon_back: Some(0.25), moon_cap: Some(14.0), ..aids }, ..i });
                     assert!(u == other || format!("{u:?}") == format!("{other:?}"), "{elevation}: {i:?}");
                 }
             }
@@ -1788,7 +1787,7 @@ mod tests {
         }
     }
 
-    /// The deep night's levels: the direct light at the geometric mean of the two luminances, its hue kept, the
+    /// The deep night's levels: the direct light at the two luminances' mix by [`NIGHT_PULL`], its hue kept, the
     /// light from below pulled by its own gain, the sky level and MoonlightNVSE.ini's factor outside of it, each
     /// once; a weather whose night sunlight is no brighter than its clouds untouched.
     #[test]
@@ -1796,9 +1795,9 @@ mod tests {
         let i = clear_night(START_LIGHT);
         let (l, [light, _, lower]) = (lighting(&i), undimmed(&i));
         let (ls, lc) = (luminance(gained(i.sunlight, 1.0)), luminance(gained(i.ambient, 1.0)));
-        let g = (lc / ls).sqrt() as f32;
+        let g = (lc / ls).powf(f64::from(NIGHT_PULL)) as f32;
         assert!((l.light - light * g).abs().max_element() < 1e-6 * light.max_element(), "{} against {}", l.light, light * g);
-        let kept = lower * ((lc / luminance(lower_light(&i))).sqrt() as f32);
+        let kept = lower * ((lc / luminance(lower_light(&i))).powf(f64::from(NIGHT_PULL)) as f32);
         assert!((l.llower.truncate() - kept).abs().max_element() < 1e-5 * lower.max_element());
         // Twice the sky level: twice the light, the gains the same.
         let two = lighting(&VolumeInputs { sky_scale: 2.0, ..i });
@@ -1822,7 +1821,7 @@ mod tests {
         assert_eq!((start_light_aids(one("dark")).night_pull, start_light_aids(one("NaN")).night_pull, start_light_aids(|_| None).night_pull), (NIGHT_PULL, NIGHT_PULL, NIGHT_PULL));
         assert_eq!((LightAids { night_pull: f32::NAN, ..START_LIGHT }.night_pull(), LightAids { night_pull: 5.0, ..START_LIGHT }.night_pull()), (NIGHT_PULL, MAX_NIGHT_PULL));
         assert!(LightAids { night_pull: 0.75, ..START_LIGHT }.text().ends_with("NIGHTPULL 0.75") && !START_LIGHT.text().contains("NIGHTPULL"));
-        assert!(START_LIGHT.model_text().contains("(NIGHTPULL 0.50), every colour bounded to"));
+        assert!(START_LIGHT.model_text().contains("(NIGHTPULL 0.45), every colour bounded to"));
         let vars = |n: &str| match n {
             MOON_FORWARD_VAR => Some("2.5".to_string()),
             MOON_BACK_VAR => Some("9".to_string()),
@@ -1832,6 +1831,19 @@ mod tests {
         assert_eq!((a.moon_forward, a.moon_back), (Some(2.5), Some(MAX_WEIGHT)));
         assert!(a.text().ends_with("MOONFORWARD x2.50, MOONBACK x4.00"), "{}", a.text());
         assert_eq!((START_LIGHT.moon_forward, START_LIGHT.moon_back), (MOON_FORWARD, MOON_BACK));
+        // The cap by moonlight: parsed and held, from the day's to the moon's by the night's share, the day's by day
+        // and where it is unset or not a number; in the uniform and nowhere else of it.
+        let cap = |v: &'static str| move |n: &str| (n == MOON_CAP_VAR).then(|| v.to_string());
+        assert_eq!((start_light_aids(cap("12")).moon_cap, start_light_aids(cap("99")).moon_cap, start_light_aids(cap("-1")).moon_cap), (Some(12.0), Some(MAX_MOON_CAP), Some(0.0)));
+        assert_eq!((start_light_aids(cap("high")).moon_cap, START_LIGHT.moon_cap), (MOON_CAP, MOON_CAP));
+        let capped = |m: Option<f32>| LightAids { moon_cap: m, ..START_LIGHT };
+        assert_eq!((capped(Some(12.0)).phase_cap(None), capped(Some(12.0)).phase_cap(Some(0.0)), capped(Some(12.0)).phase_cap(Some(0.5)), capped(Some(12.0)).phase_cap(Some(1.0))), (PHASE_CAP, PHASE_CAP, (PHASE_CAP + 12.0) * 0.5, 12.0));
+        assert_eq!((capped(None).phase_cap(Some(1.0)), capped(Some(f32::NAN)).phase_cap(Some(1.0)), capped(Some(50.0)).phase_cap(Some(1.0))), (PHASE_CAP, PHASE_CAP, MAX_MOON_CAP));
+        let night = uniform(&clear_night(capped(Some(12.0))));
+        assert_eq!(night.phase.w, 12.0, "the deep night");
+        assert_eq!(uniform(&clear_night(capped(None))).phase.w, PHASE_CAP);
+        let plain = uniform(&clear_night(capped(None)));
+        assert_eq!((night.phase.truncate(), night.light_dir, night.lmode, night.loct, night.lfloor), (plain.phase.truncate(), plain.light_dir, plain.lmode, plain.loct, plain.lfloor));
         // Between the day's and the moon's, the other weights and the day untouched.
         assert_eq!((a.phase_weight(LightWeight::Forward, None), a.phase_weight(LightWeight::Forward, Some(0.5)), a.phase_weight(LightWeight::Forward, Some(1.0))), (1.0, 1.75, 2.5));
         assert_eq!(a.phase_weight(LightWeight::Sun, Some(1.0)), a.weight(LightWeight::Sun));

@@ -1312,7 +1312,16 @@ impl MoonTune {
     /// The day's values, unchanged.
     pub const DAY: MoonTune = MoonTune { strength: 1.0, rays: None, lift: None, shade: None, g: None, cap: None, sky_weight: None, sky_phase: None };
     /// The moonlight's start values.
-    pub const START: MoonTune = MoonTune { strength: MOON_STRENGTH, ..MoonTune::DAY };
+    pub const START: MoonTune = MoonTune {
+        strength: MOON_STRENGTH,
+        rays: Some(8.0),
+        lift: Some(1.6),
+        shade: Some(0.4),
+        g: Some(0.7),
+        cap: Some(3.0),
+        sky_weight: Some(0.3),
+        sky_phase: Some(0.15),
+    };
 
     /// The values by their tune keys, in their order.
     fn named(&self) -> [(&'static str, Option<f32>); 8] {

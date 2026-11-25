@@ -2741,10 +2741,11 @@ fn lines_said_to_someone_turn_the_two_to_each_other() {
     assert!(turns(&g).is_empty());
 }
 
-/// SayTo with `noTargetLookFlag` 1 turns nobody, body or head, whoever the target is
-/// (#2796, docs/design/dialogue-play.md §9.2): Curtis's radio call to the player.
+/// SayTo with `noTargetLookFlag` 1 turns the speaker to its target, and the target does
+/// not look back, whoever the target is (observer check 218, #3989,
+/// docs/design/dialogue-play.md §9.2).
 #[test]
-fn say_to_with_no_target_look_turns_nobody() {
+fn say_to_with_no_target_look_turns_the_speaker_alone() {
     let f = fixture();
     let r = |id: u32| ArgValue::Value(Value::Ref(id));
     let n = |x: f64| ArgValue::Value(Value::Num(x));
@@ -2754,12 +2755,10 @@ fn say_to_with_no_target_look_turns_nobody() {
         call(&mut g, 0x1034, NPC1_REF, &[r(target), r(GREETING), n(0.0), n(1.0)]);
         assert!(g.is_talking(FormId(NPC1_REF)), "the line is said to {target:08X}");
         assert_eq!(g.speech[0].target, Some(FormId(target)));
-        assert!(g.facings().is_empty(), "nobody turns for the line to {target:08X}");
+        let f = g.facings();
+        assert_eq!(f.len(), 1, "the speaker alone turns for the line to {target:08X}");
+        assert_eq!((f[0].who, f[0].to, f[0].body), (FormId(NPC1_REF), FormId(target), true));
     }
-    // A game saved while such a line was said before #2796 (look "Speaker") reads it as
-    // the new rule.
-    let old: fnv_game::game::LineLook = serde_json::from_str("\"Speaker\"").unwrap();
-    assert_eq!(old, fnv_game::game::LineLook::Nobody);
 }
 
 #[test]

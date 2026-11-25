@@ -341,13 +341,12 @@ the bullet and note the ruling in the spec it links to.
   a mean bone-weight share of `PART_TRIANGLE_SHARE = 0.5`, then filled at the same mask
   opacity as whole parts. A different threshold changes the boundary, not its strength;
   coarse meshes may need finer clipping. [Classic VATS §12](design/vats-classic.md#12-the-selected-part-lit-on-the-target-2026-11-10).
-- **SayTo's "no target look" flag turns nobody (#2796).** [hypothesis, #2796] A SayTo with
-  `noTargetLookFlag` 1 now turns neither the speaker nor the target, so Curtis talks into
-  his radio in the McCarran tower without turning to the player below. Without the flag
-  the speaker still turns to whom it talks (your 2026-10-11 rule). This changes the 22
-  shipped SayTo calls to the player that carry the flag (the monorail guards would warn
-  you without turning). The narrower reading, the speaker stays only when the target is
-  the player, is a one-line change. ([dialogue-play §9.2](design/dialogue-play.md))
+- **SayTo's "no target look" flag turns the speaker again (#3989).** [observed, check 218]
+  The original turns a standing speaker to its target with the flag as without it; only
+  the target is not made to look. NVForever now does the same, so Curtis may turn to the
+  player for his radio call in the McCarran tower again (#2796), until what keeps him
+  still in the original (his package or idle there, check 218's open part) is matched.
+  ([dialogue-play §9.2](design/dialogue-play.md))
 - **Hold CLAMP effect idles (#2685).** [design, #2685] `HOLD_CLAMP_EFFECT_IDLES` keeps
   a CLAMP actor idle with material/emitter tracks at its exact end until replacement or
   stop, overriding repeat counts. This keeps attached chamber effects and pod glow;

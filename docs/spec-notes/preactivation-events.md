@@ -104,18 +104,20 @@ post-handler destroyed re-check follow `ShowOff:OnPreActivate` via shared
   - `ShowOff:OnPreActivateInventoryItemAlt` runs next with calling reference `actor`
     (`0::`) and five arguments `(rItemBase, rItemRef, bIsActivationNotPrevented, iKey,
     bEquipping)` carrying forward the sticky `allowed` state from the non-Alt pass.
-- Scripted `EquipItem`, `UseAidItem` (`Game::consume`), and `UnequipItem` check
-  `Game::pre_activate_inventory_item_alt` (only the Alt event, not non-Alt) when the
-  actor carries (or, for `UnequipItem`, has equipped) the item, passing `iKey = 0` and
-  `bEquipping = 1` and canceling equip/consume/unequip on `SetFunctionValue 0`
-  [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9, ShowOffNVSE 184,
-  `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
-  `tools/capture/nvse/catalogs/wave6d1_pre_activate_inv_alt_unequip.json` probes
-  `w6d1_15_pre_activate_inv_aid_and_unequip`
+- Scripted `EquipItem` (aid/weapon) and scripted `UnequipItem` (equipped weapon)
+  fire `ShowOff:OnPreActivateInventoryItemAlt` (only the Alt event, not non-Alt,
+  `na=0`) with `bEquipping = 1` and cancel equip/consume/unequip on
+  `SetFunctionValue 0` [observed: 2026-11-24, Fallout: New Vegas 1.4.0.525, xNVSE
+  6.4.9, ShowOffNVSE 184, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base
+  masters, `tools/capture/nvse/catalogs/wave6d1_pre_activate_inv_alt_unequip.json`
+  probes `w6d1_15_pre_activate_inv_aid_and_unequip`
   (`na=0|aid(vetoCnt=7,vAl=1,vEq=1,alwCnt=6,aAl=2)|wep(veto=0,alw=1,postUn=0,unAl=1,unBEq=1)`)
   and `w6d1p3_15_unequip_alt_beq_and_veto`
   (`pre=1|veto(eq=1,n=1,bEq=1)|alw(eq=0,n=2,bEq=1)`); no binary, DLL, PDB, or
-  third-party source consulted].
+  third-party source consulted]. Passing `iKey = 0` and wiring scripted `UseAidItem`
+  (`Game::consume`) through `Game::pre_activate_inventory_item_alt` remain
+  `[hypothesis]`; gating the helper on whether the actor carries (or, for
+  `UnequipItem`, has equipped) the item is `[design]`.
 
 [design] Both helpers short-circuit with zero `temp_ref` allocation when no matching
 handler is registered, leaving unmodded vanilla behavior untouched. A per-`Game`

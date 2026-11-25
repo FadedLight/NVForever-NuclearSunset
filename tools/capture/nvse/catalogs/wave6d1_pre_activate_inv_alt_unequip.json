@@ -45,7 +45,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/preactivation-events.md",
-          "spec_line": 95,
+          "spec_line": 107,
           "functions_tested": [
             "ShowOff:OnPreActivateInventoryItem",
             "ShowOff:OnPreActivateInventoryItemAlt"
@@ -147,7 +147,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/preactivation-events.md",
-          "spec_line": 95,
+          "spec_line": 107,
           "functions_tested": [
             "ShowOff:OnPreActivateInventoryItemAlt"
           ],

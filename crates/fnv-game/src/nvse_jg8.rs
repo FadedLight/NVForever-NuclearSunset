@@ -133,9 +133,11 @@ impl Game<'_> {
         use crate::trace::EventKind as K;
         match *kind {
             K::QuestFailed { quest } if self.jg8_listening(Ev::FailQuest) => Some((Ev::FailQuest, vec![XVal::Ref(quest.0)], vec![XVal::Ref(quest.0)])),
-            // [hypothesis: the arguments; the page gives none]
-            K::ReputationChanged { reputation, axis, value } if self.jg8_listening(Ev::Reputation) => {
-                Some((Ev::Reputation, vec![XVal::Ref(reputation.0)], vec![XVal::Ref(reputation.0), XVal::Num(axis as f64), XVal::Num(value)]))
+            // [observed 2026-11-24: w6t2p3_12_rep_fame_infamy, FNV 1.4.0.525 + JG 528:
+            // callback receives (reputation, fame, infamy)]
+            K::ReputationChanged { reputation, .. } if self.jg8_listening(Ev::Reputation) => {
+                let [infamy, fame] = self.player.reputation.get(&reputation).copied().unwrap_or([0.0; 2]);
+                Some((Ev::Reputation, vec![XVal::Ref(reputation.0)], vec![XVal::Ref(reputation.0), XVal::Num(fame), XVal::Num(infamy)]))
             }
             _ => None,
         }

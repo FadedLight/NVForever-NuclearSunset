@@ -118,19 +118,22 @@ Each extraction makes a plan of it (`rtgi_volume/plan.rs`, a pure function) and 
 (`gpu.rs`), before anything is specialised:
 
 - **First bind** of a visit: only under the loading screen of a start or a travel, until it first
-  settles. The screen waits for pipelines that were asked for, so those of what is loaded, in range
+  settles, and only with a world camera's view. The screen waits for pipelines that were asked for, so those of what is loaded, in range
   and not culled are asked for while it is up. A request that comes later waits for the next visit,
   in the stock light. What comes into view later asks for its pipeline then and is skipped until it
   is ready, as any other.
 - **Another texture of the same visit** (empty to solved, a newer result): at any time, as it changes
-  no key and no pipeline. An older result than what is bound is dropped.
+  no key and no pipeline. An older result than what is bound is dropped, whatever it is.
 - **Unbind**: in the extraction that sees another place, the outdoors or no request. Every world
   camera's view has it, a replaced camera's new one in the same extraction; the mirror, the scope's
   lens and the menus never.
-- **Stock for the visit**: the hook failed, the device refused, or a pipeline whose fragment has the
-  def failed for good (looked for once a frame while something is bound). Then the component goes
-  in the next extraction. A reader whose stock twin is broken too counts as well, as it is told by
-  the def. One line each in the log.
+- **Stock to the end of the visit**: the hook failed, the device refused (a solved texture too, where
+  the empty one was granted), the request was late, or a pipeline whose fragment has the def failed
+  for good (looked for once a frame while something is bound; the component goes in the next
+  extraction). A reader whose stock twin is broken too counts as well, as it is told by the def. The
+  log has one line a visit for it, beside one for what was unbound and the pipeline cache's own.
+- **Late at a start**: a run begins without a game, so the visit is another one when the scripts have
+  made it. If that is the frame in which the screen settles, the request is late.
 
 A texture that is not used any more is let go; the GPU has it until it is done with it. A run
 counts what it makes, sends, binds and dispatches, and bevy_pbr's patch counts the view bind groups
@@ -145,12 +148,13 @@ when:
 
 - the fragment stage of the fullest pipeline has more sampled textures, samplers or uniform buffers
   than the device allows. That pipeline is the view's fullest layout (`fullest_view_key`, with the
-  tonemapping's table and the three bindings, without the light volume's arrays while they are
-  off), 2 textures, 2 samplers and 4 uniform buffers of the mesh, and the most that a material drawn
+  tonemapping's table, the contact shadows' uniform and the three bindings, without the light
+  volume's arrays while they are off), 2 textures, 2 samplers and 4 uniform buffers of the mesh, and the most that a material drawn
   in that view has. Binding arrays count against other limits;
 - rgba16float cannot be filtered, sampled or written;
 - a side is larger than the device allows, or the texture than 32 MiB. An old and a new one may then
-  be there side by side.
+  be there side by side: 128 MiB of payload for one replacement, the staging copy and the main
+  world's counted; revisions that follow each other faster than the GPU lets go add to it.
 
 While bevy_pbr's layouts or the hook are not there yet it is asked again in the next frame. What it
 cannot promise: an allocation may still fail, which ends the game as any other.
@@ -163,17 +167,25 @@ of 5 x 4 x 24, every point with values of its own, three that do not count and a
 compute pass (`rtgi_readback.wesl`) makes 96 reads of it through the view's own buffer, texture and
 sampler with `nvf_rtgi_read`, and the log says how far they are from `nvf_rtgi::Reader`'s:
 
-- at texel centres, outside too: within 1e-4 and 1/2048 of the value;
-- between the points, with thin support and in the shell: within a bound worked out for each read.
-  With e = 1/256 + 1e-4 texels of filter error on an axis a filtered channel is off by at most
-  e (Rx + Ry + Rz), R the largest difference of two corners next to each other along an axis;
-  with N the numerator's error, D the support's and d = max(m, thin), E is off by at most
-  (N + |E| D) / (d - D), and v the same. Never less than at a centre.
+- at texel centres that the normalised coordinates hold exactly on every axis and in every slab (x 1
+  and z 0 or 3 here), and outside: within A = 1e-4 + 1/2048 of the value, as nothing is filtered;
+- at the other centres, between the points, with thin support and in the shell: within a bound worked
+  out for each read. With e = 1/256 + 1e-4 texels of filter error on an axis a filtered channel is
+  off by at most e (Rx + Ry + Rz), R the largest difference of two texels next to each other along an
+  axis in all the cells that e reaches (on both sides of a centre); with N the numerator's error, D the
+  support's and d = max(m, thin), E is off by at most (N + |E| D) / (d - D), and v the same. A on top.
 
-That e is a threshold for the machines the smoke test runs on (`rtgi-made-volume`), 8 fractional
-bits' worth. It says nothing about a GPU's precision, and a miss alone does not tell coarse
-filtering from a wrong slab, place or uniform; right centres with wrong fractions point at the
-filter. The light's formula and the surfaces that read are not checked there: the tests have them.
+The log says `readback passed` or `readback FAILED`, of the numbers as they are, and the largest
+difference over its bound of each kind. That e is a threshold for the machines the smoke test runs on
+(`rtgi-made-volume`), 8 fractional bits rounded or cut. It is no claim about a GPU's precision, and
+a miss alone does not tell coarse filtering from a wrong slab, place or uniform; right exact centres
+with wrong fractions point at the filter. The light's formula and the surfaces that read are not
+checked there: the tests have them. The job belongs to the visit and the revision it was made for: its
+buffers are made when that is bound and go with it.
+
+**Pending**: both smoke scenarios on a GPU; pictures of off against main at three views; turning and
+walking with the made volume under DLSS, FSR and multisampling. What the smoke test sees is that
+pipelines with the def were made and that bind groups had the entries, not which camera drew with them.
 
 ## What nothing bound means
 

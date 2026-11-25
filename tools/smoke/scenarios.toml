@@ -1273,8 +1273,10 @@ paths = [
   "engine/nvforever/src/rtgi_*", "engine/nvforever/src/rtgi_volume/**", "engine/nvforever/src/lights.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvf-rtgi/src/volume.rs",
   "engine/nvf-assets/src/nif_material*", "engine/vendor/bevy_pbr/src/render/mesh*.rs",
 ]
-# A home of its own: the list of pipelines it keeps has the variants that read.
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_RTGI_MADE = "1", NVFOREVER_HOME = "rtgi-made-home" }
+# No pipeline or composed shader of an earlier run, none kept for a later one; no scripts, so that the
+# visit is the same from its first frame (the game's token may come in the frame the screen settles,
+# which is late: the stock light).
+env = { NVF_PLAY_SCRIPTS = "0", NVF_PLAY_DEBUG_RTGI_MADE = "1", NVF_PIPELINE_CACHE = "0" }
 args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
 run_seconds = 15
 order = [[
@@ -1282,14 +1284,15 @@ order = [[
   { re = 'rtgi: cell [0-9A-F]{8}, revision 1: the empty texture of \[3, 3, 12\] bound', label = "the empty texture is bound under the start's screen" },
   "loading screen down after",
   { re = 'rtgi: cell [0-9A-F]{8}, revision 1: a solved texture of \[5, 4, 24\] bound', label = "the made one takes its place when the screen is down" },
-  { re = 'rtgi: readback: ', label = "the GPU's reads come back" },
+  { re = 'rtgi: readback ', label = "the GPU's reads come back" },
 ]]
 expect = [
   { re = 'rtgi: pipelines that read the volume: (?P<n>\d+) there, 0 to come, 0 failed', range = [1, 100000], label = "at least one pipeline that reads is there and none failed" },
-  { re = 'rtgi: readback: 96 reads, the largest difference is (?P<n>[\d.]+) of its bound', range = [0, 1], all = true, label = "every read on the GPU is within its bound of the CPU's" },
+  { text = "rtgi: readback passed: 96 reads", count = 1, label = "every read on the GPU is within its bound of the CPU's" },
   { re = 'rtgi: \d+ allocations, \d+ uploads, \d+ binds, 1 dispatches; view bind groups \d+, with RTGI entries (?P<n>\d+)', range = [1, 100000000], label = "view bind groups were made with the three entries" },
 ]
 forbid = [
+  { text = "rtgi: readback FAILED", label = "a read beyond its bound, or no pipeline to read with" },
   { text = "rtgi: unbound", label = "it stays bound" },
   { text = "asked for with no screen up", label = "it is bound under the start's screen" },
   { text = "pipelines that read the volume failed", label = "a pipeline that reads failed for good" },

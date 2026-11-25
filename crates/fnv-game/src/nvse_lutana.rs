@@ -705,11 +705,12 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         // flag: `PlacedRef::parent_activate_only`].
         "isparentactivateonly" => yes(form(args, 0).or(subject).and_then(|r| g.world.placed.get(r)).is_some_and(|p| p.parent_activate_only)),
         // ---- form flags and playability ----
-        // `form flag`: 1 when every bit of `flag` is among the form's record flags
-        // [documented: GetFormFlag's table], as GetFlagsLow/High read them.
+        // `form flag`: 1 when any bit of `flag` is among the form's record flags
+        // [documented: GetFormFlag's table; observed: `w6d2_32_lutana_form_flag_service_and_casino`],
+        // as GetFlagsLow/High read them.
         "getformflag" => {
             let (Some(f), Some(bit)) = (form(args, 0), num(args, 1).map(|b| b as i64 as u32)) else { return Some(Ok(zero)) };
-            yes(bit != 0 && crate::nvse_other::record_flags_of(g, f) & bit == bit)
+            yes(bit != 0 && crate::nvse_other::record_flags_of(g, f) & bit != 0)
         }
         // `form flag on`: as SetFlagsLow/High store them, read by the same getters.
         "setformflag" => {

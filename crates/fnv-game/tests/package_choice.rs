@@ -123,6 +123,7 @@ const NPC_E: u32 = 0x844;
 const NPC_F: u32 = 0x845;
 const NPC_G: u32 = 0x846;
 const NPC_H: u32 = 0x847;
+const NPC_I: u32 = 0x848;
 const STAT: u32 = 0x850;
 const CELL: u32 = 0x860;
 const CELL_FAR: u32 = 0x861;
@@ -137,6 +138,7 @@ const REF_F: u32 = 0x877;
 const REF_G: u32 = 0x878;
 const REF_FAR: u32 = 0x879;
 const REF_H: u32 = 0x87A;
+const REF_I: u32 = 0x87B;
 
 const TRAVEL: u8 = 6;
 const SLEEP: u8 = 4;
@@ -186,6 +188,7 @@ fn plugin_bytes() -> Vec<u8> {
         npc(NPC_F, "F", &[P_SHOP, P_DEFAULT]),
         npc(NPC_G, "G", &[P_SUNDAY, P_WEEKEND, P_DEFAULT]),
         npc(NPC_H, "H", &[P_FIND_2H, P_PATROL_3H, P_DEFAULT]),
+        npc(NPC_I, "I", &[P_NIGHT_COND]),
     ]
     .concat();
     let stat = record(b"STAT", STAT, &[sub(b"EDID", z("Marker"))]);
@@ -200,6 +203,7 @@ fn plugin_bytes() -> Vec<u8> {
         placed(b"ACHR", REF_F, "FRef", NPC_F, None),
         placed(b"ACHR", REF_G, "GRef", NPC_G, None),
         placed(b"ACHR", REF_H, "HRef", NPC_H, None),
+        placed(b"ACHR", REF_I, "IRef", NPC_I, None),
     ]
     .concat();
     let cell = |id: u32, edid: &str, refs: &[u8]| {
@@ -1109,4 +1113,50 @@ fn package_change_script_switching_to_third_package_skips_superseded_begin() {
     assert_eq!(g.world.global(FormId(G_THIRD_BEGIN)), Ok(1.0), "P_THIRD Begin runs once");
     assert_eq!(g.world.global(FormId(G_SECOND_BEGIN)), Ok(0.0), "superseded P_SECOND Begin does not run");
     assert_eq!(g.extra[&actor].current_package, Some(FormId(P_THIRD)));
+}
+
+/// Issue #3041: a package that is BOTH outside its schedule and failing its own
+/// conditions must not be kept when no other package in the list applies (`check_package`
+/// returns `OutOfSchedule` before testing conditions, so `select_package` tests the
+/// package's own conditions directly). While its conditions still pass outside its
+/// schedule it is still kept.
+#[test]
+fn an_out_of_schedule_package_whose_conditions_fail_is_not_kept() {
+    let f = fixture();
+    let mut g = game(&f, None);
+    let actor = id(REF_I);
+    set(&mut g, G_HOUR, 23.0);
+    set(&mut g, G_SWITCH, 1.0);
+    assert_eq!(g.evaluate_package(actor), Some(id(P_NIGHT_COND)));
+    // Out of schedule (08:00), conditions still passing: kept.
+    set(&mut g, G_HOUR, 8.0);
+    assert_eq!(g.check_package(actor, id(P_NIGHT_COND)), PackageCheck::OutOfSchedule);
+    assert_eq!(g.evaluate_package(actor), Some(id(P_NIGHT_COND)));
+    // Out of schedule (08:00) AND conditions now failing: dropped, not kept.
+    set(&mut g, G_SWITCH, 0.0);
+    assert_eq!(g.check_package(actor, id(P_NIGHT_COND)), PackageCheck::OutOfSchedule);
+    assert_eq!(g.evaluate_package(actor), None);
+    assert_eq!(g.extra[&actor].current_package, None);
+}
+
+/// Issue #3041: a script relocating an actor (`MoveTo` / `MoveToMarkerWithFade`) releases
+/// the Must Complete / Must Reach Location hold on its pre-relocation package so the next
+/// periodic choice can drop it once its conditions fail, while keeping it unchanged if it
+/// is still valid at the new spot.
+#[test]
+fn script_relocation_releases_must_complete_hold_without_dropping_a_still_valid_package() {
+    let f = fixture();
+    let mut g = game(&f, None);
+    let e = id(REF_E);
+    set(&mut g, G_SWITCH, 1.0);
+    assert_eq!(g.update_package(e), Some(id(P_MUST)));
+    assert_eq!(g.package_held(e), Some("must complete"));
+    // Script moves the actor while the package is still valid: hold is cleared, but the
+    // choice re-picks the same package unchanged.
+    fnv_game::functions::console::call_words(&mut g, Some(e), "moveto", &[format!("{MARKER:08X}")], "test").unwrap();
+    assert_eq!(g.package_held(e), None);
+    assert_eq!(g.update_package(e), Some(id(P_MUST)));
+    // Once its conditions also fail, the next periodic choice drops it to the fallback.
+    set(&mut g, G_SWITCH, 0.0);
+    assert_eq!(g.update_package(e), Some(id(P_DEFAULT)));
 }

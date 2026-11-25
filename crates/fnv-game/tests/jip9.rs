@@ -357,3 +357,23 @@ fn nif_block_materials_and_places() {
     let intrinsic = place(&mut g, "GetNifBlockRotationAlt \"Scene Root\" fX fY fZ 2");
     assert_ne!(intrinsic, "1 30.00 -0.00 90.00", "the same turn about the turning axes: other angles");
 }
+
+#[test]
+fn get_angles_between_points_and_get_angle_ex_match_observed_jip() {
+    let f = fixture();
+    let mut g = game(&f);
+    // East: pitch 0, heading -90; Diagonal (10,20,30)->(110,20,130): pitch 45, heading -90
+    // [observed: w6_t1_01_angles_between_points].
+    let east = s(&mut g, "GetAnglesBetweenPoints 0 0 0 100 0 0 fX fZ\nlet sOut := sv_Construct \"%.2f %.2f\" fX fZ\nSetFunctionValue sOut");
+    assert_eq!(east, "0.00 -90.00");
+    let diag = s(&mut g, "GetAnglesBetweenPoints 10 20 30 110 20 130 fX fZ\nlet sOut := sv_Construct \"%.2f %.2f\" fX fZ\nSetFunctionValue sOut");
+    assert_eq!(diag, "45.00 -90.00");
+    // GetAngleEx global (0) vs local (1) on Player rotated (25, 0, 315)
+    // [observed: w6_t1_02_angle_ex_and_heading].
+    q(&mut g, "PlayerREF.SetAngle X 25\nPlayerREF.SetAngle Z 315");
+    g.tick();
+    let glob = s(&mut g, "PlayerREF.GetAngleEx fX fY fZ 0\nlet sOut := sv_Construct \"%.2f %.2f %.2f\" fX fY fZ\nSetFunctionValue sOut");
+    assert_eq!(glob, "25.00 0.00 315.00");
+    let loc = s(&mut g, "PlayerREF.GetAngleEx fX fY fZ 1\nlet sOut := sv_Construct \"%.2f %.2f %.2f\" fX fY fZ\nSetFunctionValue sOut");
+    assert_eq!(loc, "-18.25 17.39 42.19");
+}

@@ -1566,6 +1566,17 @@ mod tests {
 
         let combined = emit_radius(0.1, 0.5, 0.5);
         assert!((combined - 2447.5 * 0.1 * 0.5 * 0.5).abs() < 1e-3, "combines reference, system, and emitter size: {combined}");
+
+        // Grass-fire flames (`grass_fire_fx::flame_scales`) must stay linear in `size * share`
+        // through real `emit` without quadratic double-scaling (#3673).
+        let flame_size = 1.2_f32;
+        let spawn_r = emit_radius(crate::grass_fire_fx::START_SIZE, 1.0, flame_size);
+        assert!((spawn_r - 2447.5 * flame_size * crate::grass_fire_fx::START_SIZE).abs() < 1e-2, "grass-fire spawn radius: {spawn_r}");
+        for share in [crate::grass_fire_fx::START_SIZE, 0.5, 1.0] {
+            let (holder, em_size) = crate::grass_fire_fx::flame_scales(flame_size, 1.0, share);
+            let r = emit_radius(holder, 1.0, em_size);
+            assert!((r - 2447.5 * flame_size * share).abs() < 1e-2, "grass-fire radius at share={share}: {r}");
+        }
     }
 
     fn test_particle(pos: Vec3, trail: Vec<Vec3>) -> Particle {

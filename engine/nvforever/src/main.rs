@@ -1499,10 +1499,13 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // NVFOREVER_HOME, every file created new, then mounted over every other loose layer for
     // this run only (nvf_assets pbr_field/ground.rs `seed_ground_pack`, terrain.rs
     // `ground_pack_diffuses`). No mods folder is written.
-    let ground_pack: Option<PathBuf> = if nvf_assets::ground_pack_requested() {
-        match terrain::ground_pack_diffuses(&opened.plugins, &args.esm_schema).and_then(|d| nvf_assets::seed_ground_pack(&d)) {
+    let ground_pack: Option<PathBuf> = if let Some(kind) = nvf_assets::ground_pack_requested() {
+        match terrain::ground_pack_diffuses(&opened.plugins, &args.esm_schema).and_then(|d| nvf_assets::seed_ground_pack(kind, &d)) {
             Ok((dir, sets, files)) => {
                 eprintln!("pbr ground pack: {sets} height-only sets for the landscape textures ({files} generated files, depth {}) written under {} (this run's own folder, mounted over every other loose layer)", nvf_assets::GROUND_DEPTH, dir.display());
+                if kind == nvf_assets::GroundPack::Alpha {
+                    eprintln!("pbr ground pack: and a diffuse for each, one flat colour with a checkerboard alpha, and a flat normal map");
+                }
                 Some(dir)
             }
             Err(e) => {

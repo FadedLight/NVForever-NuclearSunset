@@ -345,7 +345,12 @@ fn weapons() {
     assert_eq!(n(&mut g, "GetWeaponDetectionSoundLevel TestGun"), 2.0);
     q(&mut g, "SetWeaponDetectionSoundLevel TestGun 9");
     assert_eq!(n(&mut g, "GetWeaponDetectionSoundLevel TestGun"), 2.0);
-    // Mods, read by GetWeaponItemMod and the rest; left out, none [documented].
+    // Mods, read by GetWeaponItemMod and the rest; left out or non-IMOD clears to 0
+    // [documented; observed: jip_20_weapon_item_mod_non_imod].
+    q(&mut g, "SetWeaponItemMod TestGun 2 TestMod");
+    assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), f64::from(IMOD));
+    q(&mut g, "SetWeaponItemMod TestGun 2 TestGun");
+    assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), 0.0, "non-IMOD clears slot to 0");
     q(&mut g, "SetWeaponItemMod TestGun 2 TestMod");
     assert_eq!(n(&mut g, "GetWeaponItemMod 2 TestGun"), f64::from(IMOD));
     q(&mut g, "SetWeaponItemMod TestGun 2");
@@ -455,8 +460,8 @@ fn calculated_weapon_damage_and_dps_resolve_inv_and_world_refs() {
     let f = fixture();
     let mut g = game(&f);
 
-    // Keep Stewie plugin gate pinned at 945 while building 945->960 consumers.
-    assert_eq!(n(&mut g, "GetPluginVersion \"lStewieAl's Tweaks\""), 945.0);
+    // Stewie plugin gate promoted to 960 (#3183); 970 (#3184) remains held.
+    assert_eq!(n(&mut g, "GetPluginVersion \"lStewieAl's Tweaks\""), 960.0);
 
     // Player: Guns 50 (factor 0.75), CritChance 10 (0.10 * 30 * 2.0 = 6.0 crit contrib).
     // NPC: Guns 100 (factor 1.0), CritChance 0.

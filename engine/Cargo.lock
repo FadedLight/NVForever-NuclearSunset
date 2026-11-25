@@ -718,6 +718,7 @@ dependencies = [
  "bevy_utils",
  "bevy_window",
  "bitflags 2.13.2",
+ "bytemuck",
  "indexmap",
  "nonmax",
 ]

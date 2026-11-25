@@ -321,13 +321,18 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         // ---- the debug texts ----
-        // `name x y text`: made, or moved and changed when it is there [documented:
-        // DebugTextCreate; hypothesis: an existing name is changed, not doubled].
+        // `name x y text`: creates a new debug text and returns 1; if `name` already
+        // exists, updates its position and text in place (preserving zoom) [documented:
+        // DebugTextCreate; hypothesis: an existing name is moved and changed, not doubled]
+        // while returning -1 [observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+        // SUP NVSE 855, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official
+        // base masters, `w4c_b4_03_sup6_bobbypin_debugtext`: `dt(1,-1)`].
         "debugtextcreate" => {
             let Some(n) = text(args, 0) else { return Some(Ok(zero)) };
+            let existed = g.sup.debug_texts.contains_key(&n);
             let zoom = g.sup.debug_texts.get(&n).map_or(DEBUG_TEXT_ZOOM, |d| d.zoom);
             g.sup.debug_texts.insert(n, DebugText { x: num(args, 1, 0.0) as f32, y: num(args, 2, 0.0) as f32, text: text(args, 3).unwrap_or_default(), zoom });
-            zero
+            XVal::Num(if existed { -1.0 } else { 1.0 })
         }
         "debugtextdestroy" => {
             if let Some(n) = text(args, 0) {

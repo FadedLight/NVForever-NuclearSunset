@@ -34,7 +34,7 @@ Check: log `script switches: colour 1 130 232 112`; green HUD.
 
 **Game not full screen / launcher didn't start the game.**
 Did: `<workspace>\Play Nuclear Sunset (NVForever).cmd` runs our build with
-`--data <stock>\Data --mo2 <MO2 instance> --profile "D - Hikikomori NVR High" --window borderless --upscaler fsr --upscaler-quality quality`,
+`--data <stock>\Data --mo2 <MO2 instance> --profile "<profile>" --window borderless --upscaler fsr --upscaler-quality quality`,
 env `NVF_REPORTS=0`, schemas from the release folder; desktop shortcut to it.
 
 ---

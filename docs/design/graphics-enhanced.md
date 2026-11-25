@@ -4120,7 +4120,8 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the sunlit share from the sun and ambient lights as sky.rs sets them, weakened under a closed deck by
     what the clouds let through of a light from above (Cloud shadows on), the clouds' mean shadow
     as the reference the rays are measured against; a fog the light cannot read, a fog not blended
-    in display values, night, interiors and under water are shown the plain way. The look's
+    in display values, night in a climate without a moon, interiors and under water are shown the plain way. By
+    night the light is the moon's, the weather's night sunlight from the opposite side. The look's
     constants (ray contrast, lift, shade limit, phase floor, sky weights) are artistic choices made
     from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`, a
     developer aid too); the ends of the fog blend, the deck's share and the bright hold are constants.

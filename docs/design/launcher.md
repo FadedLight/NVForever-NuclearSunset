@@ -71,9 +71,8 @@ without the launcher is the same as before.
   by Save.
   The same page holds the launcher's other NVForever.ini keys, which are not rows of the
   game's menu (#3483; the Settings page stays the game's own menu, maintainer decision
-  2026-11-24): the PROGRAM card's `[Launcher] Exe` box (empty: the program beside the
-  launcher), and an **NVForever.ini** card with `[Launcher] News` and `CloseOnPlay`, the
-  game-written `[Controls] Input Device` shown but not changed, and the file's place. The
+  2026-11-24): an **NVForever.ini** card with `[Launcher] News`, `CloseOnPlay` and `Exe`
+  (empty: the program beside the launcher), the game-written `[Controls] Input Device` shown but not changed, and the file's place. The
   card's Save writes the keys that changed over the file as it is on disk and leaves every
   other line; only a changed program is checked, so one that went missing does not stop the
   other keys being saved. Each Save on the page (the folder's, the card's) keeps the other's

@@ -1103,7 +1103,7 @@ impl App {
         });
     }
 
-    /// The PROGRAM card's `[Launcher] Exe` box, part of the page's NVForever.ini form.
+    /// The NVForever.ini card's `[Launcher] Exe` box.
     fn exe_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Game program").small()).on_hover_text("[Launcher] Exe. Empty uses the program beside the launcher.");
@@ -1117,8 +1117,7 @@ impl App {
     }
 
     /// The Game folder page's NVForever.ini card: the `[Launcher]` keys this launcher reads,
-    /// the game-written input device, the file's place, and one Save for the program box above
-    /// and this card.
+    /// the game-written input device, the file's place, and the card's Save.
     fn ini_card(&mut self, ui: &mut egui::Ui) {
         if self.home.is_none() {
             ui.label("No home folder was found, so NVForever.ini cannot be written.");
@@ -1128,6 +1127,7 @@ impl App {
             ui.set_width(ui.available_width());
             ui.checkbox(&mut self.ini.news, "Fetch news").on_hover_text("[Launcher] News. Ask nv-forever.com (and GitHub) for the news when the launcher opens.");
             ui.checkbox(&mut self.ini.close, "Close the launcher when the game starts").on_hover_text("[Launcher] CloseOnPlay.");
+            self.exe_row(ui);
             let device = ini_get(&self.ini_text, "Controls", "Input Device").filter(|s| !s.is_empty()).unwrap_or_else(|| "not set".into());
             ui.label(RichText::new(format!("Input device: {device}")).small().color(WEAK)).on_hover_text("[Controls] Input Device. The game writes this. It is not changed here.");
             if let Some(path) = self.ini_path() {
@@ -1135,7 +1135,7 @@ impl App {
             }
             let dirty = self.ini_form_dirty();
             ui.horizontal(|ui| {
-                if ui.add_enabled(dirty, gold_button("Save", dirty)).on_hover_text("Writes the game program and these values into NVForever.ini, where you changed them.").clicked() {
+                if ui.add_enabled(dirty, gold_button("Save", dirty)).on_hover_text("Writes the values you changed into NVForever.ini.").clicked() {
                     let ctx = ui.ctx().clone();
                     self.save_ini_form(&ctx);
                 }
@@ -1819,7 +1819,11 @@ impl App {
                 Some(p) => ui.label(format!("Starts {}", p.display())),
                 None => ui.label(RichText::new(format!("{} was not found beside the launcher.", launch::GAME_EXE)).color(BAD)),
             };
-            self.exe_row(ui);
+            if cfg!(windows) && ui.button("Choose the game program…").clicked() {
+                if let Some(f) = pick_file("nvforever") {
+                    self.set_launcher_key("Exe", &f.display().to_string());
+                }
+            }
         });
         ui.add_space(12.0);
         ui.label(RichText::new("NVFOREVER.INI").small().strong().color(theme::GOLD_TEXT));

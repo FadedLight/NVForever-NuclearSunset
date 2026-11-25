@@ -44,6 +44,37 @@ NVForever never writes into the game folder, the MO2 folders or `Documents\My Ga
   (46), and the Goodsprings parking-lot road's collision is back in place (47): two of our
   first-pass fixes that the upstream merge had dropped.
 - NVR's **Water Lens**: water drops on the screen for a few seconds after you surface (48).
+- NVR's look now follows **Cartographer's preset per area** (Capital Wasteland → DCWorld,
+  the Pitt, Dead Money, Point Lookout, the Strip…) instead of one look everywhere (49).
+
+## Not finished yet
+
+In progress or queued, in order (see LOCAL-CHANGES.md and FIXES.md for what was tried):
+
+- **Underwater fog at Lake Mead is black** (logged colour 0, 0, 0): not looked into yet.
+- **NVR ImageAdjust**: held back. Hikikomori's values (brightness 14.5, negative colour
+  multipliers) only make sense with NVR's own formula, which the clean-room rule keeps us
+  from reading; a guess would look wrong. Needs tuning by eye against the original game.
+- **Cartographer presets**: done for bloom, sharpening, height fog, Cinema and Water Lens;
+  the presets' other effects (and their NoPBR/Performance flags) are not used.
+- **Other NVR effects not ported**: Wet World (needs the material shaders, a screen-space try
+  was taken out), NVR's rain, Bloom Legacy, the Vanilla Tonemapper and its sky tweak, Vanilla
+  Plus AO's settings.
+- **The owner's "Almost Makes You Wish For A Nuclear Sunset" look as built-in passes**:
+  Clarity ×2, Local Contrast, AmbientLight, bump detail, FXAA if needed, texture LOD bias
+  −0.6 / 16× anisotropy and the FalloutPrefs view distances. Not started.
+- **Prebaked ray-traced lighting** (ambient occlusion and bounce light only; the live
+  shadows stay as they are), prototype in one interior and Megaton. Not started.
+- **Collision**: "a Goodsprings building with no collision" (the bug hunter finds no building
+  without collision there; needs the exact building), the Megaton deck (walkway checked: the
+  player walks past the old wall), the 11 small overlaps and 4 floating items the Goodsprings
+  hunt lists.
+- **Scripts/AI**: the 8 extender functions still missing (ySIGetTagTrait,
+  ClearModNVSEVars, cn, GetRespawn, NVRGetSetting, NVRSetSetting, NVRSetSettingS, UMON), the
+  "setbaseform called on no reference" loop in Hymn of The New West.esp, NS UI mods with 194
+  targets missing, Functional Post Game Ending's "overwritten" notice (a load-order question).
+- **Viewer screenshots** sometimes exit without writing the picture after a long delay (seen
+  at 35–60 s); shorter delays work.
 
 ## Sync with upstream, 2026-11-25
 

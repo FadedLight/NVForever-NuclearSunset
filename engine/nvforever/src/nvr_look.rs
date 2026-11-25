@@ -103,7 +103,9 @@ fn value(text: &str, section: &str, key: &str) -> Option<f32> {
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
         if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            inside = name.trim().eq_ignore_ascii_case(section);
+            // NVR's TOML names the sections `_Shaders.…`, Cartographer's presets `Shaders.…`
+            // [observed: Hikikomori NVR's `config\Cartographer\NVRPresets\*.ini`].
+            inside = name.trim().trim_start_matches('_').eq_ignore_ascii_case(section.trim_start_matches('_'));
             continue;
         }
         if !inside {
@@ -163,12 +165,97 @@ impl NvrLook {
     }
 }
 
+/// Cartographer's choice of NVR preset per place [observed: Hikikomori NVR's
+/// `config\Cartographer\NVR.ini`: `[Main]` `Exterior=Default`, `Interior=Default`, and
+/// `[Overrides]` `<worldspace EditorID>=<preset>,<flags>…`, e.g. `Wasteland=DCWorld`,
+/// `DLC01PittWorld=ThePitt`; each preset is `config\Cartographer\NVRPresets\<preset>.ini`
+/// with NVR's settings]. The flags after the preset name are not taken over.
+const CARTOGRAPHER_MAP: &str = "config\\Cartographer\\NVR.ini";
+const CARTOGRAPHER_PRESETS: &str = "config\\Cartographer\\NVRPresets";
+
+/// The preset Cartographer names for a worldspace (or an interior), from NVR.ini's text.
+pub fn cartographer_preset(map: &str, world: Option<&str>, interior: bool) -> Option<String> {
+    let mut section = String::new();
+    let mut main = None;
+    let mut over = None;
+    for line in map.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            section = name.trim().to_ascii_lowercase();
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let preset = v.split(',').next().unwrap_or("").trim();
+        if preset.is_empty() {
+            continue;
+        }
+        match section.as_str() {
+            "main" if k.trim().eq_ignore_ascii_case(if interior { "Interior" } else { "Exterior" }) => main = Some(preset.to_string()),
+            "overrides" if !interior && world.is_some_and(|w| k.trim().eq_ignore_ascii_case(w)) => over = Some(preset.to_string()),
+            _ => {}
+        }
+    }
+    over.or(main)
+}
+
+/// The NVR settings texts the look is made from: NVR's own, and Cartographer's map.
+#[derive(Resource, Default)]
+struct NvrSources {
+    base: Option<String>,
+    map: Option<String>,
+}
+
 pub struct NvrLookPlugin;
 
 impl Plugin for NvrLookPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostUpdate, (load, apply).chain().after(crate::post::image_space_glow));
+        app.add_systems(PostUpdate, (load, follow_place, apply).chain().after(crate::post::image_space_glow));
     }
+}
+
+/// Where the camera is, as Cartographer chooses by it: (worldspace EditorID, interior).
+fn place_of(world: Option<&crate::world::WorldData>, sky: Option<&crate::sky::SkyState>) -> (Option<String>, bool) {
+    let interior = sky.is_some_and(|s| s.interior.is_some());
+    let edid = world.and_then(|w| w.index.worldspaces.get(&w.world)).and_then(|ws| ws.edid.clone());
+    (edid, interior)
+}
+
+/// Cartographer's preset for where the camera is, put in place whenever the place changes;
+/// NVR's own settings where Cartographer names none or its preset is missing.
+fn follow_place(
+    mut commands: Commands,
+    data: Option<Res<GameData>>,
+    sources: Option<Res<NvrSources>>,
+    world: Option<Res<crate::world::WorldData>>,
+    sky: Option<Res<crate::sky::SkyState>>,
+    mut last: Local<Option<(Option<String>, bool)>>,
+) {
+    let (Some(data), Some(sources)) = (data, sources) else { return };
+    let Some(map) = sources.map.as_deref() else { return };
+    let place = place_of(world.as_deref(), sky.as_deref());
+    if last.as_ref() == Some(&place) {
+        return;
+    }
+    *last = Some(place.clone());
+    let preset = cartographer_preset(map, place.0.as_deref(), place.1);
+    let text = preset.as_ref().and_then(|p| data.read(&format!("{CARTOGRAPHER_PRESETS}\\{p}.ini"))).map(|b| String::from_utf8_lossy(&b).into_owned());
+    let (look, from) = match (&text, &sources.base) {
+        (Some(t), _) => (NvrLook::parse(t), format!("Cartographer preset {}", preset.as_deref().unwrap_or("?"))),
+        (None, Some(b)) => (NvrLook::parse(b), NVR_SETTINGS.to_string()),
+        (None, None) => return,
+    };
+    info!(
+        "nvr look: {} {} uses {from}: bloom day x{:.2}, night x{:.2}, interiors x{:.2}; sharpening {}; height fog x{:.2}; cinema {}",
+        if place.1 { "interior in" } else { "worldspace" },
+        place.0.as_deref().unwrap_or("?"),
+        look.bloom[0],
+        look.bloom[1],
+        look.bloom[2],
+        look.sharpen.map_or("off".into(), |s| format!("x{s:.2}")),
+        look.fog,
+        if look.cinema.is_some() { "on" } else { "off" }
+    );
+    commands.insert_resource(look);
 }
 
 /// Read the NVR settings once the game's data is there.
@@ -183,7 +270,13 @@ fn load(mut commands: Commands, data: Option<Res<GameData>>, look: Option<Res<Nv
         commands.insert_resource(NvrLook::default());
         return;
     }
-    let look = match data.read(NVR_SETTINGS) {
+    let map = data.read(CARTOGRAPHER_MAP).map(|b| String::from_utf8_lossy(&b).into_owned());
+    if map.is_some() {
+        info!("nvr look: Cartographer's {CARTOGRAPHER_MAP} picks the NVR preset per worldspace");
+    }
+    let base = data.read(NVR_SETTINGS).map(|b| String::from_utf8_lossy(&b).into_owned());
+    commands.insert_resource(NvrSources { base: base.clone(), map });
+    let look = match base.map(String::into_bytes) {
         Some(bytes) => {
             let look = NvrLook::parse(&String::from_utf8_lossy(&bytes));
             info!("nvr look: from {NVR_SETTINGS}: bloom day x{:.2}, night x{:.2}, interiors x{:.2}; sharpening {}; height fog x{:.2}; cinema {}", look.bloom[0], look.bloom[1], look.bloom[2], look.sharpen.map_or("off".into(), |s| format!("x{s:.2}")), look.fog, look.cinema.map_or("off".into(), |c| format!("grain {:.2}, aberration {:.2}, overlay {:.2}, vignette {:.2}/{:.2}", c.grain, c.aberration, c.overlay, c.vignette_darkness, c.vignette_radius)));
@@ -258,6 +351,18 @@ mod tests {
         assert!((look.bloom_now(1.0, false) - 0.4).abs() < 1e-6);
         assert!((look.bloom_now(0.0, false) - 3.0).abs() < 1e-6);
         assert!((look.bloom_now(0.0, true) - 2.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cartographer_picks_the_preset_by_worldspace_and_reads_its_sections() {
+        let map = "[Main]\nExterior=Default\nInterior=Default\n\n[Overrides]\nWastelandNV=Default,NoPBR,Performance\n;TTW\nWasteland=DCWorld,NoPBR,Performance\nDLC01PittWorld=ThePitt,NoPBR\n";
+        assert_eq!(cartographer_preset(map, Some("wasteland"), false).as_deref(), Some("DCWorld"));
+        assert_eq!(cartographer_preset(map, Some("DLC01PittWorld"), false).as_deref(), Some("ThePitt"));
+        assert_eq!(cartographer_preset(map, Some("SomewhereElse"), false).as_deref(), Some("Default"));
+        assert_eq!(cartographer_preset(map, Some("Wasteland"), true).as_deref(), Some("Default"), "interiors take [Main] Interior");
+        // A preset's sections have no leading underscore.
+        let pitt = "[Shaders.Bloom.Main]\nStrength=0.0\n[Shaders.Bloom.Status]\nEnabled=true\n";
+        assert_eq!(NvrLook::parse(pitt).bloom[0], RATIO_RANGE.0, "Pitt's bloom 0 is held to the range");
     }
 
     #[test]

@@ -478,3 +478,14 @@ Written from the game data, the run logs and NVForever's own notes only (no nv-r
     play run at Lake Mead (WastelandNV cell 28,16), dived to 1,800 and surfaced at 2 s / 5 s:
     log "water lens: out of the water, drops on the lens"; `results\visual\lens-surfaced.png`
     shows the drops, `lens-gone.png` (4 s later) none.
+
+49. **Cartographer's per-worldspace NVR presets** (`engine/nvforever/src/nvr_look.rs`
+    `cartographer_preset`, `follow_place`, `NvrSources`). Hikikomori NVR ships
+    `config\Cartographer\NVR.ini` (`[Main]` Exterior/Interior, `[Overrides]` worldspace →
+    preset) and `config\Cartographer\NVRPresets\*.ini` [observed]. The look now follows the
+    preset of the worldspace the camera is in (or `[Main]` Interior indoors), falling back to
+    `NewVegasReloaded.dll.toml`; preset sections are read without the leading `_`. The
+    preset's flags after its name (NoPBR, Performance) are not taken over. Checked: nvr_look
+    and cinema tests (8) pass, new `cartographer_picks_the_preset_by_worldspace_and_reads_its_sections`;
+    viewer runs log "worldspace DLC01PittWorld uses Cartographer preset ThePitt … height fog
+    x2.50" and "worldspace NVDLC01Villa uses Cartographer preset DeadMoney: bloom day x0.40".

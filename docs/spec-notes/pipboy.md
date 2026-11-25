@@ -715,8 +715,8 @@ is the top left 85 × 92 of `head.dds`) [observed].
   The list 500 wide from 40, 100, nine rows [hypothesis: the file's height, 542 from
   100, would reach the tab line]. Reputations: those with fame or infamy [hypothesis],
   the selected one's picture (REPU ICON, zoom 150) and its title by the levels of fame
-  and infamy (Accepted, Liked, Mixed …) [documented: GECK wiki GetReputationThreshold;
-  hypothesis: "Dark Hero" with more infamy, "Soft-Hearted Devil" with more fame], and
+  and infamy, in NVForever's own words (`crate::reputation::TITLES`) [design, #2982;
+  the data holds no title setting], and
   "Fame n, Infamy n" [design]. Statistics: the 43 New Vegas names [documented: GECK wiki
   GetPCMiscStat] in the order of their codes [observed: the owner's screenshot of the
   original's list, 2026-10-14] with their counters (docs/spec-notes/misc-stats.md; "--"

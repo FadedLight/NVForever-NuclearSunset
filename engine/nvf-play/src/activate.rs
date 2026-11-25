@@ -868,11 +868,46 @@ pub(crate) fn activate(
         }
     }
     // An actor shown by name only (hostile, or a creature with nothing to say): E does
-    // nothing (playtest list 4, item 19) but open the perks' choices, if they offer any on
-    // it now (Robotics Expert's, #3479).
+    // nothing (playtest list 4, item 19) except:
+    // - open the perks' choices, if they offer any on it now (Robotics Expert's, #3479);
+    // - for a non-hostile creature shown by name only (`Action::Name`) whose script has
+    //   an OnActivate block (e.g. CRBrahminScript brahmin pushing, #3669), run its
+    //   OnActivate block while keeping the default activation behind it "nothing".
+    // Hostile actors keep #2536's rule.
     if matches!(t.action, Action::Name | Action::Hostile) {
         if crate::script::choices_by_hand(script.as_deref_mut(), &mut sim, t.form_id) {
             return;
+        }
+        if t.action == Action::Name {
+            if let Some(done) = crate::script::script_activate_by_hand(script.as_deref_mut(), &mut sim, t.form_id) {
+                match done {
+                    Ok(crate::script::ByHand::Script) => {
+                        sounds.write(crate::world_sounds::Activated { reference: t.form_id });
+                        info!("activate 0x{:08X} {} ({}): its script's OnActivate ran", t.form_id, t.name, t.action.label());
+                    }
+                    Ok(crate::script::ByHand::Refused) => {
+                        info!("activate 0x{:08X} {}: destroyed or prevented, it cannot be activated", t.form_id, t.name);
+                    }
+                    Ok(crate::script::ByHand::Talk) => {
+                        info!("activate 0x{:08X} {} ({}): a conversation started", t.form_id, t.name, t.action.label());
+                    }
+                    Ok(crate::script::ByHand::Greeted) => {
+                        info!("activate 0x{:08X} {} ({}): it said its greeting, no conversation", t.form_id, t.name, t.action.label());
+                    }
+                    Ok(crate::script::ByHand::Woken) => {
+                        info!("activate 0x{:08X} {} ({}): asleep, it wakes and gets up before talking", t.form_id, t.name, t.action.label());
+                    }
+                    Ok(crate::script::ByHand::Wheel) => {
+                        info!("activate 0x{:08X} {} ({}): the companion wheel opened", t.form_id, t.name, t.action.label());
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("activate 0x{:08X} {}: {e}", t.form_id, t.name);
+                        hud.show(format!("{}: {e}", t.name));
+                    }
+                }
+                return;
+            }
         }
         info!("activate 0x{:08X} {}: nothing to do ({})", t.form_id, t.name, if t.action == Action::Hostile { "hostile" } else { "name only" });
         return;

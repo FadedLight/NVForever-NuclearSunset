@@ -1003,6 +1003,62 @@ impl Runtime {
         true
     }
 
+    /// A living creature shown by name only (`Action::Name`, #3669): if its script has an
+    /// OnActivate block, run that block through [`Game::activate`] (`ActMode::Hand`). The
+    /// default activation behind it stays "nothing": any `Outcome::Talk` on `target`
+    /// emitted by the block's own plain `Activate` is skipped so it neither opens a
+    /// conversation nor posts a "has nothing to say" message. Returns `None` when
+    /// `target`'s script has no OnActivate block.
+    fn script_only(&mut self, target: FormId) -> Option<Result<ByHand, String>> {
+        let has_block = self.game.ref_script(target).and_then(|s| self.game.data.script(s)).is_some_and(|u| u.has_block(event::ON_ACTIVATE));
+        if !has_block {
+            return None;
+        }
+        if self.game.activation_refused(target) {
+            return Some(Ok(ByHand::Refused));
+        }
+        if self.game.parent_activate_only(target) {
+            info!("activate: {} is set off by its activate parents only", self.game.data.name(target));
+            return Some(Ok(ByHand::Refused));
+        }
+        self.observe_inventory();
+        let player = FormId::PLAYER_REF;
+        let from = self.game.events.len();
+        info!("script: activating {target} runs its OnActivate block instead of the default action");
+        let r = self.game.activate(player, target, ActMode::Hand).map(|done| {
+            if matches!(done["result"].as_str(), Some("prevented" | "destroyed")) { ByHand::Refused } else { ByHand::Script }
+        });
+        // A name-only creature has no Talk default action (#3669): suppress any
+        // Outcome::Talk on `target` emitted by the block's own `Activate` (e.g.
+        // CRBrahminScript calling plain `Activate` when standing or weapon-out).
+        let self_talks: Vec<usize> = self
+            .game
+            .events
+            .iter()
+            .enumerate()
+            .skip(from)
+            .filter_map(|(i, e)| match &e.kind {
+                EventKind::Activated { by, outcome: Some(o), .. } if *by == player => match script_events::activation_from_json(o)?.outcome {
+                    Outcome::Talk { actor } if actor == target => Some(i),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        self.skip.extend(self_talks);
+        let r = match r {
+            Ok(done) => Ok(self.talk_after(from).unwrap_or(done)),
+            r => r,
+        };
+        self.snapshot_inventory();
+        Some(r)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_event_skipped(&self, index: usize) -> bool {
+        self.skip.contains(&index)
+    }
+
     fn by_hand(&mut self, target: FormId) -> Result<ByHand, String> {
         // A destroyed door or activator cannot be activated (`Game::activation_refused`).
         if self.game.activation_refused(target) {
@@ -1097,6 +1153,7 @@ impl Runtime {
             .iter()
             .enumerate()
             .skip(from)
+            .filter(|(i, _)| !self.skip.contains(i))
             .filter_map(|(i, e)| match &e.kind {
                 EventKind::Activated { by, outcome: Some(o), .. } if *by == player => match script_events::activation_from_json(o)?.outcome {
                     Outcome::Talk { actor } => Some((i, actor)),
@@ -1499,6 +1556,14 @@ pub fn talk_by_hand(script: Option<&mut ScriptState>, sim: &mut SimState, target
 /// opened.
 pub fn choices_by_hand(script: Option<&mut ScriptState>, sim: &mut SimState, target: u32) -> bool {
     script.and_then(|s| s.rt.as_mut()).is_some_and(|rt| with_world(rt, sim, |rt| rt.choices_only(FormId(target))))
+}
+
+/// A living creature shown by name only whose script has an OnActivate block
+/// (`Runtime::script_only`, #3669): runs its OnActivate block while keeping the default
+/// activation behind it "nothing". `None` when scripts are off or `target` has no
+/// OnActivate block.
+pub fn script_activate_by_hand(script: Option<&mut ScriptState>, sim: &mut SimState, target: u32) -> Option<Result<ByHand, String>> {
+    script.and_then(|s| s.rt.as_mut()).and_then(|rt| with_world(rt, sim, |rt| rt.script_only(FormId(target))))
 }
 
 /// The player activates `target` by hand (E): through the scripts when they run.

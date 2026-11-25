@@ -77,7 +77,7 @@ impl Lamp {
         if reach == 0.0 {
             return V3::ZERO;
         }
-        // The cone's direction is unit right at the lamp too, where the other is shorter.
+        // The cone's direction is unit near the lamp too, where the other is shorter; none right at it.
         let cone = self.cone.map_or(1.0, |c| c.factor(-to.unit().unwrap_or(V3::ZERO)));
         let to = to * (1.0 / d2.max(1e-4).sqrt());
         let facing = n.dot(to).clamp(0.0, 1.0);
@@ -108,8 +108,8 @@ struct Grid {
     lamps: Vec<u32>,
 }
 
-/// The largest coordinate and range of a lamp, 2^24: beyond it f32 does not tell one unit from the next.
-const FURTHEST: f32 = 16_777_216.0;
+/// The largest coordinate and range of a lamp, 2^21: what a cell of the grid is wider by stays small beside it.
+const FURTHEST: f32 = 2_097_152.0;
 /// Cells along the longest side.
 const CELLS: f32 = 32.0;
 /// The most lamps and directionals, and entries of the table.
@@ -275,19 +275,20 @@ pub mod tests {
     }
 
     /// Nor one at the grid's upper edge or at a cell's, where a point's cell is rounded: one of ordinary sizes, and
-    /// of coordinates of which no two are less than 4 apart.
+    /// of the largest coordinates there may be.
     #[test]
     fn the_grid_at_its_edges() {
         let far = -FURTHEST;
-        // The middle one is 2.5 below the corner of cell 20; a point a half below it is rounded up to it.
-        let [of_rooms, of_worlds] = [vec![(-2900.3, 100.0), (-100.0, 100.0)], vec![(far, 1.0), (-6_291_458.5, 2.01), (0.0, 1.0)]]
+        // The middle one's point is a sixteenth below the corner of cell 20, and rounded up to it; the last one's is
+        // rounded to the grid's end.
+        let [of_rooms, of_worlds] = [vec![(-2900.3, 100.0), (-100.0, 100.0)], vec![(far, 1.0), (-786_491.0 - 0.8125, 60.01), (0.0, 1.0)]]
             .map(|l| LightState { lamps: l.into_iter().map(|(x, range)| lamp(V3::new(x, 0.0, 0.0), range)).collect(), ..LightState::default() });
         let aside = V3::new(-1.0, 0.0, 0.0);
         for (state, p, n) in [
             (&of_rooms, V3::new(-1e-5, 0.0, 0.0), aside),
             (&of_rooms, V3::new(-100.0, -99.9, 0.0), UP),
-            (&of_worlds, V3::new(0.0, 0.5, 0.0), -UP),
-            (&of_worlds, V3::new(-6_291_456.5, 0.0, 0.0), aside),
+            (&of_worlds, V3::new(0.99, 0.0, 0.0), aside),
+            (&of_worlds, V3::new(-786_431.0 - 0.8125, 0.0, 0.0), aside),
             (&of_worlds, V3::new(far, 0.5, 0.0), -UP),
         ] {
             let all = state.lamps.iter().fold(V3::ZERO, |s, l| s + l.light(p, n));
@@ -296,6 +297,16 @@ pub mod tests {
         }
         let x = |s: &LightState, x: f32| lights_of(s).near(V3::new(x, 0.0, 0.0)).count();
         assert!(x(&of_rooms, 200.0) == 0 && x(&of_rooms, -3200.0) == 0 && x(&of_rooms, f32::NAN) == 0);
+    }
+
+    /// Small lamps in a small grid as far off as they may be: the cells are not so much wider that all hold all.
+    #[test]
+    fn the_table_far_off() {
+        let at = |i: usize| V3([FURTHEST - if i.is_multiple_of(2) { 31.0 } else { 1.0 }; 3]);
+        let state = LightState { lamps: (0..MOST_LAMPS).map(|i| lamp(at(i), 1.0)).collect(), ..LightState::default() };
+        let lights = Lights::new(&state, &|| false).unwrap();
+        assert_eq!(lights.grid.cells, [32; 3]);
+        assert_eq!(lights.near(at(1)).count(), MOST_LAMPS / 2);
     }
 
     #[test]

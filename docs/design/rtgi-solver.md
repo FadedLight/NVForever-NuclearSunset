@@ -106,7 +106,7 @@ there the flood goes on to neighbours along an axis, inside the box about the tr
 nothing on the way. A point is in the air when its rays meet something and at most a quarter of it
 shows its back. `Coverage` says how a flood went: seeds that found nothing, points, and the parts
 they are in. A `Probe` says what its rays did: `lamps` counts the lamps that were looked at, all
-those of each hit's cell of the lamps' grid, whether their spheres hold the hit or not.
+those of each lit hit's cell of the lamps' grid, whether their spheres hold the hit or not.
 
 The same input gives the same points and the same light on any number of threads, on one machine
 and toolchain. Between toolchains that is not shown.
@@ -132,7 +132,7 @@ All are ours, none is a claim about the original game.
 | flood | 8 points around a seed, then 64; 6 neighbours | [design] a seed in a corner still finds a point; only open ways along the axes count |
 | inside geometry | more than 1/4 backs | [design] a point beside one open back still counts |
 | the lamps' grid | 32 cells along its longest side, 1 unit at least; a sphere 0.1 % and 1 unit more (of the square), a cell 8 x f32's epsilon of the largest coordinate wider on each side | [design] a ray's end looks at the lamps near it; the additions are for roundings, so that none that adds light is left out |
-| furthest seed, lamp | 1e9 spacings, 2^24 units | [design] further off is in no cell, and beyond 2^24 f32 does not tell one unit from the next. A seed there finds nothing, a lamp there is input out of range |
+| furthest seed, lamp | 1e9 spacings, 2^21 units | [design] further off is in no cell, and what the lamps' cells are wider by stays small. A seed there finds nothing, a lamp there is input out of range |
 | limits of a gathering | 40,000 points, reached or not; 65,536 seeds (`GatherLimits`) | [design] a budget for play; 1,024 seeds' candidates are held at a time |
 | looks at the caller's check (scene) | every 65,536 instances counted and triangles placed, tree nodes of 4,096 triangles and more | [design] cheap against the work between two of them |
 | fixed limits | 2^26 triangles, 64 threads, 4,096 rays of a point, 4,096 lamps and as many directionals, 2^24 entries of the lamps' table | [design] no count can overflow |

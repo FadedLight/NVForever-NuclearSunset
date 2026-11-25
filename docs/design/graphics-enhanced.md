@@ -3850,6 +3850,19 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     the Sunlight colour. Test `the_lean_light_takes_the_weathers_colours`.
   - *The light's direction*: by day the sun's disc, by night the moon's, with the moon's share of the
     sun's strength as on the landscape; it grows from nothing at the horizon to full at 4 degrees.
+  - *By moonlight* [design]: in many weathers the night Sunlight is far brighter than the cloud layers, which
+    the flat sky draws nearly black, so clouds lit at its luminance glowed against the sky
+    [hypothesis: stills of 2026-11-25 at Goodsprings with a development build, the views not kept]. Below the horizon the direct
+    light and the light from below are each dimmed toward the visible layers' PNAM luminance by
+    `min(1, L(cloud) / L(light))^q`, q `NIGHTPULL` (0.5: the geometric mean of the two) times the night's
+    share (0 at the horizon, 1 from 4 degrees under it, smooth). It only ever dims, keeps every hue, follows the weather's values alone (no weather named,
+    no level fixed), and leaves a weather whose night Sunlight is no brighter than its clouds as it was. With no
+    visible cloud colour nothing is dimmed, and the dimming grows in over eight times that least luminance.
+    The sky level, the moon's share and MoonlightNVSE.ini's factor are outside of it. The bound is taken of
+    the undimmed light. It is part of Volumetric clouds, with Volumetric light on or off; without a moon the light from below
+    dims alone. `MOONFORWARD` and `MOONBACK` can give the phase's forward lobe and back-scatter floor weights of their own by
+    the same share; unset, as by default, they are the day's. By day and at the horizon none of it is computed (test
+    `the_day_is_untouched_by_the_night_pull`, bit for bit).
   - *The bound*: the most a step emits per channel, computed in f64, sets one factor `min(1, 30,000 / B)` for
     every colour, so a mod's huge sky level stays inside the HDR target (`light_bound`).
   - *What is not modelled*: a third octave, after-sunset light from below, moon bounce; the column
@@ -4207,6 +4220,8 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   | `UPPER`, `LOWER`, `GROUND`, `OCCLUDE` | 1, 1, 1, 1 | 0..4; the light from above, below, the reflectance, the ambient's fall |
   | `SUN`, `LEVEL`, `POWDER` | 1.3, 1.12, 1 | 0..4; the direct light, one level on the whole, the powder |
   | `SUNCOLOUR` (alias `SUNCOLOR`) | 0 | 0..1; the Sunlight's share in the direct hue |
+  | `NIGHTPULL` | 0.5 | 0..2; the night's pull toward the cloud layers' luminance (0 none, 1 that luminance) |
+  | `MOONFORWARD`, `MOONBACK` | unset | 0..4; `FORWARD` and `BACKSCATTER` by moonlight (unset: the day's) |
   | `STEPS`, `TYPE`, `VIEW` | 28, none, none | 4..128; a type's name; a view's name |
   | `HEIGHT`, `HORIZON` (start-only) | 24,000, 400,000 | the domain |
   | `PUFF`, `AIR` (start-only) | 1, 0.82 | the fair lobes' weight, the haze |

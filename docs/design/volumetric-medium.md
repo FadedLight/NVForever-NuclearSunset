@@ -596,8 +596,8 @@ the defaults given here. Read once at the start, usable in a played run (they do
   `noise` are in §3.23. `VIEW=none` restores the picture.
 - `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_TUNE=<file>` (#3032 stage 2e, L1): the cloud source's aids
   tuned live from a `NAME=value` file, looked at at most every 0.5 s of real time while the row is
-  on (live: `SHAPE`, `EROSION`, `DENSITY`, `STEPS`, `TYPE`, `VIEW`, `WISP`, the light's weights and
-  `SUNCOLOUR`; start-only: `HEIGHT`, `HORIZON`).
+  on (live: `SHAPE`, `EROSION`, `DENSITY`, `STEPS`, `TYPE`, `VIEW`, `WISP`, the light's weights,
+  `SUNCOLOUR`, `NIGHTPULL`, `MOONFORWARD` and `MOONBACK`; start-only: `HEIGHT`, `HORIZON`).
   Each change of the effective values counts as a sky jump for the history (dropped
   once), so paired pictures after an edit start from fresh rays. A key the file does not set (a
   deleted line included) takes its start value: its start variable, else its start default
@@ -611,7 +611,8 @@ the defaults given here. Read once at the start, usable in a played run (they do
   `1,1` is B1's whole sweep every frame).
 - `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS_` `SHAPE`, `EROSION`, `STEPS`, `TYPE`, `HEIGHT`, `HORIZON`, `WISP`,
   `PUFF`, `AIR`, `REFINED_STRIDE`, `LIGHT_REUSE` and the light's `OCTAVE`, `BACKSCATTER`, `UPPER`, `LOWER`,
-  `GROUND`, `FORWARD`, `SUN`, `LEVEL`, `OCCLUDE`, `POWDER`, `SUNCOLOUR` (alias `SUNCOLOR`), and
+  `GROUND`, `FORWARD`, `SUN`, `LEVEL`, `OCCLUDE`, `POWDER`, `SUNCOLOUR` (alias `SUNCOLOR`),
+  `NIGHTPULL`, `MOONFORWARD`, `MOONBACK`, and
   `NVF_PLAY_DEBUG_VOLUMETRIC_CLOUDS=<0..4>` (`DENSITY`): the cloud source's start values, ranges and meanings
   are graphics-enhanced.md §3.23, "Debug aids". The cloud source's light is the source's own business:
   the medium's seam (`MediumRay` in, `MediumSample` out) and its history do not see it. The wisps' phases

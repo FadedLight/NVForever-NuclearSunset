@@ -904,7 +904,7 @@ pub fn first_shown(heights: &[f32], first: usize, selected: usize, room: f32) ->
 }
 
 /// A dim row's strength: half, as the original draws ammo the weapon cannot fire
-/// [observed: observer check 265, text about half as bright].
+/// [observed: observer check 288, text about half as bright].
 const DIM_ROW: f32 = 0.5;
 
 fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, heights: &[f32], tab: usize) {

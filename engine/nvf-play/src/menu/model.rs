@@ -124,7 +124,7 @@ pub struct Row {
     /// the inventory's sense).
     pub loaded: bool,
     /// Ammo the player's weapon cannot fire, in the Pip-Boy: its row is drawn at half
-    /// brightness [observed: observer check 265, #3442].
+    /// brightness [observed: observer check 288, #3442].
     pub dim: bool,
     /// A weapon's attached mods (`Extra::mods`): its units are a row of their own, named
     /// with " +" (docs/spec-notes/weapon-mods.md §3).
@@ -388,7 +388,7 @@ fn sort_rows_by(rows: &mut [Row], by_ysi_tag: bool) {
 }
 
 /// Marks the ammo rows `firable` leaves out as dim (`Row::dim`); `None` dims nothing.
-/// Only ammo rows: a weapon or a stimpak is never dim [observed: observer check 265].
+/// Only ammo rows: a weapon or a stimpak is never dim [observed: observer check 288].
 fn mark_dim(rows: &mut [Row], firable: Option<&[FormId]>) {
     for r in rows.iter_mut() {
         r.dim = r.kind == Some(ItemKind::Ammo) && firable.is_some_and(|f| !f.contains(&r.item));
@@ -1292,7 +1292,7 @@ impl MenuModel {
                 }
                 // Ammo the weapon cannot fire is dimmed in the Pip-Boy; a weapon's other
                 // kinds stay at full strength, and with the fists out every ammo row is dim
-                // [observed: observer check 265, #3442].
+                // [observed: observer check 288, #3442].
                 if side == Side::Player && self.mode == Mode::Inventory {
                     mark_dim(&mut l.rows, self.firable_ammo.as_deref());
                 }

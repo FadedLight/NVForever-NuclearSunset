@@ -1726,7 +1726,7 @@ fn barter_hides_keys_on_both_sides_in_all_and_misc_while_inventory_and_container
 
 /// #3442: ammo the weapon cannot fire is dim; the weapon's other kinds and every
 /// row that is not ammo stay full; with the fists out every ammo row is dim; not
-/// knowing the weapon dims nothing [observed: observer check 265].
+/// knowing the weapon dims nothing [observed: observer check 288].
 #[test]
 fn ammo_the_weapon_cannot_fire_is_dim() {
     let row = |item: u32, kind: ItemKind| Row {

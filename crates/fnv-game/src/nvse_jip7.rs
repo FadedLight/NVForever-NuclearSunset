@@ -242,9 +242,9 @@ pub struct ProjectileTraits {
     pub sound_disable: Option<FormId>,
 }
 
-/// Sparse session-only non-flag `PROJ` overrides for a projectile (clone-first, then
-/// ancestor chain to `original`), `None` for any field not overridden this session
-/// ([`Game::projectile_trait_overrides`]).
+/// Sparse session-only non-flag `PROJ` overrides directly on a projectile (including
+/// overrides snapshotted at `TempCloneForm` creation time), `None` for any field not
+/// overridden ([`Game::projectile_trait_overrides`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectileTraitOverrides {
     pub original: FormId,
@@ -457,31 +457,6 @@ const PROJ_NUMERIC: [(&str, &str, Take); 15] = [
     ("DATA", "rotation.z", Take::Clamp(F32)),
     ("DATA", "bouncy_mult", Take::Clamp(F32)),
     ("VNAM", "", Take::OneOf(&[1.0, 2.0])),
-];
-
-/// All non-flag `PROJ` trait keys kept in `field_overrides` (excludes `DATA/flags`).
-const PROJ_TRAIT_KEYS: [&str; 21] = [
-    "DATA/type",
-    "DATA/gravity",
-    "DATA/speed",
-    "DATA/range",
-    "DATA/tracer_chance",
-    "DATA/explosion_alt_trigger_proximity",
-    "DATA/explosion_alt_trigger_timer",
-    "DATA/muzzle_flash_duration",
-    "DATA/fade_duration",
-    "DATA/impact_force",
-    "DATA/rotation.x",
-    "DATA/rotation.y",
-    "DATA/rotation.z",
-    "DATA/bouncy_mult",
-    "VNAM/",
-    "DATA/explosion",
-    "DATA/light",
-    "NAM1/",
-    "DATA/sound",
-    "DATA/sound_countdown",
-    "DATA/sound_disable",
 ];
 
 /// `PROJ DATA/type` enum label matching `schemas/fnv/combat.json` `ProjectileData.type`
@@ -775,12 +750,13 @@ impl Game<'_> {
     }
 
     /// A climate's weathers (WLST), ClimateAddWeatherType's and ClimateRemoveWeatherType's
-    /// changes first.
+    /// changes first (clone-first, original fallback).
     pub fn climate_weathers(&self, climate: FormId) -> Vec<ClimateWeather> {
-        if let Some(v) = self.other.jip7.climate_weathers.get(&climate) {
+        let orig = self.unclone(climate);
+        if let Some(v) = self.other.jip7.climate_weathers.get(&climate).or_else(|| self.other.jip7.climate_weathers.get(&orig)) {
             return v.clone();
         }
-        let list = self.data.record_field(climate, "WLST", "").and_then(Json::as_array);
+        let list = self.data.record_field(orig, "WLST", "").and_then(Json::as_array);
         list.into_iter()
             .flatten()
             .filter_map(|e| {
@@ -861,46 +837,43 @@ impl Game<'_> {
         }
     }
 
-    /// Walk `form`'s `TempCloneForm` ancestor chain for a `field_overrides` entry:
-    /// clone's own override wins, falling back through parent clones to the original.
-    pub(crate) fn projectile_field_override(&self, mut form: FormId, key: &str) -> Option<&XVal> {
-        let key_s = key.to_string();
-        loop {
-            if let Some(v) = self.field_overrides.get(&(form, key_s.clone())) {
-                return Some(v);
-            }
-            match self.clones.get(&form) {
-                Some(&parent) if parent != form => form = parent,
-                _ => return None,
-            }
-        }
+    /// Look up a `PROJ` `field_overrides` entry directly on `form`.
+    /// Cloned `PROJ` records snapshot all active overrides at `TempCloneForm` creation
+    /// time [observed: w4g_02_tempcloneform_world_proj_csty], so an absent entry uses
+    /// the authored record rather than inheriting post-clone edits from a parent or original.
+    pub(crate) fn projectile_field_override(&self, form: FormId, key: &str) -> Option<&XVal> {
+        self.field_overrides.get(&(form, key.to_string()))
     }
 
-    /// Snapshot any active session non-flag `PROJ` trait overrides from `source` onto
-    /// `clone` at `TempCloneForm` creation time. Pre-clone edits on `source` carry onto
-    /// `clone` and stay isolated from later edits on `source`, while fields untouched on
-    /// `source` before cloning retain the existing clone-to-original fallback.
+    /// Snapshot all active session `PROJ` overrides (numeric traits, flags, form slots,
+    /// muzzle-flash/model paths) from `source` onto `clone` at `TempCloneForm` creation
+    /// time so pre-clone edits on `source` carry onto `clone` and clone-of-clone chains,
+    /// while post-clone edits on `source` never bleed into already-created clones
+    /// [observed: w4g_02_tempcloneform_world_proj_csty].
     pub(crate) fn snapshot_projectile_traits(&mut self, source: FormId, clone: FormId) {
         if self.data.sig(self.unclone(source)) != Some(*b"PROJ") {
             return;
         }
-        for key in PROJ_TRAIT_KEYS {
-            if let Some(v) = self.field_overrides.get(&(source, key.to_string())).cloned() {
-                self.field_overrides.insert((clone, key.to_string()), v);
-            }
+        let entries: Vec<(String, XVal)> = self
+            .field_overrides
+            .iter()
+            .filter(|((form, _), _)| *form == source)
+            .map(|((_, key), val)| (key.clone(), val.clone()))
+            .collect();
+        for (key, val) in entries {
+            self.field_overrides.insert((clone, key), val);
         }
     }
 
-    /// Session `DATA/flags` override for a `PROJ` (clone-first, original fallback),
-    /// from `SetProjectileFlag`. Returns `None` for non-projectiles, absent edits, or
-    /// non-finite values [design].
+    /// Session `DATA/flags` override directly on a `PROJ` (including overrides snapshotted
+    /// at `TempCloneForm` creation time), from `SetProjectileFlag`. Returns `None` for
+    /// non-projectiles, absent edits, or non-finite values [design].
     pub fn projectile_flags_override(&self, projectile: FormId) -> Option<u16> {
         let original = self.unclone(projectile);
         if self.data.sig(original) != Some(*b"PROJ") {
             return None;
         }
-        let key = "DATA/flags".to_string();
-        match self.field_overrides.get(&(projectile, key.clone())).or_else(|| self.field_overrides.get(&(original, key))) {
+        match self.field_overrides.get(&(projectile, "DATA/flags".to_string())) {
             Some(XVal::Num(n)) if n.is_finite() => Some((n.trunc() as i64 as u64 & 0xFFFF) as u16),
             _ => None,
         }
@@ -932,10 +905,10 @@ impl Game<'_> {
         )
     }
 
-    /// Speed, impact-force, and `DATA/flags` overrides, with the same clone-first /
-    /// original fallback as the record getters. Absent edits leave the typed consumer's
-    /// values alone. The finite conversion guard is an engineering boundary for physical
-    /// values.
+    /// Speed, impact-force, and `DATA/flags` overrides directly on `projectile` (including
+    /// overrides snapshotted at `TempCloneForm` creation time). Absent edits leave the
+    /// typed consumer's values alone. The finite conversion guard is an engineering boundary
+    /// for physical values.
     pub fn projectile_launch_traits(&self, projectile: FormId) -> Option<ProjectileLaunchTraits> {
         let original = self.unclone(projectile);
         if self.data.sig(original) != Some(*b"PROJ") {
@@ -950,9 +923,9 @@ impl Game<'_> {
         })
     }
 
-    /// Sparse session-only non-flag `PROJ` overrides for `projectile` (clone-first, then
-    /// ancestor chain to `original`). Absent or non-finite entries stay `None` so typed
-    /// combat/audio consumers preserve their authored values.
+    /// Sparse session-only non-flag `PROJ` overrides directly on `projectile` (including
+    /// overrides snapshotted at `TempCloneForm` creation time). Absent or non-finite entries
+    /// stay `None` so typed combat/audio consumers preserve their authored values.
     pub fn projectile_trait_overrides(&self, projectile: FormId) -> Option<ProjectileTraitOverrides> {
         let original = self.unclone(projectile);
         if self.data.sig(original) != Some(*b"PROJ") {
@@ -1237,20 +1210,27 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             }
             zero
         }
-        // `ammo [form]`: left out, none [documented: SetAmmoProjectile, SetAmmoCasing].
-        // SetAmmoProjectile validates PROJ (following clones) when a form is given [hypothesis].
-        "setammoprojectile" | "setammocasing" => {
+        // `ammo [projectile]`: omitting the 2nd argument clears to 0; passing an explicit
+        // null ref (0) is a no-op leaving the current projectile unchanged [observed:
+        // w4g_11_ammo_clear_and_proj_delete, tools/capture/nvse/catalogs/wave4g_f2_extenders.json].
+        // A non-null 2nd argument must be a PROJ (following TempCloneForm clones) [hypothesis].
+        "setammoprojectile" => {
             if let Some(a) = ammo(g, form(args, 0)) {
-                let target = form(args, 1);
-                if name == "setammoprojectile" {
-                    if let Some(p) = target {
-                        if g.data.sig(g.unclone(p)) != Some(*b"PROJ") {
-                            return Some(Ok(zero));
-                        }
+                if args.len() < 2 {
+                    g.set_field(a, "DAT2", "projectile", XVal::Ref(0));
+                } else if let Some(p) = form(args, 1) {
+                    if g.data.sig(g.unclone(p)) == Some(*b"PROJ") {
+                        g.set_field(a, "DAT2", "projectile", XVal::Ref(p.0));
                     }
                 }
-                let path = if name == "setammoprojectile" { "projectile" } else { "consumed_ammo" };
-                g.set_field(a, "DAT2", path, XVal::Ref(target.map_or(0, |f| f.0)));
+            }
+            zero
+        }
+        // `ammo [form]`: left out, none [documented: SetAmmoCasing].
+        "setammocasing" => {
+            if let Some(a) = ammo(g, form(args, 0)) {
+                let target = form(args, 1);
+                g.set_field(a, "DAT2", "consumed_ammo", XVal::Ref(target.map_or(0, |f| f.0)));
             }
             zero
         }
@@ -1441,7 +1421,11 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "setweathertransitiontimeoverride" => {
             // NaN or infinity changes nothing.
             if let Some(s) = field_number(num(args, 0, 0.0), 0.0, F32.1) {
-                g.other.jip7.weather_transition = (s > 0.0).then_some(s);
+                let next = (s > 0.0).then_some(s);
+                if g.other.jip7.weather_transition != next {
+                    g.other.jip7.weather_transition = next;
+                    g.traits.note_weather_visual_change();
+                }
             }
             zero
         }
@@ -1478,6 +1462,23 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             }
             zero
         }
+        // `[armor]`: 1 light, 2 medium, 3 heavy; with no armor given, the calling actor's
+        // UpperBody armour's; 0 without one, or for a form that is no armour [documented:
+        // GECK wiki GetArmorClass, alias GetAC]. A class SetArmorClass gave is read back.
+        "getarmorclass" | "getac" => {
+            use fnv_sim::forms::ArmorClass;
+            let class = match form(args, 0) {
+                Some(a) if g.is_armo(a) => Some(crate::armor_overrides::armor_class_from_flags(g.armo_general_flags(a))),
+                Some(_) => None,
+                None => subject.and_then(|r| g.body_armor(r)).map(|(_, c)| c),
+            };
+            XVal::Num(match class {
+                Some(ArmorClass::Light) => 1.0,
+                Some(ArmorClass::Medium) => 2.0,
+                Some(ArmorClass::Heavy) => 3.0,
+                None => 0.0,
+            })
+        }
         // `armor path`: the ragdoll constraint template (BMCT) [documented: SetArmorRCT].
         "setarmorrct" => {
             if let (Some(a), Some(path)) = (of_sig(g, form(args, 0), b"ARMO"), text(args, 1)) {
@@ -1485,13 +1486,13 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             }
             zero
         }
-        // `[multiplier]`: sets it, and returns it; left out, returns it unchanged
-        // [documented: SetArmorConditionPenalty]. 0-2: past 2 the formula's mult would go
-        // below zero at 0% condition [hypothesis: the page's formula,
-        // `1.0 - (0.5 - condition) * multiplier`].
-        // Both return the value before the call; the penalty takes any number (3 and -1),
-        // the share only 0-1 (2 and -1 set nothing) [observed: jip7 armor.condpenalty,
-        // armor.maxpercent; jip7b armor.*].
+        // `[multiplier]`: sets it and returns the value before the call; left out, returns
+        // it unchanged [documented: SetArmorConditionPenalty]. Any finite float (e.g. 5.0,
+        // 3.0, -1.0) is stored verbatim without clamping [observed: jip7 armor.condpenalty,
+        // jip7b armor.condpenalty.neg; Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN
+        // 57.30, probe jip_19_armor_cond_penalty_clamp: 1.000, 1.000, 5.000, 5.000, -1.000];
+        // the share (`SetDamageToArmorMaxPercent`) takes only 0-1 (2 and -1 set nothing)
+        // [observed: jip7 armor.maxpercent, jip7b armor.maxpercent.range].
         "setarmorconditionpenalty" => {
             let was = g.armor_condition_penalty();
             if let Some(m) = args.first().and_then(|v| v.num().ok()).filter(|m| m.is_finite()) {

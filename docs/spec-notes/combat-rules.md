@@ -18,7 +18,7 @@ them.
 
 | Value | Default | Shapes |
 |---|---|---|
-| `dt_floor` | 0.2 | DT never removes more than 80 % of a hit |
+| `dt_floor` | 0.2 | Armour never removes more than 80 % of a hit [observed: damage-armour.md §2] |
 | `headshot_unaware_crit` | true | a headshot on an unaware target is a critical |
 | `bloom_per_shot`, `bloom_per_min_spread`, `bloom_auto_mult` | 0.08 + 0.04 × Min Spread, × 0.5 for automatics | spread added per shot (spread units) |
 | `bloom_max`, `bloom_recovery` | 1.0 (about 6° of deviation, 3° of cone), 2.0 /s | bloom cap; how fast it shrinks once settling |
@@ -92,14 +92,21 @@ For one projectile (or one swing) that hits [documented unless marked]:
      attacks included [documented: GECK wiki Weapons, Crit % Mult: "will not cause any
      critical hits, even for sneak attacks"].
    - Critical damage (through "Calculate My Critical Hit Damage") is added before
-     armour. For shotguns it is shared among the projectiles [design].
+     armour and before the ammunition's Damage Mod, which multiplies it with the rest;
+     each projectile of a shotgun adds the whole of it [observed 2026-11-21:
+     damage-armour.md §3].
 7. **Armour.**
    - DT comes from the target, then ammo DT Mod effects, then the attacker's and
      defender's DT perk hooks. A weapon with "Ignores Normal Weapon Resistance" skips
      DT and DR [design: the page says the flag did not work in the original].
-   - After DT, at least `dt_floor` of the hit remains [design].
-   - DR (after ammo DR Mod effects, capped at `fMaxArmorRating`) then takes its
-     percentage.
+   - DR (after ammo DR Mod effects, capped at `fMaxArmorRating`) takes its percentage
+     of what DT leaves, for every damage type; a weapon's own resistance (§ the damage
+     type, weapon-data-fields.md §3) cuts it as well.
+   - The hit never deals less than `dt_floor` of its damage and critical bonus before
+     the ammunition's Damage Mod, whatever DT and DR took.
+   - The body part's multiplier comes last, on what armour let through.
+   - These four in this order are the original's [observed 2026-11-21:
+     damage-armour.md §1, §2 and §4].
    - A teammate's DT and DR are × (1 + Companion Nerve) before the ammo effects and
      perks [documented: as step 3, "armor"; hypothesis: that armour means both, and
      the order] (`Target::nerve`). Its energy and fire resistances are not changed.
@@ -395,6 +402,20 @@ between them in the original [observed: owner playtest, #2739].
   - A thrown frag grenade (`GrenadeFragProjectile`, Lobber, speed 1,200, gravity 1.0;
     the attack held 30 loops, aimed level; one run, o26_gl frag0): its figures are under
     "A thrown grenade rolls" and "Throw speed" below.
+  - **A Lobber whose gravity is 0 falls under the full gravity** (#3441) [hypothesis;
+    observer check 289]. The load order's Lobbers with gravity 0 [observed: PROJ DATA
+    of the ten masters, 2026-11-23] are:
+    - `NVDLC05GrenadeNukaProjectile`, `NVDLC05MFCGrenadeProjectile` and
+      `NVDLC05MFCMineClusterProjectile2` (GunRunnersArsenal.esm);
+    - `MineBottleCapProjectile`, `MinePlasmaProjectile` and `MinePulseProjectile`
+      (FalloutNV.esm).
+
+    The other 33 have 1.0, except 1.5 for `NVDLC0525mmGrenadeProjectileTimed`; the frag
+    mine has 1.0. With the field taken only as a multiplier, a thrown Nuka-grenade flew
+    dead straight and had unlimited reach (player report, #3441). So a Lobber of 0 now
+    takes a multiplier of 1.0 (`ProjectileStats::fall`, the same rule as Bouncy Mult's
+    0). Its flight, its reach in VATS, an NPC's throw choice and the aim of the low arc
+    all use it. A Missile of 0 still flies straight.
 - **Explosions.**
   - Without Alt. Trigger, the explosion goes off on impact.
   - With it, a lobber bounces (× its bouncy multiplier, else `default_bounce`) and
@@ -2058,10 +2079,17 @@ parity. No associations yields the existing null/zero convention. Queries store 
 new lifetime state: ordinary World/Game snapshot and restore retain association,
 while a fresh world inherits none.
 
-[hypothesis] Native ordering, exact empty-array/null representation and unusual
-unloaded/disabled-owner timing remain probe questions. The getter relies on existing
-producer association; death/VATS production and the full installed hover mod are not
-qualified by getter tests or a manually seeded association.
+[observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9, 2026-11-24, `GSDocMitchellHouse`
+(`0x00103DF9`), 10 official base masters, `w4d_42_vanilla_faction_class_kill_drop`
+(`tools/capture/nvse/catalogs/wave4d_extenders.json`, #3679): `dropSz=-1` (`ar_Size (GetDroppedRefs)`
+called without a reference when no dropped weapons exist); no DLL or source consulted] When no
+dropped weapons are associated, `GetDroppedRefs` returns `ar_Null` (`ar_Size == -1`), not an
+empty array (`0`).
+
+[hypothesis] Native ordering of multiple dropped refs and unusual unloaded/disabled-owner
+timing remain probe questions. The getter relies on existing producer association; death/VATS
+production and the full installed hover mod are not qualified by getter tests or a manually
+seeded association.
 
 [design] Four authored controls in the shared `fnv-game` integration binary use
 compiled source, actual World placements and explicitly seeded existing associations.

@@ -566,15 +566,27 @@ pub struct NifSurface {
     /// them off only while this is set. Tracked explicitly, not by comparing handles, so a
     /// baseline depth map of the game's own (#2979) would never be mistaken for one. CPU only.
     pub height_overlay: bool,
-    /// Window environment map (`nif_spawn::window_env`; docs/spec-notes/nif.md §6 "Window
-    /// glass and environment maps"): x the scale of the reflection (0: none), y 1 when
-    /// [`env_mask`](Self::env_mask) is set; z, w unused. The reflection, the cube read in
-    /// the reflected view direction × the scale × the mask's red channel, is added to the
-    /// lit colour; on a premultiplied shape (a blended one that reflects) after the colour
-    /// is multiplied by its alpha [hypothesis, the note above].
+    /// Environment map (`nif_spawn::shape_env`, `env_map::env_uniforms`;
+    /// docs/spec-notes/nif.md §6 "Window glass and environment maps", "Environment maps on
+    /// other shapes"): x the scale of the reflection (0: none), y how the mask is read
+    /// (`env_map::MaskMode`: 0 none, 1 [`env_mask`](Self::env_mask)'s red channel, 2 the
+    /// alpha of [`env_mask`](Self::env_mask), which then holds the game's own normal map),
+    /// z and w the camera distances over which it fades out (both 0:
+    /// no fade). The reflection, the cube read in the reflected view direction × the scale
+    /// × the mask × the fade, is added to the lit colour; on a premultiplied shape (a
+    /// blended window shape that reflects) after the colour is multiplied by its alpha, on
+    /// a blended one it is weighted by the alpha like the rest of the colour
+    /// [hypothesis, the notes above].
     pub env: Vec4,
+    /// How the environment map is read (`env_map::env_uniforms`): x the cube orientation
+    /// (`env_map::Axes`, 0 #2669's lookup), y 1 when the reflection is scaled by the light
+    /// the fragment receives (a debug switch's stand-in), 2 by the scene light, z 1 for a
+    /// window shape (the Window_Environment_Mapping flag), w 1 on every shape with an
+    /// environment map (a premultiplied one is premultiplied by it even where the
+    /// reflection has faded out). All zero without an environment map.
+    pub env_how: Vec4,
     /// The environment cube (texture-set slot 4), loaded as a cube map
-    /// (`texture::dds_cube_image`); `None` without a window environment map.
+    /// (`texture::dds_cube_image`); `None` without an environment map.
     #[texture(54, dimension = "cube")]
     #[sampler(55)]
     pub env_cube: Option<Handle<Image>>,
@@ -604,8 +616,9 @@ pub struct NifSurfaceUniform {
     /// [`NifSurface::metal_gain`] (#2981; read only by the opted-in main pass of a view with
     /// a reflection cube, on authored materials); z, w unused.
     pub terrain: Vec4,
-    /// [`NifSurface::env`].
+    /// [`NifSurface::env`], [`NifSurface::env_how`].
     pub env: Vec4,
+    pub env_how: Vec4,
 }
 
 /// Screen UV of shift per unit of refraction strength and of view-space tilt
@@ -617,7 +630,7 @@ pub const REFRACTION_SCREEN: f32 = 0.1;
 
 impl From<&NifSurface> for NifSurfaceUniform {
     fn from(s: &NifSurface) -> Self {
-        NifSurfaceUniform { falloff: s.falloff, alpha_cut: s.alpha_cut, add_whole: s.add_whole, refraction: s.refraction * REFRACTION_SCREEN, fire_period: s.fire_period, emissive_rule: s.emissive_rule, holes: s.holes, holes_edge: s.holes_edge, soft: s.soft, pipboy_a: s.pipboy_a, pipboy_b: s.pipboy_b, terrain: Vec4::new(if crate::terrain_sampling::repeat_valid(s.terrain_repeat) { s.terrain_repeat } else { 0.0 }, s.metal_gain, 0.0, 0.0), env: s.env }
+        NifSurfaceUniform { falloff: s.falloff, alpha_cut: s.alpha_cut, add_whole: s.add_whole, refraction: s.refraction * REFRACTION_SCREEN, fire_period: s.fire_period, emissive_rule: s.emissive_rule, holes: s.holes, holes_edge: s.holes_edge, soft: s.soft, pipboy_a: s.pipboy_a, pipboy_b: s.pipboy_b, terrain: Vec4::new(if crate::terrain_sampling::repeat_valid(s.terrain_repeat) { s.terrain_repeat } else { 0.0 }, s.metal_gain, 0.0, 0.0), env: s.env, env_how: s.env_how }
     }
 }
 
@@ -692,6 +705,7 @@ impl Default for NifSurface {
             legacy: None,
             height_overlay: false,
             env: Vec4::ZERO,
+            env_how: Vec4::ZERO,
             env_cube: None,
             env_mask: None,
         }
@@ -717,10 +731,20 @@ pub struct NifSurfaceKey {
     /// the surface the depth prepass holds and take the ambient occlusion
     /// ([`ambient_occlusion_opt_in`]).
     pub terrain_layer: bool,
+    /// The window shows HDR output ([`hdr_output`]) when the material was prepared: `specialize`
+    /// adds `NVF_HDR`. A live switch makes [`respecialize_on_hdr_switch`] prepare every material again.
+    pub hdr: bool,
 }
 
 impl From<&NifSurface> for NifSurfaceKey {
     fn from(surface: &NifSurface) -> Self {
+        Self::with_hdr(surface, hdr_output())
+    }
+}
+
+impl NifSurfaceKey {
+    /// The key for `surface` with the output's HDR state given.
+    fn with_hdr(surface: &NifSurface, hdr: bool) -> Self {
         NifSurfaceKey {
             decal: surface.decal,
             refract: surface.refract,
@@ -733,6 +757,7 @@ impl From<&NifSurface> for NifSurfaceKey {
             pipboy_screen: surface.pipboy_screen,
             anti_tiling: surface.anti_tiling && crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
             terrain_layer: crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
+            hdr,
         }
     }
 }
@@ -753,6 +778,12 @@ impl MaterialExtension for NifSurface {
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         nif_prepass(descriptor, key.mesh_key);
+        // HDR output (nvforever hdr.rs): hot light keeps the strength it emits above white.
+        if key.bind_group_data.hdr {
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader_defs.push("NVF_HDR".into());
+            }
+        }
         if key.bind_group_data.first_person {
             first_person_depth(descriptor, key.mesh_key);
         }
@@ -1007,6 +1038,28 @@ pub fn display_emissive(value: f32) -> f32 {
 /// whole].
 pub const ADD_DISPLAY_MAX: f32 = 2.0;
 
+/// Whether the window shows HDR output (nvforever hdr.rs): its surface is fp16 scRGB.
+/// It changes live (the row switches HDR with no restart: the surface is reconfigured on the
+/// next frame), so it goes into [`NifSurfaceKey`] when a material is prepared, and
+/// [`respecialize_on_hdr_switch`] prepares every material again when it changes.
+pub(crate) fn hdr_output() -> bool {
+    bevy::render::view::window::NVF_HDR_SURFACE_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// After a live HDR switch, marks every [`NifMaterial`] and blended-landscape material changed: Bevy prepares each again, its
+/// key takes the new [`hdr_output`], and the pipelines are specialized with or without `NVF_HDR`.
+fn respecialize_on_hdr_switch(mut seen: Local<bool>, mut materials: ResMut<Assets<NifMaterial>>, blends: Option<ResMut<Assets<crate::nif_surface_blend::NifBlendMaterial>>>) {
+    let now = hdr_output();
+    if now == *seen {
+        return;
+    }
+    *seen = now;
+    for _ in materials.iter_mut() {}
+    if let Some(mut blends) = blends {
+        for _ in blends.iter_mut() {}
+    }
+}
+
 /// The linear light an additive shape (NiAlphaProperty destination factor ONE, drawn as
 /// `AlphaMode::Add`) adds to a pixel whose opaque frame is `behind` (linear), for its
 /// linear colour `colour` and its alpha `alpha` (1 for a ONE / ONE shape; CPU mirror of
@@ -1084,6 +1137,7 @@ impl Plugin for NifMaterialPlugin {
         app.add_plugins(MaterialPlugin::<NifMaterial>::default())
             .init_resource::<BlendedCutouts>()
             .add_systems(Startup, spawn_transmission_anchor)
+            .add_systems(Update, respecialize_on_hdr_switch)
             .add_systems(PostUpdate, (apply_blended_cutouts.in_set(BlendedCutoutSystems), see_through_casts_no_shadow.in_set(SeeThroughShadowSystems)));
         // The authored materials' debug switches are read once, at the start, and the run's
         // reflections state is fixed with them (nvforever main.rs sets it before this; off
@@ -1310,21 +1364,22 @@ mod tests {
     }
 
     /// [design] The ordinary interface (with #2551's `terrain` row and #2462's window
-    /// environment map: the `env` row after it, the cube, its sampler and the mask at
-    /// 54-56): 50..57, table 100, data 101, and ten 16-byte rows (160 bytes). No
+    /// environment map: the `env` row after it, then #2841's `env_how` row, the cube, its
+    /// sampler and the mask at 54-56): 50..57, table 100, data 101, and eleven 16-byte rows
+    /// (176 bytes). No
     /// enabled-only resource may enter this type.
     #[test]
     fn ordinary_surface_gpu_interface_matches_main() {
         use bevy::render::render_resource::BindlessResourceType as R;
-        assert_eq!(NifSurfaceUniform::min_size().get(), 160);
-        assert_eq!(NifSurfaceUniform::from(&NifSurface::default()).size().get(), 160);
+        assert_eq!(NifSurfaceUniform::min_size().get(), 176);
+        assert_eq!(NifSurfaceUniform::from(&NifSurface::default()).size().get(), 176);
         let descriptor = NifSurface::bindless_descriptor().unwrap();
         assert_eq!(descriptor.index_tables.len(), 1);
         let table = &descriptor.index_tables[0];
         assert_eq!((table.indices.start.0, table.indices.end.0, table.binding_number.0), (50, 57, 100));
         assert_eq!(&descriptor.resources[50..], &[R::DataBuffer, R::Texture2d, R::SamplerFiltering, R::Texture2d, R::TextureCube, R::SamplerFiltering, R::Texture2d]);
         assert_eq!(descriptor.buffers.len(), 1);
-        assert_eq!((descriptor.buffers[0].binding_number.0, descriptor.buffers[0].bindless_index.0, descriptor.buffers[0].size), (101, 50, Some(160)));
+        assert_eq!((descriptor.buffers[0].binding_number.0, descriptor.buffers[0].bindless_index.0, descriptor.buffers[0].size), (101, 50, Some(176)));
         // Non-bindless declarations are from this exact derived production type.
         let source = include_str!("nif_material.rs");
         let extension = source.split("pub struct NifSurface {").nth(1).unwrap().split("\n}").next().unwrap();
@@ -1598,7 +1653,7 @@ mod tests {
         // Only the switches in `NifSurfaceKey` select the pipeline; the falloff and the
         // alpha cut are uniforms.
         let mut surface = NifSurface::default();
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         assert_eq!(surface.alpha_cut, 0.0);
         assert_eq!(surface.emissive_rule, Vec4::ZERO);
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, Vec4::ZERO);
@@ -1608,19 +1663,19 @@ mod tests {
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, surface.emissive_rule);
         assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey::from(&NifSurface::default()));
         surface.decal = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         surface.hard_edges = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         surface.shade_light = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         // The refraction strength is a uniform; whether the shape refracts is the pipeline's.
         surface.refraction = 0.1;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         surface.refract = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
         // A FaceGen offset selects the tinting shader.
         surface.facegen_offset = Some(Handle::default());
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, hdr: false });
     }
 
     #[test]
@@ -1663,6 +1718,12 @@ mod tests {
         assert!(!NifSurfaceKey::from(&NifSurface::default()).add_linear);
         assert!(include_str!("nif_material.wesl").contains("@if(ADD_LINEAR)"));
         assert!(NifSurfaceKey::from(&NifSurface { pipboy_screen: true, ..default() }).pipboy_screen);
+        // HDR output is in the key, so a live switch selects another pipeline.
+        let sdr = NifSurfaceKey::with_hdr(&NifSurface::default(), false);
+        let hdr = NifSurfaceKey::with_hdr(&NifSurface::default(), true);
+        assert!(!sdr.hdr);
+        assert!(hdr.hdr);
+        assert_ne!(sdr, hdr);
         // Landscape anti-tiling (#2551): only a landscape material (a repeat above 0) with the
         // switch on; the repeat reaches the shader, 0 for every other shape.
         assert!(!NifSurfaceKey::from(&NifSurface::default()).anti_tiling);

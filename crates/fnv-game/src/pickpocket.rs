@@ -442,7 +442,7 @@ impl Game<'_> {
             .into_iter()
             .flatten()
             .filter(|ei| {
-                let Some(m) = data.magic_effects.get(&ei.effect) else { return false };
+                let Some(m) = self.magic_effect_def(ei.effect) else { return false };
                 let harmful = m.has(crate::data::MagicEffectDef::DETRIMENTAL) || m.has(crate::data::MagicEffectDef::HOSTILE);
                 harmful && ei.magnitude > 0 && ei.actor_value.or(m.actor_value) == Some(crate::actor_values::HEALTH)
             })

@@ -37,6 +37,10 @@
 //! - **Terrain anti-tiling** (`terrain-anti-tiling`, off in both presets, likewise): the
 //!   landscape textures are read at a few offset places hashed from the world and blended,
 //!   so their repeat no longer shows as a grid (terrain.rs "Anti-tiling", #2551).
+//! - **Terrain parallax** (`terrain-parallax`, off in both presets, likewise until its cost
+//!   is measured; it needs Authored materials): the landscape's texture layers whose
+//!   texture pack gives a height map (`_p`) show relief near the camera (terrain.rs
+//!   "Parallax", #3322).
 //! - **Cloud shadows** (`cloud-shadows`, off in both presets: #2670 asked for it "in
 //!   `enhanced`", a row the menu overhaul removed, and its strength is not calibrated yet):
 //!   the weather's cloud layers darken the sun's direct light where their shadow falls
@@ -56,6 +60,11 @@
 //! - **Aerial perspective** (`aerial-perspective`, off in every preset): far scenery takes on
 //!   the weather's sky colours with distance, per colour channel and toward the sun, inside the
 //!   weather's own fog (aerial.rs, #2993).
+//! - **Night sky detail** (`night-sky-detail`, off in every preset): the stars twinkle, the
+//!   moon has a glow and the clouds take its light, from the weather's own colours and fog
+//!   (night_sky.rs, #2995).
+//! - **Distant lights** (`distant-lights`, off in both presets): at night, placed lights in
+//!   the cells beyond the loaded ones show as small glows (distant_lights.rs, #3013).
 //!
 //! Another switch is off in both looks and not part of `enhanced`: **Blend meshes into
 //! ground** (`mesh-terrain-blend`, `mesh_terrain_blend.rs`), outdoor roads, rocks and
@@ -205,6 +214,9 @@ pub struct Graphics {
     /// Anti-tiling of the landscape textures (terrain.rs "Anti-tiling"; off in both
     /// presets) [design, #2551].
     pub terrain_anti_tiling: bool,
+    /// Parallax from authored height maps on the landscape's folded texture layers
+    /// (terrain.rs "Parallax"; off in both presets) [design, #3322].
+    pub terrain_parallax: bool,
     /// The weather's clouds shade the sun (cloud_shadows.rs; off in both presets)
     /// [design, #2670].
     pub cloud_shadows: bool,
@@ -227,6 +239,9 @@ pub struct Graphics {
     /// changes). Read once at the start (nvf_assets `reflection_cube::set_enabled`, main.rs);
     /// this field is the settings row's value for the next start.
     pub authored_reflections: bool,
+    /// Glows of placed lights beyond the loaded cells at night (distant_lights.rs; off in
+    /// both presets) [design, #3013].
+    pub distant_lights: bool,
     /// Full models of static scenery in the cells beyond the loaded ones, draw-only
     /// (full_detail.rs; 7 x 7 in `enhanced`, off in vanilla) [design, #2701; maintainer
     /// decision 2026-11-21 on #3048].
@@ -238,6 +253,9 @@ pub struct Graphics {
     /// Far scenery takes on the sky's colours in the weather's fog (aerial.rs; off in every
     /// preset) [design, #2993].
     pub aerial_perspective: bool,
+    /// Twinkling stars, a moon glow and moonlit clouds (night_sky.rs; off in every preset)
+    /// [design, #2995].
+    pub night_sky_detail: bool,
 }
 
 /// The settings key of the Authored materials row (#2981).
@@ -249,7 +267,7 @@ pub const AUTHORED_REFLECTIONS_KEY: &str = "authored-reflections";
 /// The keys of `--graphics-only`: the settings page's switches and the anti-aliasing,
 /// shadow-filter, full-detail and distant-object choices that are not vanilla's, in the
 /// order of [`Graphics::describe`].
-pub const KEYS: [&str; 25] = [
+pub const KEYS: [&str; 28] = [
     "ambient-occlusion",
     "fine-shadows",
     "bloom",
@@ -266,6 +284,7 @@ pub const KEYS: [&str; 25] = [
     "shadow-filter-temporal",
     "terrain-height-blend",
     "terrain-anti-tiling",
+    "terrain-parallax",
     "cloud-shadows",
     "terrain-shadows",
     "heat-haze",
@@ -275,6 +294,8 @@ pub const KEYS: [&str; 25] = [
     "distant-objects-8",
     "distant-objects-12",
     "aerial-perspective",
+    "night-sky-detail",
+    "distant-lights",
 ];
 
 impl Graphics {
@@ -322,6 +343,9 @@ impl Graphics {
             terrain_height_blend: false,
             // The same for anti-tiling [design, #2551].
             terrain_anti_tiling: false,
+            // The same for terrain parallax, whose cost is still to measure [design, #3322;
+            // the maintainer's call].
+            terrain_parallax: false,
             // The same for cloud shadows, whose strength is still to calibrate [design,
             // #2670; the issue's "in enhanced" names a row the overhaul removed].
             cloud_shadows: false,
@@ -336,6 +360,8 @@ impl Graphics {
             authored_materials: true,
             // On in both looks [design, #2981]: without a pack nothing reflects.
             authored_reflections: true,
+            // Off in both looks: an addition of our own [design, #3013].
+            distant_lights: false,
             // An addition of our own for machines with GPU headroom: the 7 x 7 ring in
             // `enhanced`, off in vanilla [design, #2701; maintainer decision 2026-11-21 on
             // #3048].
@@ -345,6 +371,8 @@ impl Graphics {
             distant_objects: crate::distant_objects::DistantObjects::Off,
             // Off in every preset: an addition of our own [design, #2993].
             aerial_perspective: false,
+            // Off in every preset: an addition of our own [design, #2995].
+            night_sky_detail: false,
         }
     }
 
@@ -366,13 +394,16 @@ impl Graphics {
             "mesh-terrain-blend" => &mut self.mesh_terrain_blend,
             "terrain-height-blend" => &mut self.terrain_height_blend,
             "terrain-anti-tiling" => &mut self.terrain_anti_tiling,
+            "terrain-parallax" => &mut self.terrain_parallax,
             "cloud-shadows" => &mut self.cloud_shadows,
             "terrain-shadows" => &mut self.terrain_shadows,
             "heat-haze" => &mut self.heat_haze,
             "desert-haze" => &mut self.desert_haze,
             "aerial-perspective" => &mut self.aerial_perspective,
+            "night-sky-detail" => &mut self.night_sky_detail,
             AUTHORED_MATERIALS_KEY => &mut self.authored_materials,
             AUTHORED_REFLECTIONS_KEY => &mut self.authored_reflections,
+            "distant-lights" => &mut self.distant_lights,
             _ => return None,
         })
     }
@@ -431,6 +462,7 @@ impl Graphics {
             (self.shadow_filter == ShadowFilteringMethod::Temporal, "temporal shadow filtering"),
             (self.terrain_height_blend, "terrain height blending"),
             (self.terrain_anti_tiling, "terrain anti-tiling"),
+            (self.terrain_parallax, "terrain parallax"),
             (self.cloud_shadows, "cloud shadows"),
             (self.terrain_shadows, "terrain shadows"),
             (self.heat_haze, "heat haze"),
@@ -440,6 +472,8 @@ impl Graphics {
             (self.full_detail != crate::full_detail::FullDetail::Off, self.full_detail.describe()),
             (self.distant_objects != crate::distant_objects::DistantObjects::Off, self.distant_objects.describe()),
             (self.aerial_perspective, "aerial perspective"),
+            (self.night_sky_detail, "night sky detail"),
+            (self.distant_lights, "distant lights"),
         ];
         let mut on: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, n)| *n).collect();
         if self.fsr().is_some() {
@@ -680,7 +714,7 @@ impl Plugin for GraphicsPlugin {
             app.init_resource::<nvf_play::phys_load::PhysLoad>();
             // (time in this period, time counted, slowest, frames counted, cycle index)
             #[allow(clippy::type_complexity)]
-            app.add_systems(Update, move |mut commands: Commands, time: Res<Time<Real>>, mut g: ResMut<Graphics>, sky: Res<SkyState>, store: Res<bevy::diagnostic::DiagnosticsStore>, lights: Query<(Option<&Name>, &DirectionalLight, &bevy::camera::visibility::CascadesVisibleEntities)>, views: Query<Option<&Name>, With<Camera>>, mut acc: Local<(f32, f32, f32, u32, usize)>, mut start_shadows: Local<Option<(bool, f32, crate::sky::CascadeLayout, f32)>>, thin: Res<crate::shadow_thin::ShadowThin>, refs: Query<&nvf_play::RefVisual>, mut phys_load: ResMut<nvf_play::phys_load::PhysLoad>| {
+            app.add_systems(Update, move |mut commands: Commands, time: Res<Time<Real>>, mut g: ResMut<Graphics>, sky: Res<SkyState>, store: Res<bevy::diagnostic::DiagnosticsStore>, lights: Query<(Option<&Name>, &DirectionalLight, &bevy::camera::visibility::CascadesVisibleEntities)>, views: Query<Option<&Name>, With<Camera>>, mut acc: Local<(f32, f32, f32, u32, usize)>, mut cpu_at: Local<Option<(f64, f64)>>, mut start_shadows: Local<Option<(bool, f32, crate::sky::CascadeLayout, f32)>>, thin: Res<crate::shadow_thin::ShadowThin>, refs: Query<&nvf_play::RefVisual>, mut phys_load: ResMut<nvf_play::phys_load::PhysLoad>| {
                 let first = start_shadows.is_none();
                 let start = *start_shadows.get_or_insert((sky.shadows, sky.shadow_distance, sky.shadow_layout, thin.ratio));
                 if first {
@@ -697,6 +731,15 @@ impl Plugin for GraphicsPlugin {
                 }
                 if acc.0 >= ft.every {
                     info!("frame time: {:.2} ms mean, {:.1} ms slowest over {} frames; graphics: {}; sun shadows {}; sun at heading {:.0}, elevation {:.0}", acc.1 * 1e3 / acc.3.max(1) as f32, acc.2 * 1e3, acc.3, g.describe(), if sky.shadows { format!("to {:.0} in {} cascades", sky.shadow_distance, sky.shadow_layout.count()) } else { "off".into() }, sky.sun_heading(), sky.sun_elevation());
+                    // Processor time a frame over the period: this (the main) thread's and the
+                    // whole process's, which a display's frame cap does not hide as it does
+                    // the frame time.
+                    if let (Some(main), Some(all)) = (crate::profile::thread_cpu_secs(), crate::profile::process_cpu_secs()) {
+                        if let Some((m0, a0)) = cpu_at.replace((main, all)) {
+                            let n = f64::from(acc.3.max(1));
+                            info!("cpu time: main thread {:.2} ms a frame, process {:.2} ms a frame", (main - m0) * 1e3 / n, (all - a0) * 1e3 / n);
+                        }
+                    }
                     // The GPU's time in the passes that cost the most (ms, about the last
                     // second's average).
                     let mut passes: Vec<(String, f64)> = store
@@ -1012,7 +1055,9 @@ fn apply(
         } else {
             e.remove::<(bevy::post_process::bloom::Bloom, bevy::camera::Hdr, crate::post::ImageSpaceGlow)>();
         }
-        if temporal {
+        // HDR output (hdr.rs) keeps the main view in fp16 so its highlights band no more
+        // than the screen's.
+        if temporal || crate::hdr::on() {
             e.insert(bevy::camera::Hdr);
         }
         // Eye adaptation (eye_adapt.rs) and the bright pass need the HDR view; each has
@@ -1663,6 +1708,17 @@ mod tests {
     }
 
     #[test]
+    fn terrain_parallax_is_off_in_both_looks_and_has_its_own_key() {
+        assert!(!Graphics::preset(Preset::Vanilla).terrain_parallax && !Graphics::preset(Preset::Enhanced).terrain_parallax);
+        let on = Graphics::only(&["terrain-parallax".into()]).expect("terrain-parallax");
+        assert!(on.terrain_parallax && !on.terrain_anti_tiling && !on.terrain_height_blend);
+        assert_eq!(on.describe(), "light glow, terrain parallax");
+        let mut g = Graphics::preset(Preset::Vanilla);
+        *g.switch("terrain-parallax").expect("settings key") = true;
+        assert_eq!(g, on);
+    }
+
+    #[test]
     fn heat_haze_is_off_in_both_looks_and_has_its_own_key() {
         assert!(!Graphics::preset(Preset::Vanilla).heat_haze && !Graphics::preset(Preset::Enhanced).heat_haze);
         let on = Graphics::only(&["heat-haze".into()]).expect("heat-haze");
@@ -1696,6 +1752,18 @@ mod tests {
         *g.switch("aerial-perspective").expect("settings key") = true;
         assert_eq!(g, on);
         assert!(!Graphics::preset(Preset::Enhanced).describe().contains("aerial"));
+    }
+
+    #[test]
+    fn night_sky_detail_is_off_in_both_looks_and_has_its_own_key() {
+        assert!(!Graphics::preset(Preset::Vanilla).night_sky_detail && !Graphics::preset(Preset::Enhanced).night_sky_detail);
+        let on = Graphics::only(&["night-sky-detail".into()]).expect("night-sky-detail");
+        assert!(on.night_sky_detail);
+        assert_eq!(on.describe(), "light glow, night sky detail");
+        let mut g = Graphics::preset(Preset::Vanilla);
+        *g.switch("night-sky-detail").expect("settings key") = true;
+        assert_eq!(g, on);
+        assert!(!Graphics::preset(Preset::Enhanced).describe().contains("night sky"));
     }
 
     // The guard alone: repeated requests and an earlier registration. Both callers

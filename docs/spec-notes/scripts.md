@@ -935,9 +935,13 @@ faction of the actor. GetPCSleepHours reads the hours of a sleep in progress, 0 
 awake or waiting. SetLastExtDoorActivated sets the door GetPCLastExteriorDoor reads.
 SetPCYoung, SetPCToddler, SetNoActivationSound / ClearNoActivationSound and
 SetLocationSpecificLoadScreensOnly are kept in `PlayerState` (`young`, `toddler`,
-`no_activation_sound`, `location_load_screens_only`), but nothing draws, animates or
-plays by them yet: the child's default hair, the toddler's walk, the refused-activation
-sound and the load screen choice are not built.
+`no_activation_sound`, `location_load_screens_only`). `SetPCYoung` forces the
+race's default hair and suppresses face attachments in the actor resolver and
+rebuilds the player body (`appearance.rs`, `fnv_actor::resolve`); `SetPCToddler`
+switches player locomotion clips to the toddler walk set, forces walking pace
+(blocking sprint), and follows the toddler walk clip's root speed when loaded
+(`pc-toddler-young.md`). The refused-activation sound and the load screen choice
+are not built yet.
 
 The rest of the audit's §1 (2026-11-03, same module, opcodes the same way; Wait 0x10B7
 and IsWaiting 0x106F come with StopWaiting). Two opcodes have no catalogue name and

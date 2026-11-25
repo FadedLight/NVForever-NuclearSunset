@@ -1117,6 +1117,29 @@ fn register_graphics(app: &mut App) {
             ask_keep: false,
         },
     );
+    // Shadows of placed lights (light_shadows.rs; graphics-enhanced.md §3.17): Off,
+    // Performance or Quality as the Sun shadows row, saved by name, off by default [design].
+    add_choice_list(
+        app,
+        Setting {
+            key: "light-shadows",
+            group: GROUP_GRAPHICS,
+            label: "ALC shadows",
+            note: LIGHT_SHADOWS_NOTE,
+            switches: "--light-shadows",
+            get: |_| false,
+            set: |_, _| {},
+            slider: None,
+        },
+        ChoiceList {
+            names: |_| crate::light_shadows::CHOICES.iter().map(|c| c.to_string()).collect(),
+            chosen: light_shadows_chosen,
+            pick: take_light_shadows,
+            save: light_shadows_chosen,
+            load: take_light_shadows,
+            ask_keep: false,
+        },
+    );
     nvf_play::settings::set_disabled_status(app, "anti-aliasing", |w| crate::upscaler::temporal_active(w).then_some("Off (upscaling active)"));
     // Frame generation: Off, FSR 3.1 or DLSS (#2317), each choice dimmed with its reason; the
     // INI's old on/off still reads. Then DLSS's frames per real frame.
@@ -1165,7 +1188,7 @@ fn register_graphics(app: &mut App) {
         Setting { key: AO_KEY, group: GROUP_GRAPHICS, label: "Ambient occlusion", note: AO_NOTE, switches: "--graphics, --ambient-occlusion", get: |_| false, set: |_, _| {}, slider: None },
         ChoiceList { names: |_| AO_CHOICES.iter().map(|c| (*c).to_string()).collect(), chosen: ao_chosen, pick: take_ao, save: ao_chosen, load: take_ao, ask_keep: false },
     );
-    let switches: [Switch; 21] = [
+    let switches: [Switch; 24] = [
         (
             "fine-shadows",
             "Longer sun shadows",
@@ -1277,6 +1300,17 @@ fn register_graphics(app: &mut App) {
             |w| w.resource::<Graphics>().terrain_anti_tiling,
             |w, on| w.resource_mut::<Graphics>().terrain_anti_tiling = on,
         ),
+        // #3322: needs Authored materials (nvf_settings_layout NEEDS, for the next start) and
+        // the run's state of it (`parallax_status`), whose height maps it draws; switched
+        // while the game runs (terrain.rs `sync_parallax`).
+        (
+            "terrain-parallax",
+            "Terrain parallax",
+            "On: ground textures a texture pack gives height maps for (textures\\pbr\\) show depth near you, for some GPU time. Without such a pack nothing changes.",
+            "--graphics-only",
+            |w| w.resource::<Graphics>().terrain_parallax,
+            |w, on| w.resource_mut::<Graphics>().terrain_parallax = on,
+        ),
         (
             "light-shafts",
             "Sun shafts",
@@ -1308,6 +1342,22 @@ fn register_graphics(app: &mut App) {
             "--graphics, --graphics-only",
             |w| w.resource::<Graphics>().aerial_perspective,
             |w, on| w.resource_mut::<Graphics>().aerial_perspective = on,
+        ),
+        (
+            "night-sky-detail",
+            "Night sky detail (experimental)",
+            "On: stars twinkle a little, more near the horizon; the moon gets a glow and lights the clouds facing it, wider in hazy weather. Not in the original.",
+            "--graphics, --graphics-only",
+            |w| w.resource::<Graphics>().night_sky_detail,
+            |w, on| w.resource_mut::<Graphics>().night_sky_detail = on,
+        ),
+        (
+            "distant-lights",
+            "Distant lights (experimental)",
+            "On: at night, lamps in the places beyond the loaded area show as small glows, so towns can be seen from afar. They light nothing. Not in the original.",
+            "--graphics, --graphics-only",
+            |w| w.resource::<Graphics>().distant_lights,
+            |w, on| w.resource_mut::<Graphics>().distant_lights = on,
         ),
         (
             "water-reflections",
@@ -1348,7 +1398,31 @@ fn register_graphics(app: &mut App) {
     for (key, label, note, switches, get, set) in switches {
         add_setting(app, Setting { key, group: GROUP_GRAPHICS, label, note, switches, get, set, slider: None });
     }
+    // Read once at the start like Authored materials; the row keeps the next start's choice
+    // (gpu_occlusion.rs).
+    crate::gpu_occlusion::add_row(app, GROUP_GRAPHICS);
+    nvf_play::settings::set_needs_in_game(app, "terrain-parallax", |w| parallax_status(nvf_assets::authored::enabled(), w.get_resource::<Graphics>().is_some_and(|g| g.authored_materials)));
 }
+
+/// The Terrain parallax row's availability in the game, by the run's Authored materials
+/// state (`session`, nvf_assets `authored::enabled`, fixed at the start), not the row's
+/// saved value (`row`, which the launcher's NEEDS rule follows for the next start): free
+/// while the run has authored materials, even with the row turned off for the next start
+/// (the height maps stay loaded); greyed with a restart note while the row is on but the run
+/// started without them; the NEEDS words while both are off [design, #3322 review].
+pub(crate) fn parallax_status(session: bool, row: bool) -> Option<&'static str> {
+    match (session, row) {
+        (true, _) => None,
+        (false, true) => Some(PARALLAX_RESTART),
+        (false, false) => Some(PARALLAX_NEEDS),
+    }
+}
+
+/// The NEEDS words of the Terrain parallax row (nvf_settings_layout `NEEDS`).
+pub(crate) const PARALLAX_NEEDS: &str = "Needs Authored Materials.";
+
+/// What the Terrain parallax row says while Authored materials waits for the next start.
+pub(crate) const PARALLAX_RESTART: &str = "After a restart (Authored Materials)";
 
 /// The Authored materials row's note (#2981): it takes effect at the next start, as the run's
 /// state is fixed before the first material (main.rs).
@@ -1432,7 +1506,9 @@ fn register_pipeline_waits(app: &mut App) {
         "anti-aliasing", "shadow-filter", "upscaler", "upscaler-quality", "ambient-occlusion",
         "fine-shadows", "bloom", "glow", "eye-adaptation", "neon-glow", "sharpen",
         "light-shafts", "water-reflections", "water-effects", "water-mirror", "sun-shadows", "grade",
-        "terrain-height-blend", "terrain-anti-tiling", "cloud-shadows", "terrain-shadows", "heat-haze", MESH_BLEND_KEY,
+        "terrain-height-blend", "terrain-anti-tiling", "terrain-parallax", "cloud-shadows", "terrain-shadows", "heat-haze", MESH_BLEND_KEY, "distant-lights",
+        // ALC shadows' first point and spot light shadow views specialize their passes.
+        "light-shadows",
     ] {
         nvf_play::settings::wait_for_pipelines(app, key);
     }
@@ -1685,6 +1761,27 @@ fn take_shadow_resolution(w: &mut World, text: &str) -> bool {
     match nvf_play::settings::choice_of(text, &names, |v| choice_index(v, graphics::SHADOW_RESOLUTIONS.len())) {
         Some(i) => {
             graphics::set_shadow_resolution_choice(w, i);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The ALC shadows row's note (light_shadows.rs; ALC: All Lights Cast, the user-visible
+/// name since 2026-11-19, once Lamp shadows; the INI key stays `light-shadows`).
+const LIGHT_SHADOWS_NOTE: &str = "ALC (All Lights Cast): lamps, fires and spot lights cast shadows within the shadow distance, so walls stop their light. Performance redraws less often. Costs frame rate. Not in the original.";
+
+fn light_shadows_chosen(w: &World) -> String {
+    let choice = w.get_resource::<crate::light_shadows::LightShadows>().map_or(0, |l| l.choice);
+    crate::light_shadows::CHOICES[choice.min(crate::light_shadows::CHOICES.len() - 1)].to_string()
+}
+
+/// The ALC shadows choice `text` names.
+fn take_light_shadows(w: &mut World, text: &str) -> bool {
+    let names: Vec<String> = crate::light_shadows::CHOICES.iter().map(|c| c.to_string()).collect();
+    match nvf_play::settings::choice_of(text, &names, |v| choice_index(v, crate::light_shadows::CHOICES.len())) {
+        Some(i) => {
+            w.insert_resource(crate::light_shadows::LightShadows { choice: i });
             true
         }
         None => false,
@@ -2901,6 +2998,7 @@ dlss-model=Preset K
             ("anti-aliasing", &["--msaa", "--graphics-only"]),
             ("shadow-filter", &[]),
             ("shadow-resolution", &[]),
+            ("light-shadows", &["--light-shadows"]),
             (FRAME_GENERATION_KEY, &["--frame-generation"]),
             (FRAMES_KEY, &[]),
             ("latency-reduction", &["--latency-reduction"]),
@@ -2918,10 +3016,13 @@ dlss-model=Preset K
             (crate::graphics::AUTHORED_REFLECTIONS_KEY, &["--graphics-only"]),
             ("terrain-height-blend", &["--graphics", "--graphics-only"]),
             ("terrain-anti-tiling", &["--graphics", "--graphics-only"]),
+            ("terrain-parallax", &["--graphics-only"]),
             ("light-shafts", &["--graphics"]),
             ("heat-haze", &["--graphics-only"]),
             ("desert-haze", &["--graphics", "--graphics-only"]),
             ("aerial-perspective", &["--graphics", "--graphics-only"]),
+            ("night-sky-detail", &["--graphics", "--graphics-only"]),
+            ("distant-lights", &["--graphics", "--graphics-only"]),
             ("water-reflections", &["--graphics"]),
             ("water-effects", &["--graphics", "--graphics-only"]),
             ("water-mirror", &["--graphics-only"]),
@@ -2937,6 +3038,31 @@ dlss-model=Preset K
         assert!(settings.list().iter().all(|s| !s.note.contains("--")), "no Graphics row's note names a switch");
         assert_eq!(nvf_play::settings::note_switches(FPS_COUNTER_SWITCHES), ["--fps"]);
         assert!(nvf_play::settings::note_switches(FPS_SPLIT_SWITCHES).is_empty());
+    }
+
+    /// #3322 review: in the game the Terrain parallax row follows the run's Authored
+    /// materials state, not the row's saved value (the launcher's NEEDS rule, for the next
+    /// start): free while the run has them, even with the row turned off; greyed with a
+    /// restart note while the row is on but the run started without them.
+    #[test]
+    fn the_terrain_parallax_row_follows_this_runs_authored_materials() {
+        assert_eq!(parallax_status(true, true), None);
+        assert_eq!(parallax_status(true, false), None, "turned off for the next start: still drawn this run");
+        assert_eq!(parallax_status(false, true), Some(PARALLAX_RESTART));
+        assert_eq!(parallax_status(false, false), Some(PARALLAX_NEEDS));
+        assert_eq!(nvf_settings_layout_why("terrain-parallax"), Some(PARALLAX_NEEDS), "the same words as the shared NEEDS rule");
+        assert!(PARALLAX_RESTART.len() <= 40);
+        let mut app = rows_app();
+        let i = row(&app, "terrain-parallax");
+        let status = |app: &App| app.world().resource::<nvf_play::settings::Settings>().disabled_status(app.world(), i);
+        assert_eq!(status(&app), None, "Authored materials on, as this run's");
+        app.world_mut().resource_mut::<Graphics>().authored_materials = false;
+        assert_eq!(status(&app), None, "the saved row off does not grey it while this run has them");
+        assert!(!app.world().resource::<nvf_play::settings::Settings>().list()[i].note.contains("original"), "the page note says what the row adds, not what the original lacks (observer check 268: it draws none)");
+
+        fn nvf_settings_layout_why(key: &str) -> Option<&'static str> {
+            nvf_play::settings_layout::needs(key).first().map(|r| r.why)
+        }
     }
 
     /// #2661: the mesh terrain blend's row stands among the Graphics switches, off in a

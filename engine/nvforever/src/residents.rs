@@ -1853,7 +1853,14 @@ impl Core {
     fn take_moved(&mut self, game: &mut Game, all: bool, mut phys: Option<&mut PhysState>) {
         let refs = game.world.placed;
         for (id, ours) in self.ai.moved_by_scripts(game) {
-            if !is_actor(refs, id) {
+            // An actor a script made (PlaceAtMe) is in no plugin's table of placed
+            // references, yet the AI looks after it (`ours`): it is moved as any other.
+            // Left out here, its character stayed where it was made, and the walker, which
+            // reads its place from its character, went on from there: a radscorpion made
+            // at the player and moved 600 units out 0.2 s later fought from beside the
+            // player in about half the runs, whenever its character already existed
+            // [observed: smoke `radscorpions-spacing-cadence`, 21 probe runs, #3366].
+            if !ours && !is_actor(refs, id) {
                 continue;
             }
             if let Some(run) = self.knocks.get_mut(&id.0) {
@@ -3279,6 +3286,7 @@ type Moves<'w, 's> = (
     Option<MessageReader<'w, 's, nvf_play::combat::Knockback>>,
     Option<MessageReader<'w, 's, nvf_play::Travel>>,
     Option<ResMut<'w, nvf_play::loading::Loading>>,
+    Option<MessageReader<'w, 's, nvf_play::loading::TravelRequest>>,
 );
 
 type Held<'w, 's> = (
@@ -3309,7 +3317,7 @@ pub fn drive(
     mut doors: ResMut<nvf_play::doors::Doors>,
     (script, mut sim, mut phys, mut blocks): PlayState,
     (seated, hours, flinches, fighters, idle_holds, mut refusals, stances): Held,
-    (mut door_fades, mut door_sounds, mut travel, mut knocks, trips, mut screen): Moves,
+    (mut door_fades, mut door_sounds, mut travel, mut knocks, trips, mut screen, asked): Moves,
 ) {
     // Hours passed in the Wait menu since the last frame (`--play` only: without it
     // there is no menu and no such message).
@@ -3333,7 +3341,12 @@ pub fn drive(
     // travel (not a script's MoveTo: `Loading::arriving`): who was in the loaded area
     // shortly before stays put; the others near the destination are put at their
     // package's place (`Core::arrive`).
-    if trips.is_some_and(|mut t| t.read().count() > 0) {
+    // A travel asked for this frame counts too: a door whose script runs Activate (Gomorrah's
+    // inner door, SCPT 0x00127959) asks in the scripts' pass, and its trip is sent only
+    // after this system has run; the guard started its weapons check in that frame again
+    // (#2835, pilot sweep 2026-11-18).
+    let asked = asked.is_some_and(|mut t| t.read().count() > 0);
+    if trips.is_some_and(|mut t| t.read().count() > 0) || asked {
         let arriving = screen.is_some_and(|mut s| std::mem::take(&mut s.arriving));
         if arriving {
             res.core.begin_trip();

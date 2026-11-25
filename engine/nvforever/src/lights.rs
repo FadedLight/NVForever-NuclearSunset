@@ -31,6 +31,11 @@ const PBR_FUNCTIONS: &str = "embedded://bevy_pbr/render/pbr_functions.wesl";
 
 mod display_shader;
 pub(crate) use self::display_shader::display_patched;
+#[cfg(test)]
+pub(crate) use self::display_shader::{
+    spot_display_scale, spot_specular_scale, FIRST_PERSON_FLASHLIGHT_DIFFUSE,
+    FIRST_PERSON_FLASHLIGHT_SPECULAR,
+};
 pub use self::display_shader::unix_lines;
 pub(crate) mod reflection_gate;
 
@@ -69,6 +74,11 @@ const BEVY_TONY: &str = "} @elif(TONEMAP_METHOD_TONY_MC_MAPFACE) {\n    color = 
 /// the eye adaptation's exposure (eye_adapt.rs), which Bevy applies in that pass.
 const GAME_CLIP: &str = "} @elif(TONEMAP_METHOD_TONY_MC_MAPFACE) {\n    color = min(color, vec3(1.0));";
 
+/// With HDR output (hdr.rs) the values above 1 stay: the image-space grade keeps them
+/// apart from its clipped picture and the HDR pass maps them between paper white and the
+/// screen's peak. Everything at or below 1 is the same as with [`GAME_CLIP`].
+const GAME_HDR: &str = "} @elif(TONEMAP_METHOD_TONY_MC_MAPFACE) {\n    color = max(color, vec3(0.0));";
+
 /// Set once the clip is in place (`NVF_TONEMAP=tony` keeps Bevy's curve, a test aid);
 /// sky.rs then leaves out its inverse of Tony McMapface.
 static CLIP_INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -87,7 +97,7 @@ impl Plugin for LightsPlugin {
         let tonemapping: Handle<Shader> = app.world().resource::<AssetServer>().load(TONEMAPPING_SHARED);
         app.insert_resource(LightingShader { handle, patched: false })
             .insert_resource(FunctionsShader { handle: functions, patched: false })
-            .insert_resource(TonemapShader { handle: tonemapping, patched: false })
+            .insert_resource(TonemapShader { handle: tonemapping, patched: false, hdr: false })
             .add_systems(PreUpdate, patch_clip)
             .add_systems(Update, (patch_attenuation, patch_display_sum, sync_script_lights, animate_lights, bind_model_lights, animate_model_lights).chain().after(nvf_play::PlaySet::Scripts));
     }
@@ -97,15 +107,37 @@ impl Plugin for LightsPlugin {
 struct TonemapShader {
     handle: Handle<Shader>,
     patched: bool,
+    /// The output the clip was installed for (HDR or SDR): a live switch swaps it.
+    hdr: bool,
 }
 
 /// Once Bevy's tonemapping functions have loaded, swap Tony McMapface's curve for the
 /// clip; the sky system is told to set its colours again.
 fn patch_clip(mut state: ResMut<TonemapShader>, mut shaders: ResMut<Assets<Shader>>, sky: Option<ResMut<crate::sky::SkyState>>) {
     if state.patched {
+        // HDR output switched live (hdr.rs): the clip for the other output in its place.
+        let hdr = bevy::render::view::window::NVF_HDR_SURFACE_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+        if hdr == state.hdr || !CLIP_INSTALLED.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Some(shader) = shaders.get(&state.handle) else { return };
+        let bevy::shader::Source::Wesl(source) = &shader.source else { return };
+        let (from, to) = if hdr { (GAME_CLIP, GAME_HDR) } else { (GAME_HDR, GAME_CLIP) };
+        let source = unix_lines(source);
+        if source.contains(from) {
+            let patched = crate::fog::with_source(shader, source.replace(from, to));
+            let _ = shaders.insert(&state.handle, patched);
+            info!("lights: the tonemapping clip switched to {}", if hdr { "HDR" } else { "SDR" });
+        }
+        state.hdr = hdr;
         return;
     }
     let Some(shader) = shaders.get(&state.handle) else { return };
+    // With HDR output asked for, wait for the window's surface: only an fp16 surface shows
+    // light above white; on an SDR surface the clip stays, so the picture is the SDR one.
+    if crate::hdr::on() && !bevy::render::view::window::NVF_HDR_SURFACE_DECIDED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     state.patched = true;
     if std::env::var("NVF_TONEMAP").is_ok_and(|v| v.eq_ignore_ascii_case("tony")) {
         info!("lights: NVF_TONEMAP=tony, the main view keeps Tony McMapface");
@@ -120,13 +152,15 @@ fn patch_clip(mut state: ResMut<TonemapShader>, mut shaders: ResMut<Assets<Shade
         error!("{TONEMAPPING_SHARED}: Tony McMapface not found (Bevy changed?); the main view keeps it");
         return;
     }
-    let patched = crate::fog::with_source(shader, source.replace(BEVY_TONY, GAME_CLIP));
+    let hdr = bevy::render::view::window::NVF_HDR_SURFACE_ACTIVE.load(std::sync::atomic::Ordering::Relaxed);
+    state.hdr = hdr;
+    let patched = crate::fog::with_source(shader, source.replace(BEVY_TONY, if hdr { GAME_HDR } else { GAME_CLIP }));
     let _ = shaders.insert(&state.handle, patched);
     CLIP_INSTALLED.store(true, std::sync::atomic::Ordering::Relaxed);
     if let Some(mut sky) = sky {
         sky.refresh();
     }
-    info!("lights: display values shown clipped (in Tony McMapface's place)");
+    info!("lights: display values shown {} (in Tony McMapface's place)", if hdr { "unclipped for HDR output" } else { "clipped" });
 }
 
 #[derive(Resource)]
@@ -1200,5 +1234,36 @@ mod tests {
     fn reflection_gate_refuses_a_source_with_another_ungated_block() {
         let input = chain_before_gate().replace("// Total light\n", "// Total light\n@if(ENVIRONMENT_MAP) {\n}\n");
         assert!(reflection_gate::gate_patched(&input).is_none());
+    }
+
+    /// Issue #3121: on `FIRST_PERSON_DEPTH` shapes only, shadow-casting spot lights
+    /// (the player's flashlight) take the diffuse and specular scales in
+    /// `lights/display_shader.rs`, matching the Rust constants, while `!FIRST_PERSON_DEPTH`
+    /// keeps full strength and the full shader-patch chain stays balanced.
+    #[test]
+    fn first_person_flashlight_patch_scales_shadow_spots_only() {
+        let chained = reflection_gate::gate_patched(&chain_before_gate())
+            .expect("full pbr_functions patch chain applies");
+        assert!(crate::sun_visibility::tests::balanced(&chained));
+        let diffuse_lit = format!(
+            "let nvf_fp_scale = select(1.0, {:.2}, ((*light).flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u);",
+            FIRST_PERSON_FLASHLIGHT_DIFFUSE,
+        );
+        let spec_lit = format!(
+            "direct_light += light_contrib * (shadow * select(1.0, {:.2}, (view_bindings::clustered_lights.data[light_id].flags & mesh_view_types::POINT_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u));",
+            FIRST_PERSON_FLASHLIGHT_SPECULAR,
+        );
+        assert_eq!(chained.matches(&diffuse_lit).count(), 1, "diffuse scale matches Rust constant once");
+        assert_eq!(chained.matches(&spec_lit).count(), 1, "specular scale matches Rust constant once");
+        assert_eq!(
+            chained.matches("@if(!FIRST_PERSON_DEPTH)\n    let nvf_fp_scale = 1.0;").count(),
+            1,
+            "world and third-person spot diffuse stay at 1.0",
+        );
+        assert_eq!(
+            chained.matches("@if(!FIRST_PERSON_DEPTH)\n        direct_light += light_contrib * shadow;").count(),
+            1,
+            "world and third-person spot specular stay unmodified",
+        );
     }
 }

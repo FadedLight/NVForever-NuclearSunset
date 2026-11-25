@@ -9,10 +9,12 @@ pub mod authored;
 mod bc5_field;
 pub mod camera_shot;
 pub mod data;
+pub mod env_map;
 pub mod guard;
 pub mod load_times;
 pub mod material_anim;
 pub mod model;
+pub mod model_glow;
 pub mod model_light;
 pub mod morph;
 pub mod particles;
@@ -35,6 +37,8 @@ pub use nif_spawn::{NifHidden, NifRoot, SpawnCtx, SpawnReport};
 pub use release::{AssetReleasePlugin, KeepLimits};
 /// The reflections' mount-pack test aid (pbr_field/reflect.rs).
 pub use pbr_field::reflect::{mount_pack_requested, seed_mount_pack, MOUNT_PACK_ENV};
+/// The terrain parallax's ground-pack test aid (pbr_field/ground.rs).
+pub use pbr_field::ground::{ground_pack_requested, seed_ground_pack, GROUND_DEPTH, GROUND_PACK_ENV};
 pub use texture::TextureCache;
 
 pub mod nif_surface_blend;

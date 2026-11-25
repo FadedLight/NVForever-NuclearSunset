@@ -42,7 +42,12 @@ pub struct RowShown {
     /// [observed: the tile's name, the item's without the count].
     pub name: String,
     pub text: String,
+    /// The row carries the equipped mark: a thing worn or held, and the ammo the weapon
+    /// loads now ([`Row::loaded`]; #3442: the list drawn from tiles left that out, so the
+    /// Ammo tab marked nothing).
     pub equipped: bool,
+    /// Resolved ySI tag/icon/template for this row when ySI is active (`None` otherwise).
+    pub ysi: Option<fnv_game::ui_ysi::YsiItemDisplay>,
 }
 
 /// A list as shown.
@@ -82,6 +87,10 @@ pub struct Snapshot {
     /// The container adapter's Take All hint.
     pub take_all_hint: String,
     pub note: Option<String>,
+    /// Whether `apply_row_icon` should instantiate `ySIImage` row tiles (`yUI.ini`
+    /// `[Sorting and Icons] bAddInventoryIcons`, gated by `bSortingIcons`) [design:
+    /// `docs/spec-notes/yui-ini.md`].
+    pub ysi_icons: bool,
 }
 
 /// The rows of a listing with their keys.
@@ -89,7 +98,7 @@ pub fn rows_shown(rows: &[Row]) -> Vec<RowShown> {
     let mut out: Vec<RowShown> = Vec::with_capacity(rows.len());
     for (index, r) in rows.iter().enumerate() {
         let Some(key) = RowKey::at(rows, index) else { continue };
-        out.push(RowShown { key, name: r.name.clone(), text: look::row_text(r), equipped: r.equipped });
+        out.push(RowShown { key, name: r.name.clone(), text: look::row_text(r), equipped: r.equipped || r.loaded, ysi: r.ysi.clone() });
     }
     out
 }
@@ -171,6 +180,11 @@ pub fn write_lists(ui: &mut Ui, s: &Snapshot, st: &mut MenuTiles) {
             }
             if let Some(t) = list::child(ui, row.tile, st.paths.row_mark) {
                 ui.set_trait(t, "visible", on(shown.equipped));
+            }
+            if s.ysi_icons {
+                fnv_game::ui_ysi::apply_row_icon(ui, &fnv_ui::MemSource::default(), row.tile, shown.ysi.as_ref());
+            } else if let Some(existing) = list::child(ui, row.tile, fnv_game::ui_ysi::YSI_IMAGE_TILE) {
+                ui.unload_tile(existing);
             }
         }
         set(ui, st.paths.titles[i], "string", Value::Str(s.titles[i].clone()));
@@ -392,5 +406,41 @@ pub fn row_commands(side: Side, index: usize, on_it: bool, shift: bool) -> Vec<c
         (true, true) => vec![Command::Stack],
         (false, _) => vec![Command::Hover(side, index), if shift { Command::Stack } else { Command::One }],
         (true, false) => vec![Command::Select(side, index)],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fnv_sim::FormId;
+
+    /// #3442: the ammo the weapon loads now carries the equipped mark in the list drawn
+    /// from tiles, as in the hand-built one.
+    #[test]
+    fn the_loaded_ammo_s_row_carries_the_equipped_mark() {
+        let row = |item: u32, equipped: bool, loaded: bool| Row {
+            item: FormId(item),
+            at: None,
+            name: format!("Item {item}"),
+            count: 12,
+            weight: None,
+            value: None,
+            kind: None,
+            equipped,
+            quest: false,
+            condition: None,
+            icon: None,
+            price: None,
+            bartered: false,
+            loaded,
+            mods: 0,
+            mods_value: 0,
+            folder: None,
+            reference: None,
+            live: false,
+            ysi: None,
+        };
+        let shown = rows_shown(&[row(1, false, false), row(2, false, true), row(3, true, false)]);
+        assert_eq!(shown.iter().map(|r| r.equipped).collect::<Vec<_>>(), [false, true, true]);
     }
 }

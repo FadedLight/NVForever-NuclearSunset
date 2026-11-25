@@ -132,7 +132,7 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
         // [documented: GetValueAlt] the base value, ingestibles included (ENIT value).
         "getvaluealt" => {
             let f = form(args, 0).or(subject).map(|f| base(g, f)).unwrap_or(FormId(0));
-            let sub = if g.data.sig(f) == Some(*b"ALCH") { "ENIT" } else { "DATA" };
+            let sub = if g.data.sig(g.unclone(f)) == Some(*b"ALCH") { "ENIT" } else { "DATA" };
             match crate::nvse::record_value(g, f, sub, "value") {
                 Some(XVal::Num(x)) => XVal::Num(x),
                 _ => XVal::Num(0.0),

@@ -95,6 +95,8 @@ const ROW_W: f32 = 400.0 - ROW_X - 5.0;
 const NAME_X: f32 = 40.0;
 const NAME_Y: f32 = 20.0;
 const WRAP: f32 = 300.0;
+/// Width reserved for a ySI row icon when ySI is active (0 in vanilla).
+const YSI_ICON_ADVANCE: f32 = 30.0;
 const MARK: Rect = Rect { min: Vec2::new(15.0, 18.0), max: Vec2::new(40.0, 43.0) };
 /// A row is 51 high and its name's further lines 35 below the first [hypothesis: as the
 /// barter menu's rows, measured there, barter-menu.md §3].
@@ -593,6 +595,13 @@ fn on_row_click(
     }
 }
 
+/// Cached heading figures and hotkey-panel icons from the last draw of the ITEMS page.
+#[derive(Default)]
+pub struct DrawnState {
+    heading: Option<Heading>,
+    panel_icons: Option<super::hotkey_panel::PanelIcons>,
+}
+
 /// Fill the ITEMS page's body when it is new or the inventory changed.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
@@ -610,7 +619,7 @@ pub fn draw(
     play: Option<Res<crate::PlayWorld>>,
     mut forms: Local<Option<super::stats::read::Forms>>,
     (repair, modding, mut script): (Res<super::repair::PipRepair>, Res<super::item_mod::PipItemMod>, Option<ResMut<crate::script::ScriptState>>),
-    (hold, hotkeys, mut figures): (Res<HotkeyHold>, Res<Hotkeys>, Local<Option<Heading>>),
+    (hold, hotkeys, mut drawn): (Res<HotkeyHold>, Res<Hotkeys>, Local<DrawnState>),
     (pip, mut logged, mut drawn_with): (Res<PipBoy>, Local<String>, Local<Option<crate::pad::Labels>>),
 ) {
     // Laid out in the Pip-Boy's screen texture, at its size whatever the UI scale (#1631).
@@ -625,8 +634,17 @@ pub fn draw(
     // they differ from what it drew (#3120), as the STATS page does with its snapshot.
     let shown = active.0.as_ref().is_some_and(|m| m.mode == Mode::Inventory) && modding.0.is_none() && repair.0.is_none();
     let now = shown.then(|| heading(sim.bypass_change_detection(), script.as_mut().map(|s| s.bypass_change_detection()), combat.as_deref()));
-    let refigured = now.is_some() && *figures != now;
-    if added.get(body).is_err() && !relabelled && !refigured && !active.is_changed() && !repair.is_changed() && !modding.is_changed() && !hold.is_changed() && !hotkeys.is_changed() {
+    let refigured = now.is_some() && drawn.heading != now;
+    let now_panel_icons = (shown && hold.slot.is_some()).then(|| {
+        let selected_now = active.0.as_ref().and_then(|m| m.list(Side::Player).rows.get(m.selected[Side::Player as usize]));
+        let script_ref = script.as_mut().map(|s| &*s.bypass_change_detection());
+        super::hotkey_panel::panel_icons(&hotkeys, &hold, selected_now, sim.bypass_change_detection(), combat.as_deref(), script_ref)
+    });
+    let reiconed = now_panel_icons.is_some() && drawn.panel_icons != now_panel_icons;
+    if now_panel_icons.is_none() {
+        drawn.panel_icons = None;
+    }
+    if added.get(body).is_err() && !relabelled && !refigured && !reiconed && !active.is_changed() && !repair.is_changed() && !modding.is_changed() && !hold.is_changed() && !hotkeys.is_changed() {
         return;
     }
     if forms.is_none() {
@@ -662,7 +680,8 @@ pub fn draw(
         info!("pipboy items: {} selected: {:?}", r.name, i);
     }
     let (hp, dt) = now.unwrap_or_else(|| heading(sim, script.as_deref_mut(), combat.as_deref()));
-    *figures = Some((hp.clone(), dt.clone()));
+    drawn.heading = Some((hp.clone(), dt.clone()));
+    drawn.panel_icons = now_panel_icons;
     let offer = super::repair::current(&active, sim, script.as_deref());
     // The tab's hints for the selected row (the hotkey panel hides them).
     let tab = TABS[pip.tab().min(TABS.len() - 1)];
@@ -697,7 +716,7 @@ pub fn draw(
         // The hotkey panel hides the picture, the badge and the hints (`IM_ButtonRect`).
         if let (true, Some(k)) = (panel, hold.slot) {
             info!("pipboy hotkeys: panel drawn, key {} chosen{}", k + 1, hold.said.as_ref().map_or_else(String::new, |s| format!(", says {s:?}")));
-            super::hotkey_panel::draw(p, &mut c, &hotkeys, &hold, selected, sim, combat.as_deref());
+            super::hotkey_panel::draw(p, &mut c, &hotkeys, &hold, selected, sim, combat.as_deref(), script.as_deref());
         } else {
             // The selected item's own lines for its Repair and Mod hints.
             let (repair_row, mod_row) = hint_rows(labels);
@@ -852,7 +871,9 @@ pub(crate) fn wg_text(m: &MenuModel) -> String {
 
 /// Each row's height as drawn: a name broken over more lines makes its row taller.
 fn row_heights(c: &mut Ctx, m: &MenuModel) -> Vec<f32> {
-    m.list(Side::Player).rows.iter().map(|r| ROW_H + LINE_PITCH * c.lines(2, &row_text(r), Some(WRAP)).len().saturating_sub(1) as f32).collect()
+    let rows = &m.list(Side::Player).rows;
+    let wrap = WRAP - if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    rows.iter().map(|r| ROW_H + LINE_PITCH * c.lines(2, &row_text(r), Some(wrap)).len().saturating_sub(1) as f32).collect()
 }
 
 /// The first row to draw: the list's own first row, or a later one when the rows from
@@ -873,11 +894,14 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, 
     let x0 = MAIN.min.x + LIST.min.x + ROW_X;
     let mut y = MAIN.min.y + LIST.min.y;
     let rows = &m.list(Side::Player).rows;
+    let icon_advance = if rows.iter().any(|r| r.ysi.is_some()) { YSI_ICON_ADVANCE } else { 0.0 };
+    let name_x = NAME_X + icon_advance;
+    let wrap = WRAP - icon_advance;
     let selected = m.selected[Side::Player as usize];
     let mut fit = 0;
     for i in first..rows.len() {
         let r = &rows[i];
-        let lines = c.lines(2, &row_text(r), Some(WRAP));
+        let lines = c.lines(2, &row_text(r), Some(wrap));
         let h = heights[i];
         if y + h > MAIN.min.y + LIST.max.y {
             break;
@@ -892,8 +916,11 @@ fn list(p: &mut ChildSpawnerCommands, c: &mut Ctx, m: &MenuModel, first: usize, 
                 p.spawn((at(mk.min.x, mk.min.y, mk.width(), mk.height()), BackgroundColor(bright)));
             }
         }
+        if let Some(icon) = r.ysi.as_ref().and_then(|d| d.icon.as_deref()) {
+            c.image(p, icon, at(x0 + NAME_X, y + 14.0, 24.0, 24.0), bright);
+        }
         for (k, l) in lines.iter().enumerate() {
-            c.set(p, 2, l, x0 + NAME_X, y + NAME_Y - THICK + LINE_PITCH * k as f32, Align::Left, bright);
+            c.set(p, 2, l, x0 + name_x, y + NAME_Y - THICK + LINE_PITCH * k as f32, Align::Left, bright);
         }
         p.spawn((at(x0, y, ROW_W, h), RowButton(i), Pickable::default())).observe(on_row_over).observe(on_row_click);
         y += h;
@@ -1008,6 +1035,7 @@ mod tests {
             folder: None,
             reference: None,
             live: false,
+            ysi: None,
         };
         assert_eq!(row_text(&r), "Stimpak (9)");
         r.count = 1;
@@ -1015,7 +1043,7 @@ mod tests {
     }
 
     fn row(kind: Option<fnv_sim::forms::ItemKind>) -> Row {
-        Row { item: FormId(1), at: None, name: "Thing".into(), count: 1, weight: None, value: None, kind, equipped: false, quest: false, condition: None, icon: None, price: None, bartered: false, loaded: false, mods: 0, mods_value: 0, folder: None, reference: None, live: false }
+        Row { item: FormId(1), at: None, name: "Thing".into(), count: 1, weight: None, value: None, kind, equipped: false, quest: false, condition: None, icon: None, price: None, bartered: false, loaded: false, mods: 0, mods_value: 0, folder: None, reference: None, live: false, ysi: None }
     }
 
     #[test]

@@ -181,6 +181,9 @@ pub struct App {
     // Mods.
     mods: Option<plugins::PluginList>,
     mods_dirty: bool,
+    /// The Mods page's Mod Organizer 2 view: the search text and whether it lists plugins (else mods).
+    mo2_filter: String,
+    mo2_plugins: bool,
     /// The row being dragged on the Mods page.
     mods_drag: Option<usize>,
     /// The displays, for the Resolution and Monitor lists (asked once at start).
@@ -250,6 +253,8 @@ impl App {
             start_custom: None,
             mods: None,
             mods_dirty: false,
+            mo2_filter: String::new(),
+            mo2_plugins: false,
             mods_drag: None,
             monitors: crate::display::monitors(),
             languages: crate::display::language_choices(&fnv_util::words::dirs(
@@ -1658,7 +1663,102 @@ impl App {
         self.mods = std::fs::read_to_string(home.plugins_file()).ok().map(|t| plugins::PluginList::parse(&t));
     }
 
+    /// The Mods page for a Mod Organizer 2 profile: its mods (modlist.txt, MO2's priority
+    /// order, separators as headings) or its plugins (plugins.txt, load order), with a search
+    /// box. Read only: MO2 owns the order, so it is changed there [design].
+    fn mo2_mods_page(&mut self, ui: &mut egui::Ui, dir: &std::path::Path, check: &launch::Mo2Check) {
+        let layout = fnv_install::mo2::Layout::open(dir, Some(&check.profile)).ok();
+        ui.horizontal(|ui| {
+            ui.heading("Mods");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if let Some(l) = &layout {
+                    if ui.button("Open profile folder").clicked() {
+                        launch::open_folder(&l.profile);
+                    }
+                    if ui.button("Open mods folder").clicked() {
+                        launch::open_folder(&l.mods);
+                    }
+                }
+            });
+        });
+        ui.label(
+            RichText::new(format!(
+                "From Mod Organizer 2, profile \"{}\" ({}). NVForever plays these as MO2 orders them and never changes them: reorder or switch mods in MO2, then come back. Change the profile on the Game folder page.",
+                check.profile,
+                dir.display()
+            ))
+            .small()
+            .color(WEAK),
+        );
+        self.start_box(ui);
+        ui.separator();
+        let Some(layout) = layout else {
+            ui.label(RichText::new("This profile could not be read.").color(BAD));
+            return;
+        };
+        // Mods: modlist.txt lists the highest priority first; `+` on, `-` off, `*` unmanaged
+        // (the game's own files), and names ending `_separator` are MO2's headings
+        // [documented: MO2 modlist.txt].
+        let modlist = std::fs::read_to_string(layout.profile.join("modlist.txt")).unwrap_or_default();
+        let mods: Vec<(char, String)> = modlist
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim_end();
+                let c = l.chars().next()?;
+                matches!(c, '+' | '-' | '*').then(|| (c, l[1..].to_string()))
+            })
+            .collect();
+        let plugins = layout.profile_plugins().unwrap_or_default();
+        let enabled = mods.iter().filter(|(c, n)| *c == '+' && !n.ends_with("_separator")).count();
+        ui.horizontal(|ui| {
+            if ui.selectable_label(!self.mo2_plugins, format!("Mods ({enabled} on of {})", mods.iter().filter(|(_, n)| !n.ends_with("_separator")).count())).clicked() {
+                self.mo2_plugins = false;
+            }
+            if ui.selectable_label(self.mo2_plugins, format!("Plugins ({})", plugins.len())).clicked() {
+                self.mo2_plugins = true;
+            }
+            ui.add_space(12.0);
+            ui.add(egui::TextEdit::singleline(&mut self.mo2_filter).hint_text("Search").desired_width(220.0));
+        });
+        let filter = self.mo2_filter.trim().to_ascii_lowercase();
+        let shown = |name: &str| filter.is_empty() || name.to_ascii_lowercase().contains(&filter);
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            if self.mo2_plugins {
+                for (i, p) in plugins.iter().enumerate().filter(|(_, p)| shown(p)) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{i:>3}")).monospace().color(WEAK));
+                        ui.label(p.as_str());
+                    });
+                }
+            } else {
+                // Lowest priority at the bottom of modlist.txt: shown top to bottom as MO2's
+                // left pane shows it, lowest first.
+                for (c, name) in mods.iter().rev().filter(|(_, n)| shown(n)) {
+                    if let Some(heading) = name.strip_suffix("_separator") {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(heading.to_uppercase()).small().strong().color(theme::GOLD_TEXT));
+                        continue;
+                    }
+                    let (mark, colour) = match c {
+                        '+' => ("on ", GOOD),
+                        '-' => ("off", WEAK),
+                        _ => ("game", WEAK),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(mark).monospace().color(colour));
+                        ui.label(RichText::new(name.as_str()).color(if *c == '-' { WEAK } else { ui.visuals().text_color() }));
+                    });
+                }
+            }
+        });
+    }
+
     fn mods_page(&mut self, ui: &mut egui::Ui) {
+        // Playing through a Mod Organizer 2 profile: its mods and plugins, as MO2 has them.
+        if let Some((dir, check)) = self.saved_mo2() {
+            self.mo2_mods_page(ui, &dir, &check);
+            return;
+        }
         ui.horizontal(|ui| {
             ui.heading("Mods");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

@@ -459,7 +459,7 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
         "setjohnnyonstartquesteventhandler" | "setjohnnyonstopquesteventhandler" => {
             let start = name == "setjohnnyonstartquesteventhandler";
             let Some(f) = args.get(1).cloned() else { return Some(Ok(zero)) };
-            let quest = form(args, 3);
+            let quest = form(args, 3).filter(|&id| id != FormId(0x0000_003B));
             g.gaps.quest_handlers.retain(|(s, h, q)| !(*s == start && *h == f && *q == quest));
             if num(args, 0, 1.0) != 0.0 {
                 g.gaps.quest_handlers.push((start, f, quest));

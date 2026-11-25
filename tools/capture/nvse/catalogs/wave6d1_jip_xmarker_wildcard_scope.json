@@ -36,8 +36,7 @@
           "bucket": "A",
           "extender": "JIP LN 57.30",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,
@@ -45,7 +44,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/jip-events.md",
-          "spec_line": 22,
+          "spec_line": 52,
           "functions_tested": [
             "SetOnHealthDamageEventHandler"
           ],
@@ -110,8 +109,7 @@
           "bucket": "A",
           "extender": "JIP LN 57.30",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,
@@ -119,7 +117,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/jip-events.md",
-          "spec_line": 50,
+          "spec_line": 61,
           "functions_tested": [
             "SetOnUseAidItemEventHandler"
           ],
@@ -195,7 +193,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/jip-events.md",
-          "spec_line": 48,
+          "spec_line": 59,
           "functions_tested": [
             "SetOnAnimActionEventHandler",
             "SetOnPlayGroupEventHandler",
@@ -313,8 +311,7 @@
           "bucket": "A",
           "extender": "JIP LN 57.30",
           "required_plugins": [
-            "jip_nvse.dll",
-            "ShowOffNVSE.dll"
+            "jip_nvse.dll"
           ],
           "optional_extender": false,
           "requires_world": true,
@@ -322,7 +319,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/jip-events.md",
-          "spec_line": 43,
+          "spec_line": 54,
           "functions_tested": [
             "SetOnCrippledLimbEventHandler",
             "SetOnNoteAddedEventHandler"

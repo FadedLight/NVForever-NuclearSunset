@@ -18,7 +18,8 @@
 //!
 //! **Who asks** [design]: the settings row Volumetric light (`volumetric-light`,
 //! graphics.rs `Graphics::volumetric_light`, also `--graphics-only volumetric-light`) or the
-//! debug aid [`AID`] (`NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`, read once at the start: it asks
+//! debug aid [`AID`] (`NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`, read once at the start, not in
+//! release builds: dev_aids.rs; it asks
 //! when the value is a finite number above 0). One system, [`follow_demand`], is the only
 //! writer of [`AirWanted`]: `row || aid`, on a device that can hold the volume
 //! (medium_air_grid.rs `format_supported`, asked once; on another nothing of the light is
@@ -131,7 +132,7 @@ impl Plugin for AirDemandPlugin {
 
 /// Set [`AirAid`] from the aid; one log line when it asks for the light, none otherwise.
 fn read_aid(mut aid: ResMut<AirAid>) {
-    let on = wanted_from_aid(std::env::var(AID).ok().as_deref());
+    let on = wanted_from_aid(crate::dev_aids::var(AID).as_deref());
     if on {
         info!("volumetric medium: light in the air wanted (debug aid {AID})");
     }

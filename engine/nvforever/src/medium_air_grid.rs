@@ -177,7 +177,7 @@ struct AirAids {
 }
 
 static AIDS: LazyLock<AirAids> = LazyLock::new(|| {
-    let var = |name: &str| std::env::var(name).ok();
+    let var = crate::dev_aids::var;
     let tune = AirTune::start(
         medium_air::debug_strength(var(medium_air::ENV_STRENGTH).as_deref()),
         medium_air::debug_view(var(medium_air::ENV_VIEW).as_deref()),

@@ -4084,7 +4084,8 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   about the original game, never a parity item; off by default and in every preset, with or
   without this section's row. Switched by the row "Volumetric light (experimental)"
   (`volumetric-light`) with its strength slider (`volumetric-light-strength`, 0 to 200 %, one
-  overall scale of the applied correction), or the debug aid `NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`;
+  overall scale of the applied correction), or the developer aid `NVF_PLAY_DEBUG_MEDIUM_LIGHT=<strength>`
+  (not in release builds, §3.23);
   the screen-space Sun shafts skip their pass on a view in any frame in which the light's
   composite drew there (decided in the render world), and are greyed on the page. Code: `medium_air.rs`,
   `medium_air_demand.rs`, `medium_air_light.rs`, `medium_air_grid.rs` and `.wesl`,
@@ -4106,7 +4107,8 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     as the reference the rays are measured against; a fog the light cannot read, a fog not blended
     in display values, night, interiors and under water are shown the plain way. The look's
     constants (ray contrast, lift, shade limit, phase floor, sky weights) are artistic choices made
-    from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`).
+    from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`, a
+    developer aid too).
   - *Cost so far*: volumetric-medium.md, "Cost and memory" (the grid pass's two walks, measured on two
     GPUs); 6.9 MiB a volume, two with the filter. Not
     done: a temporal filter, the cost of the light volume's reads, the moon, local lights, FSR's reactive

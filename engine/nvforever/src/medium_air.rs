@@ -125,6 +125,7 @@ const _: () = assert!(AIR_HDR_MAX < 65_504.0);
 /// reads it from the uniform's misc.y) [design].
 pub const AIR_SAMPLES_DEFAULT: u32 = 4;
 /// How often the tune file is looked at, real seconds [design].
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub const TUNE_POLL_SECONDS: f64 = 0.5;
 /// Columns held to this range when they follow the aspect [design].
 const AIR_COLUMNS: (u32, u32) = (64, 320);
@@ -145,13 +146,15 @@ const PHASE_STEPS: usize = 8_192;
 /// 200 %): the one overall scale k of the correction ([`applied_scale`]) [design].
 const AIR_STRENGTHS: (f32, f32) = (0.0, 2.0);
 
-/// The start aids and the tune file's variable (read by the GPU half at start).
+/// The start aids and the tune file's variable (read by the GPU half at start through dev_aids.rs:
+/// not in release builds).
 pub const ENV_STRENGTH: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT";
 pub const ENV_VIEW: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_VIEW";
 pub const ENV_GRID: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_GRID";
 pub const ENV_DEPTH: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_DEPTH";
 pub const ENV_OCCLUDERS: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_OCCLUDERS";
 pub const ENV_WALK: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_WALK";
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub const ENV_TUNE: &str = "NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE";
 
 // ---------------------------------------------------------------------------------------------
@@ -1203,6 +1206,7 @@ impl AirTune {
     /// Unknown names and unreadable or non-finite values are ignored (the base value kept);
     /// every value is held to its field's range. `SHARE`, `DEPTH`, `GRID` and `REF` take `auto`
     /// to clear the override.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     pub fn parse(text: &str, base: &AirTune) -> AirTune {
         let mut t = *base;
         for line in text.lines() {
@@ -1304,11 +1308,13 @@ pub fn tune_diff(a: &AirTune, b: &AirTune) -> String {
 
 /// Whether the tune file is due a look: never looked at, or [`TUNE_POLL_SECONDS`] of real
 /// time since the last look (a clock that went back counts as due) [design].
+#[cfg(any(test, debug_assertions, feature = "dev-aids"))]
 pub fn poll_due(last: Option<f64>, now: f64) -> bool {
     last.is_none_or(|t| now < t || now - t >= TUNE_POLL_SECONDS)
 }
 
-/// Follows the tune file: each read's text is parsed over the
+/// Follows the start values (the strength's slider) and, in a build with the developer aids
+/// (dev_aids.rs), the tune file: each read's text is parsed over the
 /// **start** tune (so removing a line returns that key to its start value); a text seen before
 /// changes nothing; a missing or unreadable file is the start tune, said once until the file
 /// is read again [design].
@@ -1317,12 +1323,18 @@ pub struct TuneFollower {
     start: AirTune,
     tune: AirTune,
     /// The last read: its text, or `Err` while the file could not be read.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     seen: Option<Result<String, ()>>,
 }
 
 impl TuneFollower {
     pub fn new(start: AirTune) -> TuneFollower {
-        TuneFollower { start, tune: start, seen: None }
+        TuneFollower {
+            start,
+            tune: start,
+            #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+            seen: None,
+        }
     }
 
     /// The tune now.
@@ -1332,6 +1344,7 @@ impl TuneFollower {
 
     /// One read of the file: its text, or the error's words. Returns the log lines to write
     /// (`volumetric medium: light in the air tune: ...`), none when nothing changed.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     pub fn feed(&mut self, read: Result<&str, &str>) -> Vec<String> {
         let mut lines = Vec::new();
         let next = match read {
@@ -1368,10 +1381,13 @@ impl TuneFollower {
             return Vec::new();
         }
         self.start = start;
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
         let next = match &self.seen {
             Some(Ok(text)) => AirTune::parse(text, &self.start),
             _ => self.start,
         };
+        #[cfg(not(any(test, debug_assertions, feature = "dev-aids")))]
+        let next = self.start;
         let mut lines = Vec::new();
         if tune_changed(&self.tune, &next) {
             lines.push(format!("volumetric medium: light in the air tune: {}", tune_diff(&self.tune, &next)));

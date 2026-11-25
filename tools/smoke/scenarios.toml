@@ -36257,15 +36257,15 @@ note = "The same start, spot search and poses as terrain-parallax-ground-pack (r
 
 [[scenario]]
 name = "volumetric-light"
-source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs, medium_air_grid.wesl, medium_air_filter.wesl and medium_air_compose.wesl, and the narrow edits in graphics.rs (the view kept HDR), terrain_shadows.rs (the map's producer demand) and sun_visibility.rs (the outdoor sun's marker): with the debug aid NVF_PLAY_DEBUG_MEDIUM_LIGHT=1 at Goodsprings at 17:30 under NVWastelandClear, 4x MSAA, sun shadows and the Terrain shadows and Cloud shadows rows on, the light is wanted, its gate opens, the volume is made with the filter's second volume, the grid, filter and composite pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite (multisampled depth) draw, without a 'not drawn' reason or a shader, pipeline or rendering error. The look and the cost are checked in pictures and GPU spans by hand"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs, medium_air_grid.wesl, medium_air_filter.wesl and medium_air_compose.wesl, and the narrow edits in graphics.rs (the view kept HDR), terrain_shadows.rs (the map's producer demand) and sun_visibility.rs (the outdoor sun's marker): with the Volumetric light row at Goodsprings at 17:30 under NVWastelandClear, 4x MSAA, sun shadows and the Terrain shadows and Cloud shadows rows on, the light is wanted, its gate opens, the volume is made with the filter's second volume, the grid, filter and composite pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite (multisampled depth) draw, without a 'not drawn' reason or a shader, pipeline or rendering error. The look and the cost are checked in pictures and GPU spans by hand"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,volumetric-light"]
 run_seconds = 30
 expect = [
-  { re = 'graphics: light glow, cloud shadows, terrain shadows$', label = "the two rows the light reads are on and nothing else of the enhanced look" },
-  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light (medium_air_demand.rs)" },
+  { re = 'graphics: light glow, cloud shadows, terrain shadows, volumetric light$', label = "the light's row and the two rows it reads are on and nothing else of the enhanced look" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light (medium_air_demand.rs)" },
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors (medium_air_light.rs) and the on line states the grid and the bounds" },
   { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made, with the filter's second volume (FILTER on by default)" },
   { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles (medium_air_grid.wesl)" },
@@ -36278,7 +36278,7 @@ expect = [
   { text = "volumetric medium: light in the air: composite drawn (view none, multisampled depth yes)", label = "the light was composed, on the 4x multisampled depth" },
 ]
 order = [[
-  { text = "volumetric medium: light in the air wanted", label = "the demand at the start" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the demand at the start" },
   { re = 'volumetric medium: light in the air on: ', label = "the gate opens" },
   { text = "volumetric medium: light in the air: composite drawn (", label = "before the composite draws (it runs only through the open gate)" },
 ]]
@@ -36298,14 +36298,13 @@ name = "volumetric-light-solid-cores"
 source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (Solid cores of blended shapes), engine/nvforever/src/solid_cores.rs, engine/nvf-assets/src/nif_spawn.rs (solid_core_rules, solid_core) and texture.rs (alpha_solidity): the light in the air by its row, by the Goodsprings water tank (reference 00106B5E at -68245,591,8183 [documented: FalloutNV.esm REFR DATA], about 1,540 units off at heading 176; nv_watertank.nif, NiAlphaProperty flags 4333: blend on, no test) at 07:00 under NVWastelandHazy: the loaded cells' blended shapes with solid texels get their core draws, so they are in the depth the composite reads, and the light is composed, without a shader, pipeline or rendering error. With the light off there is none: volumetric-light-off. Smoke cannot read the depth at a pixel: that the tank is solid in it is checked by hand in pictures of the light alone (NVF_PLAY_DEBUG_SOLID_CORES=off for the pair)"
 areas = ["renderer", "graphics", "models"]
 paths = ["engine/nvforever/src/solid_cores.rs", "engine/nvforever/src/medium_air_compose*", "engine/nvforever/src/medium_air_demand.rs", "engine/nvf-assets/src/nif_spawn.rs", "engine/nvf-assets/src/nif_material*", "engine/nvf-assets/src/nif_prepass.wesl"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_SOLID_CORES = "ref:00106B5E" }
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light"]
 run_seconds = 45
 expect = [
   { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light" },
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors" },
   { re = 'solid cores: [1-9]\d* \(draws of [1-9]\d* materials', label = "blended shapes with solid texels have their core draws (how many is not fixed)" },
-  { re = 'solid cores: reference 00106B5E: [1-9]\d* cores \([1-9]\d* of them in view\)', label = "the tank itself has cores, and the view holds them" },
   { text = "volumetric medium: light in the air: composite drawn (", label = "the light was composed over them" },
 ]
 forbid = [
@@ -36320,12 +36319,42 @@ forbid = [
 ]
 
 [[scenario]]
+name = "volumetric-light-solid-cores-tank"
+source = "[design, #3032 stage 3] volumetric-light-solid-cores with the aid that names the tank's own cores: docs/design/volumetric-medium.md (Solid cores of blended shapes), engine/nvforever/src/solid_cores.rs, engine/nvf-assets/src/nif_spawn.rs (solid_core_rules, solid_core) and texture.rs (alpha_solidity): the light in the air by its row, by the Goodsprings water tank (reference 00106B5E at -68245,591,8183 [documented: FalloutNV.esm REFR DATA], about 1,540 units off at heading 176; nv_watertank.nif, NiAlphaProperty flags 4333: blend on, no test) at 07:00 under NVWastelandHazy: the loaded cells' blended shapes with solid texels get their core draws, so they are in the depth the composite reads, and the light is composed, without a shader, pipeline or rendering error. With the light off there is none: volumetric-light-off. Smoke cannot read the depth at a pixel: that the tank is solid in it is checked by hand in pictures of the light alone (NVF_PLAY_DEBUG_SOLID_CORES=off for the pair)"
+areas = ["renderer", "graphics", "models"]
+paths = ["engine/nvforever/src/solid_cores.rs", "engine/nvforever/src/medium_air_compose*", "engine/nvforever/src/medium_air_demand.rs", "engine/nvf-assets/src/nif_spawn.rs", "engine/nvf-assets/src/nif_material*", "engine/nvf-assets/src/nif_prepass.wesl"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_SOLID_CORES = "ref:00106B5E" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light"]
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+run_seconds = 45
+expect = [
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light (the tank named)" },
+  { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors (the tank named)" },
+  { re = 'solid cores: [1-9]\d* \(draws of [1-9]\d* materials', label = "blended shapes with solid texels have their core draws (how many is not fixed) (the tank named)" },
+  { re = 'solid cores: reference 00106B5E: [1-9]\d* cores \([1-9]\d* of them in view\)', label = "the tank itself has cores, and the view holds them (the tank named)" },
+  { text = "volumetric medium: light in the air: composite drawn (", label = "the light was composed over them (the tank named)" },
+]
+forbid = [
+  { text = "solid cores: off", label = "the debug aid switched the cores off (the tank named)" },
+  { text = "volumetric medium: light in the air not drawn", label = "a reason the light could not be drawn (the tank named)" },
+  { re = 'pipeline \d+ failed after \d+ ms', label = "a pipeline failed with the cores (the tank named)" },
+  { re = '(?i)validation error|wgpu error', label = "a wgpu validation error with the cores (the tank named)" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the cores (the tank named)" },
+  { text = "failed to process shader", label = "a shader that does not build with the cores (the tank named)" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good with the cores (the tank named)" },
+  { text = "panicked", label = "a panic with the cores (the tank named)" },
+]
+
+[[scenario]]
 name = "volumetric-light-solid-cores-blend"
 source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (Solid cores of blended shapes), engine/nvforever/src/solid_cores.rs (drawn_source): volumetric-light-solid-cores with the Mesh terrain blend row on, which draws the tank (a blended STAT) with a clone of its material: the tank has its cores all the same (the row took them away, judged by eye in a play test, 2026-11-24). Smoke cannot read the depth at a pixel"
 areas = ["renderer", "graphics", "models"]
 paths = ["engine/nvforever/src/solid_cores.rs", "engine/nvforever/src/mesh_terrain_blend.rs", "engine/nvf-assets/src/nif_surface_blend.rs", "engine/nvforever/src/medium_air_compose*", "engine/nvforever/src/medium_air_demand.rs", "engine/nvf-assets/src/nif_spawn.rs", "engine/nvf-assets/src/nif_material*", "engine/nvf-assets/src/nif_prepass.wesl"]
 env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_SOLID_CORES = "ref:00106B5E" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light,mesh-terrain-blend"]
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
 run_seconds = 45
 expect = [
   { text = "mesh terrain blend: start band=", label = "the Mesh terrain blend row is on" },
@@ -36351,12 +36380,12 @@ name = "volumetric-light-taa"
 source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs and its shaders: the volumetric-light run under native TAA at a fixed 1280x720, so the depth is single-sampled and the composite's single-sampled variant is the one asked for: the light is wanted, its gate opens, the pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/taa.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,taa"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,volumetric-light,taa"]
 run_seconds = 30
 expect = [
-  { re = 'graphics: light glow, temporal anti-aliasing, cloud shadows, terrain shadows$', label = "TAA is the anti-aliasing in force (not the multisampling)" },
-  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light under TAA" },
+  { re = 'graphics: light glow, temporal anti-aliasing, cloud shadows, terrain shadows, volumetric light$', label = "TAA is the anti-aliasing in force (not the multisampling)" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light under TAA" },
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors under TAA" },
   { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles under TAA" },
   { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made with the filter's second volume under TAA" },
@@ -36383,12 +36412,12 @@ name = "volumetric-light-fsr"
 source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air*.rs and its shaders: the volumetric-light run under FSR Quality at a fixed 1280x720 output (render size 853x480), so the composite works on the reduced main pass (its viewport from MainPassResolutionOverride) with single-sampled depth before the upscaler: the light is wanted, its gate opens, the pipelines compile, the terrain map and the cloud shadow are in use, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error. DLSS needs files a player supplies: no scenario"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/fsr.rs", "engine/nvforever/src/upscaler/**"]
-env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--fsr", "quality", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--size", "1280x720", "--fsr", "quality", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,volumetric-light"]
 run_seconds = 30
 expect = [
   "FSR dispatch active: 3.1.4, 853x480 -> 1280x720",
-  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light under FSR" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light under FSR" },
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the gate opens by day outdoors under FSR" },
   { re = 'pipeline \d+ ready after \d+ ms: medium_air_grid_pipeline', label = "the grid pass compiles under FSR" },
   { re = 'volumetric medium: light in the air: grid \d+x\d+x\d+ to \d+ units \([\d.]+ MiB in 2 volumes, filter 3x3\)', label = "the volume is made with the filter's second volume under FSR" },
@@ -36417,11 +36446,11 @@ name = "volumetric-light-night"
 source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air), engine/nvforever/src/medium_air.rs (gate, day_by_aim) and medium_air_light.rs (day from SkyState::sun_elevation_at(sun_light_hour())): the volumetric-light run at 01:00, where the Sun entity's light is the weather's night light from the opposite direction: the light is wanted, the gate closes with the night reason by the clock that aims the light, and the composite never draws, without a 'not drawn' reason or a shader, pipeline or rendering error"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "1", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "1", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows,volumetric-light"]
 run_seconds = 20
 expect = [
-  { text = "volumetric medium: light in the air wanted", label = "the aid asks for the light" },
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light" },
   { text = "volumetric medium: light in the air off: night (the direct light is the night light)", label = "the gate closes at night with its reason (held 0.5 s before it is logged)" },
 ]
 forbid = [
@@ -36438,14 +36467,14 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-light-off"
-source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air: off means off), engine/nvforever/src/medium_air_demand.rs, medium_air_grid.rs and medium_air_light.rs: the volumetric-light run without the debug aid (the light off, as by default): no line of the light is logged and none of its pipelines is asked for, while the Terrain shadows and Cloud shadows rows it shares the frame with stay on, without a shader, pipeline or rendering error"
+source = "[design, #3032 stage 3] docs/design/volumetric-medium.md (The near grid and the light in the air: off means off), engine/nvforever/src/medium_air_demand.rs, medium_air_grid.rs and medium_air_light.rs: the volumetric-light run without its row (the light off, as by default): no line of the light is logged and none of its pipelines is asked for, while the Terrain shadows and Cloud shadows rows it shares the frame with stay on, without a shader, pipeline or rendering error"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvf-play/src/settings_layout.rs", "crates/nvf-settings-layout/src/lib.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/solid_cores.rs"]
 env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17.5", "--weather", "NVWastelandClear", "--msaa", "4", "--sun-shadows", "--graphics-only", "terrain-shadows,cloud-shadows"]
 run_seconds = 20
 expect = [
-  { re = 'graphics: light glow, cloud shadows, terrain shadows$', label = "the rows are on; the light is not a row of the graphics line" },
+  { re = 'graphics: light glow, cloud shadows, terrain shadows$', label = "the rows are on; the light is not in the graphics line" },
   { text = "test aid NVF_PLAY_TEST_PIPELINE_LOG: each pipeline logged", label = "the pipeline log is on, so an asked pipeline of the light would show" },
 ]
 forbid = [
@@ -36458,12 +36487,36 @@ forbid = [
 ]
 
 [[scenario]]
+name = "volumetric-light-no-aids"
+source = "[design, #3032 stage 3] engine/nvforever/src/dev_aids.rs, medium_air_demand.rs, medium_air_grid.rs, medium_air_light.rs and solid_cores.rs: the light's developer aids are not in a release build. The light by its row at a fixed 1280x720 with every aid of the light set (its strength and switch, the view, the grid, the depth, the occluders, the walk, the tune file, the solid cores off): a release exe draws it as without them, the row alone asking, the default grid to 48,000 units at strength 1, no view, the cores drawn, no line of an aid"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/dev_aids.rs", "engine/nvforever/src/medium_air*", "engine/nvforever/src/solid_cores.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_LOOK = "1:176:0", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "0.5", NVF_PLAY_DEBUG_MEDIUM_LIGHT_VIEW = "slice", NVF_PLAY_DEBUG_MEDIUM_LIGHT_GRID = "32,16,16", NVF_PLAY_DEBUG_MEDIUM_LIGHT_DEPTH = "2000", NVF_PLAY_DEBUG_MEDIUM_LIGHT_OCCLUDERS = "none", NVF_PLAY_DEBUG_MEDIUM_LIGHT_WALK = "serial", NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE = "{repo}/target/smoke-no-such-tune.txt", NVF_PLAY_DEBUG_SOLID_CORES = "off" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-68354,2129,8372", "--hour", "7", "--weather", "NVWastelandHazy", "--size", "1280x720", "--msaa", "4", "--sun-shadows", "--graphics-only", "volumetric-light"]
+note = "for a release exe: skipped with NVF_SMOKE_DEV_AIDS set (an exe built with --features dev-aids obeys the aids)."
+requires = ["!NVF_SMOKE_DEV_AIDS"]
+run_seconds = 45
+expect = [
+  { text = "volumetric medium: light in the air wanted (the Volumetric light row)", label = "the row asks for the light" },
+  { re = 'volumetric medium: light in the air on: grid 160x88x64 to 48000 units, .*, strength 1, ', label = "the default grid, depth and the slider's strength" },
+  { re = 'volumetric medium: light in the air: grid 160x88x64 to 48000 units \(', label = "the volume is the default one" },
+  { re = 'solid cores: [1-9]\d* \(draws of [1-9]\d* materials', label = "the solid cores are drawn" },
+  { text = "volumetric medium: light in the air: composite drawn (view none, ", label = "the light was composed, no view" },
+]
+forbid = [
+  { text = "light in the air wanted (debug aid", label = "the light's aid was read" },
+  { re = 'grid walk .* \(the debug aid', label = "the walk's aid was read" },
+  { text = "light in the air tune:", label = "the tune file was looked for" },
+  { text = "solid cores: off", label = "the solid cores' aid was read" },
+]
+
+[[scenario]]
 name = "volumetric-light-clouds"
 source = "[design, #3032] docs/design/volumetric-medium.md (The near grid and the light in the air, The visibility), engine/nvforever/src/medium_air_grid.rs (prepare_air_volume, air_cloud_source), medium_air_grid.wesl (AIR_LIGHT_VOLUME) and sun_visibility.rs (CloudVolumeFrame): the light in the air with the Volumetric clouds and Cloud shadows rows on, at Goodsprings at noon under NVBlackMountainWeather: the surfaces take their cloud shadows from the clouds' light volume and the air takes the same source, its light-volume grid and mean pipelines compile, and the grid pass and the composite draw, without a 'not drawn' reason or a shader, pipeline or rendering error. The look is checked in pictures by hand; run it with --slots 1 (three games compiling the march at once outrun the run)"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/sun_visibility*", "engine/nvforever/src/light_volume_reader.wesl", "engine/nvforever/src/volumetric_clouds_lightvol*"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1", NVF_PLAY_DEBUG_MEDIUM_LIGHT = "1" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--sun-shadows", "--graphics-only", "volumetric-clouds,cloud-shadows,volumetric-light"]
 run_seconds = 40
 expect = [
   { re = 'volumetric medium: light in the air on: grid \d+x\d+x\d+ to \d+ units, ', label = "the light's gate opens" },
@@ -36487,10 +36540,10 @@ forbid = [
 
 [[scenario]]
 name = "volumetric-light-picture"
-source = "[design, #3032 stage 3] engine/nvforever/src/medium_air_compose.rs and .wesl, medium_air_grid*: the light changes the picture: one still view at Goodsprings at 17:30 under NVWastelandClear (frozen sky, no actors, the solid cores off by their aid, the Sun shafts and both shadow rows off), five screenshots 15 s apart, three with the Volumetric light row off, one with it on and one with it off again (NVF_PLAY_TEST_SETTINGS), each measured against the one before and the one before that (NVF_PLAY_TEST_SHOT_DIFF, nvf-play test_aid.rs). The view has no flag and the first picture is taken after the start's HUD text, which moved the picture more than the light's return could. Over the same 15 s, switching the row moves the picture further than it moves by itself with a margin (the tolerance, which a composite that returned its input, or a slow animation, would stay inside), and over the same 30 s the off picture comes back within the tolerance of two off pictures. What the light looks like is checked in pictures by hand. The glow keeps the view HDR throughout, so the switch changes the light alone"
+source = "[design, #3032 stage 3] engine/nvforever/src/medium_air_compose.rs and .wesl, medium_air_grid*: the light changes the picture: one still view at Goodsprings at 17:30 under NVWastelandClear (frozen sky, no actors, the Sun shafts and both shadow rows off), five screenshots 15 s apart, three with the Volumetric light row off, one with it on and one with it off again (NVF_PLAY_TEST_SETTINGS), each measured against the one before and the one before that (NVF_PLAY_TEST_SHOT_DIFF, nvf-play test_aid.rs). The view has no flag and the first picture is taken after the start's HUD text, which moved the picture more than the light's return could. Over the same 15 s, switching the row moves the picture further than it moves by itself with a margin (the tolerance, which a composite that returned its input, or a slow animation, would stay inside), and over the same 30 s the off picture comes back within the tolerance of two off pictures. What the light looks like is checked in pictures by hand. The glow keeps the view HDR throughout, so the switch changes the light and the solid cores it draws, which move only texels of 0.85 alpha and more by the share of what is behind them, far under the half a level the light must move the whole view by"
 areas = ["renderer", "graphics", "weather"]
 paths = ["engine/nvforever/src/medium_air*", "engine/nvforever/src/graphics.rs", "engine/nvforever/src/terrain_shadows.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvforever/src/settings.rs", "engine/nvforever/src/shafts.rs", "engine/nvforever/src/solid_cores.rs"]
-env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_CLOUD_PHASE = "100", NVF_PLAY_DEBUG_SOLID_CORES = "off", NVF_PLAY_TEST_LOOK = "8:290:5", NVF_PLAY_TEST_SHOT_DIFF = "1", NVF_PLAY_TEST_SHOTS = "45:vl_off_a.png,60:vl_off_b.png,75:vl_off_c.png,90:vl_on_d.png,105:vl_off_e.png", NVF_PLAY_TEST_PAUSE = "76:78,91:93", NVF_PLAY_TEST_SETTINGS = "77:volumetric-light,92:volumetric-light" }
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_CLOUD_PHASE = "100", NVF_PLAY_TEST_LOOK = "8:290:5", NVF_PLAY_TEST_SHOT_DIFF = "1", NVF_PLAY_TEST_SHOTS = "45:vl_off_a.png,60:vl_off_b.png,75:vl_off_c.png,90:vl_on_d.png,105:vl_off_e.png", NVF_PLAY_TEST_PAUSE = "76:78,91:93", NVF_PLAY_TEST_SETTINGS = "77:volumetric-light,92:volumetric-light" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--no-actors", "--hour", "17.5", "--weather", "NVWastelandClear", "--still-sky", "--size", "1280x720", "--msaa", "4", "--sun-shadows", "--graphics-only", "anisotropic"]
 run_seconds = 111
 expect = [

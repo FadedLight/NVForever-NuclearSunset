@@ -94,7 +94,7 @@ use nvf_assets::nif_surface_blend::{BlendShape, NifBlendMaterial};
 use nvf_assets::{GameData, NifMaterial, TextureCache};
 use nvf_play::RefVisual;
 
-/// The debug aid, read once at the start: `NVF_PLAY_DEBUG_SOLID_CORES=off` draws no cores,
+/// The debug aid (not in release builds, dev_aids.rs), read once at the start: `NVF_PLAY_DEBUG_SOLID_CORES=off` draws no cores,
 /// `=ref:<FormID hex>` logs one reference's cores once.
 pub const AID: &str = "NVF_PLAY_DEBUG_SOLID_CORES";
 
@@ -248,7 +248,7 @@ pub struct SolidCoresPlugin;
 
 impl Plugin for SolidCoresPlugin {
     fn build(&self, app: &mut App) {
-        let aid = Aid::parse(std::env::var(AID).ok().as_deref());
+        let aid = Aid::parse(crate::dev_aids::var(AID).as_deref());
         app.insert_resource(SolidCores { aid, ..default() }).add_systems(
             PostUpdate,
             (follow, place)
@@ -265,7 +265,9 @@ impl Plugin for SolidCoresPlugin {
                 .run_if(needed),
         );
         // After the visibility check, whose answer it reports.
-        app.add_systems(Last, report_reference.run_if(reference_asked));
+        if crate::dev_aids::ON {
+            app.add_systems(Last, report_reference.run_if(reference_asked));
+        }
     }
 }
 

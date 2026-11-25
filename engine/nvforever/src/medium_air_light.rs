@@ -6,7 +6,7 @@
 //! and its commands (so after the camera, underwater.rs's fog and the transforms, and before
 //! the solid cores and the visibility check), [`follow_light`] finishes the main camera's
 //! `AirCamera`, which the frame's grid and composite are drawn by:
-//! - **the tune file** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`): looked
+//! - **the tune file** (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`; not in release builds, dev_aids.rs): looked
 //!   at every 0.5 s of real time (medium_air.rs `poll_due`), each text parsed over the start
 //!   tune (`TuneFollower`), its changes logged; the grid follows its `DEPTH` and `GRID`
 //!   (medium_air_grid.rs `prepare_air` makes the volume again when the grid changes);
@@ -57,11 +57,12 @@ struct LightAids {
     /// `NVF_PLAY_DEBUG_MEDIUM_LIGHT`'s strength when the aid asks for the light
     /// (medium_air_demand.rs `wanted_from_aid`): it wins over the settings row's slider.
     aid_strength: Option<f32>,
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     path: Option<String>,
 }
 
 static AIDS: LazyLock<LightAids> = LazyLock::new(|| {
-    let var = |name: &str| std::env::var(name).ok();
+    let var = crate::dev_aids::var;
     let start = AirTune {
         grid: medium_air::debug_grid(var(medium_air::ENV_GRID).as_deref()),
         ..AirTune::start(
@@ -71,10 +72,16 @@ static AIDS: LazyLock<LightAids> = LazyLock::new(|| {
             medium_air::debug_depth(var(medium_air::ENV_DEPTH).as_deref()),
         )
     };
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     let path = var(medium_air::ENV_TUNE).filter(|p| !p.trim().is_empty());
     let aid = var(medium_air::ENV_STRENGTH);
     let aid_strength = crate::medium_air_demand::wanted_from_aid(aid.as_deref()).then(|| medium_air::debug_strength(aid.as_deref()));
-    LightAids { start, aid_strength, path }
+    LightAids {
+        start,
+        aid_strength,
+        #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
+        path,
+    }
 });
 
 /// The start strength: the aid's value when the aid asks for the light, else the settings
@@ -98,6 +105,7 @@ struct LightState {
     active: bool,
     follower: Option<TuneFollower>,
     /// When the tune file was last looked at (real seconds).
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     looked: Option<f64>,
     /// The gate's log (an off reason only once it held 0.5 s).
     log: GateLog,
@@ -192,8 +200,9 @@ fn follow_light(
     for line in follower.restart(start) {
         info!("{line}");
     }
-    // The tune file, at most every TUNE_POLL_SECONDS of real time.
     let now = time.elapsed_secs_f64();
+    // The tune file, at most every TUNE_POLL_SECONDS of real time.
+    #[cfg(any(test, debug_assertions, feature = "dev-aids"))]
     if let Some(path) = aids.path.as_deref().filter(|_| medium_air::poll_due(state.looked, now)) {
         let read = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"));
         for line in follower.feed(read.as_deref().map_err(String::as_str)) {

@@ -44,7 +44,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-jg8.md",
-          "spec_line": 37,
+          "spec_line": 31,
           "functions_tested": [
             "SetOnActorValueChangeEventHandler"
           ],
@@ -154,7 +154,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-jg8.md",
-          "spec_line": 37,
+          "spec_line": 31,
           "functions_tested": [
             "SetOnActorValueChangeEventHandler"
           ],

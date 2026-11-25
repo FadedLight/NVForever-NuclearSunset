@@ -67,9 +67,11 @@
 //! cannot give back what the allocator keeps (#898), but the largest single textures can:
 //! the sun's shadow maps (a 4096² layer is 64 MiB against 16 MiB at 2048², five layers by
 //! day in first person) and the multisampled view targets (each sample is a full-size
-//! colour and depth target). Textures this size get allocations of their own from the
-//! driver, so dropping them returns their memory [hypothesis, checked by the use the next
-//! check logs: smoke scenario `gpu-sheds-over-budget`]. When this process holds over
+//! colour and depth target). Textures larger than the allocator's blocks get allocations
+//! of their own from the driver, so dropping them returns their memory [observed:
+//! `gpu-sheds-over-budget`, 2026-11-25: 4096 to 2048 maps took the use from 1,444 to
+//! 1,204 MB]; smaller ones go back into blocks the allocator keeps (#898) and return
+//! nothing: multisampled targets at 1280x720 gave back 0-1 MB, at 1920x1080 see the PR. When this process holds over
 //! [`SHED_SHARE`] of the GPU budget at [`SHED_AFTER_CHECKS`] checks in a row, one step of
 //! [`next_shed`] is taken (shadow maps 4096 to 2048, then multisampling 8x to 4x, then 4x
 //! to 2x), at most one every [`SHED_WAIT_SECS`]; each is logged with the use before, the
@@ -122,8 +124,8 @@ pub const TELL_TEXT: &str = "Graphics memory is almost full. If the game stutter
 /// The share of the GPU budget held over which a step of [`next_shed`] is taken [design:
 /// the same share at which the player is told].
 pub const SHED_SHARE: f64 = TELL_SHARE;
-/// Checks in a row (2 s apart) over [`SHED_SHARE`] before a step is taken [design: a
-/// moment's peak, such as a load, does not lower anything].
+/// Checks in a row (2 s apart) over [`SHED_SHARE`], with no loading screen up, before a
+/// step is taken [design: a moment's peak, such as a load, does not lower anything].
 pub const SHED_AFTER_CHECKS: u32 = 2;
 /// The least time between two steps, seconds [design: the memory of the step before is
 /// back by then; checked in `gpu-sheds-over-budget`].
@@ -636,7 +638,7 @@ fn watch_use(
     adapter: Option<Res<RenderAdapterInfo>>,
     mut budget: ResMut<MemoryBudget>,
     mut limits: ResMut<KeepLimits>,
-    (mut corner, mut commands): (Option<ResMut<nvf_play::corner_messages::CornerMessages>>, Commands),
+    (mut corner, mut commands, loading): (Option<ResMut<nvf_play::corner_messages::CornerMessages>>, Commands, Option<Res<nvf_play::loading::Loading>>),
     mut last: Local<f64>,
 ) {
     let now = real.elapsed_secs_f64();
@@ -666,7 +668,9 @@ fn watch_use(
         if let Some((step, before)) = budget.shed_before.take() {
             info!("memory budget: after {} this process holds {used} of {b} MB (it held {before} MB)", step.what());
         }
-        budget.over_checks = if share > SHED_SHARE { budget.over_checks + 1 } else { 0 };
+        // A loading screen's peak (the cells and pipelines coming in) does not count.
+        let loading_now = loading.as_deref().is_some_and(nvf_play::loading::Loading::active);
+        budget.over_checks = if share > SHED_SHARE && !loading_now { budget.over_checks + 1 } else { 0 };
         if budget.over_checks >= SHED_AFTER_CHECKS && budget.shed_at.is_none_or(|t| now - t >= SHED_WAIT_SECS) {
             budget.shed_at = Some(now);
             commands.queue(move |world: &mut World| {

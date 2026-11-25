@@ -339,15 +339,15 @@ name = "gpu-sheds-over-budget"
 source = "#2754 (an 8 GB card at 1440p held 7,037 of its 6,844 MB budget and stalled 1-2 s at a time; #3349 a lost device over budget): over 95 % of the GPU budget at two checks in a row the game gives memory back one step at a time, at most one every 10 s (shadow maps 4096 to 2048, then multisampling 8x to 4x, then 4x to 2x), logs the use before and after each step and tells the player (engine/nvforever/src/memory_budget.rs)"
 areas = ["renderer", "graphics"]
 paths = ["engine/nvforever/src/memory_budget.rs", "engine/nvforever/src/graphics.rs"]
-# The test aid's 700 MB is under what Goodsprings holds on foot (about 1,100 MB), so every step is taken; the settings page sets 4096 maps and 8x first (anti-aliasing 0.5 is the fourth of seven choices, 8x).
-env = { NVFOREVER_HOME = "gpu-shed-home", NVF_PLAY_TEST_VRAM_MB = "700", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "3:4", NVF_PLAY_TEST_SETTINGS = "3.3:shadow-resolution=4096,3.6:anti-aliasing=0.5" }
-args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--sun-shadows"]
+# Goodsprings on foot holds about 1,070 MB at 2048 maps and 4x (2026-11-25), under 95 % of the test aid's 1,150 MB, so nothing is lowered until the settings page sets 4096 maps and 8x (anti-aliasing 0.5 is the fourth of seven choices); those take it over, and each step follows while it stays over.
+env = { NVFOREVER_HOME = "gpu-shed-home", NVF_PLAY_TEST_VRAM_MB = "1150", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "3:4", NVF_PLAY_TEST_SETTINGS = "3.3:shadow-resolution=4096,3.6:anti-aliasing=0.5" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--sun-shadows", "--size", "1920x1080"]
 run_seconds = 45
 expect = [
-  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 700 MB\) at 2 checks in a row: shadow resolution lowered to 2048 to give memory back', count = 1, label = "the shadow maps go to 2048 first" },
-  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 700 MB\) at 2 checks in a row: anti-aliasing lowered to 4x to give memory back', count = 1, label = "then 8x multisampling to 4x" },
-  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 700 MB\) at 2 checks in a row: anti-aliasing lowered to 2x to give memory back', count = 1, label = "then 4x to 2x" },
-  { re = 'memory budget: after shadow resolution lowered to 2048 this process holds \d+ of 700 MB \(it held \d+ MB\)', label = "the use after the step is logged" },
+  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 1150 MB\) at 2 checks in a row: shadow resolution lowered to 2048 to give memory back', count = 1, label = "the shadow maps go to 2048 first" },
+  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 1150 MB\) at 2 checks in a row: anti-aliasing lowered to 4x to give memory back', count = 1, label = "then 8x multisampling to 4x" },
+  { re = 'memory budget: over 95 % of the GPU budget \(\d+ of 1150 MB\) at 2 checks in a row: anti-aliasing lowered to 2x to give memory back', count = 1, label = "then 4x to 2x" },
+  { re = 'memory budget: after shadow resolution lowered to 2048 this process holds \d+ of 1150 MB \(it held \d+ MB\)', label = "the use after the step is logged" },
 ]
 order = [[
   "settings: shadow-resolution 4096",

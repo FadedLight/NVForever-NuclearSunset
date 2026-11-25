@@ -725,11 +725,16 @@ is the top left 85 × 92 of `head.dds`) [observed].
   [hypothesis: alignments by the globals `KarmaVeryEvil`, `KarmaEvil`, `KarmaGood`,
   `KarmaVeryGood`; pictures `karma_evil`, `_bad`, `_neutral`, `_good`, `_saintly`].
   The karma title is the game setting `sKarmicTitle<Good|Neutral|Evil><level>` (levels
-  1–30, 30 for 30 and over) [observed: FalloutNV.esm holds 50 of the 90, e.g.
-  `sKarmicTitleNeutral1` "Drifter", `sKarmicTitleEvil29` "Demon Spawn"; the rest are
-  presumably the executable's defaults], else the owner's table (`todo 5.txt`,
-  `stats::model::KARMA_TITLES`); Good and Very Good take the good column, Evil and Very
-  Evil the evil one [hypothesis]. The reputation list (the other mode) is the hook for
+  1–30, 30 for 30 and over; levels below 10 spelled with two digits,
+  `sKarmicTitleNeutral01`) [observed: `fnvtool esm inventory`: FalloutNV.esm holds 53 of
+  the 90, levels 1, 2, 9, 11, 13, 15 and 20–30 in each column, 14 for Good and Evil, 28
+  for Neutral and Evil, 8 for Evil; the DLC masters hold none]. The original shows a
+  title at the other levels too, from text that is not in the data, which NVForever
+  does not copy (LEGAL.md; #2983): a level without a setting takes the nearest level
+  below with one in the same column, else the nearest above, and a load order with no
+  title in the column shows the alignment word [design: `fnv_game::karma_titles`]. A
+  `TTW.ini` `[Karma Titles]` entry comes first (ext-small.md). Good and Very Good take
+  the good column, Evil and Very Evil the evil one [hypothesis]. The reputation list (the other mode) is the hook for
   the reputation workstream.
 - **Keys** [design: `engine/nvf-play/src/pipboy.rs::keys`, `stats/mod.rs::keys`]:
   Up/Down choose CND, RAD, EFF; Left/Right step tabs on every view. A/D also step

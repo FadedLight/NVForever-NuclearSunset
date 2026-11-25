@@ -1,17 +1,19 @@
-//! Who may have a volume and when, without a GPU: the plan and the admission as tables, and that
-//! nothing is done without a request.
+//! Who may have a volume and when, without a GPU: the plan and the admission as tables, what is
+//! carried out on wgpu's no-op device, and that nothing is done without a request.
 
 use super::admit::{admit, counts, view_key, Limits, MESH, MOST_BYTES};
-use super::gpu::RtgiGpu;
+use super::gpu::{carry_out, RtgiGpu};
 use super::plan::{plan, Admission, Key, Latch, Now, Pipelines, Plan, Why};
 use super::tests::{extracted, noop};
 use super::*;
 use crate::sun_visibility::{view_counts, StageCounts};
 use crate::world::Streamer;
 use bevy::app::SubApp;
+use bevy::ecs::system::RunSystemOnce;
 use bevy::pbr::{check_views_need_specialization, init_mesh_pipeline_view_layouts, MeshPipelineKey, MeshPipelineViewLayoutKey, MeshPipelineViewLayouts, NvfRtgiVolumeBindings, ViewKeyCache};
 use bevy::render::camera::DirtySpecializations;
 use bevy::render::render_resource::CachedPipelineState;
+use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::sync_world::{MainEntity, RenderEntity};
 use bevy::render::view::RetainedViewEntity;
 use bevy::render::{ExtractSchedule, MainWorld, RenderStartup};
@@ -156,6 +158,51 @@ fn the_counts_are_of_the_layouts() {
 
 // ---------------------------------------------------------------------------------------
 // What is done.
+
+fn solved(share: f32) -> RtgiRequest {
+    RtgiRequest::solved(HERE, 1, Arc::new(made::made([0; 3])), made::FIT, share).unwrap()
+}
+
+/// A volume that is not what it says is refused before anything is done with it.
+#[test]
+fn a_broken_volume_is_no_request() {
+    let mut v = made::made([0; 3]);
+    v.rgba16f_le.pop();
+    assert!(RtgiRequest::solved(HERE, 1, Arc::new(v), made::FIT, 1.0).is_err());
+}
+
+/// What is made, sent and bound, on the no-op device: the empty texture, the solved one in its place
+/// (buffer and sampler stay), another share, an older result, a replaced camera, the end.
+#[test]
+fn what_is_planned_is_done_once() {
+    let (device, _, queue) = noop();
+    let mut world = World::new();
+    world.insert_resource(device);
+    world.insert_resource(queue);
+    world.init_resource::<RtgiGpu>();
+    world.init_resource::<RtgiCounts>();
+    let [a, b] = std::array::from_fn(|_| world.spawn_empty().id());
+    let step = |world: &mut World, plan: Plan, request: Option<RtgiRequest>, cam: Entity| {
+        let system = move |mut commands: Commands, mut bound: Query<(Entity, &mut NvfRtgiVolumeBindings)>, mut state: ResMut<RtgiGpu>, gpu: (Res<RenderDevice>, Res<RenderQueue>), counts: Res<RtgiCounts>| {
+            carry_out(plan, request.as_ref(), &[cam], &mut commands, &mut bound, &mut state.held, Some((&*gpu.0, &*gpu.1)), &counts);
+        };
+        world.run_system_once(system).unwrap();
+        let at = [a, b].map(|e| world.get::<NvfRtgiVolumeBindings>(e).map(|b| (b.uniform.id(), b.texture.id(), b.sampler.id())));
+        (world.resource::<RtgiCounts>().all(), at)
+    };
+    let (n, first) = step(&mut world, Plan::Bind { new: true }, Some(RtgiRequest::empty(HERE, 1)), a);
+    assert_eq!((n, first[1]), ([3, 2, 1, 0], None));
+    assert_eq!(step(&mut world, Plan::Bind { new: false }, Some(RtgiRequest::empty(HERE, 1)), a), ([3, 2, 1, 0], first), "nothing again");
+    let (n, second) = step(&mut world, Plan::Bind { new: true }, Some(solved(0.0)), a);
+    assert_eq!(n, [4, 4, 2, 0], "a texture, and the uniform written");
+    let (before, after) = (first[0].unwrap(), second[0].unwrap());
+    assert!(before.0 == after.0 && before.1 != after.1 && before.2 == after.2);
+    assert_eq!(step(&mut world, Plan::Bind { new: false }, Some(solved(0.5)), a), ([4, 5, 2, 0], second), "the share");
+    assert_eq!(step(&mut world, Plan::Keep, Some(RtgiRequest::empty(HERE, 0)), a), ([4, 5, 2, 0], second), "an older result");
+    assert_eq!(step(&mut world, Plan::Bind { new: false }, Some(solved(0.5)), b), ([4, 5, 3, 0], [None, second[0]]), "the camera replaced");
+    assert_eq!(step(&mut world, Plan::Stock(Why::Nothing), None, b), ([4, 5, 3, 0], [None; 2]));
+    assert!(world.resource::<RtgiGpu>().held.is_none());
+}
 
 fn streamer(interior: Option<u32>) -> Streamer {
     Streamer {

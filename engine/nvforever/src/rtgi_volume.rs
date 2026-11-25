@@ -1,8 +1,9 @@
 //! The bounce light of a probe volume on an interior's NIF surfaces (#3009,
 //! docs/design/rtgi-volume.md) [design], an engineering choice, not the original game's, and a
 //! home-grown one. What is here is the shader that reads a volume and what puts one on the GPU
-//! for it. **Nothing in the game asks for one**: there is no setting. Without a request no view has
-//! the bindings, no pipeline reads them, and nothing is made, written, bound or dispatched.
+//! for it. **Nothing in the game asks for one**: there is no setting, only the developer aid
+//! `NVF_PLAY_DEBUG_RTGI_MADE=1` ([`made`]). Without a request no view has the bindings, no
+//! pipeline reads them, and nothing is made, written, bound or dispatched.
 //!
 //! The parts, built the way the ambient occlusion's are (ssao_lighting.rs): bevy_pbr's view
 //! component `NvfRtgiVolumeBindings` (vendored, engine/vendor/README.md), the NIF surfaces that
@@ -26,6 +27,7 @@ use std::sync::Arc;
 mod admit;
 mod gpu;
 pub mod hook;
+mod made;
 mod plan;
 pub(crate) use hook::hook_patched;
 
@@ -95,8 +97,7 @@ struct Solved {
     share: f32,
 }
 
-/// Main world: the volume the player's view is to have. Not there by default: nothing makes one yet.
-#[allow(dead_code)]
+/// Main world: the volume the player's view is to have. Not there by default.
 #[derive(Resource, Clone)]
 struct RtgiRequest {
     place: Place,
@@ -109,7 +110,6 @@ struct RtgiRequest {
 /// The sides of the empty texture: one point and its shell.
 const EMPTY: [u32; 3] = [3, 3, 12];
 
-#[allow(dead_code)]
 impl RtgiRequest {
     /// The stock light through the bindings.
     fn empty(place: Place, revision: u64) -> Self {
@@ -185,8 +185,7 @@ enum Did {
     Upload,
     /// A view given the component, or another texture in it.
     Bind,
-    /// A compute pass; nothing has one yet.
-    #[allow(dead_code)]
+    /// The readback's compute pass ([`made`]).
     Dispatch,
 }
 
@@ -212,6 +211,9 @@ impl Plugin for RtgiVolumePlugin {
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app.insert_resource(counts);
         gpu::add(render_app);
+        if made::wanted() {
+            app.add_plugins(made::MadePlugin);
+        }
     }
 }
 
@@ -228,6 +230,8 @@ fn report(mut exit: MessageReader<AppExit>, counts: Res<RtgiCounts>) {
     );
 }
 
+#[cfg(test)]
+mod made_tests;
 #[cfg(test)]
 mod owner_tests;
 #[cfg(test)]

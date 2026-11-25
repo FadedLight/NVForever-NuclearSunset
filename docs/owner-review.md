@@ -176,6 +176,13 @@ the bullet and note the ruling in the spec it links to.
     into fights you start (they join once the other side fights back), say where.
     Observer check 217 asks the original. ([combat-ai §10.3](design/combat-ai.md))
 
+- **While VATS targets are chosen, world sounds and voices slow only as far as while
+  VATS fires (0.71 speed), no longer to 0.4 (#3784).** A player took 17 s to mark in the
+  NCRCF fight and read the voices, played more than an octave down all that time, as
+  broken sound. Your "more drawn out and lower pitch like the base game" still holds;
+  rule otherwise for the old 0.4 drone, or for silence (or ducking) while marking.
+  [docs/design/vats-mode.md](design/vats-mode.md) §4.
+
 ## Tier 2: movement and controls feel
 
 - **Harmless authored drops without Allow Falls (#2532).** [design, #2532]

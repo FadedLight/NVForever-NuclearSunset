@@ -36323,6 +36323,24 @@ forbid = [
   { text = "Caught rendering error", label = "a rendering (validation) error" },
 ]
 note = "The same start, spot search and poses as terrain-parallax-ground-pack (round 2, 2026-11-22), not yet checked by a run. The shots are saved as terrain-parallax-ground-pack-off-shots/terrain_parallax_ab_<seconds>s_<a|b|c>.png."
+[[scenario]]
+name = "light-shafts-msaa"
+source = "[design] docs/design/graphics-enhanced.md §3.7 (engine/nvforever/src/shafts.wesl `sky_depth_at`): with --graphics-only light-shafts and 4x multisampling (FSR off, so the INI's upscaler does not turn it off) at Goodsprings in the late afternoon, the shafts' pipelines (the source pass reading every sample of the multisampled depth) are made and used without a pipeline or validation error. Whether a silhouette's edge against the sun still leaks into the shafts is checked in pictures by hand"
+areas = ["renderer", "graphics"]
+paths = ["engine/nvforever/src/shafts.wesl", "engine/nvforever/src/shafts.rs"]
+env = { NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "17", "--fsr", "off", "--msaa", "4", "--graphics-only", "light-shafts"]
+run_seconds = 20
+expect = [
+  { re = 'graphics: .*sun shafts', label = "the graphics line names the sun shafts" },
+  { re = 'pipeline \d+ ready after \d+ ms: downsample depth multisample', label = "the view is multisampled" },
+  { re = 'pipeline \d+ ready after \d+ ms: shafts_pipeline', count = 4, label = "the shafts' source and composite were made for the start's view and again for the multisampled one (the MULTISAMPLED source)" },
+]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good (the shafts' source shader does not compile)" },
+  { text = "DeviceLost", label = "the GPU device was lost" },
+]
 
 [[scenario]]
 name = "volumetric-light"

@@ -105,13 +105,18 @@ The ActorValue page's three pools (actor-values.md §1) [documented: ActorValue]
     will regenerate more and more health" and "slowly regenerate lost Health" [observed:
     PERK DESC of `RadChild`, `SolarPowered`], though the GECK wiki calls a No Duration
     effect "instantaneous" [documented: Base Effect]. So in a permanent effect (an ability,
-    a stage's) such an effect that is neither Hostile nor Detrimental gives Health back by
-    the second while it is active, never past the maximum and not on the dead
-    [hypothesis]: magnitude × `fnv_game::aid::REGENERATION_RATE` (1) a second
-    [hypothesis: the unit; observer check
-    3471-rad-child-regeneration-rate]. Cast once it acts at once. A stage change
-    swaps the rate in the frame; a perk added or lost is noticed at the next condition
-    check (§13). A wait gives the seconds its hours stand for (§6). A game saved before
+    a stage's) such an effect that is neither Hostile nor Detrimental gives Health back
+    every frame while it is active, never past the maximum, magnitude ×
+    `fnv_game::aid::REGENERATION_RATE` (1) per real second [observed:
+    obs284_rad_child_regen, obs284_stage250: 2, 4, 6 and 8 at the stages, 1 for Solar
+    Powered, 5 for the Legate, 100 for Dead Money's holograms], and not on the dead
+    [hypothesis]. Cast once it acts at once. A stage change swaps the rate in the frame
+    [observed: obs284_rad_child_regen]; a perk added or lost is noticed within a second
+    (0.3 to 0.9 s [observed: obs284_rad_child_regen, obs284_stage250]), here at the next
+    condition check (§13). A wait gives the seconds its hours stand for (§6)
+    [hypothesis: observer check 3471-rad-child-regeneration-rate, still open for the Wait
+    menu; moving `GameHour` or `TimeScale` gave nothing extra [observed:
+    obs284_rad_child_regen]]. A game saved before
     2026-11-23 holds it as a single restoration, which a load turns into the rate.
   - Left acting once, for want of evidence that they repeat [hypothesis]: "Restore Health"
     (without the flag) in `GhoulRadHeal` (10, with the subject in radiation), Lonesome

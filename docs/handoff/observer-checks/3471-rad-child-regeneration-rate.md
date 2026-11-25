@@ -5,9 +5,10 @@ Needs: the observer, unattended; no particular save (outside Hardcore)
 Spec: #3471, [aid-items.md](../../spec-notes/aid-items.md) §3
 
 The four stage spells carry "Regeneration" of magnitude 2, 4, 6 and 8 behind
-`HasPerk RadChild`; no record gives the unit. Ours [hypothesis]: magnitude Health a second
+`HasPerk RadChild`; no record gives the unit. Ours: magnitude Health a second
 (`fnv_game::aid::REGENERATION_RATE` 1), evenly, from at most 1 s after the perk, stopping at
-the maximum.
+the maximum [observed: obs284_rad_child_regen, obs284_stage250; the answer below]. Open:
+what the Wait menu gives.
 
 - Set-up: outside Hardcore, indoors, no fight, god mode off, rads not rising, no Solar
   Powered, implant, food or chem effect. `ModActorValue Health 1000`, then

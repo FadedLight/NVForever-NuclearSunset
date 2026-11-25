@@ -50,11 +50,9 @@ pub const PARTS_LIMB_SHARE: f64 = 1.0 / 6.0;
 
 /// Health a second that one point of a regeneration's magnitude gives back
 /// ([`regenerates`]: Rad Child's 2, 4, 6 and 8 at the stages of radiation sickness, Solar
-/// Powered's 1) [hypothesis: the unit, magnitude per second as a timed restoration's; no
-/// record says it, observer check
-/// 3471-rad-child-regeneration-rate measures it]. Applied where the effect ticks
-/// ([`Game::tick_change_at`]), so saves hold magnitudes and a measured rate only changes
-/// this number.
+/// Powered's 1): the magnitude per real second, a little every frame [observed:
+/// obs284_rad_child_regen, obs284_stage250]. Applied where the effect ticks
+/// ([`Game::tick_change_at`]), so saves hold magnitudes.
 pub const REGENERATION_RATE: f64 = 1.0;
 
 /// The settings of potency and addiction, with the GECK wiki's defaults [documented:

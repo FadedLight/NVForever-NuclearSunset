@@ -33662,9 +33662,9 @@ args = ["--cell", "Lucky38ControlRoom", "--play", "--pos=1024,-2400,8010", "--he
 run_seconds = 38
 order = [[
   { re = 'idle: NVCRMrHouse01REF plays MRHouseSleepingLoop', label = "the chamber plays its sealed loop from the start" },
-  { re = 'console: nvf pod sealed shell (?P<n>-?\d+) ', range = [110, 140], label = "the shell is closed over him (about 126 degrees; 25, open, before the fix)" },
+  { re = 'console: nvf pod sealed shell (?P<n>-?\d+) ', range = [-140, -110], label = "the shell is closed over him (about 126 degrees, read as -126: GetNifBlockRotation gives the angles of the drawn rotation's transpose since a00a539b5, observed on the 10mm pistol's ProjectileNode, #3712; 25, open, before the fix)" },
   { re = 'idle: NVCRMrHouse01REF plays MrHouseOpen', label = "the unsealing plays the opening" },
-  { re = 'console: nvf pod opened shell (?P<n>-?\d+) ', range = [15, 35], label = "and leaves the shell open (about 25 degrees)" },
+  { re = 'console: nvf pod opened shell (?P<n>-?\d+) ', range = [-35, -15], label = "and leaves the shell open (about 25 degrees, read as -25 for the same reason)" },
 ]]
 manual = "house_pod_sealed.png: the chamber closed, House not to be seen; house_pod_opened.png: open, House in it"
 

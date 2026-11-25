@@ -35677,6 +35677,21 @@ expect = [
 ]
 
 [[scenario]]
+name = "locker-shelf-pick"
+source = "#3351: in the Sloan barracks an open locker (QJLocker01 0x000E7610) holds a first aid kit (0x000E7612) and Duck and Cover! (0x000E7613) on its shelves; the ray enters the locker's own render box before either, so the locker was always the crosshair's target (engine/nvf-play/src/activate/pick.rs choose_inside)"
+areas = ["activate"]
+paths = ["engine/nvf-play/src/activate/pick.rs"]
+note = "From in front of the open half the view is turned to the kit, then the book, then the locker's body beside the shelves [observed 2026-11-22: the three target lines in this order]"
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_GOTO = "2:2774:-640:16284", NVF_PLAY_TEST_LOOK = "4:180:-24,6:182:-40,8:177.5:-37" }
+args = ["--cell", "QJBarracks", "--play", "--no-voice", "--no-messages"]
+run_seconds = 11
+order = [[
+  { re = 'target 0x000E7612 First Aid Box \(Open', label = "the kit on the upper shelf is the target" },
+  { re = 'target 0x000E7613 Duck and Cover! \(Take', label = "the book on the lower shelf is the target" },
+  { re = 'target 0x000E7610 Locker \(Open', label = "beside the shelves' contents the locker is still the target" },
+]]
+
+[[scenario]]
 name = "vats-templated-name"
 source = "#3445: a Lonesome Road deathclaw of the nameless base NVDLC04DeathclawAmbusherLVL (template: the leveled creature list NVDLC04DeathClawGLENC, Base Data from the template) was named by that Editor ID in VATS; its name is the picked entry's FULL, Deathclaw (engine/nvf-play/src/sim.rs ref_shown_name)"
 areas = ["combat", "vats"]

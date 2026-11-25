@@ -2291,7 +2291,7 @@ pub(crate) fn run_scripts(
                             rt.frozen_frames = 2;
                             // The drawn world follows the restored simulation.
                             for id in changed_refs {
-                                changed.write(RefChanged { form_id: id.0, restored: true });
+                                changed.write(RefChanged::restored(id.0));
                             }
                         }
                         Err(e) => {
@@ -2681,6 +2681,21 @@ pub(crate) fn run_scripts(
         info!("script: EnableLoadingMenu with no move of the player: no loading screen (a screen without travel is not built)");
     }
     let mut sent = BTreeSet::new();
+    // References a script had an actor other than the player pick up this frame (Ringo
+    // taking his own ammo at the start of Ghost Town Gunfight, #3918): not the player's
+    // deed. A pick-up by the player in the same frame wins.
+    let mut takers: std::collections::HashMap<u32, Option<u32>> = std::collections::HashMap::new();
+    for e in &events {
+        if let EventKind::Activated { reference, by, outcome: Some(v) } = &e.kind {
+            if v["result"] == "picked_up" {
+                let other = (*by != FormId::PLAYER_REF).then_some(by.0);
+                let t = takers.entry(reference.0).or_insert(other);
+                if other.is_none() {
+                    *t = None;
+                }
+            }
+        }
+    }
     let feet = phys.player.as_ref().map(|c| c.feet);
     for e in effects {
         // The player's own trip through a door, not a script's MoveTo (`Loading::arriving`).
@@ -2688,7 +2703,7 @@ pub(crate) fn run_scripts(
         match e {
             ScriptEffect::RefChanged(id) => {
                 if sent.insert(id) {
-                    changed.write(RefChanged::new(id));
+                    changed.write(RefChanged { taker: takers.get(&id).copied().flatten(), ..RefChanged::new(id) });
                 }
             }
             ScriptEffect::Fade { form_id, fade_in } => {

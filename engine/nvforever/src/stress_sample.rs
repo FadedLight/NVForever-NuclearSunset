@@ -7,10 +7,10 @@
 //! bodies <fixed>/<kinematic>/<dynamic>, bodies awake <n>, contact pairs <n>, manifolds <n>,
 //! solver contacts <n>, joints <n>, solver ms <a>/<r>/<d>/<i>/<c>/<s>, actors <n>,
 //! nan actors <n>, ragdolls <n>,
-//! projectiles <n>[, gpu allocated <MB>, gpu reserved <MB>, gpu blocks <n>], startup frames
-//! <n>, hidden frames <n>, phase changes <n>, window <ms> ms, mesh alloc <ms> ms, mesh
-//! alloc worst <ms> ms, meshes written <n>, meshes freed <n>, slabs made <n>, slab mb <MB>,
-//! slab mb copied <MB>, at <place>`
+//! projectiles <n>[, gpu allocated <MB>, gpu reserved <MB>, gpu blocks <n>], mesh alloc
+//! <ms> ms, mesh alloc worst <ms> ms, meshes written <n>, meshes freed <n>, slabs made <n>,
+//! slab mb <MB>, slab mb copied <MB>, startup frames <n>, hidden frames <n>, phase changes
+//! <n>, window <ms> ms, at <place>`
 //! (the mesh allocator's work over the window: vendored bevy_render `nvf_mesh_alloc`,
 //! #3057)
 //! with what the engine holds now and where the camera is (the crash report's place text);
@@ -608,7 +608,7 @@ fn sample(
     // The full-detail ring's draw-only meshes, only while it draws any (full_detail.rs).
     let ring = if loaded.ring_refs > 0 { format!(", ring meshes {}", loaded.ring_refs) } else { String::new() };
     info!(
-        "stress sample: t {:.1} s, frames {frames}, frame mean {mean:.2} ms, frame worst {worst:.2} ms, entities {}, refs drawn {}, meshes {}, images {}, materials {}, models cached {}, textures cached {}, audio {}, cells {cells}, bodies {bodies}, actors {}, nan actors {nan}, ragdolls {ragdolls}, projectiles {}{ring}{gpu}{window}{mesh}, at {}",
+        "stress sample: t {:.1} s, frames {frames}, frame mean {mean:.2} ms, frame worst {worst:.2} ms, entities {}, refs drawn {}, meshes {}, images {}, materials {}, models cached {}, textures cached {}, audio {}, cells {cells}, bodies {bodies}, actors {}, nan actors {nan}, ragdolls {ragdolls}, projectiles {}{ring}{gpu}{mesh}{window}, at {}",
         t,
         loaded.entities,
         loaded.refs,

@@ -160,6 +160,12 @@ impl Game<'_> {
     pub fn top_ui_quest(&self) -> Option<FormId> {
         self.other.jg7.top_quest
     }
+
+    /// The custom map marker texture path set for `r` by `SetCustomMapMarkerIcon`,
+    /// if any (non-empty) [documented: SetCustomMapMarkerIcon].
+    pub fn custom_map_marker_icon(&self, r: FormId) -> Option<&str> {
+        self.other.jg7.marker_icons.get(&r).map(String::as_str).filter(|p| !p.trim().is_empty())
+    }
 }
 
 fn form(args: &[XVal], k: usize) -> Option<FormId> {
@@ -289,9 +295,16 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         "getyieldtimer" => XVal::Num(g.other.jg7.yield_timer.map_or(0.0, |(v, at)| (v - (g.time - at)).max(0.0))),
-        // 0 is the default [documented: Get/SetViewmodelClipDistance].
+        // 0 is the default [documented: Get/SetViewmodelClipDistance]; stores raw finite
+        // values including negatives without clamping to 0 [observed: Fallout: New Vegas
+        // 1.4.0.525 + xNVSE 6.4.9 + JohnnyGuitarNVSE 528, 2026-11-24, `GSDocMitchellHouse`
+        // (`0x00103DF9`), 10 official base masters, `jg_25_yield_timer_and_viewmodel_clip_neg`
+        // (`-5.00`) and `w4c_b3_05_jg7_bounds_heap` (`vc(0=0.0,neg=-5.0)`)].
         "setviewmodelclipdistance" => {
-            g.other.jg7.viewmodel_clip = num(args, 0, 0.0).max(0.0);
+            let v = num(args, 0, 0.0);
+            if v.is_finite() {
+                g.other.jg7.viewmodel_clip = v;
+            }
             zero
         }
         "getviewmodelclipdistance" => XVal::Num(g.other.jg7.viewmodel_clip),
@@ -443,13 +456,18 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         // `marker|list path`: a map marker reference, or each one of a form list
-        // [documented: SetCustomMapMarkerIcon], for the session.
+        // [documented: SetCustomMapMarkerIcon], for the session. An empty path clears the
+        // override back to the marker's type icon [hypothesis].
         "setcustommapmarkericon" => {
             let (Some(f), Some(p)) = (form(args, 0), text(args, 1)) else { return Some(Ok(zero)) };
             let list = crate::functions::list_members(g, f);
             let markers = if list.is_empty() { vec![f] } else { list };
             for m in markers {
-                g.other.jg7.marker_icons.insert(m, p.clone());
+                if p.trim().is_empty() {
+                    g.other.jg7.marker_icons.remove(&m);
+                } else {
+                    g.other.jg7.marker_icons.insert(m, p.clone());
+                }
             }
             zero
         }
@@ -460,8 +478,8 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         // reference that is no map marker [hypothesis].
         "getcustommapmarkericon" => {
             let Some(r) = subject else { return Some(Ok(XVal::Str(String::new()))) };
-            let p = g.other.jg7.marker_icons.get(&r).cloned().or_else(|| {
-                let kind = g.world.placed.get(r)?.map_marker.as_ref()?.kind;
+            let p = g.custom_map_marker_icon(r).map(str::to_string).or_else(|| {
+                let kind = g.marker_kind(r)?;
                 let name = MAP_MARKER_ICONS.get(kind as usize).copied().unwrap_or("settlement");
                 Some(format!("Interface\\Icons\\World Map\\icon_map_{name}.dds"))
             });
@@ -510,12 +528,15 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             yes(on)
         }
         // DefaultHeapInitialAllocMB of Data\NVSE\nvse_config.ini [documented:
-        // GetDefaultHeapSize], any section; 0 without it [hypothesis].
+        // GetDefaultHeapSize], any section; 200 (xNVSE default) when absent [observed:
+        // Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JohnnyGuitarNVSE 528, 2026-11-24,
+        // `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters,
+        // `w4c_b3_05_jg7_bounds_heap`: `heap=200`].
         "getdefaultheapsize" => {
             let path = crate::mod_files::data_dir().map(|d| d.join("NVSE").join("nvse_config.ini"));
             let text = path.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             let v = text.lines().filter_map(|l| l.split_once('=')).find(|(k, _)| k.trim().eq_ignore_ascii_case("DefaultHeapInitialAllocMB")).and_then(|(_, v)| v.trim().parse::<f64>().ok());
-            XVal::Num(v.unwrap_or(0.0))
+            XVal::Num(v.unwrap_or(200.0))
         }
         // ---- nothing values ----
         // A debugger breakpoint [documented: AsmBreak]: nothing [decision: NVForever

@@ -1,5 +1,8 @@
-//! A new game's start: the start quest and the intro film the game reads from
-//! NVForever.ini's `[General]` (`sCharGenQuest`, `sIntroMovie`).
+//! A new game's start, as a card on the Mods page (#2945): the start quest and the intro film
+//! the game reads from NVForever.ini's `[General]` (`sCharGenQuest`, `sIntroMovie`;
+//! docs/design/install-layout.md, nvf-play game_start.rs), typed in so a start mod's
+//! values need no hand edit of the file. A TTW on/off switch writes Tale of Two Wastelands'
+//! values or the base game's (docs/spec-notes/new-game-start.md).
 
 use fnv_install::{ini_get, ini_set};
 
@@ -36,15 +39,15 @@ pub const DEFAULT_QUEST: &str = "00102037";
 /// `engine/nvf-play/src/game_start.rs`).
 pub const DEFAULT_FILM: &str = "FNVIntro.bik";
 
-/// Tale of Two Wastelands' master. The card's TTW switch is always shown; while TTW is on
-/// and this plugin is not on in the load order, the card warns that the start quest is not
-/// found.
+/// Tale of Two Wastelands' master. The card's TTW switch is always shown; while the start
+/// quest is TTW's and this plugin is off or not in the load order, the card warns
+/// ([`ttw_missing`]).
 pub const TTW_PLUGIN: &str = "TaleOfTwoWastelands.esm";
 /// TTW's start quest, as its installation guide writes it (`SCharGenQuest=001FFFF8`, `SIntroMovie=`).
 pub const TTW_QUEST: &str = "001FFFF8";
 
 /// The card's fields.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct Fields {
     /// `sCharGenQuest` (a FormID or an Editor ID); empty: no line, the New Vegas opening.
     pub quest: String,
@@ -98,10 +101,23 @@ impl Fields {
         self.quest.trim().eq_ignore_ascii_case(TTW_QUEST) && self.no_film
     }
 
-    /// Tale of Two Wastelands' start. TTW off is [`Fields::original`], the base game.
+    /// Tale of Two Wastelands' start. TTW off is [`Fields::original`], the base game. The film
+    /// field keeps the base game's name, as [`Fields::read`] fills it, so the switch's value
+    /// and a saved file read back are equal; "No intro film" writes `sIntroMovie=`.
     pub fn ttw() -> Fields {
-        Fields { quest: TTW_QUEST.into(), film: String::new(), no_film: true }
+        Fields { quest: TTW_QUEST.into(), film: DEFAULT_FILM.into(), no_film: true }
     }
+}
+
+/// The card's warning when the fields name TTW's start quest but TTW's master is off
+/// (`Some(false)`) or not in the load order at all (`None`, TTW removed with its lines
+/// left in, #3229): New Game then starts the New Vegas opening instead.
+pub fn ttw_missing(fields: &Fields, ttw_active: Option<bool>) -> Option<String> {
+    if !fields.quest.trim().eq_ignore_ascii_case(TTW_QUEST) || ttw_active == Some(true) {
+        return None;
+    }
+    let state = if ttw_active.is_some() { "is off in the load order" } else { "is not in the load order" };
+    Some(format!("{TTW_PLUGIN} {state}: New Game starts the New Vegas opening instead. Turn it on, or turn TTW off."))
 }
 
 /// `text` without the `key=` lines of `[section]` (names without case); every other line kept.
@@ -139,6 +155,17 @@ mod tests {
     }
 
     #[test]
+    fn ttws_quest_without_ttw_is_flagged() {
+        assert_eq!(ttw_missing(&Fields::ttw(), Some(true)), None);
+        assert!(ttw_missing(&Fields::ttw(), Some(false)).unwrap().contains("is off in the load order"));
+        assert!(ttw_missing(&Fields::ttw(), None).unwrap().contains("is not in the load order"));
+        // The quest alone, with the default film, is still TTW's.
+        let quest_only = Fields { quest: "001fffF8".into(), ..Fields::default() };
+        assert!(ttw_missing(&quest_only, None).is_some());
+        assert_eq!(ttw_missing(&Fields::default(), None), None);
+    }
+
+    #[test]
     fn read_and_write() {
         let ini = "[Game]\nPath=F:\\FNV\n\n[Settings]\ngrass=1\n";
         assert_eq!(Fields::read(ini), Fields::original());
@@ -155,6 +182,7 @@ mod tests {
         // Another mod's start and film, typed with spaces around.
         let other = Fields { quest: " MyStart ".into(), film: "Mine.bik ".into(), no_film: false }.write(ini);
         assert_eq!(Fields::read(&other), Fields { quest: "MyStart".into(), film: "Mine.bik".into(), no_film: false });
+        // "No film" wins over a typed film; lines copied in by hand, any case, quoted, count.
         let none = Fields { quest: String::new(), film: "Mine.bik".into(), no_film: true }.write(ini);
         assert_eq!(ini_get(&none, "General", "sIntroMovie").as_deref(), Some(""));
         let quoted = Fields::read("[general]\nSCharGenQuest=\"001fffF8\"\nSIntroMovie=\n");
@@ -185,7 +213,7 @@ mod tests {
         let out = fields.write("[General]\nsCharGenQuest=00102037\nsIntroMovie=FNVIntro.bik\n");
         assert_eq!(ini_get(&out, "General", "sCharGenQuest").as_deref(), Some("001FFFF8"));
         assert_eq!(ini_get(&out, "General", "sIntroMovie").as_deref(), Some(""));
-        assert!(Fields::read(&out).is_ttw());
+        assert_eq!(Fields::read(&out), fields);
         let back = Fields::original().write(&out);
         assert_eq!(ini_get(&back, "General", "sCharGenQuest").as_deref(), Some("00102037"));
         assert_eq!(ini_get(&back, "General", "sIntroMovie").as_deref(), Some("FNVIntro.bik"));

@@ -227,6 +227,15 @@ pub struct RefState {
     /// on a load (`World::made_at_from_saved_place`, #3042).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub made_at: Option<(Option<FormId>, [f32; 3])>,
+    /// A reference created at run time ([`World::place`]): the Euler angles (radians)
+    /// it was created with, answered by `GetStartingAngle` [observed: Fallout: New Vegas
+    /// 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, 2026-11-23, `GSDocMitchellHouse`
+    /// (`0x00103DF9`), 10 official base masters, `b3_jip4_02_session_time_and_start_angle`
+    /// (`tools/capture/nvse/catalogs/wave4b_extenders.json`, #3679):
+    /// `PROBE|b3_jip4_02_session_time_and_start_angle|sess=5.31,docZ=22.92,dynZ=270.00`;
+    /// no DLL or source consulted; hypothesis: X/Y axes and save persistence].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub made_rot: Option<[f32; 3]>,
     /// A shot's temporary reference for scripts (`fnv_game::nvse_proj`): the engine draws
     /// the shot's flying model along its flight, so this reference is neither drawn nor
     /// given collision as a dropped item (#2186).
@@ -454,12 +463,36 @@ pub struct Snapshot {
 /// start empty, as the scripts' session does (GetGameRestarted is true again in the new
 /// run, so a mod that makes such edits on GetGameRestarted makes them again; saving the
 /// edits as well would make it add its leveled-list entries twice) [decision].
+/// Session-only encounter-zone level/flag overrides (`SetZoneMinLevel`, `SetZoneFlag`
+/// bit 2 "Match PC Below Minimum Level") and zone assignment overrides
+/// (`SetRefEncounterZone`, `SetCellEncounterZone`, `SetWorldspaceEncounterZone`).
+/// Carried across same-run loads in [`WorldSession`], not saved in [`Snapshot`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ZoneSession {
+    pub(crate) min_levels: BTreeMap<FormId, i8>,
+    pub(crate) match_levels: BTreeMap<FormId, bool>,
+    pub(crate) ref_zones: BTreeMap<FormId, Option<FormId>>,
+    pub(crate) cell_zones: BTreeMap<FormId, Option<FormId>>,
+    pub(crate) world_zones: BTreeMap<FormId, Option<FormId>>,
+}
+
+impl ZoneSession {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.min_levels.is_empty()
+            && self.match_levels.is_empty()
+            && self.ref_zones.is_empty()
+            && self.cell_zones.is_empty()
+            && self.world_zones.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldSession {
     setting_changes: BTreeMap<String, crate::settings::Setting>,
     leveled_edits: BTreeMap<FormId, crate::forms::LeveledList>,
     base_edits: BTreeMap<FormId, Vec<crate::forms::Entry>>,
     container_respawns: BTreeMap<FormId, bool>,
+    zone_session: ZoneSession,
 }
 
 impl WorldSession {
@@ -468,6 +501,7 @@ impl WorldSession {
             && self.leveled_edits.is_empty()
             && self.base_edits.is_empty()
             && self.container_respawns.is_empty()
+            && self.zone_session.is_empty()
     }
 }
 
@@ -576,6 +610,10 @@ pub struct World<'a> {
     /// Pick Locks Even With Key tweak and Shift are on (NVForever's tweaks,
     /// docs/design/tweaks.md); not saved.
     player_ignores_keys: bool,
+    /// Encounter zones do not freeze their level on first visit (`bNoLockEncounterZoneLevels`,
+    /// set by the game layer, [`World::set_no_lock_encounter_zone_levels`]) [design:
+    /// docs/design/tweaks.md]; not saved.
+    pub(crate) no_lock_encounter_zone_levels: bool,
     /// Encounter zones entered and their levels (`crate::zones`).
     pub(crate) zone_levels: BTreeMap<FormId, u16>,
     /// SetZoneRespawns: zone → whether it respawns, over its "Never Resets" flag.
@@ -607,6 +645,9 @@ pub struct World<'a> {
     /// `World::set_container_respawns`). Kept for the session, not saved ([`WorldSession`])
     /// [hypothesis: session-only, like `base_edits`].
     container_respawns: BTreeMap<FormId, bool>,
+    /// Session-only encounter-zone level/flag and assignment overrides ([`WorldSession`]).
+    /// Not saved in [`Snapshot`] [hypothesis: session-only, like other record setters].
+    pub(crate) zone_session: ZoneSession,
     /// ShowOff's SetEnableParent: a reference's enable parent for the session in place of
     /// its XESP (`None`: removed) [documented: SetEnableParent]. Not saved [hypothesis: the
     /// page does not say the change is savebaked].
@@ -649,6 +690,7 @@ impl<'a> World<'a> {
             power_armor_training: false,
             player_equips_broken: false,
             player_ignores_keys: false,
+            no_lock_encounter_zone_levels: false,
             zone_levels: BTreeMap::new(),
             zone_respawns: BTreeMap::new(),
             ref_levels: BTreeMap::new(),
@@ -657,6 +699,7 @@ impl<'a> World<'a> {
             lock_serial: serial,
             presence_serial: serial,
             container_respawns: BTreeMap::new(),
+            zone_session: ZoneSession::default(),
             enable_parent_edits: BTreeMap::new(),
             own_enable: std::collections::BTreeSet::new(),
             next_dynamic: FormId::FIRST_DYNAMIC.0,
@@ -706,6 +749,16 @@ impl<'a> World<'a> {
     /// Whether the player's carried key is left unused on a lock ([`World::activate`]).
     pub fn set_player_ignores_keys(&mut self, on: bool) {
         self.player_ignores_keys = on;
+    }
+
+    /// Whether encounter zones avoid freezing their level on first visit
+    /// (`bNoLockEncounterZoneLevels`; not saved) [design: docs/design/tweaks.md].
+    pub fn set_no_lock_encounter_zone_levels(&mut self, on: bool) {
+        self.no_lock_encounter_zone_levels = on;
+    }
+
+    pub fn no_lock_encounter_zone_levels(&self) -> bool {
+        self.no_lock_encounter_zone_levels
     }
 
     pub fn power_armor_training(&self) -> bool {
@@ -836,6 +889,7 @@ impl<'a> World<'a> {
                 equipped: false,
                 mods: 0,
                 live: false,
+                magazine: None,
             },
             actor_values: BTreeMap::new(),
             last_restock: None,
@@ -843,6 +897,7 @@ impl<'a> World<'a> {
             equip_locks: BTreeMap::new(),
             dropped_by: None,
             made_at: None,
+            made_rot: None,
             shot: false,
             outfitted: false,
         })
@@ -1547,6 +1602,7 @@ impl<'a> World<'a> {
                     equip_locks: BTreeMap::new(),
                     dropped_by: None,
                     made_at: None,
+                    made_rot: None,
                     shot: false,
                 },
             );
@@ -1755,26 +1811,33 @@ impl<'a> World<'a> {
     }
 
     /// A game setting's number: a run-time change ([`World::change_setting`]), else the
-    /// record's.
+    /// record's, else a seeded built-in engine default ([`crate::settings::builtin_default`]).
     pub fn setting_f32(&self, edid: &str) -> Option<f32> {
-        match self.setting_changes.get(&edid.to_ascii_lowercase()) {
-            Some(v) => v.as_f32(),
-            None => self.forms.setting_f32(edid),
-        }
+        self.setting_value(edid)?.as_f32()
     }
 
-    /// A game setting as it is now: a run-time change, else the record's.
+    /// A game setting as it is now: a run-time change, else the record's, else a seeded
+    /// built-in engine default.
     pub fn setting_value(&self, edid: &str) -> Option<&crate::settings::Setting> {
         let k = edid.to_ascii_lowercase();
-        self.setting_changes.get(&k).or_else(|| self.forms.settings.get(&k))
+        self.setting_changes
+            .get(&k)
+            .or_else(|| self.forms.settings.get(&k))
+            .or_else(|| crate::settings::builtin_default(&k))
     }
 
-    /// Change a game setting for this run. It must exist, and the value must be of its
-    /// kind (its Editor ID's first letter: `f`, `i`, `s`).
+    /// Change a game setting for this run. It must exist (in the load order or in the
+    /// seeded built-in engine defaults), and the value must be of its kind (its Editor
+    /// ID's first letter: `f`, `i`, `s`).
     pub fn change_setting(&mut self, edid: &str, value: crate::settings::Setting) -> Result<(), SimError> {
         use crate::settings::Setting;
         let k = edid.to_ascii_lowercase();
-        let old = self.forms.settings.get(&k).ok_or_else(|| SimError::MissingSetting(edid.into()))?;
+        let old = self
+            .forms
+            .settings
+            .get(&k)
+            .or_else(|| crate::settings::builtin_default(&k))
+            .ok_or_else(|| SimError::MissingSetting(edid.into()))?;
         let fits = matches!((old, &value), (Setting::Float(_), Setting::Float(_)) | (Setting::Int(_), Setting::Int(_)) | (Setting::Str(_), Setting::Str(_)));
         if !fits {
             return Err(SimError::SettingKind(edid.into()));
@@ -2029,6 +2092,13 @@ impl<'a> World<'a> {
         Ok(())
     }
 
+    /// Record a saved cell detach timestamp (`GameDaysPassed`, offline save import).
+    pub fn set_cell_detached_at(&mut self, cell: FormId, days_passed: f32) {
+        if days_passed.is_finite() && days_passed >= 0.0 {
+            self.detached_cells.insert(cell, days_passed);
+        }
+    }
+
     /// GameDaysPassed when `cell` was last unloaded ([`World::detach_cell`]), while it
     /// is still unloaded.
     pub fn detached_since(&self, cell: FormId) -> Option<f32> {
@@ -2275,6 +2345,7 @@ impl<'a> World<'a> {
                 equip_locks: BTreeMap::new(),
                 dropped_by: None,
                 made_at: Some((cell, pos)),
+                made_rot: Some(rot),
                 shot: false,
             },
         );
@@ -2632,6 +2703,7 @@ impl<'a> World<'a> {
             leveled_edits: std::mem::take(&mut self.leveled_edits),
             base_edits: std::mem::take(&mut self.base_edits),
             container_respawns: std::mem::take(&mut self.container_respawns),
+            zone_session: std::mem::take(&mut self.zone_session),
         }
     }
 
@@ -2641,6 +2713,7 @@ impl<'a> World<'a> {
         self.leveled_edits = s.leveled_edits;
         self.base_edits = s.base_edits;
         self.container_respawns = s.container_respawns;
+        self.zone_session = s.zone_session;
     }
 
     pub fn restore(forms: &'a FormStore, placed: &'a RefTable, s: &Snapshot) -> Result<World<'a>, String> {

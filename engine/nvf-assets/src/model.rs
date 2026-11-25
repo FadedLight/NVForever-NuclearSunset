@@ -14,7 +14,7 @@ use crate::anim_play::{Clip, MaterialTarget, MaterialTrack, OwnCycle, Playing};
 use crate::material_anim::{MaterialSlot, RigMaterials};
 use crate::data::GameData;
 use crate::nif_material::NifMaterial;
-use crate::nif_spawn::{affine, build_mesh, is_editor_marker, shaded_model, shape_material_with, shape_props, shape_skin, to_bevy, StoreTextures, TextureSource};
+use crate::nif_spawn::{affine, is_editor_marker, shaded_model, shape_material_with, shape_props, to_bevy, AdmittedShape, NumericRejections, StoreTextures, TextureSource};
 use crate::texture::{worker_texture, worker_texture_exact, TextureCache, TextureSnapshot, TextureUsage, WorkerTextures};
 use bevy::asset::AssetHandleProvider;
 use bevy::image::CompressedImageFormats;
@@ -1823,10 +1823,14 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
     // Shapes without any property beside shaded ones: editor geometry (`Props::is_helper`).
     let shaded = shaded_model(&file, &dec);
     let mut editor_shapes: Vec<String> = Vec::new();
+    let mut rejected = NumericRejections::default();
     // Shapes drawn with a window environment map, and how (nif.md §6 "Window glass and
     // environment maps").
     let mut env_shapes: Vec<String> = Vec::new();
     let mut env_how = String::new();
+    // Shapes without the window flag drawn with an environment map, each with how
+    // (nif.md §6 "Environment maps on other shapes").
+    let mut other_env: Vec<String> = Vec::new();
     for o in objects.iter().filter(|o| !o.is_node) {
         // Walk to the root: accumulate the transform below the root's own and look
         // for hidden ancestors.
@@ -1880,7 +1884,7 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
             first_textures += props.use_first_person_textures(|p| game.vfs.exists(p));
             first_worn += props.first_person_texture_count();
         }
-        let Some((mut mesh, tris, stored)) = build_mesh(data) else { continue };
+        let Some(AdmittedShape { mut mesh, triangles: tris, skin, stored }) = rejected.admit(o.block, &dec, shape, data) else { continue };
         let managed_morph = managed_morphs.get(&o.block).filter(|m| m.num_vertices() == mesh.count_vertices()).cloned();
         if managed_morph.is_some() {
             // [design, #2685] Keep the source available for private rig mesh copies.
@@ -1901,10 +1905,22 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
         });
         // The normal map's tangents: those the file stores (crate::tangents).
         let (material, missing_diffuse) = shape_material_with(&props, &mut mesh, sink, crate::tangents::Tangents::Stored(&stored));
-        if material.extension.env.x > 0.0 {
+        if !rejected.accept_mesh(o.block, &mesh) {
+            continue;
+        }
+        if material.extension.env.x > 0.0 && material.extension.env_how.z > 0.5 {
             let over = if matches!(material.base.alpha_mode, AlphaMode::Premultiplied) { "over the blend" } else { "added" };
-            env_how = format!("{}, scale {:.2}, {over}", props.textures.get(4).map_or("-", String::as_str), material.extension.env.x);
+            // Scaled by light only under a debug switch (env_map.rs `LIGHT_WINDOW`); the
+            // default line stays #2462's.
+            let light = match material.extension.env_how.y {
+                y if y > 1.5 => ", by scene light",
+                y if y > 0.5 => ", by received light",
+                _ => "",
+            };
+            env_how = format!("{}, scale {:.2}, {over}{light}", props.textures.get(4).map_or("-", String::as_str), material.extension.env.x);
             env_shapes.push(shape_name.clone());
+        } else if material.extension.env.x > 0.0 {
+            other_env.push(format!("{shape_name} ({})", crate::env_map::describe(props.textures.get(4).map_or("-", String::as_str), &material)));
         }
         if let Some(VertexAttributeValues::Float32x3(p)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
             for v in p {
@@ -1915,7 +1931,6 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
                 });
             }
         }
-        let skin = shape_skin(&dec, shape, mesh.count_vertices());
         if skin.is_some() {
             out.skinned += 1;
         }
@@ -1992,10 +2007,14 @@ fn prepare_unguarded(sink: &mut impl ModelSink, path: &str, keep_cpu: bool, firs
     if !env_shapes.is_empty() {
         info!("{path}: {} shape(s) with a window environment map ({env_how}): {}", env_shapes.len(), env_shapes.join(", "));
     }
+    if !other_env.is_empty() {
+        info!("{path}: {} shape(s) with an environment map, no window flag: {}", other_env.len(), other_env.join("; "));
+    }
     if !swaps.is_empty() {
         info!("{path}: texture swap: {} entr(ies), {} shape(s) retextured: {}", swaps.len(), swapped.len(), swapped.join(", "));
     }
     if attachments { out.objects = attachment::objects(&objects, &dec, &shape_objects, rig.as_ref().map(|(_, index)| index)); }
+    rejected.report(path);
     out.rig = rig.map(|(r, _)| r);
     Ok(out)
 }

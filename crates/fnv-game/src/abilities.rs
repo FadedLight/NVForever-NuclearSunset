@@ -29,9 +29,21 @@
 
 use crate::game::Game;
 use fnv_sim::FormId;
+use std::collections::BTreeSet;
+
+/// Only authored placements are immutable for the life of a reference table. Enable
+/// state, current cell, script-created actors and effects are read again each tick.
+pub(crate) struct PlacedEffectActors<'a> {
+    placed: &'a fnv_sim::RefTable,
+    cells: BTreeSet<FormId>,
+    actors: BTreeSet<FormId>,
+}
 
 /// SPEL SPIT type "Ability" [documented: schema `combat.json` SPIT].
 pub const SPELL_ABILITY: i64 = 4;
+/// ENCH ENIT type "Weapon" [documented: schema `combat.json`; observed: all 59 WEAP EITM of
+/// FalloutNV.esm name one of this type].
+pub const ENCHANTMENT_WEAPON: u32 = 2;
 /// ENCH ENIT type "Apparel" [documented: schema `combat.json`; observed: all 186 ARMO EITM of
 /// FalloutNV.esm name one of this type, all 59 WEAP EITM one of type 2 Weapon].
 pub const ENCHANTMENT_APPAREL: u32 = 3;
@@ -127,6 +139,11 @@ impl Game<'_> {
         }
     }
 
+    /// What `r`'s active abilities add to actor value `code`, together.
+    pub fn ability_value(&self, r: FormId, code: u16) -> f64 {
+        self.effects.iter().filter(|e| e.target == r && !e.inactive && self.is_ability_effect(e)).filter_map(|e| e.change.as_ref()).filter(|c| c.code == code).map(|c| c.amount).sum()
+    }
+
     /// Whether an effect is an ability's (an effect of a listed spell of type Ability).
     pub fn is_ability_effect(&self, e: &crate::game::ActiveEffect) -> bool {
         e.permanent && e.worn.is_none() && self.spell_type(e.source) == Some(SPELL_ABILITY)
@@ -161,6 +178,87 @@ impl Game<'_> {
         }
     }
 
+    /// Session `SetObjectEffect` override for `form` (or its `TempCloneForm` original):
+    /// `None` when untouched this session, `Some(None)` when explicitly cleared to 0,
+    /// `Some(Some(ench))` when overridden to an enchantment FormID.
+    pub fn object_effect_override(&self, form: FormId) -> Option<Option<FormId>> {
+        let key = "EITM/";
+        let val = self
+            .field_overrides
+            .get(&(form, key.to_string()))
+            .or_else(|| self.field_overrides.get(&(self.unclone(form), key.to_string())))?;
+        match val {
+            fnv_script::vm::XVal::Ref(0) => Some(None),
+            fnv_script::vm::XVal::Ref(id) => Some(Some(FormId(*id))),
+            _ => None,
+        }
+    }
+
+    /// Effective object effect (`EITM`) of a form (`ARMO`, `WEAP`, `EXPL`, …), preferring
+    /// a live `SetObjectEffect` session override on the form or its `TempCloneForm`
+    /// original before falling back to authored record data. Returns `None` when cleared
+    /// to 0 by `SetObjectEffect`.
+    pub fn object_effect(&self, form: FormId) -> Option<FormId> {
+        if let Some(override_effect) = self.object_effect_override(form) {
+            return override_effect;
+        }
+        let orig = self.unclone(form);
+        if let Some(&ench) = self.data.armor_enchantments.get(&orig) {
+            return Some(ench);
+        }
+        match self.data.record_field(orig, "EITM", "") {
+            Some(serde_json::Value::String(s)) if s.starts_with("0x") => {
+                u32::from_str_radix(&s[2..], 16).ok().filter(|&id| id != 0).map(FormId)
+            }
+            _ => None,
+        }
+    }
+
+    /// Snapshot `source`'s effective object effect (`EITM`) onto its `TempCloneForm`
+    /// `clone` so pre-clone overrides carry over while post-clone edits on `source` stay
+    /// isolated from `clone` (including clone-of-clone chains) [design].
+    pub(crate) fn snapshot_object_effect(&mut self, source: FormId, clone: FormId) {
+        let orig = self.unclone(source);
+        if !matches!(self.data.sig(orig).as_ref(), Some(b"ARMO" | b"WEAP" | b"EXPL")) {
+            return;
+        }
+        let eff = self.object_effect(source);
+        self.field_overrides.insert((clone, "EITM/".into()), fnv_script::vm::XVal::Ref(eff.map_or(0, |e| e.0)));
+    }
+
+    /// Apply a `SetObjectEffect` override for an `ARMO`, `WEAP`, or `EXPL` form (including
+    /// `TempCloneForm` clones) [documented: GECK wiki SetObjectEffect]. Refuses unsupported
+    /// base types or mismatched enchantment kinds without mutating state. For `ARMO`, clears
+    /// stale worn-dispel state on change and resyncs loaded actors' worn enchantments.
+    pub(crate) fn set_object_effect(&mut self, form: FormId, effect: Option<FormId>) -> bool {
+        let orig = self.unclone(form);
+        let want = match self.data.sig(orig).as_ref() {
+            Some(b"ARMO") => ENCHANTMENT_APPAREL,
+            Some(b"WEAP" | b"EXPL") => ENCHANTMENT_WEAPON,
+            _ => return false,
+        };
+        if !effect.is_none_or(|e| self.data.enchantment_types.get(&e) == Some(&want)) {
+            return false;
+        }
+        let previous = self.object_effect(form);
+        self.field_overrides.insert((form, "EITM/".into()), fnv_script::vm::XVal::Ref(effect.map_or(0, |e| e.0)));
+        if self.data.sig(orig) == Some(*b"ARMO") && previous != effect {
+            let clones: Vec<FormId> = self.extra.values().flat_map(|x| x.worn_dispelled.iter().copied()).collect();
+            let key = "EITM/".to_string();
+            let matching: std::collections::HashSet<FormId> = clones
+                .into_iter()
+                .filter(|&item| item == form || (self.unclone(item) == form && !self.field_overrides.contains_key(&(item, key.clone()))))
+                .collect();
+            if !matching.is_empty() {
+                for x in self.extra.values_mut() {
+                    x.worn_dispelled.retain(|item| !matching.contains(item));
+                }
+            }
+            self.sync_loaded_actor_effects();
+        }
+        true
+    }
+
     /// The enchanted armour an actor wears: (item, its Apparel enchantment). Reads the
     /// inventory as it is; one not yet made (an actor never loaded) wears nothing.
     pub fn worn_enchantments(&self, r: FormId) -> Vec<(FormId, FormId)> {
@@ -169,7 +267,10 @@ impl Game<'_> {
             .equipped()
             .into_iter()
             .filter_map(|item| {
-                let ench = *self.data.armor_enchantments.get(&item)?;
+                if self.data.sig(self.unclone(item)) != Some(*b"ARMO") {
+                    return None;
+                }
+                let ench = self.object_effect(item)?;
                 (self.data.enchantment_types.get(&ench) == Some(&ENCHANTMENT_APPAREL) && self.data.effect_items.contains_key(&ench)).then_some((item, ench))
             })
             .collect();
@@ -248,16 +349,20 @@ impl Game<'_> {
     /// Not every actor that ever chose a package (#1992): [`Game::package_actors`] keeps
     /// those for the periodic choice, so a long playthrough synced thousands of actors
     /// out of the loaded area every frame, each a no-op once its effects had ended.
-    pub(crate) fn effects_actors(&self) -> std::collections::BTreeSet<FormId> {
+    pub(crate) fn effects_actors(&mut self) -> BTreeSet<FormId> {
         // The loaded part of `package_actors`, built without its every-package-actor set:
         // the loaded cells' actors and those moved or created into them, and the package
         // actors that walked into one.
         let placed = self.world.placed;
         let is_actor = |r: &FormId| placed.get(*r).is_some_and(|p| matches!(&p.sig, b"ACHR" | b"ACRE"));
-        let mut actors: std::collections::BTreeSet<FormId> = std::collections::BTreeSet::new();
-        for c in &self.loaded_cells {
-            actors.extend(placed.by_cell.get(c).into_iter().flatten().filter(|r| is_actor(r)));
-        }
+        let placements = match &mut self.placed_effect_actors {
+            Some(saved) if std::ptr::eq(saved.placed, placed) && saved.cells == self.loaded_cells => saved,
+            slot => {
+                let actors = self.loaded_cells.iter().filter_map(|c| placed.by_cell.get(c)).flatten().copied().filter(is_actor).collect();
+                slot.insert(PlacedEffectActors { placed, cells: self.loaded_cells.clone(), actors })
+            }
+        };
+        let mut actors = placements.actors.clone();
         actors.extend(self.moved.iter().filter(|r| is_actor(r)));
         actors.extend(self.created_actors());
         actors.extend(self.extra.iter().filter(|(r, e)| e.current_package.is_some() && is_actor(r)).map(|(r, _)| *r).filter(|r| self.cell_of(*r).is_some_and(|c| self.loaded_cells.contains(&c))));

@@ -85,6 +85,9 @@ pub struct TextInput {
     pub max: usize,
     pub digits_only: bool,
     pub enter_closes: bool,
+    /// Current live text of the input box (kept synchronized with `TextEditMenu`'s input
+    /// tile while open; updated by `SetTextInputString` and engine typing).
+    pub text: String,
     /// SetTextInputString's text, for the engine to take.
     pub set_text: Option<String>,
 }
@@ -620,6 +623,16 @@ impl Game<'_> {
         self.other.jip12.text_input.as_mut()?.set_text.take()
     }
 
+    /// Update the open `ShowTextInputMenu`'s live typed text from the engine UI and
+    /// mirror it into `TextEditMenu`'s input text tile without overwriting script edits
+    /// to other `TextEditMenu` traits.
+    pub fn set_text_input_live_text(&mut self, typed: &str) {
+        let Some(t) = self.other.jip12.text_input.as_mut() else { return };
+        let clipped: String = typed.chars().take(t.max).collect();
+        t.text = clipped.clone();
+        crate::ui_text_input::sync_live_text(self, &clipped);
+    }
+
     /// Ok in the text input menu: the callback gets the text (next frame), the menu closes.
     pub fn finish_text_input(&mut self, typed: String) {
         let Some(t) = self.other.jip12.text_input.take() else { return };
@@ -714,11 +727,14 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             zero
         }
         // ---- the world ----
-        // The modifiers on the screen, once each, in the order applied [documented;
-        // hypothesis: the order].
+        // The active modifiers on the screen in application order without deduplication
+        // [documented; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN
+        // 57.30, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base
+        // masters, `w4d_24_active_imods_order` (`tools/capture/nvse/catalogs/wave4d_extenders.json`,
+        // #3679): `n=3,0=00054E13,1=001736A8,2=00054E13`; no DLL or source consulted;
+        // hypothesis: next-tick retention of duplicates].
         "getactiveimods" => {
-            let mut seen = BTreeSet::new();
-            let mods: Vec<XVal> = g.image_modifiers.iter().filter(|m| seen.insert(m.modifier)).map(|m| XVal::Ref(m.modifier.0)).collect();
+            let mods: Vec<XVal> = g.image_modifiers.iter().map(|m| XVal::Ref(m.modifier.0)).collect();
             list(g, mods)
         }
         // Interiors (1) or exteriors (0) [documented].
@@ -860,12 +876,15 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
         "getmenuitemfilter" => {
             let code = num(args, 0).unwrap_or(0.0) as u16;
             let side = usize::from(num(args, 1).unwrap_or(0.0) != 0.0);
-            // The menu's filter, kept after it closes; before it was ever open, 1
-            // (weapons) for the inventory [observed: jip12 filter.inventory], 0 otherwise
-            // [hypothesis].
-            let first = if code == 1002 { 1 } else { 0 };
+            // The menu's filter, kept after it closes [hypothesis]; before it was ever
+            // open, 1 (weapons) for the inventory (1002) and -1 for container (1008) /
+            // barter (1053) / other menus [observed: jip12 filter.inventory; Fallout:
+            // New Vegas 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30, `jip_40_barter_and_filter_defaults`:
+            // 1002 -> 1, 1008 -> -1, 1053 -> -1; `w4d_19_menu_item_filter_persist`:
+            // `f0=1|open1(mm=1002,f=1)`].
+            let first: i16 = if code == 1002 { 1 } else { -1 };
             let f = g.other.jip12.item_menus.get(&code).map(|m| m.filter).or_else(|| g.other.jip12.item_filters.get(&code).copied());
-            XVal::Num(f64::from(f.map_or(first, |f| f[side])))
+            XVal::Num(f.map_or(f64::from(first), |f| f64::from(f[side])))
         }
         // The open menu's rows as inventory references, keyed by their index in the
         // unfiltered list [documented]; the shown ones, or all (1); the right panel (1).
@@ -952,13 +971,25 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
             let title = formatted(args, 3);
             let size = (num(args, 1).unwrap_or(0.0) as f32, num(args, 2).unwrap_or(0.0) as f32);
             g.ext.retain(&cb);
-            g.other.jip12.text_input = Some(TextInput { callback: cb, title, size, offset: (0.0, 0.0), min: 1, max: TEXT_MAX, digits_only: false, enter_closes: false, set_text: None });
+            g.other.jip12.text_input = Some(TextInput {
+                callback: cb,
+                title,
+                size,
+                offset: (0.0, 0.0),
+                min: 1,
+                max: TEXT_MAX,
+                digits_only: false,
+                enter_closes: false,
+                text: String::new(),
+                set_text: None,
+            });
             g.open_menu(crate::game::menus::NAME);
             yes(true)
         }
         // Origin, the length limits (1 and 32,767 by default, 0 the latter too), digits
         // only (1), Enter closes (2) [documented].
         "settextinputextendedprops" => {
+            let mut updated = false;
             if let Some(t) = g.other.jip12.text_input.as_mut() {
                 t.offset = (num(args, 0).unwrap_or(0.0) as f32, num(args, 1).unwrap_or(0.0) as f32);
                 t.min = num(args, 2).map_or(1, |m| m.max(0.0) as usize);
@@ -966,13 +997,25 @@ pub(crate) fn call(g: &mut Game, ctx: &RunCtx, name: &str, subject: Option<FormI
                 let switches = num(args, 4).unwrap_or(0.0) as u32;
                 t.digits_only = switches & 1 != 0;
                 t.enter_closes = switches & 2 != 0;
+                t.text = t.text.chars().take(t.max).collect();
+                updated = true;
+            }
+            if updated {
+                crate::ui_text_input::sync_open(g);
             }
             zero
         }
         "settextinputstring" => {
             let s = formatted(args, 0);
+            let mut live = None;
             if let Some(t) = g.other.jip12.text_input.as_mut() {
+                let clipped: String = s.chars().take(t.max).collect();
+                t.text = clipped.clone();
                 t.set_text = Some(s);
+                live = Some(clipped);
+            }
+            if let Some(live) = live {
+                crate::ui_text_input::sync_live_text(g, &live);
             }
             zero
         }

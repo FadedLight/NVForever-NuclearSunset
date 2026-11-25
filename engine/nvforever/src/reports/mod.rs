@@ -798,7 +798,7 @@ fn asks_to_move(state: &str, intent: Option<&nvf_play::player::MoveIntent>, held
 
 #[cfg(test)]
 mod stuck_tests {
-    use super::asks_to_move;
+    use super::{asks_to_move, away_frame};
     use nvf_play::player::MoveIntent;
 
     /// #3046: keys held while a script locks movement (Doc Mitchell's opening) or furniture

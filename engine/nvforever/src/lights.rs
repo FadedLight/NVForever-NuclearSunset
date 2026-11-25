@@ -1224,13 +1224,25 @@ mod tests {
 
     /// The installer itself: the whole chain in its order stored and the bounce light's hook
     /// (#3009) reported installed; with its anchor doubled (which fails no other edit), or
-    /// without the display sum, reported failed and not in the text.
+    /// without the display sum, reported failed and not in the text. Run in a process of its
+    /// own, as it sets the process-wide states of three hooks.
     #[test]
     fn the_installer_reports_the_rtgi_hook() {
         use crate::rtgi_volume::{hook::IMPORT_LINE, hook_state, HookState};
+        const CHILD: &str = "NVF_TEST_RTGI_INSTALLER_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["lights::tests::the_installer_reports_the_rtgi_hook", "--exact", "--nocapture", "--test-threads=1"])
+                .env(CHILD, "1")
+                .output()
+                .expect("start the test alone");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success() && text.contains("1 passed"), "{text}\n{}", String::from_utf8_lossy(&output.stderr));
+            return;
+        }
         let good = std::fs::read_to_string(format!("{}/../vendor/bevy_pbr/src/render/pbr_functions.wesl", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let doubled = unix_lines(&good).replacen(IMPORT_LINE, &IMPORT_LINE.repeat(2), 1);
-        assert_eq!(hook_state(), HookState::Pending, "no other test installs it");
+        assert_eq!(hook_state(), HookState::Pending);
         for (source, installed) in [(&good, true), (&doubled, false), (&good, true), (&String::new(), false), (&good, true)] {
             let mut world = World::new();
             let mut shaders = Assets::<Shader>::default();

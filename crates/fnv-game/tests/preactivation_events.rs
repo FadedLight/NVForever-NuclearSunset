@@ -279,8 +279,8 @@ fn callback_filter_snapshot_survives_unregister_until_dispatch_finishes() {
     assert!(g.default_activation_by_hand(trader).unwrap().is_some());
     assert_eq!(
         num(&mut g, "owned.later"),
-        1.0,
-        "retained filtered dispatch snapshot still runs after unregister"
+        0.0,
+        "unregistered later callback is skipped in the same dispatch"
     );
     assert_eq!(
         g.ext.arrays.len(),
@@ -288,8 +288,35 @@ fn callback_filter_snapshot_survives_unregister_until_dispatch_finishes() {
         "dispatch releases its final array-filter hold"
     );
     assert!(g.default_activation_by_hand(trader).unwrap().is_some());
-    assert_eq!(num(&mut g, "owned.later"), 1.0);
+    assert_eq!(num(&mut g, "owned.later"), 0.0);
     no_errors(&g);
+}
+
+#[test]
+fn expression_lambda_veto_and_mid_dispatch_unregister_on_pre_scripted_activate() {
+    let f = fixture(true);
+    let mut g = game(&f);
+    query(
+        &mut g,
+        "SetEventHandlerAlt \"ShowOff:OnPreScriptedActivate\" ({ref actor, int blockFlag, int allowed} => 0) \"priority\"::2",
+    );
+    let trader = target(&mut g, "owned.trader");
+    let res = g.activate(FormId::PLAYER_REF, trader, ActMode::Block).unwrap();
+    assert_eq!(res["result"], "prevented", "expression-only lambda => 0 must veto");
+    assert_eq!(num(&mut g, "owned.block"), 0.0);
+
+    let f2 = fixture(true);
+    let mut g2 = game(&f2);
+    query(
+        &mut g2,
+        "SetEventHandlerAlt \"ShowOff:OnPreScriptedActivate\" ({ref actor, int blockFlag, int allowed} => 1) \"priority\"::2",
+    );
+    let trader2 = target(&mut g2, "owned.trader");
+    let res2 = g2.activate(FormId::PLAYER_REF, trader2, ActMode::Block).unwrap();
+    assert_eq!(res2["result"], "script", "expression-only lambda => 1 must allow");
+    assert_eq!(num(&mut g2, "owned.block"), 1.0);
+    no_errors(&g);
+    no_errors(&g2);
 }
 
 #[test]

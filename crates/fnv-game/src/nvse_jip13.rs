@@ -410,9 +410,11 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             g.console_requests.push(crate::functions::console::ConsoleRequest::SetVel { on: r, axis: ['X', 'Y', 'Z'][a], speed: v as f32 });
             zero
         }
-        // 0 for an actor [documented]; a moving body's mass up to 100, 100 for one that
-        // does not move [hypothesis: the page's "100 translates as no movement"], 0
-        // without collision.
+        // 0 for an actor [documented]; a moving body's mass up to 100, and 0 for static
+        // (non-dynamic) bodies or without collision [observed: Fallout: New Vegas 1.4.0.525 +
+        // xNVSE 6.4.9 + JIP LN 57.30, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`),
+        // 10 official base masters, `w4c_b4_06_jip13_physics_queries`: static door `0x103E61`
+        // returned `0.0`].
         "getrigidbodymass" => {
             let Some(r) = subject else { return Some(Ok(zero)) };
             if is_actor(g, r) {
@@ -421,7 +423,6 @@ pub(crate) fn call(g: &mut Game, _ctx: &RunCtx, name: &str, subject: Option<Form
             let bodies = g.bodies_at(r, "*");
             match bodies.iter().filter(|(_, b)| b.dynamic).map(|(_, b)| b.mass).reduce(f32::max) {
                 Some(m) => XVal::Num(f64::from(m.min(100.0))),
-                None if !bodies.is_empty() => XVal::Num(100.0),
                 None => zero,
             }
         }

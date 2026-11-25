@@ -670,7 +670,7 @@ unless the player binds them, so nothing changes until then.
 | Hold and Release Throws | `bHoldAndReleaseThrowables` | `combat::fire`: the cycle's `WindUp` is not let reach 0 while the trigger is held (`WeaponAnim::throw_held`); nvforever `player_body` keeps the wound-up clip at its `Hit` key (`wound_hit`). The switch: `Tweaks::hold_release_throws` |
 | Enemies Can Disarm You | `bNPCsCanDisarmPlayer` | `hit_actor` pushes the player's crippled arm to `HitFeedback::disarms` (not their own hits); `combat::disarm` drops `Combat::weapon` with `drop_equipped` and says so on the HUD. The switch: `Tweaks::npcs_disarm_player` |
 | NPCs Drop Live Grenades | `bNPCsDropLiveGrenades` | `combat::death_drops`: a held grenade (`is_grenade`) is fired as an `ActorFire` straight down from 60 units up, its holder noted in `Combat::dropped_live`, so `actor_attacks` slows the projectile to `LIVE_DROP_SPEED`. The switch: `Tweaks::npcs_drop_live_grenades` |
-| Keep Chosen Ammo | `tweak-keep-chosen-ammo` | `combat::Combat::chosen_ammo` remembers the player's last chosen ammo type per weapon base form across Ammo Swap, weapon-wheel ammo swaps, holstered swaps, Full Reload Swaps Ammo, and Reload Swaps Spent Ammo, used on `equip_sync` (and weapon-wheel preview) when still in the weapon's ammo list and carried, falling back to `ammo_for` while retaining the remembered choice when temporarily out of stock; persisted in `EngineSnapshot::chosen_ammo` beside `magazine_ammo` (#1574) and remapped on load-order changes [documented: Remember Selected Ammo mod description ("Not let the game forget your selected ammo type after switching, unequipping or dropping the gun"), #3305; design: per weapon base form, player only, off by default, saved with the game] |
+| Keep Chosen Ammo | `bRememberWeaponAmmos` (`tweak-keep-chosen-ammo`) | `combat::Combat::chosen_ammo` remembers the player's last chosen ammo type per weapon base form across Ammo Swap, weapon-wheel ammo swaps, holstered swaps, Full Reload Swaps Ammo, and Reload Swaps Spent Ammo, used on `equip_sync` (and weapon-wheel preview) when still in the weapon's ammo list and carried, falling back to `ammo_for` while retaining the remembered choice when temporarily out of stock; persisted in `EngineSnapshot::chosen_ammo` beside `magazine_ammo` (#1574) and remapped on load-order changes. Wired to `[Tweaks] bRememberWeaponAmmos` in `tweaks::apply_modular_overrides_to_settings` for modular `Data\NVSE\Plugins\Tweaks\INIs\*.ini` overrides beneath `NVForever.ini` (and queryable via `StewieGetValue`/`StewVal` across both `nvse_stewie_tweaks.ini` and `Tweaks\INIs\*.ini`; base `nvse_stewie_tweaks.ini` remains fallback-only per #3535) [documented: lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini` `[Tweaks]`: `; remember ammo type and count for all player weapons` / `bRememberWeaponAmmos = 0` (no DLL or source consulted); Remember Selected Ammo mod description ("Not let the game forget your selected ammo type after switching, unequipping or dropping the gun"), #3305, #3877; design: remembers the chosen ammo type per weapon base form while magazine ammo counts are already tracked per weapon via `magazine_ammo`; player only, off by default, saved with the game] |
 | (already so) | `bNoKillcamKillSound`, `bDisableHitShader`, `bNoScreenshotPopup`, `bNoInteriorBlackLoadingScreen` | NVForever plays no kill-camera kill sound, draws no hit shader, shows no screenshot message and shows an interior's picture rather than black; nothing to switch |
 
 Every tweak has now been looked at against the code: each "to do" row says what it
@@ -696,9 +696,9 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 <!-- generated: the table below lists every tweak of AllTweaks.json (v9.87) by its INI key -->
 | Status | Count |
 |---|---|
-| done | 594 |
+| done | 595 |
 | to do | 0 |
-| unsure, skipped | 24 |
+| unsure, skipped | 23 |
 | n/a | 17 |
 | skipped: fix | 10 |
 
@@ -781,6 +781,7 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 | `bNoFastTravelIfLegsCrippled` | done |  | 1 | No Travel on a Crippled Leg (NVForever's own refusal text) |
 | `bNoFreeBarterItems` | done |  | 1 | Price for Worthless Things (slider, 0-10 caps) |
 | `bNoGrabOwnedItems` | done |  |  | No Grabbing Owned Items |
+| `bNoLockEncounterZoneLevels` | done |  |  | No Encounter Zone Level Lock: encounter zones recompute their level from the player's current level instead of freezing on first visit (`fnv_sim::zones`, `fnv_game::zones`, `GetZoneLevel`; [documented: lStewieAl's Tweaks 10.05 (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini` `[Tweaks]`: `; don't freeze the level of encounter zones when they are first visited` / `bNoLockEncounterZoneLevels = 0`; no DLL or source consulted]; [design: respects zone `min_level` and `Match PC Below Minimum Level` including session overrides, while already-fixed references keep their fixed levels until cell reset]) |
 | `bNoLockFailedTerminals` | done |  |  | No Terminal Lockout |
 | `bNoPlayerStaggerAnims` | done |  |  | No Player Stagger |
 | `bNoSkillTags` | done |  | 6 | No Skill Tags (the outline, percent and XP options not built) |
@@ -850,7 +851,6 @@ may override NVForever tweak settings and load-order GMSTs at startup beneath
 | `iPerksPerLevel` | done |  | 1 | Perks per Level (1 to 5) |
 | `bMoreFrequentNPCLightUpdates` | unsure, skipped | yes | 1 | NVForever lights actors its own way; unclear what to change |
 | `bHipFireAnimsWhileScoped` | unsure, skipped |  |  | depends on alternate animations |
-| `bNoLockEncounterZoneLevels` | unsure, skipped |  |  | encounter-zone level locking not yet checked in NVForever |
 | `bSneakingDoesntForcePowerAttacks` | unsure, skipped |  |  | depends on separate animations |
 | `bStrengthAffectsAllThrowables` | unsure, skipped |  |  | how fThrowingStrengthPenalty shortens a throw is not documented (the GECK wiki export names the setting but has no page for it), and NVForever applies it to no throw yet |
 | `bUseArmorRepairKitsInRepairMenu` | unsure, skipped |  |  | the masters have no armour repair kit, and nothing in the data marks a mod's item as one or says how much it repairs |

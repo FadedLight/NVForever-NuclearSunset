@@ -665,8 +665,14 @@ pub struct TweakSettings {
     pub compass_quest_height: bool,
     /// `bPlacedMarkerHeightIndicator`: the same for the player's custom map marker.
     pub compass_marker_height: bool,
-    /// Remember the player's last chosen ammo type per weapon base form across
-    /// switching, unequipping, dropping and saving/loading (#3305) [design].
+    /// `bRememberWeaponAmmos` [documented: lStewieAl's Tweaks 10.05
+    /// (`https://www.nexusmods.com/newvegas/mods/66347`) `nvse_stewie_tweaks.ini`
+    /// `[Tweaks]`: `; remember ammo type and count for all player weapons` /
+    /// `bRememberWeaponAmmos = 0`; no DLL or source consulted]: remember the player's
+    /// last chosen ammo type per weapon base form across switching, unequipping,
+    /// dropping and saving/loading (#3305, #3877) [design: remembers chosen ammo type
+    /// per weapon base form while magazine ammo counts are already tracked per weapon
+    /// via `magazine_ammo`].
     pub keep_chosen_ammo: bool,
 }
 
@@ -2290,7 +2296,7 @@ impl Plugin for TweaksPlugin {
             app,
             "keep-chosen-ammo",
             "Keep Chosen Ammo",
-            "Weapons remember the ammo type you picked for them after switching, unequipping or dropping them; falls back if none is carried.",
+            "Weapons remember the ammo type you picked for them after switching, unequipping or dropping them; falls back if none is carried. (Stewie's Tweaks bRememberWeaponAmmos)",
             keep_chosen_ammo
         );
         switch!(app, "objectives-on-arrival", "Objectives on Arrival", "Going through a door to a new place shows your active quest's open objectives again. (Stewie's Tweaks bShowQuestObjectivesOnCellChange)", objectives_on_arrival);
@@ -2299,6 +2305,8 @@ impl Plugin for TweaksPlugin {
         switch!(app, "sleep-in-owned-beds", "Sleep in Owned Beds", "A bed that belongs to someone else can be slept in. (Stewie's Tweaks bSleepInOwnedBeds)", game.sleep_in_owned_beds);
         // ---- items ----
         switch!(app, "power-armor-no-training", "Power Armor Without Training", "Power armor can be worn without Power Armor Training. (Stewie's Tweaks bPowerArmorNeedsNoTraining)", game.power_armor_needs_no_training);
+        // ---- world ----
+        switch!(app, "no-lock-encounter-zone-levels", "No Encounter Zone Level Lock", "Encounter zones recompute their level from the player's current level instead of freezing on first visit. (Stewie's Tweaks bNoLockEncounterZoneLevels)", game.no_lock_encounter_zone_levels);
     }
 }
 
@@ -3165,6 +3173,7 @@ pub fn apply_modular_overrides_to_settings(overrides: &fnv_game::stewie_inis::St
     bool_tweak!("bTerminalGreyReadNotes", grey_read_notes);
     bool_tweak!("bCompassQuestHeightIndicator", compass_quest_height);
     bool_tweak!("bPlacedMarkerHeightIndicator", compass_marker_height);
+    bool_tweak!("bRememberWeaponAmmos", keep_chosen_ammo);
 
     if let Some(style) = overrides.get_i32("Tweaks", "iDateFormat").filter(|&s| s >= 0) {
         let max = crate::wait::model::DATE_STYLES.len() - 1;
@@ -3407,6 +3416,7 @@ mod tests {
         assert!(!t.no_karma_messages && !t.disable_fast_travel && !t.keep_chosen_ammo);
         assert!(!t.breath_activate && !t.jump_ap_danger_only && !t.jump_without_enough_ap);
         assert!(!t.game.sync_categories && t.game.prevent_switch_when_emptying_category);
+        assert!(!t.game.no_lock_encounter_zone_levels);
         assert_eq!(t.sneak_run_ap_base, 0.0);
         assert_eq!(t.sneak_run_ap_endurance_mult, 0.0);
         assert_eq!(t.console_label(), "Console");
@@ -3528,6 +3538,7 @@ mod tests {
              bNoKarmaMessages = 1\n\
              bCritChanceIgnoresFireRate = 1\n\
              bMenuSearch = 1\n\
+             bNoLockEncounterZoneLevels = 1\n\
              iDateFormat = 2\n\
              [Critical Hits]\n\
              fCriticalDamageMult = 1.5\n",
@@ -3559,6 +3570,7 @@ mod tests {
             assert!(settings.no_karma_messages);
             assert!(settings.game.crit_ignores_fire_rate);
             assert!(settings.game.menu_search);
+            assert!(settings.game.no_lock_encounter_zone_levels);
             assert_eq!(settings.date_style, 2);
             assert_eq!(settings.game.crit_damage_scale, 2.0);
         }
@@ -3570,7 +3582,103 @@ mod tests {
         assert_eq!(final_settings.game.crit_damage_scale, 0.5, "explicit NVForever.ini slider 0.25 -> x0.5 wins");
         assert!(final_settings.game.crit_ignores_fire_rate, "unmentioned modular key stays enabled");
         assert!(final_settings.game.menu_search, "unmentioned modular key stays enabled");
+        assert!(final_settings.game.no_lock_encounter_zone_levels, "unmentioned modular key stays enabled");
         assert_eq!(final_settings.date_style, 2);
+        // Toggling the registered switch in NVForever.ini overrides the modular INI back to off.
+        let idx = app.world().resource::<crate::settings::Settings>().index("tweak-no-lock-encounter-zone-levels").unwrap();
+        crate::settings::flip(app.world_mut(), idx);
+        assert!(!app.world().resource::<TweakSettings>().game.no_lock_encounter_zone_levels, "UI switch toggles off");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remember_weapon_ammos_ini_maps_to_keep_chosen_ammo_and_respects_nvforever_ini() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("nvf-play-remember-weapon-ammos-{}-{stamp}", std::process::id()));
+        let data = root.join("Data");
+        let plugins = data.join("NVSE/Plugins");
+        let inis = plugins.join("Tweaks/INIs");
+        std::fs::create_dir_all(&inis).unwrap();
+
+        // Base nvse_stewie_tweaks.ini alone does not supply NVForever defaults (#3535),
+        // keeping unmodded/vanilla keep_chosen_ammo = false while StewieGetValue/query_value
+        // still resolves it from the base file.
+        std::fs::write(plugins.join("nvse_stewie_tweaks.ini"), "[Tweaks]\nbRememberWeaponAmmos = 1\n").unwrap();
+        let (no_mod_files, no_mod_map) = fnv_game::stewie_inis::load_modular_inis_from_roots(std::slice::from_ref(&data));
+        assert_eq!(no_mod_files, 0);
+        let mut base_only = TweakSettings::default();
+        assert_eq!(apply_modular_overrides_to_settings(&no_mod_map, &mut base_only), 0);
+        assert!(!base_only.keep_chosen_ammo, "base nvse_stewie_tweaks.ini alone leaves default off");
+
+        let mut mod_files = fnv_game::mod_files::ModFiles::default();
+        assert!(mod_files.write_bytes("NVSE/Plugins/nvse_stewie_tweaks.ini", b"[Tweaks]\nbRememberWeaponAmmos = 1\n"));
+        assert_eq!(fnv_game::stewie_inis::query_value(&mod_files, "bRememberWeaponAmmos", "Tweaks").as_deref(), Some("1"));
+
+        // Invalid boolean value leaves keep_chosen_ammo unchanged (false).
+        let mut invalid_map = fnv_game::stewie_inis::StewieIniMap::default();
+        invalid_map.parse_into("[Tweaks]\nbRememberWeaponAmmos = not_a_bool\n");
+        let mut invalid_settings = TweakSettings::default();
+        assert_eq!(apply_modular_overrides_to_settings(&invalid_map, &mut invalid_settings), 0);
+        assert!(!invalid_settings.keep_chosen_ammo);
+
+        // Modular Tweaks/INIs/10_enable.ini enables keep_chosen_ammo.
+        std::fs::write(inis.join("10_enable.ini"), "; Stewie 10.05 modular override\n[Tweaks]\nbRememberWeaponAmmos = 1\n").unwrap();
+        let (files_on, map_on) = fnv_game::stewie_inis::load_modular_inis_from_roots(std::slice::from_ref(&data));
+        assert_eq!(files_on, 1);
+
+        // Unmentioned in NVForever.ini: modular bRememberWeaponAmmos=1 stays enabled.
+        let nvf_unmentioned = root.join("NVForever-unmentioned.ini");
+        std::fs::write(&nvf_unmentioned, "[Settings]\n").unwrap();
+        let mut app_on = App::new();
+        app_on.add_plugins(TweaksPlugin);
+        app_on.insert_resource(crate::settings::SettingsFile(Some(nvf_unmentioned)));
+        {
+            let mut settings = app_on.world_mut().resource_mut::<TweakSettings>();
+            assert_eq!(apply_modular_overrides_to_settings(&map_on, &mut settings), 1);
+            assert!(settings.keep_chosen_ammo);
+        }
+        crate::settings::apply_stored(app_on.world_mut());
+        assert!(app_on.world().resource::<TweakSettings>().keep_chosen_ammo);
+
+        // Explicit NVForever.ini off wins over modular bRememberWeaponAmmos=1.
+        let nvf_off = root.join("NVForever-off.ini");
+        std::fs::write(&nvf_off, "[Settings]\ntweak-keep-chosen-ammo=0\n").unwrap();
+        let mut app_user_off = App::new();
+        app_user_off.add_plugins(TweaksPlugin);
+        app_user_off.insert_resource(crate::settings::SettingsFile(Some(nvf_off)));
+        {
+            let mut settings = app_user_off.world_mut().resource_mut::<TweakSettings>();
+            assert_eq!(apply_modular_overrides_to_settings(&map_on, &mut settings), 1);
+            assert!(settings.keep_chosen_ammo);
+        }
+        crate::settings::apply_stored(app_user_off.world_mut());
+        assert!(!app_user_off.world().resource::<TweakSettings>().keep_chosen_ammo, "explicit NVForever.ini off wins");
+
+        // Later modular file setting bRememberWeaponAmmos=0 turns it back off,
+        // overrides base INI for query_value, and still yields to explicit NVForever.ini=1.
+        std::fs::write(inis.join("20_disable.INI"), "[tweaks]\nbRememberWeaponAmmos = 0\n").unwrap();
+        let (files_off, map_off) = fnv_game::stewie_inis::load_modular_inis_from_roots(std::slice::from_ref(&data));
+        assert_eq!(files_off, 2);
+        let mut disabled = TweakSettings { keep_chosen_ammo: true, ..TweakSettings::default() };
+        assert_eq!(apply_modular_overrides_to_settings(&map_off, &mut disabled), 1);
+        assert!(!disabled.keep_chosen_ammo, "later modular file with 0 disables keep_chosen_ammo");
+
+        assert!(mod_files.write_bytes("NVSE/Plugins/Tweaks/INIs/20_disable.INI", b"[tweaks]\nbRememberWeaponAmmos = 0\n"));
+        assert_eq!(fnv_game::stewie_inis::query_value(&mod_files, "bRememberWeaponAmmos", "Tweaks").as_deref(), Some("0"));
+
+        let nvf_on = root.join("NVForever-on.ini");
+        std::fs::write(&nvf_on, "[Settings]\ntweak-keep-chosen-ammo=1\n").unwrap();
+        let mut app_user_on = App::new();
+        app_user_on.add_plugins(TweaksPlugin);
+        app_user_on.insert_resource(crate::settings::SettingsFile(Some(nvf_on)));
+        {
+            let mut settings = app_user_on.world_mut().resource_mut::<TweakSettings>();
+            assert_eq!(apply_modular_overrides_to_settings(&map_off, &mut settings), 1);
+            assert!(!settings.keep_chosen_ammo);
+        }
+        crate::settings::apply_stored(app_user_on.world_mut());
+        assert!(app_user_on.world().resource::<TweakSettings>().keep_chosen_ammo, "explicit NVForever.ini on wins");
 
         let _ = std::fs::remove_dir_all(&root);
     }

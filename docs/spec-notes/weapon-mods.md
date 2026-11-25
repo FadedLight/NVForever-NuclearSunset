@@ -445,11 +445,12 @@ for each effect, and how it fits a long description.
   and 13 (`ZNAM`) with `GetWeaponSound` / `SetWeaponSound`, while keeping `SetPickupSound`
   and `SetPutdownSound`'s observed rule that a null sound leaves the existing sound intact
   [observed: `plugins2`].
-- **`TempCloneForm` isolation**: cloning a `WEAP` snapshots any active session overrides
-  (both replacements and clears) onto the clone (`Game::snapshot_weapon_sounds`), so
-  pre-clone edits carry over while later edits on the original or the clone stay isolated
-  [design, matching `TempCloneForm` sound-trait isolation]. `TempCloneForm` `SOUN` aliases
-  are accepted as valid replacement sounds.
+- **`TempCloneForm` isolation**: cloning a `WEAP` carries over any active session
+  overrides (both replacements and clears) onto the clone while later edits on the
+  original or the clone stay isolated, and `TempCloneForm` `SOUN` aliases are accepted
+  as valid replacement sounds [hypothesis: external JIP LN / xNVSE `TempCloneForm`
+  behavior not yet directly probed on `WEAP` sound slots]. NVForever implements this
+  snapshot internally via `Game::snapshot_weapon_sounds` [design].
 - **Consumer view**: `fnv_game::Game::weapon_sound`, `Game::weapon_sound_override`,
   `Game::set_weapon_sound`, `Game::weapon_sound_changes`, and `Game::weapon_sound_stamp`
   expose the effective and session-changed weapon sound slots in the same pattern as

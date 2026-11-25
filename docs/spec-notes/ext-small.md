@@ -59,7 +59,7 @@ game, so nothing here is `[observed]`. Changes last for the session.
 | StewieGetValue `"key:section"` (StewVal) | [documented: StewieGetValue] Reads a setting. [design] After handoff, the mapped [critical](stewie-stat-profile.md) and [inventory](#live-inventory-settings) keys read NVForever choices. Other keys and unbound games keep the layered `Data\NVSE\Plugins\nvse_stewie_tweaks.ini` lookup, with modular `Data\NVSE\Plugins\Tweaks\INIs\*.ini` files merged on top in case-insensitive filename order ([stewie-modular-inis.md](stewie-modular-inis.md)): a number when it reads as one, otherwise text, or 0 when absent. |
 | GetCellRegions `cell` | an exterior cell's regions (XCLR); none for an interior [documented]. When `Data\NVSE\Plugins\hNVSE.ini` sets `[Main] bMergeRegionLists=1` at load time ([documented: hNVSE 1.2 (Nexus Mods ID 85748, `https://www.nexusmods.com/newvegas/mods/85748`, authors DuncanWasHere & A User) public changelog and shipped `Data\NVSE\Plugins\hNVSE.ini` comments ("Force-merges cell region lists (XCLR subrecord in xEdit) during loading"); DLL/PDB/source not consulted]; [observed: FalloutNV 1.4.0.525 + xNVSE 6.4.9 + JIP LN 57.30 + hNVSE 120 on exterior cell `188TradingPost` (`0x000DDF1C`) with a single-record test override ESP: `[Main]` is strictly required (`[General]` is ignored) and merged `XCLR` lists place the overriding plugin's regions first followed by earlier plugins' remaining non-duplicate regions]), overridden exterior cells return the deduplicated overriding-plugin-first union (`fnv_world::audio::cell_regions_merged`, `Game::cell_regions`) [design: read once at load so world and script consumers agree and mid-session INI writes do not toggle it; `GameData::merged_cell_regions` is populated only when enabled at load so startup cost is zero when absent or disabled; per-record `XCLR` order preserved within each plugin; interior cells and deleted overrides skipped]. Absent or `0` leaves vanilla last-writer-wins unchanged |
 | SetWorldspaceMapBounds `world nwX nwY seX seY` | the WRLD MNAM cells, read by every reader of the record (`Game::world_map_bounds`) [documented; follow-up: the engine's map reads its bounds once] |
-| ySIGetTrait / ySISetTrait `"tag"\|"icon" [value] [form]` | ySI's sorting tag and icon texture path of the form, else the calling reference's base (uncloned), reading session `ySISetTrait` overrides first and falling back to the bounded `menus/ySI/*.json` rule snapshot (`ysi-filename.md`); an icon set on a tagged form (overridden or JSON-tagged) applies to every form of that tag [documented: `YSIGetTrait`, `YSISetTrait`]; "" when unset, cleared, or unmatched [design] |
+| ySIGetTrait / ySISetTrait `"tag"\|"string"\|"icon"\|"filename" [value] [form]` | ySI's sorting tag (`"tag"` / `"string"` exact bidirectional alias) and icon texture path (`"icon"` / `"filename"` share the exact same non-aborting path and tag-scoped override store; `(trait, value, form)` arg order returning `1` on `"tag"`/`"string"`/`"icon"`/`"filename"` and `0` on rejected metadata/unknown names); dot-receiver calls unwrap a placed world reference to its base form, whereas explicit form arguments are not unwrapped; when `menus/ySI/*.json` packs are loaded, unmatched/untagged/non-item `"icon"` and `"filename"` queries return `"interface\\icons\\Misc_Unknown.dds"` (and `""` when no ySI JSON packs are loaded); metadata trait names (`"template"`, `"systemcolor"`, `"category"`, `"name"`, `"tab"`, `"count"`) return `""` on `ySIGetTrait` and `0` (no-op) on `ySISetTrait` [documented: GECK wiki `YSIGetTrait`, `YSISetTrait`; observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + yUI v1.4d (`140`), 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, isolated clean-room staging copy (read-only `PrintToConsole` probes; zero writes to game install or Saves), `w4e_01_ysi_string_alias`, `w4e_02_ysi_metadata_traits`, `w4e_03_ysi_unmatched_icon_fallback`, `w4e_04_ysi_worldref_arg_vs_dot`, `w4e_c01_ysi_armordt_sibling_formlist2` (`tools/capture/nvse/catalogs/wave4e_mods.json`, #3803) and `w4c_b4_15b_ysi_no_json_fallback` (`tools/capture/nvse/catalogs/wave4c_extenders.json`, #3679): `PROBE\|w4c_b4_15b_ysi_no_json_fallback\|st=[](0)\|wp=[](0)\|pl=[](0)`; zero DLL, PDB, or third-party source consulted] |
 
 ### Live inventory settings
 
@@ -71,12 +71,19 @@ Individual item figures show one item's weight and value for a stack.
 
 [design] After the engine hands its authoritative settings to the game,
 `StewieGetValue` and `StewVal` return the existing choices below as numeric 0 or 1.
-Both functions use the same read-only path; names ignore ASCII case and surrounding
-whitespace. The base `nvse_stewie_tweaks.ini` never supplies NVForever defaults;
-mod-shipped `Data\NVSE\Plugins\Tweaks\INIs\*.ini` files may override NVForever
-tweak settings at startup beneath `NVForever.ini` (maintainer decision 2026-11-24,
-[stewie-modular-inis.md](stewie-modular-inis.md)). No new settings are
-added. [hypothesis] The original plugin matches names the same way; not observed.
+Both functions use the same read-only path; names take `Key:Section` and do NOT trim
+leading, trailing, or around-colon whitespace (`Section:Key` and bare keys also return 0)
+[observed: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + lStewieAl's Tweaks 1005 + JIP LN
+57.30, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`), 10 official base masters, isolated
+clean-room staging copy (read-only `PrintToConsole` probe; zero writes to game install or
+Saves), `w4h_08_stewie_get_value_whitespace`
+(`tools/capture/nvse/catalogs/wave4h_reconcile.json`, #3803):
+`PROBE|w4h_08_stewie_get_value_whitespace|sk(0=0,L=0,R=0,M=0)|ks(0=1,L=0,R=0,M=0)|bare(0=0,L=0,R=0)`;
+zero DLL, PDB, or third-party source consulted]. Names ignore ASCII case [hypothesis: not
+probed in `w4h_08_stewie_get_value_whitespace`]. The base `nvse_stewie_tweaks.ini` never
+supplies NVForever defaults; mod-shipped `Data\NVSE\Plugins\Tweaks\INIs\*.ini` files may
+override NVForever tweak settings at startup beneath `NVForever.ini` (maintainer decision
+2026-11-24, [stewie-modular-inis.md](stewie-modular-inis.md)). No new settings are added.
 
 | Query | Existing choice and consumer |
 |---|---|

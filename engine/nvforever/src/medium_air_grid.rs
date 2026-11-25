@@ -311,12 +311,14 @@ pub struct AirGpuUniform {
     /// the shadow starts and where it is whole ...
     pub cloud: Vec4,
     /// ... and x: 1 while the image is published and on the GPU (else K is 1); y: the mean of K
-    /// over the pattern's repeat for the current light ([`cloud_mean_k`], 1 when not in use); the
-    /// mean pass copies the light volume's over it on the GPU while the grid reads the volume
-    /// ([`CLOUD_MEAN_OFFSET`]).
+    /// over the pattern's repeat for the current light ([`cloud_mean_k`], 1 when not in use), the
+    /// reference's; z: the clouds' own mean transmittance ([`flat_deck`], 1 with none), the deck's
+    /// share's; w free. The mean pass copies the light volume's y and z over them on the GPU while the
+    /// grid reads the volume ([`CLOUD_MEAN_OFFSET`], [`CLOUD_MEAN_COPY`]).
     pub cloud_mode: Vec4,
     /// The composite's (medium_air.rs `relative_lit`; the grid shader does not declare it):
-    /// x LIFT, y the REF override (-1 for auto, the clouds' mean `cloud_mode.y`), z SHADE, w free.
+    /// x LIFT, y the REF override (-1 for auto, the clouds' mean `cloud_mode.y`), z SHADE, w 1 while
+    /// the tune's SHARE is set (medium_air.rs `deck_share` is then 1), else 0.
     pub rays2: Vec4,
 }
 
@@ -385,7 +387,7 @@ pub fn air_uniform(cam: &AirCamera, phase: &NormedPhase, view: &AirViewInputs) -
         cloud_uv: Vec4::ZERO,
         cloud: Vec4::ZERO,
         cloud_mode: Vec4::ZERO,
-        rays2: Vec4::new(cam.tune.lift, cam.tune.reference.unwrap_or(-1.0), cam.tune.shade, 0.0),
+        rays2: Vec4::new(cam.tune.lift, cam.tune.reference.unwrap_or(-1.0), cam.tune.shade, if cam.tune.share.is_some() { 1.0 } else { 0.0 }),
     }
 }
 
@@ -441,7 +443,7 @@ pub struct AirCloudBlock {
 /// `sun_visibility::SunVisibilityUniform::pack` packs `cloud_uv` and `cloud` (the strength
 /// held to 0..1, the fade's sines [`crate::sun_visibility::CLOUD_FADE_FROM`] and
 /// [`crate::sun_visibility::CLOUD_FADE_TO`]); valid with the image on the GPU and finite
-/// fields. Not valid: zeros (K is 1).
+/// fields. Not valid: zeros (K is 1). The caller fills the mode's y and z.
 pub fn cloud_block(cloud: Option<&crate::sun_visibility::CloudVisibility>, on_gpu: bool) -> AirCloudBlock {
     let Some(c) = cloud else { return AirCloudBlock::default() };
     let finite = c.uv_scale.is_finite() && c.uv_offset.is_finite() && c.plane_height.is_finite() && c.strength.is_finite();
@@ -493,6 +495,15 @@ pub fn cloud_mean_k(block: &AirCloudBlock, mean_value: Option<f32>, up: f32, hei
     (1.0 - block.cloud.y * fade * (1.0 - v)).clamp(0.0, 1.0)
 }
 
+/// The deck's transmittance without the light volume (`cloud_mode.z`), for a camera `height` up: the flat
+/// layers' own (cloud_shadows.rs `CloudShadowWork::deck`: absolute, where the image is relative to
+/// its own clear percentile), 1 with none (Cloud shadows off, indoors, no layer read yet) or no
+/// number, and 1 from their plane up, as [`cloud_mean_k`] (the plane comes with it, whether or not the
+/// image is on the GPU yet). A 0 is an opaque deck.
+pub fn flat_deck(deck: Option<crate::cloud_shadows::FlatDeck>, height: f32) -> f32 {
+    deck.filter(|d| d.transmittance.is_finite() && height < d.plane_height).map_or(1.0, |d| d.transmittance.clamp(0.0, 1.0))
+}
+
 /// The Cloud shadows image's texel mean, kept in the main world for the image the surfaces read
 /// (`sun_visibility::SunVisibility::cloud`), worked out again when that image is replaced or
 /// its data changes (each composition writes the CPU copy: an asset event).
@@ -523,8 +534,11 @@ pub const AIR_VOLUME_DEF: &str = "AIR_LIGHT_VOLUME";
 /// Where `cloud_mode.y` lies in the uniform's buffer (bytes): the sixteenth vec4 after the matrix,
 /// its second number.
 pub const CLOUD_MEAN_OFFSET: u64 = 64 + 15 * 16 + 4;
-/// The mean pass's storage buffer (one vec4, the mean in x).
+/// The mean pass's storage buffer (one vec4: the mean of K, the deck's transmittance, 0, 0).
 const CLOUD_MEAN_BYTES: u64 = 16;
+/// How much of it is copied over the uniform at [`CLOUD_MEAN_OFFSET`]: `cloud_mode`'s y and z; never
+/// its x, which the grid reads.
+pub const CLOUD_MEAN_COPY: u64 = 8;
 
 /// medium_air_grid.wesl `AirLightVolume` (binding 8), field for field.
 #[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
@@ -739,10 +753,15 @@ fn extract_air(
     cams: Extract<Query<(RenderEntity, &AirCamera)>>,
     marked: Query<Entity, With<AirCamera>>,
     visibility: Extract<Option<Res<crate::sun_visibility::SunVisibility>>>,
-    (cloud_mean, mut state): (Extract<Option<Res<AirCloudMean>>>, ResMut<AirState>),
+    cloud_mean: Extract<Option<Res<AirCloudMean>>>,
+    layers: Extract<Option<Res<crate::cloud_shadows::CloudShadowWork>>>,
+    mut state: ResMut<AirState>,
 ) {
-    // The cloud shadow the surfaces read (sun_visibility.rs's main-world resource; nothing of
-    // cloud_shadows.rs is touched): kept while wanted, dropped once nothing is held.
+    let deck = layers.as_ref().and_then(|w| w.deck()).filter(|_| !cams.is_empty());
+    if state.cloud_deck != deck {
+        state.cloud_deck = deck;
+    }
+    // The cloud shadow the surfaces read (sun_visibility.rs's main-world resource): kept while wanted, dropped once nothing is held.
     let cloud = visibility.as_ref().and_then(|v| v.cloud.clone()).filter(|_| !cams.is_empty());
     // Its texel mean, only for that same image.
     let mean = cloud_mean.as_ref().filter(|m| m.image.is_some() && m.image == cloud.as_ref().map(|c| c.image.id())).and_then(|m| m.mean);
@@ -806,6 +825,8 @@ pub(crate) struct AirState {
     /// The cloud shadow the surfaces read, extracted while wanted, and its image's texel mean.
     cloud: Option<crate::sun_visibility::CloudVisibility>,
     cloud_mean: Option<f32>,
+    /// The flat layers' own transmittance and plane ([`flat_deck`]), extracted while wanted.
+    cloud_deck: Option<crate::cloud_shadows::FlatDeck>,
     /// The cloud image's 1 x 1 stand-in and the sampler it and the image are read with
     /// (repeating, linear, as the surfaces' plumbing samples it); made on first need.
     cloud_fallback: Option<(Texture, TextureView)>,
@@ -828,7 +849,7 @@ struct AirVolumeState {
     uniform: Option<UniformBuffer<AirLightVolume>>,
     mean: Option<Buffer>,
     levels: Option<[TextureView; 2]>,
-    /// This frame's composite reads the automatic reference ([`wants_cloud_mean`]): the mean pass
+    /// This frame's composite reads the clouds' mean ([`wants_cloud_mean`]): the mean pass
     /// runs, and its pipeline has to be ready.
     mean_wanted: bool,
     /// The source last named in the log.
@@ -838,11 +859,11 @@ struct AirVolumeState {
     told_drawn: bool,
 }
 
-/// Whether a view's composite reads the automatic reference visibility (`cloud_mode.y`,
-/// medium_air_compose.wesl `air_reference`): a view that shows the light, with no fixed `REF`. The
-/// diagnostic views and the `off` baseline never ask for it.
+/// Whether a view's composite reads the clouds' mean transmittance (`cloud_mode.y`,
+/// medium_air_compose.wesl `air_reference` and `air_deck_share`): a view that shows the light, with
+/// no fixed `REF` or no fixed `SHARE`. The diagnostic views and the `off` baseline never ask for it.
 pub fn wants_cloud_mean(tune: &AirTune) -> bool {
-    tune.reference.is_none() && crate::medium_air_compose::shows_light(tune.view)
+    crate::medium_air_compose::shows_light(tune.view) && (tune.reference.is_none() || tune.share.is_none())
 }
 
 /// What the grid pass needs to read the light volume this frame.
@@ -933,6 +954,7 @@ impl AirState {
         self.told_terrain = None;
         self.cloud = None;
         self.cloud_mean = None;
+        self.cloud_deck = None;
         self.cloud_fallback = None;
         self.cloud_sampler = None;
         self.told_cloud = None;
@@ -1306,6 +1328,8 @@ fn prepare_air(
         // The mean of K over the pattern's repeat for the current light (cloud_mode.y; 1 when
         // not in use, or from the plane up).
         clouds.mode.y = cloud_mean_k(&clouds, state.cloud_mean, cam.to_light.y, inputs.world_from_view.w_axis.y);
+        // The clouds' own transmittance (cloud_mode.z), always a number: 1 with none.
+        clouds.mode.z = flat_deck(state.cloud_deck, inputs.world_from_view.w_axis.y);
         if cloud_view.is_none() {
             state.cloud_fallback.get_or_insert_with(|| make_cloud_fallback(&device));
         }
@@ -1454,9 +1478,9 @@ pub fn grid_dispatched(view: AirView, light_on: bool) -> bool {
 /// The grid pass: one dispatch over the columns into the view's volume. Not drawn (and the
 /// composite then skipped) while the pipeline compiles or Bevy's light bindings are missing. While
 /// the surfaces read the clouds' light volume ([`prepare_air_volume`]) its variant runs, after (while
-/// the composite reads the automatic reference, [`wants_cloud_mean`]) one dispatch of the mean pass
-/// whose result is copied over the uniform's `cloud_mode.y`: the reference visibility is then the
-/// mean of the K that is read. The first such draw of an activation is logged.
+/// the composite reads the clouds' mean, [`wants_cloud_mean`]) one dispatch of the mean pass
+/// whose result is copied over the uniform's `cloud_mode.yz`: the reference visibility is then the
+/// mean of the K that is read, and the deck's share of the clouds it is read from. The first such draw of an activation is logged.
 #[allow(clippy::type_complexity)]
 pub(crate) fn air_grid_pass(
     view: ViewQuery<(&AirViewGpu, Option<&ViewShadowBindings>, Option<&ViewLightsUniformOffset>)>,
@@ -1547,7 +1571,7 @@ pub(crate) fn air_grid_pass(
             pass.dispatch_workgroups(1, 1, 1);
             span.end(&mut pass);
         }
-        ctx.command_encoder().copy_buffer_to_buffer(&v.mean_buffer, 0, target, CLOUD_MEAN_OFFSET, 4u64);
+        ctx.command_encoder().copy_buffer_to_buffer(&v.mean_buffer, 0, target, CLOUD_MEAN_OFFSET, CLOUD_MEAN_COPY);
         mean_copied = true;
     }
     {
@@ -1568,7 +1592,7 @@ pub(crate) fn air_grid_pass(
         state.volume.told_drawn = true;
         info!(
             "volumetric medium: light in the air: grid drawn from the clouds' light volume ({})",
-            if mean_copied { "its mean transmittance copied into the reference" } else { "no mean: nothing reads the automatic reference" }
+            if mean_copied { "its mean transmittance copied into the reference" } else { "no mean: nothing reads it" }
         );
     }
 }
@@ -1792,17 +1816,21 @@ pub(crate) mod tests {
         assert!(grid.contains("k = air_clouds(world, air.light.xyz);"));
         // The mean takes the same volume K (the read and the two lines after it are `air_clouds`'),
         // on the far level's node spacing, and never the image.
-        let part = block_after(&grid, "@if(AIR_LIGHT_VOLUME)\nfn air_volume_part(P: vec3<f32>, L: vec3<f32>) -> vec2<f32>");
+        let part = block_after(&grid, "@if(AIR_LIGHT_VOLUME)\nfn air_volume_part(P: vec3<f32>, L: vec3<f32>) -> vec3<f32>");
         for start in ["let r = ", "let k = ", "let faded = ", "if up <= "] {
             let line = |text: &str| text.lines().find(|l| l.trim().starts_with(start)).map(|l| l.trim().to_string()).expect(start);
             assert_eq!(line(part), line(air), "{start}");
         }
-        assert!(part.contains("return vec2<f32>(r.y * faded, 1.0 - r.y);"));
+        assert!(part.contains("return vec3<f32>(r.y * faded, 1.0 - r.y, r.y * exp(-r.x));"));
         let mean = block_after(&grid, "fn air_cloud_mean(");
         assert!(mean.contains("let other = select(air.cloud_mode.y, 1.0, air_volume.cloud.w > 0.5 || origin.y >= air.cloud.x);"));
         assert!(mean.contains("sum += air_volume_part(vec3<f32>(origin.x + at.x, origin.y, origin.z + at.y), air.light.xyz);"));
         assert!(mean.contains("let mean = total / f32(AIR_MEAN_SIDE * AIR_MEAN_SIDE);\n        let mixed = clamp(mean.x + mean.y * other, AIR_MEAN_LEAST, 1.0);"));
-        assert!(mean.contains("select(other, mixed, mean.y < 1.0)"));
+        assert!(mean.contains("air_mean = vec4<f32>(select(other, mixed, mean.y < 1.0), deck, 0.0, 0.0);"));
+        assert!(mean.contains("var deck = air.cloud_mode.z;\n        if mean.y < 1.0 {\n            let covered = 1.0 - mean.y;"));
+        assert!(mean.contains("let above = pow(clamp(mean.z / covered, AIR_DECK_THIN, 1.0), clamp(air.light.y, AIR_DECK_UP, 1.0));\n            deck = covered * above + mean.y * air.cloud_mode.z;"));
+        assert!(grid.contains(&format!("const AIR_DECK_UP: f32 = {:?};", medium_air::AIR_DECK_UP)));
+        assert!(grid.contains("const AIR_DECK_THIN: f32 = 1e-4;") && medium_air::AIR_DECK_THIN == 1e-4);
         assert!(grid.contains("const AIR_MEAN_LEAST: f32 = 1e-6;"));
         assert!(!code(mean).contains("air_clouds(") && !code(mean).contains("air_cloud_weather("));
         assert!(grid.contains(&format!("const AIR_MEAN_STEP: f32 = {:?};", crate::volumetric_clouds_lightvol::LV_FAR_ACROSS)));
@@ -1936,31 +1964,43 @@ pub(crate) mod tests {
     /// image's block `flat` (its mean, its plane) and the levels' nodes from `near` and `far`; summed as
     /// the shader does, 64 groups of 4 x 4 points and then the groups.
     fn mean_mirror(v: &AirLightVolume, flat: &AirCloudBlock, eye: Vec3, l: Vec3, near: &dyn Fn(IVec3) -> f32, far: &dyn Fn(IVec3) -> f32) -> f32 {
+        mean_mirror_all(v, flat, eye, l, near, far).x
+    }
+
+    /// The same with the deck's transmittance (the two numbers copied over `cloud_mode.yz`) and the
+    /// covered share.
+    fn mean_mirror_all(v: &AirLightVolume, flat: &AirCloudBlock, eye: Vec3, l: Vec3, near: &dyn Fn(IVec3) -> f32, far: &dyn Fn(IVec3) -> f32) -> Vec3 {
         let other = if v.cloud.w > 0.5 || eye.y >= flat.cloud.x { 1.0 } else { flat.mode.y };
         let part = |p: Vec3| {
             if l.y <= v.cloud.y {
-                return Vec2::new(0.0, 1.0);
+                return Vec3::Y;
             }
             let r = crate::volumetric_clouds_lightvol::lvr_optical_depth(&v.window, near, far, p, l);
             if r.y <= 0.0 {
-                return Vec2::new(0.0, 1.0);
+                return Vec3::Y;
             }
             let k = (1.0 - v.cloud.x * (1.0 - (-r.x).exp())).clamp(0.0, 1.0);
             let t = ((l.y - v.cloud.y) / (v.cloud.z - v.cloud.y)).clamp(0.0, 1.0);
             let fade = t * t * (3.0 - 2.0 * t);
-            Vec2::new(r.y * ((1.0 - fade) + k * fade), 1.0 - r.y)
+            Vec3::new(r.y * ((1.0 - fade) + k * fade), 1.0 - r.y, r.y * (-r.x).exp())
         };
         let points = mean_points(eye);
-        let mut total = Vec2::ZERO;
+        let mut total = Vec3::ZERO;
         for group in 0..64usize {
-            let mut sum = Vec2::ZERO;
+            let mut sum = Vec3::ZERO;
             for n in 0..16usize {
                 sum += part(points[(group / 8 * 4 + n / 4) * 32 + group % 8 * 4 + n % 4]);
             }
             total += sum;
         }
         let mean = total / 1024.0;
-        if mean.y < 1.0 { (mean.x + mean.y * other).clamp(1e-6, 1.0) } else { other }
+        if mean.y < 1.0 {
+            let covered = 1.0 - mean.y;
+            let deck = medium_air::deck_transmittance(mean.z / covered, covered, flat.mode.z, l.y);
+            Vec3::new((mean.x + mean.y * other).clamp(1e-6, 1.0), deck, covered)
+        } else {
+            Vec3::new(other, flat.mode.z, 0.0)
+        }
     }
 
     /// The mean pass's 32 x 32 points.
@@ -2088,26 +2128,108 @@ pub(crate) mod tests {
         assert!(GRID.contains("let origin = air.world_from_view[3].xyz;") && GRID.contains("origin.y >= air.cloud.x"));
     }
 
-    /// The mean pass runs (and has to be ready) only where the composite reads the
-    /// automatic reference: the light's views without a fixed `REF`, as the shader takes it.
+    /// The deck's transmittance steps nothing at the handoff from the flat layers to the volume, in
+    /// itself or in the share, whatever the two strengths (the image's is 1 here): with no coverage the
+    /// mean pass answers the CPU's numbers bit for bit, a thousandth of coverage moves the deck by at
+    /// most a thousandth, and between them it goes from the one to the other.
     #[test]
-    fn the_mean_is_wanted_only_for_the_automatic_reference() {
-        for view in [AirView::None, AirView::Visibility, AirView::Slice, AirView::Share, AirView::Delta, AirView::Off, AirView::Lit, AirView::Rays] {
-            let auto = AirTune { view, reference: None, ..AirTune::default() };
-            assert_eq!(wants_cloud_mean(&auto), matches!(view, AirView::None | AirView::Delta | AirView::Rays), "{view:?}");
-            assert!(!wants_cloud_mean(&AirTune { reference: Some(0.6), ..auto }), "{view:?}: a fixed REF");
+    fn the_decks_handoff_steps_nothing() {
+        use crate::medium_air::deck_share;
+        let eye = Vec3::new(1_000.0, 500.0, 1_000.0);
+        let depth = |_: IVec3| 0.3f32;
+        for strength in [0.3f32, 0.6, 1.0] {
+            for t_flat in [0.0f32, 0.35, 0.7, 1.0] {
+                let at = |presence: f32| {
+                    let (v, mut flat) = mean_fixture(strength, [0.0, presence], eye, 0.7);
+                    flat.mode.z = t_flat;
+                    mean_mirror_all(&v, &flat, eye, Vec3::Y, &depth, &depth)
+                };
+                assert_eq!(at(0.0), Vec3::new(0.7, t_flat, 0.0));
+                let sliver = at(0.001);
+                assert!((sliver.y - t_flat).abs() < 1.1e-3 && (sliver.x - 0.7).abs() < 1.1e-3, "{strength} {t_flat}: {sliver}");
+                // The smoothstep's slope: 0.75 x 1.5 / 0.45 = 2.5.
+                assert!((deck_share(sliver.y, false) - deck_share(t_flat, false)).abs() < 3e-3);
+                let mut before = at(0.0).y;
+                for n in 1..=50 {
+                    let now = at(n as f32 / 50.0).y;
+                    assert!((now - before).abs() < 0.021, "{strength} {t_flat} {n}: {before} then {now}");
+                    before = now;
+                }
+                assert!((before - (-0.3f32).exp()).abs() < 1e-4, "the volume's own, free of both strengths: {before}");
+            }
         }
-        // The composite reads the reference in the light's branch alone, and the uniform's fixed REF first.
+    }
+
+    /// One deck through the day: a uniform optical depth of 2 straight up, its ways 1 / up as long, is
+    /// a closed deck (D at its least) at every light height, at any strength, with the flat layers
+    /// describing the same deck where the light is so low that the ways leave the volume's window; a
+    /// thin sheet keeps its vertical transmittance while the window holds the ways.
+    #[test]
+    fn one_deck_is_one_share_at_every_light_height() {
+        use crate::medium_air::{deck_share, AIR_DECK_LEAST};
+        let eye = Vec3::new(1_000.0, 500.0, 1_000.0);
+        for strength in [0.3f32, 0.6, 1.0] {
+            let at = |tau: f32, up: f32| {
+                let (v, mut flat) = mean_fixture(strength, [1.0, 1.0], eye, 0.9);
+                flat.mode.z = (-tau).exp();
+                let slanted = move |_: IVec3| tau / up;
+                mean_mirror_all(&v, &flat, eye, Vec3::new((1.0 - up * up).sqrt(), up, 0.0), &slanted, &slanted)
+            };
+            for up in [0.01f32, 0.03, 0.06, 0.1, 0.2, 0.306, 0.525, 0.9, 1.0] {
+                let deck = at(2.0, up).y;
+                assert!((deck_share(deck, false) - AIR_DECK_LEAST).abs() < 1e-5, "{strength} {up}: {deck}");
+            }
+            // (Between the band's foot and the least height the power is held, and part of the ways
+            // are in the window: 0.06 would read thinner clouds as thicker, 0.82 for 0.86.)
+            for up in [0.01f32, 0.03, 0.1, 0.2, 0.306, 0.525, 0.9, 1.0] {
+                let thin = at(0.15, up).y;
+                assert!((thin - (-0.15f32).exp()).abs() < 1e-3, "{strength} {up}: {thin}");
+            }
+            assert!((at(2.0, 0.525).z - 1.0).abs() < 1e-5, "whole coverage at 17:30's height");
+        }
+    }
+
+    /// The flat layers' number: theirs, a 0 as 0; 1 with none, no number, or from their plane up, with
+    /// no image needed for any of it.
+    #[test]
+    fn the_flat_deck_is_always_a_number() {
+        let deck = |transmittance: f32| Some(crate::cloud_shadows::FlatDeck { transmittance, plane_height: 9_000.0 });
+        assert_eq!(flat_deck(deck(0.0), 100.0), 0.0);
+        assert_eq!(flat_deck(deck(0.35), 8_999.0), 0.35);
+        assert_eq!(flat_deck(deck(0.35), 9_000.0), 1.0);
+        assert_eq!(flat_deck(None, 100.0), 1.0);
+        for bad in [f32::NAN, f32::INFINITY] {
+            assert_eq!(flat_deck(deck(bad), 100.0), 1.0);
+        }
+        assert_eq!(flat_deck(deck(1.5), 100.0), 1.0);
+    }
+
+    /// The mean pass runs (and has to be ready) only where the composite reads the clouds' mean:
+    /// the light's views, unless both `REF` and `SHARE` are fixed, as the shader takes them.
+    #[test]
+    fn the_mean_is_wanted_for_the_automatic_reference_and_the_deck() {
+        for view in [AirView::None, AirView::Visibility, AirView::Slice, AirView::Share, AirView::Delta, AirView::Off, AirView::Lit, AirView::Rays] {
+            let shows = matches!(view, AirView::None | AirView::Delta | AirView::Rays);
+            for (reference, share, wanted) in [(None, None, true), (Some(0.6), None, true), (None, Some(0.4), true), (Some(0.6), Some(0.4), false)] {
+                let tune = AirTune { view, reference, share, ..AirTune::default() };
+                assert_eq!(wants_cloud_mean(&tune), shows && wanted, "{view:?} REF {reference:?} SHARE {share:?}");
+            }
+        }
+        // The composite reads the reference and the deck's share in the light's branch alone, and the
+        // uniform's fixed REF first.
         let compose = COMPOSE.replace("\r\n", "\n");
         assert_eq!(compose.matches("air_reference()").count(), 2, "the function and its one call");
         let light = compose.find("if code == VIEW_NONE || code == VIEW_DELTA || code == VIEW_RAYS {").expect("the light's branch");
         let call = compose.find("px.v_ref = air_reference();").expect("the call");
-        assert!(light < call && call < compose.find("// The debug views read sample 0.").expect("the diagnostic views"));
+        let deck = compose.find("px.scale = air.phase2.z * air_deck_share();").expect("the deck's share's call");
+        let views = compose.find("// The debug views read sample 0.").expect("the diagnostic views");
+        assert!(light < call && call < views && light < deck && deck < views);
+        assert_eq!((compose.matches("air.cloud_mode.y").count(), compose.matches("air.cloud_mode.z").count(), compose.matches("air.cloud_mode.w").count()), (1, 1, 0));
         assert!(compose.contains("if air.rays2.y > 0.0 {\n        return clamp(air.rays2.y, 0.05, 1.0);"));
     }
 
-    /// The mean pass's result lands on `cloud_mode.y` and on nothing else: the byte offset of that
-    /// number in the uniform as it is written to the GPU.
+    /// The mean pass's result lands on `cloud_mode.yz` and on nothing else (its x, whether the image
+    /// is in use, the grid reads): the byte offsets of those in the uniform as it is written to the GPU.
     #[test]
     fn the_mean_is_copied_over_the_reference_visibility() {
         use bevy::render::render_resource::encase;
@@ -2117,14 +2239,17 @@ pub(crate) mod tests {
             buffer.into_inner()
         };
         let plain = bytes(&AirGpuUniform::default());
-        let marked = bytes(&AirGpuUniform { cloud_mode: Vec4::new(0.0, 0.625, 0.0, 0.0), ..default() });
+        let marked = bytes(&AirGpuUniform { cloud_mode: Vec4::new(0.0, 0.625, 0.375, 0.0), ..default() });
         let at = CLOUD_MEAN_OFFSET as usize;
-        assert_eq!(marked[at..at + 4], 0.625f32.to_le_bytes());
+        // What the copy takes from the mean pass's buffer, the vec4's first two numbers.
+        let copied: Vec<u8> = [0.625f32, 0.375].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(copied.len() as u64, CLOUD_MEAN_COPY);
         let mut patched = plain;
-        patched[at..at + 4].copy_from_slice(&0.625f32.to_le_bytes());
+        patched[at..at + copied.len()].copy_from_slice(&copied);
         assert_eq!(patched, marked);
-        assert_eq!(CLOUD_MEAN_OFFSET % 4, 0);
+        assert!(CLOUD_MEAN_OFFSET.is_multiple_of(4) && CLOUD_MEAN_COPY.is_multiple_of(4) && CLOUD_MEAN_COPY <= CLOUD_MEAN_BYTES);
         assert!(COMPOSE.contains("let m = air.cloud_mode.y;"), "the composite's reference");
+        assert!(COMPOSE.contains("clamp((air.cloud_mode.z - AIR_DECK_FROM)"), "the deck's share");
     }
 
     /// The uniform's fields, in order, as both shaders declare `AirUniform`, and its size.
@@ -3320,6 +3445,10 @@ pub(crate) mod tests {
         assert_eq!(u.fog_colour, Vec4::new(0.5, 0.4, 0.3, 1.0));
         assert_eq!(u.misc, Vec4::new(AirOccluders::Terrain.code() as f32, medium_air::AIR_SAMPLES_DEFAULT as f32, cam.tune.sky_weight, cam.tune.sky_phase));
         assert_eq!(u.viewport, Vec4::new(4.0, 6.0, 1280.0, 720.0));
+        // rays2: LIFT, the REF override (-1 for auto), SHADE, whether SHARE is set.
+        assert_eq!(u.rays2, Vec4::new(cam.tune.lift, -1.0, cam.tune.shade, 0.0));
+        let set = AirCamera { tune: AirTune { share: Some(0.0), reference: Some(0.6), ..cam.tune }, ..cam };
+        assert_eq!(air_uniform(&set, &normed, &inputs).rays2, Vec4::new(cam.tune.lift, 0.6, cam.tune.shade, 1.0));
         assert_eq!(u.world_from_view.w_axis.truncate(), Vec3::new(1.0, 2.0, 3.0));
     }
 

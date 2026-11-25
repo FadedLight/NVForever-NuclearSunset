@@ -4100,15 +4100,17 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     post-processing (so before FSR, DLSS, bloom, eye adaptation, tonemapping and TAA). The medium
     is the weather's own fog: each froxel stores the fog share's steps and their visibility-weighted
     sum, and the light is a re-shading of the fog's own light in the fog's display-value blend, with
-    the fog colour as the budget near and the pixel's own colour on the sky (slide 62), shadow never
-    taking more than the share the fog gave, every result held inside the HDR target's range.
+    the fog colour as the budget near and the pixel's own colour on the sky and on land the fog covers
+    (slide 62), shadow never taking more than the share the fog gave, a gain never lifting a bright sky
+    pixel past white, every result held inside the HDR target's range.
   - *What follows the weather*: the fog's share curve and colour from the camera's fog each frame,
-    the sunlit share from the sun and ambient lights as sky.rs sets them, the clouds' mean shadow
+    the sunlit share from the sun and ambient lights as sky.rs sets them, weakened under a closed deck by
+    what the clouds let through of a light from above (Cloud shadows on), the clouds' mean shadow
     as the reference the rays are measured against; a fog the light cannot read, a fog not blended
     in display values, night, interiors and under water are shown the plain way. The look's
     constants (ray contrast, lift, shade limit, phase floor, sky weights) are artistic choices made
     from pictures, all live in a tune file (`NVF_PLAY_DEBUG_MEDIUM_LIGHT_TUNE`, a
-    developer aid too).
+    developer aid too); the ends of the fog blend, the deck's share and the bright hold are constants.
   - *Cost so far*: volumetric-medium.md, "Cost and memory" (the grid pass's two walks, measured on two
     GPUs); 6.9 MiB a volume, two with the filter. Not
     done: a temporal filter, the cost of the light volume's reads, the moon, local lights, FSR's reactive

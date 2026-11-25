@@ -2899,6 +2899,33 @@ forbid = [
 ]
 
 [[scenario]]
+name = "volumetric-clouds-taa"
+source = "[design, #3032] engine/nvforever/src/medium.rs, medium_trace.wesl, medium_resolve.wesl: the volumetric medium's default mode under native TAA at a fixed 1280x720, the view standing still (the turn: volumetric-clouds-taa-turn), at the level High: the buffer at two fifths (512x288) and its 171x96 trace target are made, both passes' pipelines compile, the trace pass draws, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/taa.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--graphics-only", "volumetric-clouds-high,taa"]
+run_seconds = 20
+expect = [
+  { text = "volumetric clouds: level High (far buffer scale 2.5, probe spacing x1)", count = 1, label = "the level named is in force, the view still" },
+  { text = "volumetric medium: far buffer 512x288 (two fifths of the main pass's render size), one ray in nine a frame into 171x96", label = "two fifths of 1280x720, one ray per 3x3 tile, the view still" },
+  { text = "volumetric medium: trace pass drawn (512x288 buffer, render size 1280x720, one ray in nine into 171x96, reconstructed; view: 1 samples, jittered)", label = "both passes drew, at two fifths of the render size, on a single-sampled jittered view, the view still" },
+  { re = 'graphics: light glow, temporal anti-aliasing, volumetric clouds$', label = "TAA is the anti-aliasing in force (not the multisampling), the view still" },
+  { re = 'pipeline \d+ ready after \d+ ms: medium_resolve_pipeline', label = "the reconstruction compiles, the view still" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready, the view still" },
+  { text = "volumetric medium: far buffer 512x288 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way, the view still" },
+]]
+forbid = [
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under TAA, the view still" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under TAA, the view still" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers under TAA (a false hand-back), the view still" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under TAA, the view still" },
+  { text = "failed to process shader", label = "a shader that does not build under TAA, the view still" },
+]
+
+[[scenario]]
 name = "volumetric-clouds-taa-turn"
 source = "[design, #3032] engine/nvforever/src/medium.rs, medium_trace.wesl, medium_resolve.wesl: the volumetric medium's default mode under native TAA at a fixed 1280x720, with the view turning at 60 degrees a second (NVF_PLAY_DEBUG_MEDIUM_TURN) so the reprojection, the clamp and the cut test run, at the level High: the buffer at two fifths (512x288) and its 171x96 trace target are made, both passes' pipelines compile, the trace pass draws, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. The look of the turn is checked in pictures by hand"
 areas = ["renderer", "graphics", "weather"]
@@ -2926,6 +2953,34 @@ forbid = [
   { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers while turning under TAA (a false hand-back)" },
   { text = "failed and will not be tried again", label = "a pipeline that failed for good under TAA" },
   { text = "failed to process shader", label = "a shader that does not build under TAA" },
+]
+
+[[scenario]]
+name = "volumetric-clouds-fsr"
+source = "[design, #3032] engine/nvforever/src/medium.rs: the volumetric medium's default mode under FSR Quality at a fixed 1280x720 output (render size 853x480), the view standing still (the turn: volumetric-clouds-fsr-turn), at the level Performance: the buffer is a quarter of the render size, not the output's (214x120, trace 72x40), both passes' pipelines compile and draw, and the flat layers give way only after the proxy's pipeline is ready, without a shader, pipeline or rendering error. DLSS needs files a player supplies: no scenario"
+areas = ["renderer", "graphics", "weather"]
+paths = ["engine/nvforever/src/medium*", "engine/nvforever/src/volumetric_clouds*", "engine/nvforever/src/cloud_noise.rs", "engine/nvforever/src/fsr.rs", "engine/nvforever/src/upscaler/**"]
+env = { WGPU_BACKEND = "vulkan", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PIPELINE_LOG = "1" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--weather", "NVBlackMountainWeather", "--size", "1280x720", "--fsr", "quality", "--graphics-only", "volumetric-clouds-performance"]
+run_seconds = 20
+expect = [
+  { text = "FSR dispatch active: 3.1.4, 853x480 -> 1280x720", label = "FSR Quality is in force, the view still" },
+  { text = "volumetric clouds: level Performance (far buffer scale 4, probe spacing x2)", count = 1, label = "the level named is in force, the view still" },
+  { text = "volumetric medium: far buffer 214x120 (a quarter of the main pass's render size), one ray in nine a frame into 72x40", label = "a quarter of FSR's render size, the view still" },
+  { text = "volumetric medium: trace pass drawn (214x120 buffer, render size 853x480, one ray in nine into 72x40, reconstructed; view: 1 samples, jittered)", label = "both passes drew at a quarter of FSR's render size, the view still" },
+]
+order = [[
+  { re = 'pipeline \d+ ready after \d+ ms: volumetric_clouds_pipeline', label = "the proxy's own pipeline is ready, the view still" },
+  { text = "volumetric medium: far buffer 214x120 written whole and volumetric_clouds_pipeline ready, the clouds drawn from it", label = "before the flat layers give way, the view still" },
+]]
+forbid = [
+  { text = "FSR dispatch failed", label = "an FSR dispatch failed, the view still" },
+  { text = "FSR 3.1 unavailable", label = "FSR not available, the view still" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the medium under FSR, the view still" },
+  { re = 'pipeline \d+ failed after \d+ ms: (medium_|volumetric_clouds_pipeline)', label = "a pipeline of the medium or the proxy failed under FSR, the view still" },
+  { text = "volumetric medium: hand-back to the flat layers", label = "the volume handed back to the flat layers under FSR (a false hand-back), the view still" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good under FSR, the view still" },
+  { text = "failed to process shader", label = "a shader that does not build under FSR, the view still" },
 ]
 
 [[scenario]]

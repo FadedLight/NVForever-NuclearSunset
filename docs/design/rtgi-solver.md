@@ -3,8 +3,9 @@
 The plan is a crate that works out the light that an interior's lamps throw back from its
 surfaces, as a small 3D texture, on the CPU and without Bevy. It is built in parts, each with
 tests on scenes it makes itself. **Built: part 1, the ray scene, part 2, the light gathered at
-points of the air, and part 3, the volume.** Nothing in the game calls it yet: there is no
-setting, no upload and no shader. It ships no data.
+points of the air, and part 3, the volume.** Nothing in the game solves anything yet and
+there is no setting; of the crate the game has the volume and its read alone
+([rtgi-volume](rtgi-volume.md)). It ships no data.
 
 ## The whole
 

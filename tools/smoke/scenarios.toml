@@ -1264,6 +1264,62 @@ forbid = [
 ]
 
 [[scenario]]
+name = "rtgi-made-volume"
+source = "[design, #3009] docs/design/rtgi-volume.md: a bounce light volume made by hand (engine/nvforever/src/rtgi_volume/made.rs), bound the way a solved one will be: the empty texture under the start's screen, the made one after it with the same view key; the pipelines that read it are there, none failed, and a compute pass's reads of it on the GPU are within their bounds of the CPU's"
+note = "needs NVF_SMOKE_DEV_AIDS: an nvforever built with --features dev-aids (a release build does not read the aid)."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+areas = ["renderer", "graphics"]
+paths = [
+  "engine/nvforever/src/rtgi_*", "engine/nvforever/src/rtgi_volume/**", "engine/nvforever/src/lights.rs", "engine/nvforever/src/sun_visibility.rs", "engine/nvf-rtgi/src/volume.rs",
+  "engine/nvf-assets/src/nif_material*", "engine/vendor/bevy_pbr/src/render/mesh*.rs",
+]
+# A home of its own: the list of pipelines it keeps has the variants that read.
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_DEBUG_RTGI_MADE = "1", NVFOREVER_HOME = "rtgi-made-home" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 15
+order = [[
+  "lights: RTGI volume hook installed",
+  { re = 'rtgi: cell [0-9A-F]{8}, revision 1: the empty texture of \[3, 3, 12\] bound', label = "the empty texture is bound under the start's screen" },
+  "loading screen down after",
+  { re = 'rtgi: cell [0-9A-F]{8}, revision 1: a solved texture of \[5, 4, 24\] bound', label = "the made one takes its place when the screen is down" },
+  { re = 'rtgi: readback: ', label = "the GPU's reads come back" },
+]]
+expect = [
+  { re = 'rtgi: pipelines that read the volume: (?P<n>\d+) there, 0 to come, 0 failed', range = [1, 100000], label = "at least one pipeline that reads is there and none failed" },
+  { re = 'rtgi: readback: 96 reads, the largest difference is (?P<n>[\d.]+) of its bound', range = [0, 1], all = true, label = "every read on the GPU is within its bound of the CPU's" },
+  { re = 'rtgi: \d+ allocations, \d+ uploads, \d+ binds, 1 dispatches; view bind groups \d+, with RTGI entries (?P<n>\d+)', range = [1, 100000000], label = "view bind groups were made with the three entries" },
+]
+forbid = [
+  { text = "rtgi: unbound", label = "it stays bound" },
+  { text = "asked for with no screen up", label = "it is bound under the start's screen" },
+  { text = "pipelines that read the volume failed", label = "a pipeline that reads failed for good" },
+  { re = 'rtgi: .*; the stock light', label = "the hook or the device refused it" },
+  { text = "hook's anchors not found", label = "the lighting hooks apply" },
+  { text = "Caught rendering error", label = "a rendering (validation) error with the volume bound" },
+  { text = "GPU validation error", label = "a validation error with the volume bound" },
+  { text = "Shader validation error", label = "a shader that reads the volume does not compile" },
+  { text = "failed and will not be tried again", label = "a pipeline that failed for good" },
+]
+
+[[scenario]]
+name = "rtgi-off-interior"
+source = "[design, #3009] docs/design/rtgi-volume.md: without a request nothing of the bounce light volume is made, sent, bound or dispatched in an interior, counted where bevy_pbr makes the mesh view bind groups too"
+note = "needs NVF_SMOKE_DEV_AIDS: the line is written by an nvforever built with --features dev-aids."
+requires = ["NVF_SMOKE_DEV_AIDS"]
+areas = ["renderer", "graphics"]
+paths = ["engine/nvforever/src/rtgi_*", "engine/nvforever/src/rtgi_volume/**", "engine/vendor/bevy_pbr/src/render/mesh_view_bindings.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 10
+expect = [
+  { re = 'rtgi: 0 allocations, 0 uploads, 0 binds, 0 dispatches; view bind groups (?P<n>\d+), with RTGI entries 0$', range = [1, 100000000], label = "nothing was done for the volume, and no view bind group has its entries" },
+]
+forbid = [
+  { text = "rtgi: cell", label = "a volume is bound" },
+  { text = "Caught rendering error", label = "a rendering (validation) error" },
+]
+
+[[scenario]]
 name = "ambient-occlusion-lighting-taa"
 source = "#2897 stage b, docs/design/graphics-enhanced.md §3.1.2: the default placement with temporal anti-aliasing instead of multisampling: the single-sampled pipelines without an upscaler"
 areas = ["renderer", "graphics"]

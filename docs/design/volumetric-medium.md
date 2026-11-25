@@ -1318,7 +1318,8 @@ another; `solid cores: removed (...)` when the light is no longer drawn; nothing
 - Night without a moon is off ("The moonlight", under "The medium").
 - The moonlight's shafts come from what its light is hidden by: the one near shadow cascade of the night, the terrain map (which
   follows the light's own direction, the moon's too) and the clouds. They are faint: by 22:00 and 04:00 in clear weather at
-  Goodsprings a cloud's shadow streak and a pole's shadow show by a few levels of 255; the open air changes by at most 1.5 [observed:
+  Goodsprings a cloud's shadow streak and a pole's shadow show by a few levels of 255. The whole picture's mean moves by -0.6 to +1.9 of 255 against the same clouds with the air off
+  in clear weather (most facing the low moon), by -1.8 in the hazy weather facing the moon, and by under 0.3 in overcast and Zion's weather [observed:
   NVForever runs, 2026-11-25, 1920x1080]. The bright hold, the moon's disc, the Strip's lamps, the Sun shafts' yield in
   the first degrees after sunset (they end at 2 degrees under the horizon, and give way to the moonlit air from
   its first frame) and FSR are not looked at by night.

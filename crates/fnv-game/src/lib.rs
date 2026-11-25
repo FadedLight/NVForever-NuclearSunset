@@ -109,6 +109,7 @@ pub mod idles;
 pub mod intro;
 pub mod jip_ccc;
 pub mod jip_events;
+pub mod knvse_ini;
 mod crosshair_events;
 mod jip_provenance;
 #[cfg(test)]

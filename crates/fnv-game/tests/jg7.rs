@@ -99,12 +99,12 @@ fn switches() {
     assert!(!fnv_game::experience::level_up_due(&g), "ToggleLevelUpMenu 0 holds automatic level-up");
     q(&mut g, "ToggleLevelUpMenu 1");
     assert!(fnv_game::experience::level_up_due(&g), "ToggleLevelUpMenu 1 releases pending level-up");
-    // [documented: Get/SetViewmodelClipDistance, 0 the default; observed: Wave 4
-    // jg_25_yield_timer_and_viewmodel_clip_neg stores negative -5.0 verbatim].
+    // [documented: Get/SetViewmodelClipDistance, 0 the default; observed:
+    // jg_25_yield_timer_and_viewmodel_clip_neg and w4c_b3_05_jg7_bounds_heap store -5.0 verbatim].
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), 0.0);
     q(&mut g, "SetViewmodelClipDistance 2.5");
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), 2.5);
-    q(&mut g, "SetViewmodelClipDistance -5");
+    q(&mut g, "SetViewmodelClipDistance -5.0");
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), -5.0);
     q(&mut g, "SetViewmodelClipDistance 0");
     assert_eq!(n(&mut g, "GetViewmodelClipDistance"), 0.0);
@@ -183,6 +183,8 @@ fn interface_settings() {
     assert_eq!(n(&mut g, "IsMenuPaused 1002"), 1.0);
     assert_eq!(n(&mut g, "GetJohnnyPatch 1"), 1.0);
     assert_eq!(n(&mut g, "GetJohnnyPatch 2"), 0.0);
+    // [observed: w4c_b3_05_jg7_bounds_heap: GetDefaultHeapSize returns 200 when nvse_config.ini is absent].
+    assert_eq!(n(&mut g, "GetDefaultHeapSize"), 200.0);
     // [documented: TogglePipBoy opens on the tab asked for, or closes it].
     q(&mut g, "TogglePipBoy 1003");
     assert_eq!(n(&mut g, "IsMenuPaused"), 1.0);

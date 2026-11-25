@@ -1467,6 +1467,9 @@ pub struct Game<'a> {
     pub showoff: crate::nvse_showoff::ShowOffState,
     /// Mods' INI and other files (`crate::mod_files`).
     pub mod_files: crate::mod_files::ModFiles,
+    /// Runtime settings loaded from `Data\NVSE\Plugins\kNVSE.ini` (`crate::knvse_ini`,
+    /// not saved in snapshots).
+    pub knvse_ini: crate::knvse_ini::KnvseIni,
     pub(crate) ysi_filename: crate::ysi_filename::State,
     /// SUP batch 6's state: the mouse, the cursor, the debug texts, the lockpick menu …
     /// (`crate::nvse_sup6`; the engine fills and takes it).
@@ -2005,12 +2008,6 @@ pub struct Game<'a> {
     /// menus and loading screens, conversations included [hypothesis: as the lines of a
     /// conversation do; image-modifiers.md §3].
     pub image_modifiers: Vec<ActiveImageModifier>,
-    /// Extra stacked instance count per non-animatable IMAD form beyond the single entry
-    /// kept in [`Game::image_modifiers`] (capped at `MAX_IMOD_STACK - 1`), so repeated
-    /// non-animatable re-applies never grow `image_modifiers` without bound while
-    /// `remove_image_modifier` still fires `OnRemoveIMOD` once per stacked instance
-    /// [design]. Not saved.
-    image_modifier_extra_stacks: BTreeMap<FormId, u32>,
     /// ScriptEffectElapsedSeconds inside a ScriptEffectUpdate block (0 elsewhere).
     pub effect_elapsed: f64,
     pub(crate) depth: u32,
@@ -2700,6 +2697,7 @@ impl<'a> Game<'a> {
             hud: Default::default(),
             showoff: Default::default(),
             mod_files: Default::default(),
+            knvse_ini: crate::knvse_ini::KnvseIni::load(),
             ysi_filename: Default::default(),
             sup: Default::default(),
             lu3: Default::default(),
@@ -2783,7 +2781,7 @@ impl<'a> Game<'a> {
             locks: Default::default(),
             senses: Default::default(),
             vats: Default::default(),
-            weather: Default::default(),
+            weather: crate::weather::WeatherState::cold_start(data),
             ui: Default::default(),
             console_requests: Vec::new(),
             mfg: Default::default(),
@@ -2872,7 +2870,6 @@ impl<'a> Game<'a> {
             syncing_effects: false,
             condition_check_due: 0.0,
             image_modifiers: Vec::new(),
-            image_modifier_extra_stacks: BTreeMap::new(),
             effect_elapsed: 0.0,
             depth: 0,
             runs_open: 0,
@@ -3776,7 +3773,8 @@ impl<'a> Game<'a> {
         let opts = self.opts();
         self.udf.push(UdfFrame { value: None, caller: None });
         self.open_run();
-        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds: None };
+        let seconds = Some(self.stateless_udf_seconds());
+        let mut ex = Exec { game: self, unit, locals: Locals::Temp(BTreeMap::new()), ctx, seconds };
         let result = Vm::new(&data.table, &mut ex, opts).run(&block.body).map_err(|e| e.to_string());
         if let Locals::Temp(m) = &ex.locals {
             for (&index, v) in m {
@@ -3950,9 +3948,23 @@ impl<'a> Game<'a> {
         self.run_function_with_seconds(f, on, args, caller, (ctx, None))
     }
 
+    /// Single-frame delta exposed to stateless UDFs (`GetSecondsPassed` when `ctx.inst` is
+    /// `None`): zero while paused in menus, loading, or `FreezeTime`, otherwise the current
+    /// frame step `cfg.frame_seconds` [observed: w4g_03_jip_callback_getsecondspassed].
+    pub(crate) fn stateless_udf_seconds(&self) -> f64 {
+        if self.in_menu() || self.loading || self.gaps.jip3.time_frozen {
+            0.0
+        } else {
+            self.cfg.frame_seconds
+        }
+    }
+
     /// An elapsed value belongs to this UDF invocation and its nested calls only.
-    /// JIP callbacks supply it; ordinary calls and result scripts do not.
+    /// Callers may supply an explicit delta; stateless UDFs without one receive the
+    /// single-frame delta (`stateless_udf_seconds`), while persistent instances keep their
+    /// own clocks and result scripts continue to read zero.
     pub(crate) fn run_function_with_seconds(&mut self, f: &fnv_script::vm::XVal, on: Option<Value>, args: Vec<fnv_script::vm::XVal>, caller: Option<FormId>, (ctx, seconds): (RunCtx, Option<f64>)) -> Result<fnv_script::vm::XVal, String> {
+        let seconds = seconds.or_else(|| Some(self.stateless_udf_seconds()));
         self.nested(move |g| g.run_function_here(f, on, args, caller, (ctx, seconds)))
     }
 
@@ -4269,9 +4281,6 @@ impl<'a> Game<'a> {
         self.handlers = s.handlers;
         self.jip.main_loop = s.main_loop;
         self.jip.restore_main_loop_registrars(s.main_loop_registrars, s.jip_seq);
-        for callback in &mut self.jip.main_loop {
-            callback.last_clock = functions::clock_now(self.time);
-        }
         self.restarted_seen = s.restarted_seen;
         self.handler_seq = s.handler_seq;
         self.pp_put_session(s.pp);
@@ -4663,6 +4672,7 @@ impl<'a> Game<'a> {
     /// ran, each after the previous one was closed, layer5-captures.md §10.1–10.2].
     pub fn tick(&mut self) {
         self.frame += 1;
+        self.sync_knvse_ini();
         self.temp_refs.clear();
         self.sync_player_level();
         // JIP's SetGameMainLoopCallback functions due this frame (task J6), then xNVSE's
@@ -4708,6 +4718,8 @@ impl<'a> Game<'a> {
         self.world.set_power_armor_training(self.player.power_armor || self.tweaks.power_armor_needs_no_training);
         // The player's Equip Broken Items tweak [design: docs/design/tweaks.md].
         self.world.set_player_equips_broken(self.tweaks.equip_broken_items);
+        // The player's No Encounter Zone Level Lock tweak [design: docs/design/tweaks.md].
+        self.world.set_no_lock_encounter_zone_levels(self.tweaks.no_lock_encounter_zone_levels);
         // Cannibal's and Mister Sandman's acts that are over (`crate::activate_choices`).
         if !self.perk_acts.is_empty() {
             self.finish_perk_acts();
@@ -6880,40 +6892,33 @@ impl<'a> Game<'a> {
     /// IMAD in a loop cannot grow memory or `OnRemoveIMOD` loops without bound [design].
     pub const MAX_IMOD_STACK: usize = 64;
 
-    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance for
-    /// `OnRemoveIMOD` counting if already active (`image-modifiers.md §3`). Non-animatable
-    /// re-applies keep a single [`ActiveImageModifier`] entry and track extra stacked
-    /// instances in `image_modifier_extra_stacks` (capped at `MAX_IMOD_STACK - 1`), while
-    /// animatable re-applies keep up to `MAX_IMOD_STACK` independent timers and the
-    /// renderer draws one instance per form [design]. Dispatches xNVSE `OnApplyIMOD`
-    /// PRE-update with `(modifier)` and `on = None` when handled so `IsImageSpaceActive`
-    /// reads `0` on first apply and `1` when stacking onto an already-active modifier
-    /// [documented: GECK wiki NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525,
-    /// xNVSE 6.4.9, 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base
-    /// masters, probes `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice +
-    /// `rimod` twice on `WhiteNonAnimated` `0x000C9AFA`) and
-    /// `b3_core_ex_06_on_apply_imod_event` (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier`
-    /// on `0x00144C41`) in #3679].
+    /// ApplyImageSpaceModifier: the modifier starts playing, stacking another instance in
+    /// exact application order (`image-modifiers.md §3`, `jip-world-12.md §2`). Both
+    /// animatable and non-animatable re-applies push an [`ActiveImageModifier`] entry
+    /// capped at `MAX_IMOD_STACK` per form (evicting the oldest matching entry once at
+    /// capacity so repeated script re-applies stay bounded), while the renderer draws at
+    /// most one instance per form [design]. Dispatches xNVSE `OnApplyIMOD` PRE-update with
+    /// `(modifier)` and `on = None` when handled so `IsImageSpaceActive` reads `0` on first
+    /// apply and `1` when stacking onto an already-active modifier [documented: GECK wiki
+    /// NVSE Event Handling; observed: Fallout: New Vegas 1.4.0.525, xNVSE 6.4.9,
+    /// 2026-11-23, GSDocMitchellHouse (0x00103DF9), 10 official base masters, probes
+    /// `w1_3656_objectives_unholster_imod` (`imod GetHit`, `imod` twice + `rimod` twice on
+    /// `WhiteNonAnimated` `0x000C9AFA`) and `b3_core_ex_06_on_apply_imod_event`
+    /// (`ApplyImageSpaceModifier`/`RemoveImageSpaceModifier` on `0x00144C41`) in #3679;
+    /// application-order non-animatable duplicates observed: 2026-11-24, JIP LN 57.30,
+    /// probe `w4d_24_active_imods_order` in `tools/capture/nvse/catalogs/wave4d_extenders.json`
+    /// (`n=3,0=00054E13,1=001736A8,2=00054E13`)].
     pub fn apply_image_modifier(&mut self, modifier: FormId) {
         if self.handled("onapplyimod") {
             self.dispatch_event("OnApplyIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
         }
-        let animatable = self.data.image_modifiers.get(&modifier).is_some_and(|d| d.animatable);
-        if animatable {
-            let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
-            if active >= Self::MAX_IMOD_STACK {
-                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
-                    self.image_modifiers.remove(pos);
-                }
+        let active = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if active >= Self::MAX_IMOD_STACK {
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
             }
-            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
-        } else if let Some(existing) = self.image_modifiers.iter_mut().find(|m| m.modifier == modifier) {
-            existing.elapsed = 0.0;
-            let extra = self.image_modifier_extra_stacks.entry(modifier).or_insert(0);
-            *extra = (*extra).saturating_add(1).min((Self::MAX_IMOD_STACK - 1) as u32);
-        } else {
-            self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
         }
+        self.image_modifiers.push(ActiveImageModifier { modifier, elapsed: 0.0 });
         self.emit(EventKind::ImageModifierApplied { modifier });
     }
 
@@ -6927,26 +6932,21 @@ impl<'a> Game<'a> {
     /// `WhiteNonAnimated` `0x000C9AFA` -> 2 `OnRemoveIMOD` callbacks with `IsActive=1`,
     /// then 0 on inactive `rimod`) in #3679].
     pub fn remove_image_modifier(&mut self, modifier: FormId) -> bool {
-        let vec_count = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
-        if vec_count == 0 {
-            self.image_modifier_extra_stacks.remove(&modifier);
+        let total = self.image_modifiers.iter().filter(|m| m.modifier == modifier).count();
+        if total == 0 {
             return false;
         }
-        let extra = self.image_modifier_extra_stacks.remove(&modifier).unwrap_or(0) as usize;
-        let total = vec_count.saturating_add(extra);
         let mut removed = false;
-        for i in 0..total {
+        for _ in 0..total {
             if !self.image_modifiers.iter().any(|m| m.modifier == modifier) {
                 break;
             }
             if self.handled("onremoveimod") {
                 self.dispatch_event("OnRemoveIMOD", vec![fnv_script::vm::XVal::Ref(modifier.0)], None);
             }
-            if i >= extra {
-                if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
-                    self.image_modifiers.remove(pos);
-                    removed = true;
-                }
+            if let Some(pos) = self.image_modifiers.iter().position(|m| m.modifier == modifier) {
+                self.image_modifiers.remove(pos);
+                removed = true;
             }
         }
         if removed {
@@ -7435,6 +7435,7 @@ impl<'a> Game<'a> {
         g.radio.npc_radios = s.npc_radios.clone();
         g.weather.shown = s.weather_shown;
         g.weather.raining = s.raining;
+        g.weather.clear_measurement();
         g.provocations.grudges = s.grudges.iter().copied().collect();
         g.provocations.forgiven = s.forgiven.clone();
         g.nav_switches = s.nav_switches.clone();
@@ -8143,9 +8144,6 @@ impl Host for Exec<'_, '_> {
     }
 
     fn ext_call(&mut self, name: &str, on: Option<Value>, args: &[fnv_script::vm::XVal]) -> Option<Result<fnv_script::vm::XVal, String>> {
-        if crate::ysi_filename::handles(name, args) {
-            return Some(crate::ysi_filename::call(self.game, on, args));
-        }
         if functions::player_source::handles(name) {
             let source_ctx = Ctx { unit: self.unit.shared_key().clone(), opcode: 0, on: None, self_ref: self.ctx.self_ref,
                 action_ref: self.ctx.action_ref, quest: self.ctx.quest, inst: None, in_condition: false };

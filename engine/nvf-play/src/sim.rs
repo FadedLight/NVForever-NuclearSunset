@@ -46,7 +46,7 @@ impl SimState {
     /// `game.leveled_at` there would miss every fixed level.
     pub fn leveled_at(&self, game: &fnv_game::Game<'_>, r: FormId) -> fnv_sim::zones::LevelAt {
         let player = game.player.level.map_or(self.world.config().player_level, |l| l.clamp(1, i32::from(u16::MAX)) as u16);
-        self.world.level_at(r, player)
+        self.world.level_at_with_zone_lock(r, player, !game.tweaks.no_lock_encounter_zone_levels)
     }
 
     /// The seed and level `r`'s leveled picks are made with, as the game makes them in a

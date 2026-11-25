@@ -11,6 +11,34 @@ tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repos
   [`docs/nuclear-sunset/FIXES.md`](docs/nuclear-sunset/FIXES.md).
 - Debug tools (Bug Log, `bughunt`): [`docs/debug-tools.md`](docs/debug-tools.md).
 
+## Install and play
+
+1. Have Nuclear Sunset installed through Wabbajack/Mod Organizer 2 as usual (its stock
+   game folder, `[NoDelete] Stock New Vegas`, and a profile).
+2. Download the newest `NVForever-NuclearSunset-*.zip` from this fork's
+   [releases](https://github.com/FadedLight/NVForever-NuclearSunset/releases) and unpack it
+   anywhere **outside** the game and MO2 folders.
+3. Edit the paths at the top of `Play Nuclear Sunset.cmd` in the zip (your MO2 instance and
+   profile name), then run it. It starts the game with
+   `--data "<MO2>\[NoDelete] Stock New Vegas\Data" --mo2 "<MO2>" --profile "<profile>"`.
+4. Once, add Nuclear Sunset's start quest to NVForever's own settings: in
+   `Documents\My Games\NVForever\NVForever.ini` (made at the first start) add a `[General]`
+   section with `sCharGenQuest=0x001FFFF8`. Without it a new game starts at Doc Mitchell's
+   instead of TTW's start.
+
+NVForever never writes into the game folder, the MO2 folders or `Documents\My Games\FalloutNV`.
+
+## Changelog
+
+**2026-11-25** (after the upstream sync; notes 39–44 in
+[LOCAL-CHANGES.md](docs/nuclear-sunset/LOCAL-CHANGES.md))
+- A new game reaches the world in about 6 s instead of 98 s, and the new-game scripts take
+  about 5 s instead of 2.5 min: file questions go through the MO2 index (39).
+- Start-up boxes gone: "Outdated xNVSE plugins" (40), "B42 Inertia missing requirement"
+  (41), "enable JohnnyGuitar patches: JIP Fixes" (42), "problem compiling
+  ScaledRecurringChallenges.gek" (43), TTW "falloutcustom.ini misconfigured" (44).
+- Engine tests (6,106) and clippy on both workspaces pass on Windows.
+
 ## Sync with upstream, 2026-11-25
 
 Upstream `main` (`bd0c8f4`, 2,475 commits past `v0.8.0`) was merged into this branch (a merge

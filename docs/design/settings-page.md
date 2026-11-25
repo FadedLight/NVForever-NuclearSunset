@@ -123,7 +123,7 @@ line has a soft dark glow; the arrows and the scroll bar are drawn shapes
 (`engine/nvf-play/src/menu_shapes.rs`), and they, the list boxes and the hover and selection
 boxes have the glow too; the selection box is drawn under a row and takes no room, so nothing
 moves when a row is chosen [design: owner 2026-11-15, second and third tests]. The quit
-question is two columns of three lines, centred in the view: "Warning", what is lost and the
+question is two columns of three lines, centred in the view: "Quit", what is lost and the
 question at the left, the answers (bold) at the right. The load page's band reaches as far past
 the saves' right side as past their left, with the same dark column; the sliders' meters and
 the scroll bar have the glow too (fourth build).

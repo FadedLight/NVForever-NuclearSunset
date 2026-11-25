@@ -6565,7 +6565,7 @@ env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_SCRIPT = "3:objective:
 args = ["--cell", "GSHouseInterior03", "--play", "--no-voice"]
 run_seconds = 45
 order = [[
-  "quest message on screen: Quest added: BACK IN THE SADDLE",
+  "quest message on screen: New quest: BACK IN THE SADDLE",
   { text = "quest message on screen: Talk to Sunny Smiles in the Prospector Saloon." },
   { text = "quest message on screen: COMPLETED: Talk to Sunny Smiles in the Prospector Saloon. | Meet Sunny Smiles behind the Prospector Saloon." },
 ]]
@@ -8220,7 +8220,7 @@ args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hou
 run_seconds = 40
 order = [[
   "fast travel: over-encumbered, but Has Fast Travel Always (Long Haul) lets the player travel",
-  'fast travel: asks "Do you want to travel to Primm?" (0x000CDF46)',
+  'fast travel: asks "Travel to Primm?" (0x000CDF46)',
   { re = 'fast travel: to Primm \(0x000CDF46\): arrive at its linked reference', label = "and goes" },
 ]]
 forbid = [{ re = 'fast travel: to Primm .* refused \(Encumbered\)', label = "refused for the load" }]
@@ -10652,10 +10652,10 @@ expect = [
   { re = 'CraigBooneREF: package FollowersBooneFollowPlayerLONG', label = "his long Follow package" },
   { re = 'companion wheel: aggressive_passive \(Aggressive\): CraigBooneREF says \S+ \(FollowersTacticsCombatAggressive\)', label = "Aggressive" },
   { re = 'companion wheel: ranged_melee \(Melee\): CraigBooneREF says \S+ \(FollowersTacticsCombatMelee\)', label = "Melee (his combat style)" },
-  { re = 'companion wheel: stimpak \(Use Stimpak\): \S+ used on CraigBooneREF', label = "a stimpak used on the hurt companion" },
-  { re = 'CraigBooneREF: backs up from the player', label = "Back Up walks him away" },
+  { re = 'companion wheel: stimpak \(Heal\): \S+ used on CraigBooneREF', label = "a stimpak used on the hurt companion" },
+  { re = 'CraigBooneREF: backs up from the player', label = "Step Back walks him away" },
   { re = 'sneaking: CraigBooneREF .*crouches and sneaks', label = "he sneaks with the player" },
-  { re = 'menu: a script opens .*inventory \(OpenTeammateContainer\)', label = "Open Inventory opens his inventory" },
+  { re = 'menu: a script opens .*inventory \(OpenTeammateContainer\)', label = "Inventory opens his inventory" },
   { re = 'menu: open Container.*\(\d+ non-playable stacks hidden\)', label = "his rifle and Magical Companion Ammo (Non-Playable) are not listed (owner, 2026-10-20)" },
   { re = 'companion wheel summary: opened 3 times', label = "the summary" },
 ]
@@ -12630,11 +12630,11 @@ env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST
 args = ["--cell", "Goodsprings", "--pos=-45600,65000,7000", "--play", "--hour", "12", "--no-voice", "--no-messages", "--npc-packages", "000F573F,0013E5BB"]
 run_seconds = 18
 expect = [
-  { re = 'hud: enemy health .* \(See Enemy Health: "HP:\d+ DT:\d+\.\d\d"\)', label = "Living Anatomy: the line under the name, as the original's HP:250 DT:15.00" },
+  { re = 'hud: enemy health .* \(See Enemy Health: "Health \d+  DT \d+\.\d"\)', label = "Living Anatomy: the line under the name, our own form Health 250  DT 15.0 (#2984)" },
   { re = 'combat: Meltdown: 0x[0-9A-F]{8} gives off MinePlasmaExplosion \(0x00000014.s kill with WeapLaserPistol\)', label = "a laser kill gives off the Meltdown Explosion" },
   { re = 'combat: explosion MinePlasmaExplosion at', label = "and it goes off" },
 ]
-manual = "living_anatomy_bar.png: the dog's name under the enemy bar and HP:<n> DT:<n.nn> centred under it, both red"
+manual = "living_anatomy_bar.png: the dog's name under the enemy bar and Health <n>  DT <n.n> centred under it, both red"
 
 [[scenario]]
 name = "perk-implant-y3"
@@ -12977,7 +12977,7 @@ env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--pos=-69850,5700,8650", "--hour", "12"]
 run_seconds = 28
 expect = [
-  { re = 'hud: sneak \[(HIDDEN|DETECTED|CAUTION|DANGER)\]', label = "a sneak word once the player sneaks" },
+  { re = 'hud: sneak \[(UNSEEN|SPOTTED|ALERT|COMBAT)\]', label = "a sneak word once the player sneaks" },
   { re = 'hud: enemy health \S.* 0x[0-9A-F]{8} \d+ %', label = "the bighorner's health on the enemy bar" },
 ]
 order = [[
@@ -12989,8 +12989,8 @@ order = [[
 
 [[scenario]]
 name = "hud-sneak-companion"
-source = "issue #1159 (docs/spec-notes/hud.md §9): sneaking with only a following companion near shows [HIDDEN], though the companion detects the player"
-note = "Boone hired by his recruit line at 3 s in his room (as follower-boone; no one else in the cell); the player sneaks at 14 s, Boone following beside: his detection of the player is measured and logged, the sneak word stays [HIDDEN]"
+source = "issue #1159 (docs/spec-notes/hud.md §9): sneaking with only a following companion near shows [UNSEEN], though the companion detects the player"
+note = "Boone hired by his recruit line at 3 s in his room (as follower-boone; no one else in the cell); the player sneaks at 14 s, Boone following beside: his detection of the player is measured and logged, the sneak word stays [UNSEEN]"
 areas = ["hud", "detection", "followers"]
 paths = ["engine/nvf-play/src/hud.rs", "crates/fnv-game/src/followers.rs"]
 env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "3:info:0x0015F30D:CraigBooneREF", NVF_PLAY_TEST_CONTROL = "14:sneak" }
@@ -12999,17 +12999,17 @@ run_seconds = 24
 expect = [
   { re = 'CraigBooneREF: package FollowersBooneFollowPlayerDEFAULT', label = "hired: his Follow package" },
   { re = 'detection: \S*Boone\S* .*→ the player: \S+ → detected', label = "Boone detects the player" },
-  { re = 'hud: sneak \[HIDDEN\]', label = "the sneak word is [HIDDEN]" },
+  { re = 'hud: sneak \[UNSEEN\]', label = "the sneak word is [UNSEEN]" },
 ]
 forbid = [
-  { re = 'hud: sneak \[(DETECTED|CAUTION)\]', label = "Boone alone sets neither [DETECTED] nor [CAUTION]" },
+  { re = 'hud: sneak \[(SPOTTED|ALERT)\]', label = "Boone alone sets neither [SPOTTED] nor [ALERT]" },
 ]
 
 # ------------------------------------------------------------------ enemies left behind (issue #3390)
 
 [[scenario]]
 name = "hud-sneak-left-behind"
-source = "issue #3390 (docs/design/alert.md §2): an enemy whose pair with the player is measured no more (its cell unloaded) loses the player: [DANGER] goes, and it goes Lost and then Normal on the timers"
+source = "issue #3390 (docs/design/alert.md §2): an enemy whose pair with the player is measured no more (its cell unloaded) loses the player: [COMBAT] goes, and it goes Lost and then Normal on the timers"
 note = "a gecko (NVCrGecko, the first created reference, 0xFF000000) placed at the player in Goodsprings at 3 s, put 600 units away and set on the player at 6 s, the player sneaking from 7 s; at 10 s the player is moved to the XMarker in Boone's room (0x000CAEB6, NovacBoonesRoom), where no enemy is. The gecko: hidden 1 s later, Lost 15 s after it last detected the player, Normal 30 s after it was hidden. Not run yet"
 areas = ["hud", "detection", "combat"]
 paths = ["crates/fnv-game/src/awareness.rs", "engine/nvforever/src/detection.rs", "engine/nvf-play/src/hud.rs"]
@@ -13018,8 +13018,8 @@ args = ["--cell", "Goodsprings", "--pos=-68375,4800,8700", "--heading", "0", "--
 run_seconds = 70
 order = [[
   { re = 'alert: .*FF000000 (Normal|Alert) → Combat', label = "the gecko fights the player" },
-  { re = 'hud: sneak \[DANGER\]', label = "in the fight the sneak word is [DANGER]" },
-  { re = 'hud: sneak \[(HIDDEN|DETECTED)\]', label = "left behind, it is [DANGER] no more" },
+  { re = 'hud: sneak \[COMBAT\]', label = "in the fight the sneak word is [COMBAT]" },
+  { re = 'hud: sneak \[(UNSEEN|SPOTTED)\]', label = "left behind, it is [COMBAT] no more" },
   { re = 'alert: .*FF000000 Combat → Lost', label = "the gecko loses the player" },
   { re = 'alert: .*FF000000 Lost → Normal', label = "and gives up" },
 ]]
@@ -13441,14 +13441,14 @@ order = [[
 
 [[scenario]]
 name = "reputation-box"
-source = "owner's playtest list 5, items 12 and 13 (docs/spec-notes/reputation.md, hud.md §11): leaving the start finds Goodsprings ('You have discovered'); fame with Goodsprings opens its 'Liked' box, infamy with the Powder Gangers their boxes up to 'Vilified'; the Pip-Boy's General page lists both"
+source = "owner's playtest list 5, items 12 and 13 (docs/spec-notes/reputation.md, hud.md §11): leaving the start finds Goodsprings ('Place found'); fame with Goodsprings opens its 'Liked' box, infamy with the Powder Gangers their boxes up to 'Vilified'; the Pip-Boy's General page lists both"
 areas = ["hud", "pipboy"]
 paths = ["engine/nvf-play/src/reputation.rs", "engine/nvf-play/src/message_menu.rs", "engine/nvf-play/src/crime.rs", "engine/nvf-play/src/compass.rs", "engine/nvf-play/src/pipboy/stats/*", "crates/fnv-game/src/functions/reputation.rs"]
 env = { NVF_PLAY_TEST_TILE_MENUS = "", NVF_PLAY_TEST_SCRIPT_MENUS = "2.5", NVF_PLAY_TEST_CONSOLE = "12:player.addreputation 00104C22 1 5;12.3:close;17:player.addreputation 001558E6 0 5;17.2:player.addreputation 001558E6 0 5;17.4:player.addreputation 001558E6 0 5;17.6:close", NVF_PLAY_TEST_PIPBOY = "32:open,33:page=stats,34:tab=4,36:close", NVF_PLAY_TEST_SHOTS = "6,14,19,35" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--heading", "50", "--size", "1280x720"]
 run_seconds = 38
 expect = [
-  { re = 'quest message on screen: You have discovered: GOODSPRINGS', label = "the start's town found" },
+  { re = 'quest message on screen: Place found: GOODSPRINGS', label = "the start's town found" },
   { re = 'compass: \d+ actors \(\d+ hostile\), [1-9]\d* map markers \([1-9]\d* found\)', label = "the found town's marker on the compass" },
   "reputation: Goodsprings Neutral -> Liked (fame 12, infamy 0)",
   { re = 'reputation: Powder Gangers \S.* -> Vilified', label = "the Powder Gangers' last box Vilified" },
@@ -16134,7 +16134,7 @@ run_seconds = 45
 order = [[
   { re = 'fast travel: to Primm \(0x000CDF46\) refused \(Script\); the box says "Fast travel is currently unavailable from this location\."', label = "refused while a script blocks it (sNoFastTravelScriptBlock, FalloutNV.esm's text)" },
   'fast travel: answered "OK"',
-  'fast travel: asks "Do you want to travel to Primm?" (0x000CDF46)',
+  'fast travel: asks "Travel to Primm?" (0x000CDF46)',
   'fast travel: answered "Yes"',
   { re = 'fast travel: to Primm \(0x000CDF46\): arrive at its linked reference 0x00169225', label = "the destination is the marker's linked reference" },
   "pipboy: down",
@@ -16187,7 +16187,7 @@ order = [[
   { re = 'fast travel: to Primm \(0x000CDF46\) refused \(Place\)', label = "refused: an interior" },
   'fast travel: answered "OK"',
   { text = "script: test aid calls GetPCCanFastTravel = Num(1.0)", label = "the inverted cell allows it" },
-  'fast travel: asks "Do you want to travel to Primm?" (0x000CDF46)',
+  'fast travel: asks "Travel to Primm?" (0x000CDF46)',
   'fast travel: answered "No"',
 ]]
 
@@ -26733,16 +26733,16 @@ order = [[
 expect = [
   { re = 'tiles: HUDMainMenu drawn from tiles \(\d+ file tiles, [1-9]\d* code tiles\); hand-built HUD hidden\s*$', label = "the messages, quest notices and subtitles are no longer kept hand-built" },
   "corner message: \"You are now Well Rested!\" for 10 s, icon default",
-  "tiles: QuestReminder banner Quest added: BACK IN THE SADDLE",
+  "tiles: QuestReminder banner New quest: BACK IN THE SADDLE",
   "tiles: QuestReminder 1 objectives: Talk to Sunny Smiles in the Prospector Saloon.",
   "tiles: QuestReminder 2 objectives: COMPLETED: Talk to Sunny Smiles in the Prospector Saloon. | Meet Sunny Smiles behind the Prospector Saloon.",
   { re = 'script: print "tiles notices 130 2 470 400"', label = "the copies at the original's observed paths: the text *:1 at x 130 depth 2, the bracket *:0 470 wide, the subtitle text at x 400" },
 ]
-manual = "tiles_hud_notices_banner.png: \"Quest added\" over BACK IN THE SADDLE at the left, \"You are now Well Rested!\" beside its icon and bracket at the top left, drawn once (no hand-built copy under them); tiles_hud_notices_objectives.png: the two objectives with a filled and an open square, the message still at the top left; compare with quest-messages' and corner-messages' frames"
+manual = "tiles_hud_notices_banner.png: \"New quest\" over BACK IN THE SADDLE at the left, \"You are now Well Rested!\" beside its icon and bracket at the top left, drawn once (no hand-built copy under them); tiles_hud_notices_objectives.png: the two objectives with a filled and an open square, the message still at the top left; compare with quest-messages' and corner-messages' frames"
 
 [[scenario]]
 name = "tiles-hud-discovered"
-source = "[design] T12 leftovers (docs/spec-notes/hud.md §14.11): reputation-box's start with [UI] TileMenus=HUDMainMenu: leaving the start finds Goodsprings, and 'You have discovered' over GOODSPRINGS is drawn from QuestReminder's copies, at the place the owner's screenshot shows it (quest-messages.md); Region_Location gets the same banner's copies, hidden (drawn once) [hypothesis: hud.md §14 maps discoveries to Region_Location]"
+source = "[design] T12 leftovers (docs/spec-notes/hud.md §14.11): reputation-box's start with [UI] TileMenus=HUDMainMenu: leaving the start finds Goodsprings, and 'Place found' over GOODSPRINGS is drawn from QuestReminder's copies, at the place the owner's screenshot shows it (quest-messages.md); Region_Location gets the same banner's copies, hidden (drawn once) [hypothesis: hud.md §14 maps discoveries to Region_Location]"
 note = "as reputation-box's start, without its reputation steps"
 areas = ["ui", "hud", "quest-messages"]
 paths = ["engine/nvf-play/src/tiles/notices.rs", "engine/nvf-play/src/tiles/mod.rs", "engine/nvf-play/src/quest_messages.rs"]
@@ -26750,11 +26750,11 @@ env = { NVF_PLAY_TEST_TILE_MENUS = "HUDMainMenu", NVF_PLAY_TEST_SCRIPT_MENUS = "
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12", "--heading", "50", "--size", "1280x720"]
 run_seconds = 10
 expect = [
-  { re = 'quest message on screen: You have discovered: GOODSPRINGS', label = "the start's town found (the hand-built queue)" },
-  { re = 'tiles: QuestReminder banner You have discovered: GOODSPRINGS', label = "the tile HUD draws the same line" },
-  { re = 'tiles: Region_Location banner You have discovered: GOODSPRINGS \(not drawn\)', label = "the tile HUD writes it under Region_Location too, not drawn there" },
+  { re = 'quest message on screen: Place found: GOODSPRINGS', label = "the start's town found (the hand-built queue)" },
+  { re = 'tiles: QuestReminder banner Place found: GOODSPRINGS', label = "the tile HUD draws the same line" },
+  { re = 'tiles: Region_Location banner Place found: GOODSPRINGS \(not drawn\)', label = "the tile HUD writes it under Region_Location too, not drawn there" },
 ]
-manual = "tiles_hud_discovered.png: \"You have discovered\" over GOODSPRINGS at the left, as on reputation-box's frame at 6 s, once"
+manual = "tiles_hud_discovered.png: \"Place found\" over GOODSPRINGS at the left, as on reputation-box's frame at 6 s, once"
 
 [[scenario]]
 name = "tiles-hud-subtitles"
@@ -32252,7 +32252,7 @@ expect = [
   { re = 'pipboy map: custom marker placed at \(-?\d+, -?\d+\) in 0x[0-9A-F]{8}', count = 1, label = "Yes places the marker" },
   { re = 'pipboy data: question box over the tiles \(3 answers\)', min = 1, label = "the question with a marker placed, over the tiles" },
   { text = "pipboy map: custom marker removed", count = 1, label = "the second answer removes it" },
-  { re = 'fast travel: asks "Do you want to travel to Primm\?" \(0x000CDF46\)', count = 1, label = "fast travel asks" },
+  { re = 'fast travel: asks "Travel to Primm\?" \(0x000CDF46\)', count = 1, label = "fast travel asks" },
   { text = 'fast travel: answered "No"', count = 1, label = "and is cancelled" },
   { re = 'fast travel: to Primm .*arrive', count = 0, label = "no travel" },
   { text = "MapMenu drawn by hand", count = 0, label = "no fallback was warned of (one shorter than three passes is not: the frame count below shows those)" },

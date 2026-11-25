@@ -116,7 +116,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-showoff.md",
-          "spec_line": 278,
+          "spec_line": 183,
           "functions_tested": [
             "SetOnAuxTimerStartHandler",
             "ClearShowoffSavedData"

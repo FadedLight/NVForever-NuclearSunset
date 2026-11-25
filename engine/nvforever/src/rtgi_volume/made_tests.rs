@@ -243,7 +243,8 @@ fn the_readback_tells_a_wrong_read() {
         assert!(passes(&w) && w[0] < 0.1 && w[2] > 0.01, "8 bits: {w:?}");
     }
     assert!(passes(&[1.0; 5]) && !passes(&[0.0, 1.0004, 0.0]) && !passes(&[f32::NAN]), "not as it is shown");
-    let changes: [(&str, fn(&mut RtgiVolumeUniform)); 4] =
+    type Change = fn(&mut RtgiVolumeUniform);
+    let changes: [(&str, Change); 4] =
         [("slab", |u| u.atlas.w = 5.0), ("offset", |u| u.dimensions.w = 0.0), ("origin", |u| u.origin.y += 1.0), ("spacing", |u| u.origin.w = 1.0 / 65.0)];
     for (what, change) in changes {
         let mut u = right;

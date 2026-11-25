@@ -1302,11 +1302,54 @@ fn take_settings_menu_scale(w: &mut World, text: &str) -> bool {
     true
 }
 
-/// Scope interface units for the pause Settings page when `scale != 1.0`.
-/// At the default `1.0` (100%), returns `None` so desktop and default Android
-/// use the untouched `menu_scale()` unit scope.
-fn settings_units(scale: f32) -> Option<crate::interface::HudUnits> {
-    (scale != 1.0).then(|| crate::interface::units_at(crate::interface::menu_scale() * scale))
+/// The narrowest view the settings page is laid out for, in interface units: 4:3 (the
+/// tests' `VIEW_WIDTHS`). A narrower view (a portrait display: 9:16 is 540 units) gets
+/// the page drawn smaller over the whole view until it is this wide, rather than a list 0
+/// wide beside the rail [design: #3334].
+const NARROW_VIEW_W: f32 = 1280.0;
+
+/// The window's width over its height, as `drawn_now` last read it (`f32` bits; 0: not
+/// known yet).
+static WINDOW_ASPECT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// How much smaller than `scale` the settings page is drawn to be [`NARROW_VIEW_W`] wide in
+/// a view `aspect` wide for 1 high, at the menus' scale `menu` (1: the view is wide enough
+/// as it is) [design: #3334].
+fn narrow_fit(aspect: f32, menu: f32, scale: f32) -> f32 {
+    let s = menu * scale;
+    if !(aspect > 0.0 && s > 0.0) {
+        return 1.0;
+    }
+    // The page's width as it would be drawn: its spread frame's room at this scale.
+    let wide = {
+        let _units = crate::interface::units_at(s);
+        960.0 * aspect * crate::interface::menu_room()
+    };
+    if wide >= NARROW_VIEW_W {
+        1.0
+    } else {
+        (960.0 * aspect / (s * NARROW_VIEW_W)).min(1.0)
+    }
+}
+
+/// The scopes the pause Settings page is drawn in ([`settings_units`]).
+struct SettingsUnits {
+    _units: Option<crate::interface::HudUnits>,
+    _whole: Option<crate::interface::WholeView>,
+}
+
+/// Scope interface units for the pause Settings page: `scale` (the Android menu scale; 1
+/// elsewhere), smaller still in a view narrower than [`NARROW_VIEW_W`] (then over the
+/// whole view, [`crate::interface::whole_view`], #3334). At 100% in a wide enough view,
+/// no scope, so desktop and default Android use the untouched `menu_scale()` units.
+fn settings_units(scale: f32) -> SettingsUnits {
+    let aspect = f32::from_bits(WINDOW_ASPECT.load(std::sync::atomic::Ordering::Relaxed));
+    let fit = narrow_fit(aspect, crate::interface::menu_scale(), scale);
+    let scale = scale * fit;
+    SettingsUnits {
+        _units: (scale != 1.0).then(|| crate::interface::units_at(crate::interface::menu_scale() * scale)),
+        _whole: (fit < 1.0).then(crate::interface::whole_view),
+    }
 }
 
 fn menu_font_chosen(w: &World) -> String {
@@ -1996,7 +2039,7 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
         return;
     }
     let f = &look.faces;
-    let _units = matches!(d.page, Page::Settings { .. }).then(|| settings_units(d.scale())).flatten();
+    let _units = matches!(d.page, Page::Settings { .. }).then(|| settings_units(d.scale()));
     // The settings list's place, clear of the categories.
     let lb = ListBox::of(d.view_w as f32, rail_width(f, &d.rail, d.device.1));
     commands.spawn((PauseRoot, full(), GlobalZIndex(110))).with_children(|root| {
@@ -5243,8 +5286,11 @@ fn settings_now(world: &mut World, list: &[Setting], selected: Option<RowId>) ->
 fn drawn_now(world: &mut World) -> Drawn {
     let settings_scale = world.get_resource::<SettingsMenuScale>().map_or(1.0, |s| s.scale());
     let on_settings = matches!(*world.resource::<Page>(), Page::Settings { .. });
-    let _units = on_settings.then(|| settings_units(settings_scale)).flatten();
-    let view_w = world.query_filtered::<&bevy::window::Window, With<bevy::window::PrimaryWindow>>().iter(world).next().filter(|w| w.height() > 0.0).map_or(VIEW_W, |w| 960.0 * w.width() / w.height()) * crate::interface::menu_room();
+    let aspect = world.query_filtered::<&bevy::window::Window, With<bevy::window::PrimaryWindow>>().iter(world).next().filter(|w| w.height() > 0.0).map_or(VIEW_W / 960.0, |w| w.width() / w.height());
+    // Kept for the settings page's scope ([`settings_units`]): a narrow view draws it smaller.
+    WINDOW_ASPECT.store(aspect.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    let _units = on_settings.then(|| settings_units(settings_scale));
+    let view_w = 960.0 * aspect * crate::interface::menu_room();
     // In the page's units: wider where a smaller menu scale leaves room (`page_h`).
     let view_w = view_w.round() as u32;
     let list = world.resource::<Settings>().list().to_vec();
@@ -5930,6 +5976,25 @@ mod tests {
     /// The views the settings page is laid out for in the tests: 16:9 (1280x720 and 1920x1080
     /// are both 1707 units wide), 16:10, 4:3 and 3440x1440 (21:9, 2293 units).
     const VIEW_WIDTHS: [f32; 4] = [VIEW_W, 1536.0, 1280.0, 2293.0];
+
+    /// #3334: a portrait view (9:16, 540 units at 100%) draws the settings page smaller
+    /// until it is NARROW_VIEW_W wide, over the whole view; a view already that wide is left
+    /// as it was, and an unknown window changes nothing.
+    #[test]
+    fn a_narrow_view_draws_the_settings_page_smaller() {
+        for (aspect, menu) in [(9.0 / 16.0, 1.0), (9.0 / 16.0, 0.5), (3.0 / 4.0, 1.0), (1.0, 1.0)] {
+            let fit = narrow_fit(aspect, menu, 1.0);
+            assert!(fit < 1.0, "{aspect}/{menu}: {fit}");
+            let _units = crate::interface::units_at(menu * fit);
+            let _whole = crate::interface::whole_view();
+            let view_w = 960.0 * aspect * crate::interface::menu_room();
+            assert!((view_w - NARROW_VIEW_W).abs() < 0.5, "{aspect}/{menu}: a view {view_w} wide");
+        }
+        for aspect in [4.0 / 3.0, 16.0 / 9.0, 21.0 / 9.0] {
+            assert_eq!(narrow_fit(aspect, 1.0, 1.0), 1.0, "{aspect}");
+        }
+        assert_eq!(narrow_fit(0.0, 1.0, 1.0), 1.0);
+    }
 
     #[test]
     fn the_settings_page_fits_the_view() {

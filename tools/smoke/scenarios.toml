@@ -14414,6 +14414,20 @@ expect = [
 forbid = [{ re = 'NVF_PLAY_TEST_(SETTINGS|PAUSE_MENU): ("|no switch|\S+ is a (list|slider):)', label = "every aid step is understood" }]
 
 [[scenario]]
+name = "settings-layout-portrait"
+source = "#3334: in a 9:16 window (540x960, a portrait display) the settings page is drawn smaller over the whole view until it is 1280 units wide (the 4:3 layout), so the list has room beside the rail instead of 0 width"
+areas = ["settings"]
+paths = ["engine/nvf-play/src/pause.rs", "engine/nvf-play/src/interface.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:15", NVF_PLAY_TEST_SETTINGS = "11:page,12:tab:Graphics", NVF_PLAY_TEST_PAUSE_MENU = "13:inspect" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages", "--size", "540x960"]
+run_seconds = 17
+expect = [
+  { re = 'pause menu: settings list [5-9]\d\d wide from \d+ in a view 1280 wide, band \d+-\d+', label = "a list 500 to 999 units wide in a view widened to 1280 units" },
+  { re = 'pause menu: inspect: Graphics, keys on the rows, selected \S+, lines 1-\d+ of \d+', label = "the Graphics rows listed" },
+]
+forbid = [{ re = 'NVF_PLAY_TEST_(SETTINGS|PAUSE_MENU): ("|no switch|\S+ is a (list|slider):)', label = "every aid step is understood" }]
+
+[[scenario]]
 name = "settings-launcher-menu"
 source = "owner 2026-11-16: the launcher's Settings page is the game's menu; the game writes its page (every tab, category and row with its label, note and kind) beside NVForever.ini once every row is registered, for the launcher (engine/nvf-play/src/settings_menu.rs)"
 areas = ["settings"]

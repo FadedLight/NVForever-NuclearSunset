@@ -11653,16 +11653,17 @@ forbid = [
 
 [[scenario]]
 name = "npc-seated-save-resits"
-source = "issue #2797: the third part: --load the same save with Easy Pete's package running: his AI walks him back to his chair and the engine reports the new seat (a new furniture line), after which GetSitting reads 3 again"
+source = "issue #2797: the third part: --load the same save with Easy Pete's package running: he is put back on his chair at once (#3991), as the original keeps him seated from the first moment after the load (observer check 220): no walk and no getting-on clip (the engine's 'is back on' line), after which GetSitting reads 3; before #3991 his AI walked him back from where he stood"
 areas = ["save", "furniture"]
-paths = ["engine/nvf-play/src/script.rs", "engine/nvforever/src/furniture.rs", "crates/fnv-game/src/functions/furniture.rs"]
-env = { NVFOREVER_HOME = "npc-seated-save-home", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "40:call:EasyPeteRef:GetSitting" }
+paths = ["engine/nvf-play/src/script.rs", "engine/nvforever/src/furniture.rs", "engine/nvforever/src/residents.rs", "crates/fnv-game/src/functions/furniture.rs"]
+env = { NVFOREVER_HOME = "npc-seated-save-home", NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_SCRIPT = "8:call:EasyPeteRef:GetSitting,40:call:EasyPeteRef:GetSitting" }
 args = ["--play", "--load", "npcseated", "--npc-packages", "EasyPeteRef", "--no-voice", "--no-messages"]
 run_seconds = 45
 order = [[
   { re = 'load: restored .*npcseated\.nvfsave', label = "the save is restored" },
-  { text = "furniture: 00104C80 is on 0010634A", label = "the engine seats him again and says so" },
-  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "seated again" },
+  { text = "furniture: 00104C80 is back on 0010634A", label = "the engine puts him back on his chair at once (#3991)" },
+  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "seated within seconds of the load" },
+  { text = "script: test aid calls GetSitting on EasyPeteRef = 3", label = "and still seated at 40 s" },
 ]]
 
 [[scenario]]

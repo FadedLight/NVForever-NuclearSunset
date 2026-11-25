@@ -390,10 +390,11 @@ impl TargetPicker<'_,'_,'_>{
         if sc.distance(o) - sr > REACH {
             return None;
         }
-        Some((r.0, pick::ray_box_span(o, d, &t, c, h)?))
+        let (entry, exit) = pick::ray_box_span(o, d, &t, c, h)?;
+        Some((r.0, entry, exit))
     });
     // An actor's box is rough (`pick::choose_precise_first`, #3125).
-    let bounds: Vec<(u32, f32, f32, bool)> = bounds.map(|(id, (d, out))| (id, d, out, sim.is_actor(id))).collect();
+    let bounds: Vec<pick::BoxSpan> = bounds.map(|(id, entry, exit)| (id, entry, exit, sim.is_actor(id))).collect();
     if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()).filter(|_| publish_crosshair) {
         rt.game.senses.reticle = Some(fnv_game::functions::senses::Reticle { start: eye, dir, hit: far, limb: far_limb });
         if rt.game.other.jip13.reticle_node != far_node {
@@ -411,6 +412,10 @@ impl TargetPicker<'_,'_,'_>{
     let furniture_seen = hit.and_then(|h| h.form_id).into_iter().chain(bounds.iter().map(|b| b.0)).any(is_furniture);
     // Beds among the boxes (FURN marker flags with Sleep, bit 31, furniture.md §1) may
     // yield to what lies in them (`pick::set_aside_enclosing`, #3323).
+    // The containers among the boxes: only they give way to what lies inside them
+    // (`pick::choose_inside`, #3351).
+    let containers: std::collections::HashSet<u32> =
+        bounds.iter().map(|b| b.0).filter(|&id| sim.base_of(id).and_then(|b| sim.forms.get(b)).is_some_and(|f| matches!(f.data, BaseData::Container(_)))).collect();
     let beds: std::collections::HashSet<u32> = match script.as_deref().and_then(|s| s.rt.as_ref()) {
         Some(rt) if furniture_seen => {
             let bed = |id: u32| sim.base_of(id).and_then(|b| rt.game.data.furniture.get(&b)).is_some_and(|f| f & fnv_game::package::furniture::SLEEP != 0);
@@ -494,8 +499,12 @@ impl TargetPicker<'_,'_,'_>{
         let boxes: Vec<String> = bounds.iter().map(|b| format!("0x{:08X} {:.1}-{:.1}{}{}", b.0, b.1, b.2, if b.3 { " rough" } else { "" }, if beds.contains(&b.0) { " bed" } else { "" })).collect();
         format!("pick: raw hit {:?}; boxes [{}]; set aside [{}]", hit.map(|h| (h.form_id.map(|id| format!("0x{id:08X}")), h.distance)), boxes.join(", "), aside.join(", "))
     });
+    let raw_hit = hit;
     let hit = pick::door_behind(hit, behind, |id| describe_once(id).is_some());
-    let picked = pick::choose_precise_first(hit, kept, REACH, |id| describe_once(id).is_some());
+    // What is inside a container wins over it (an open locker's shelves, #3351), among the
+    // boxes the bed rule kept.
+    let kept: Vec<pick::BoxSpan> = bounds.iter().filter(|b| kept.iter().any(|k| k.0 == b.0)).copied().collect();
+    let picked = pick::choose_inside(hit, raw_hit, kept, REACH, |id| containers.contains(&id), |id| describe_once(id).is_some());
     // How far the sleeper's body is from the eye: its posed bones (`crate::hitvol::ActorParts`,
     // which follow the lying body), else its render boxes (rough: the bind pose).
     let body_distance = |actor: u32| {

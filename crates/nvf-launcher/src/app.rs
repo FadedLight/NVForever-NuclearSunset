@@ -1615,8 +1615,8 @@ impl App {
                     self.start_edit = saved.clone();
                 }
             });
-            if self.start_edit.is_ttw() && ttw == Some(false) {
-                ui.label(RichText::new(format!("{} is off in the list below: turn it on, or this start quest is not found.", start::TTW_PLUGIN)).small().color(BAD));
+            if let Some(why) = start::ttw_missing(&self.start_edit, ttw) {
+                ui.label(RichText::new(why).small().color(BAD));
             }
         });
         if save {

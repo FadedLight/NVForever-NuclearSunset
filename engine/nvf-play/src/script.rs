@@ -312,6 +312,9 @@ pub struct Runtime {
     wake_talk: Option<(FormId, f64)>,
     /// The quest the opening starts (`crate::game_start`).
     start: GameStart,
+    /// The corner message of a New Game whose `sCharGenQuest` named no quest of the load
+    /// order (#3229), taken by `crate::game_start::notice`.
+    pub opening_notice: Option<String>,
     /// Where the player was last frame, and frames left whose time does not count (a
     /// door's loading screen).
     location: Option<Location>,
@@ -722,6 +725,7 @@ impl Runtime {
             new_game_files: false,
             wake_talk: None,
             start: GameStart::default(),
+            opening_notice: None,
             location: None,
             frozen_frames: 0,
             came_through: false,
@@ -817,7 +821,20 @@ impl Runtime {
                 let at = if state.stages_done.contains(&0) { " at stage 0" } else { "" };
                 info!("new game: {name} started{at} (now at stage {})", state.stage());
             }
-            Err(e) => warn!("new game: {}={}: {e}; no opening quest started", crate::game_start::CHARGEN_KEY, self.start.chargen_quest),
+            Err(e) => {
+                warn!("new game: {}={}: {e}", crate::game_start::CHARGEN_KEY, self.start.chargen_quest);
+                // #3229: never a silent empty start; the New Vegas opening instead, with a
+                // notice naming the setting.
+                let fallback = GameStart { chargen_quest: crate::game_start::DEFAULT_CHARGEN_QUEST.into(), ..self.start.clone() };
+                match fallback.quest(g) {
+                    Ok(q) if g.start_chargen_quest(q) => {
+                        info!("new game: falling back to {}: the New Vegas opening starts", crate::game_start::DEFAULT_CHARGEN_QUEST);
+                        self.opening_notice = Some(crate::game_start::fallback_notice(&self.start.chargen_quest));
+                    }
+                    Ok(_) => warn!("new game: {} did not start; no opening quest started", crate::game_start::DEFAULT_CHARGEN_QUEST),
+                    Err(e) => warn!("new game: {}: {e}; no opening quest started", crate::game_start::DEFAULT_CHARGEN_QUEST),
+                }
+            }
         }
     }
 
@@ -3016,6 +3033,7 @@ impl ScriptState {
             new_game_files: false,
             wake_talk: None,
             start: GameStart::default(),
+            opening_notice: None,
             location: None,
             frozen_frames: 0,
             came_through: false,

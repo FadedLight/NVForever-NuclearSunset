@@ -35559,6 +35559,24 @@ expect = [
 ]
 
 [[scenario]]
+name = "new-game-start-quest-missing"
+source = "issue #3229 (player report R-PEZL695T, 0.8.1): NVForever.ini kept Tale of Two Wastelands' SCharGenQuest=001FFFF8 and empty SIntroMovie with TTW not loaded; New Game started nothing and said so only in the log"
+note = "the test aid gives TTW's two [General] lines in place of the INI's (a fixture home's NVForever.ini would be rewritten by every run); vanilla load order. New Game falls back to VCG00, whose stage 0 PlayBink then plays the New Vegas film, and a corner message names the setting"
+areas = ["scripts", "ui"]
+paths = ["engine/nvf-play/src/game_start.rs", "engine/nvf-play/src/script.rs"]
+env = { NVF_PLAY_TEST_GAME_START = "SCharGenQuest=001FFFF8;SIntroMovie=", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3" }
+args = ["--play", "--new-game", "--no-voice", "--no-messages"]
+run_seconds = 25
+expect = [
+  { re = 'game start: sCharGenQuest=001FFFF8 sIntroMovie=\(none\) \(test aid NVF_PLAY_TEST_GAME_START\)', label = "TTW's two lines are read" },
+  { re = 'new game: sCharGenQuest=001FFFF8: 001FFFF8 \(0x001FFFF8\) is not a quest in the load order; New Game starts the New Vegas opening \(VCG00\) instead', label = "the warning says what happens instead" },
+  "new game: falling back to VCG00: the New Vegas opening starts",
+  "new game notice: The start quest 001FFFF8 (sCharGenQuest in NVForever.ini) is not in the load order: the New Vegas opening starts instead.",
+  { re = 'no opening quest started', count = 0, label = "never a silent empty start" },
+]
+order = [["new game: falling back to VCG00: the New Vegas opening starts", "new game notice: The start quest 001FFFF8"]]
+
+[[scenario]]
 name = "aerial-perspective"
 source = "[design, #2993] engine/nvforever/src/aerial.rs, fog.rs GAME_FOG, docs/design/graphics-enhanced.md §3.18: the Aerial perspective switch (off by default and in every preset) turned on while the game runs outdoors at Goodsprings at noon writes its figures, worked from the shown weather, into the fog uniform and logs them; turned off it logs off; the shader edits it rides on (pbr_functions.wesl nvf_aerial around the desert haze's fog call, fog.wesl GAME_FOG, the vendored Fog struct's nvf_params) are in place and every world pipeline compiles, without a rendering error"
 areas = ["renderer", "graphics", "settings"]
@@ -35689,6 +35707,21 @@ expect = [
   { json = "files.?tree=wastelandshrub01.stub_levels.#", schema = "fnv.spt.shape/1", equals = 0, count = 1, label = "WastelandShrub01 has no stub level" },
   { json = "files.?tree=whiteoak01.stub_levels.#", schema = "fnv.spt.shape/1", equals = 0, count = 1, label = "WhiteOak01 has no stub level" },
 ]
+
+[[scenario]]
+name = "locker-shelf-pick"
+source = "#3351: in the Sloan barracks an open locker (QJLocker01 0x000E7610) holds a first aid kit (0x000E7612) and Duck and Cover! (0x000E7613) on its shelves; the ray enters the locker's own render box before either, so the locker was always the crosshair's target (engine/nvf-play/src/activate/pick.rs choose_inside)"
+areas = ["activate"]
+paths = ["engine/nvf-play/src/activate/pick.rs"]
+note = "From in front of the open half the view is turned to the kit, then the book, then the locker's body beside the shelves [observed 2026-11-22: the three target lines in this order]"
+env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_GOTO = "2:2774:-640:16284", NVF_PLAY_TEST_LOOK = "4:180:-24,6:182:-40,8:177.5:-37" }
+args = ["--cell", "QJBarracks", "--play", "--no-voice", "--no-messages"]
+run_seconds = 11
+order = [[
+  { re = 'target 0x000E7612 First Aid Box \(Open', label = "the kit on the upper shelf is the target" },
+  { re = 'target 0x000E7613 Duck and Cover! \(Take', label = "the book on the lower shelf is the target" },
+  { re = 'target 0x000E7610 Locker \(Open', label = "beside the shelves' contents the locker is still the target" },
+]]
 
 [[scenario]]
 name = "vats-templated-name"

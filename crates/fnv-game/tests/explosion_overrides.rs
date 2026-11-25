@@ -485,3 +485,49 @@ fn live_explosion_overrides_reach_effect_pickpocket_radiation_placement_and_hit_
     q(&mut g, "player.PlaceAtMe OwnedBlastExpl 1");
     assert!(matches!(g.combat_requests.as_slice(), [CombatRequest::Explode { explosion, .. }] if *explosion == FormId(EXPL_A)));
 }
+
+#[test]
+fn showoff_on_explosion_hit_passes_explosion_ref_as_self_and_source_actor() {
+    let f = fixture();
+    let mut g = game(&f);
+
+    let expl_ref = g
+        .explosion_placed(FormId(EXPL_A), Some(FormId::PLAYER_REF), [0.0; 3], 400.0)
+        .expect("placed live explosion reference");
+
+    q(
+        &mut g,
+        r#"
+        SetEventHandler "ShowOff:OnExplosionHit" (Begin Function { ref rHit, ref rSrc }
+            ref rSelf
+            ref rBase
+            let rSelf := GetSelfAlt
+            let rBase := rSelf.GetBaseObject
+            Player.AuxVarSetRef "*eh_self" rSelf
+            Player.AuxVarSetRef "*eh_base" rBase
+            Player.AuxVarSetRef "*eh_hit" rHit
+            Player.AuxVarSetRef "*eh_src" rSrc
+            Player.AuxVarSetFlt "*eh_src_zero" (rSrc == 0)
+            Player.AuxVarSetFlt "*eh_base_dmg" (GetExplosionTraitNumeric rBase 1)
+            Player.AuxVarSetFlt "*eh_in_dmg" (GetExplosionHitDamage)
+            SetExplosionHitDamage 42.5
+        End)
+        "#,
+    );
+
+    let out = g.explosion_hit_with_context(Some(expl_ref), FormId(TARGET_REF), Some(FormId::PLAYER_REF), 100.0);
+    assert_eq!(out, 42.5);
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetRef \"*eh_self\")"), XVal::Ref(expl_ref.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetRef \"*eh_base\")"), XVal::Ref(EXPL_A));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetRef \"*eh_hit\")"), XVal::Ref(TARGET_REF));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetRef \"*eh_src\")"), XVal::Ref(FormId::PLAYER_REF.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetFlt \"*eh_src_zero\")"), XVal::Num(0.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetFlt \"*eh_base_dmg\")"), XVal::Num(80.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetFlt \"*eh_in_dmg\")"), XVal::Num(100.0));
+
+    // When no source actor is provided, arg2 is null ref (0) and GetSelfAlt stays the explosion ref.
+    let out2 = g.explosion_hit_with_context(Some(expl_ref), FormId(TARGET_REF), None, 60.0);
+    assert_eq!(out2, 42.5);
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetRef \"*eh_self\")"), XVal::Ref(expl_ref.0));
+    assert_eq!(q(&mut g, "SetFunctionValue (Player.AuxVarGetFlt \"*eh_src_zero\")"), XVal::Num(1.0));
+}

@@ -6238,7 +6238,9 @@ fn fly(
             }
             let (dt_v, dr) = target_armor(c, script.as_deref_mut(), &mut sim, target);
             // ShowOff:OnExplosionHit's handlers may change the blast's damage first.
-            let raw = script.as_deref_mut().and_then(|s| s.rt.as_mut()).map_or(b.damage, |rt| rt.game.explosion_hit(target, f64::from(b.damage)) as f32);
+            let raw = script.as_deref_mut().and_then(|s| s.rt.as_mut()).map_or(b.damage, |rt| {
+                rt.game.explosion_hit_with_context(expl_ref, target, cause.map(|c| c.actor), f64::from(b.damage)) as f32
+            });
             let (ap, tp) = blast_perks(script.as_deref_mut(), &mut sim, cause, target);
             let d = damage::blast_hit(&c.rules, &c.tuning, raw, dt_v, dr, &ap, &tp);
             log_blast_perks(cause, target, &ap, &tp, &d);

@@ -29,15 +29,28 @@ ran.
 
 ## 2. ShowOff:OnExplosionHit and the explosion's damage
 
-- The event fires when an explosion's blast reaches an actor, before the damage lands. A
-  MineFragExplosion (FalloutNV.esm 07078B) placed at the player gave a two-argument handler
-  the player first and none second [observed].
+- The event fires when an explosion's blast reaches an actor, before the damage lands.
+  - Earlier capture (`showoff1`): a MineFragExplosion (`FalloutNV.esm` `0x0007078B`)
+    placed at the player gave a two-argument handler the player first and none second
+    [observed: showoff1].
+  - Clean-room probe `[observed 2026-11-24: Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 +
+    ShowOffNVSE 184 + JIP LN 57.30, 10 official base masters, GSDocMitchellHouse
+    (0x00103DF9), isolated staging copy, committed probe w6t2_01_showoff_on_explosion_hit
+    (tools/capture/nvse/catalogs/wave6c_showoff_on_explosion_hit.json):
+    Player.PlaceAtMe 0x0007078B 1 ->
+    PROBE|w6t2_01_showoff_on_explosion_hit|reg=1,n=1,selfIsP=0,tSelf=81,tBase=81,base=0007078B,hitIsP=1,src=00000014,dmg=100.0;
+    no DLL or source consulted]`: the calling reference (`GetSelfAlt`) is the live
+    explosion reference (type 81 `EXPL`, `GetBaseObject` = `0x0007078B`, not the hit
+    actor), argument 1 is the hit actor (`Player`), and argument 2 is the source actor
+    (`Player` `0x00000014` when placed on the player, `0` when there is no source actor).
 - `GetExplosionHitDamage` read 100 inside the handler; after `SetExplosionHitDamage 5` the
   player lost 5 Health [observed]. Both are unusable outside the event [documented]; outside
   it NVForever reads 0 and ignores a set.
-- NVForever asks for the damage in the engine's blast loop, before armour is taken off, and
-  deals what the handlers leave [hypothesis: whether the original's value is before or after
-  armour is not measured; the player in nvfairport took exactly the set value].
+- NVForever asks for the damage in the engine's blast loop (`Game::explosion_hit_with_context`,
+  passing the live `expl_ref` as calling reference and `cause.map(|c| c.actor)` as the
+  source actor argument), before armour is taken off, and deals what the handlers leave
+  [hypothesis: whether the original's value is before or after armour is not measured; the
+  player in nvfairport took exactly the set value].
 
 ## 3. SetOnAuxTimerStopHandler
 

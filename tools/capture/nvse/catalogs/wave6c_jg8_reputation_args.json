@@ -44,7 +44,7 @@
           "requires_fixture": false,
           "requires_isolated_staging": false,
           "spec_file": "docs/spec-notes/ext-jg8.md",
-          "spec_line": 39,
+          "spec_line": 33,
           "functions_tested": [
             "SetOnReputationChangeEventHandler"
           ],

@@ -3536,6 +3536,27 @@ fn dispatch_event_returns_one_and_overwrites_info_map_keys() {
          SetFunctionValue ok",
     );
     assert_eq!(res, XVal::Num(1111.0));
+    // Case-variant caller keys ("EventName", "eventsender") must overwrite in place rather than
+    // pushing duplicate entries into the stringmap.
+    let res_case = q(
+        &mut g,
+        "let m := Ar_Construct \"stringmap\"
+         let m[\"EventName\"] := \"Wrong\"
+         let m[\"eventsender\"] := \"OldSnd\"
+         let r1 := DispatchEvent \"W6DEv\" m \"CaseSnd\"
+         let ok := r1 * 1000
+         if eval (Ar_Size m == 3)
+           let ok := ok + 100
+         endif
+         if eval (m[\"eventName\"] == \"W6DEv\") && (m[\"eventSender\"] == \"CaseSnd\")
+           let ok := ok + 10
+         endif
+         if eval (m[\"EventName\"] == \"W6DEv\") && (m[\"eventsender\"] == \"CaseSnd\")
+           let ok := ok + 1
+         endif
+         SetFunctionValue ok",
+    );
+    assert_eq!(res_case, XVal::Num(1111.0));
 }
 
 #[test]

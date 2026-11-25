@@ -4155,7 +4155,9 @@ impl<'a> Game<'a> {
                 if let Some(a) = self.ext.array_mut(id).filter(|a| a.kind == fnv_script::vm::ArrayKind::StringMap) {
                     for (k, v) in [("eventName", event.clone()), ("eventSender", sender)] {
                         let key = XKey::Str(k.into());
-                        if let Some((_, slot)) = a.entries.iter_mut().find(|(ek, _)| *ek == key) {
+                        if let Some((_, slot)) =
+                            a.entries.iter_mut().find(|(ek, _)| ek.cmp_key(&key) == std::cmp::Ordering::Equal)
+                        {
                             replaced.push(std::mem::replace(slot, XVal::Str(v)));
                         } else {
                             a.entries.push((key, XVal::Str(v)));

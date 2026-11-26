@@ -43,8 +43,8 @@ pub struct Near {
 }
 
 impl PreparedScene {
-    /// The triangles no further from a place than `far`, in order: in double precision, with a slack of 1e-9 of `far`
-    /// and of the place's largest coordinate, so that one exactly at `far` is in.
+    /// The triangles no further from a place than `far`, in order. Conservative: it may name a triangle slightly beyond
+    /// the radius, never omits one within it. None for a `far` below 0.
     pub fn near(&self, at: V3, far: f32) -> Vec<Near> {
         self.parts().0.within(at, far).into_iter().map(|(tri, min, max)| Near { tri, min, max }).collect()
     }

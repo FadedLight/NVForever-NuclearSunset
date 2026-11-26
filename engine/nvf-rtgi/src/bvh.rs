@@ -76,29 +76,69 @@ pub(crate) fn meet(r: &Ray, tri: &Corners) -> Option<(f32, [f32; 3])> {
     (det != 0.0 && t.is_finite()).then(|| (t, w.map(|f| f / det)))
 }
 
-/// How far `p` is from a triangle, in double precision: from its plane where `p` is over the inside, else from the
-/// nearest side. Where a thin triangle's inside is not clear, the sides decide, and they are as near.
-fn distance(p: V3, tri: &Corners) -> f64 {
-    type D = [f64; 3];
-    let sub = |x: D, y: D| -> D { std::array::from_fn(|k| x[k] - y[k]) };
-    let dot = |x: D, y: D| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
-    let cross = |x: D, y: D| -> D { [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]] };
+type D = [f64; 3];
+
+fn sub(x: D, y: D) -> D {
+    std::array::from_fn(|k| x[k] - y[k])
+}
+
+fn dot(x: D, y: D) -> f64 {
+    x[0] * y[0] + x[1] * y[1] + x[2] * y[2]
+}
+
+fn cross(x: D, y: D) -> D {
+    [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]]
+}
+
+fn length(x: D) -> f64 {
+    dot(x, x).sqrt()
+}
+
+/// Many times what one rounding of a double can do: the room every bound below leaves for its own arithmetic.
+const ROUNDS: f64 = 64.0 * f64::EPSILON;
+
+/// How far `p` is from the box `min`..`max`, in double precision.
+fn off_box(p: D, min: D, max: D) -> f64 {
+    length(std::array::from_fn(|k| (min[k] - p[k]).max(p[k] - max[k]).max(0.0)))
+}
+
+/// Whether a triangle may be no further from `p` than `far` (not below 0), in double precision and conservative:
+/// it may say so of one a little further, never not of one within it. The triangle's box has to be within reach;
+/// then a side within it is enough, or else the plane within it where `p` is not clearly outside one of the sides,
+/// each with the room its roundings need. A triangle whose normal is lost in the rounding (it is all but a line)
+/// is near when its box is.
+fn near(p: V3, tri: &Corners, far: f64) -> bool {
     let (p, [a, b, c]) = (p.0.map(f64::from), tri.map(|v| v.0.map(f64::from)));
-    let side = |x: D, y: D| {
-        let (e, w) = (sub(y, x), sub(p, x));
-        let t = if dot(e, e) > 0.0 { (dot(w, e) / dot(e, e)).clamp(0.0, 1.0) } else { 0.0 };
-        let off: D = std::array::from_fn(|k| w[k] - e[k] * t);
-        dot(off, off).sqrt()
-    };
-    let sides = [(a, b), (b, c), (c, a)];
-    let nearest = sides.iter().map(|(x, y)| side(*x, *y)).fold(f64::INFINITY, f64::min);
-    let n = cross(sub(b, a), sub(c, a));
-    let over = dot(n, n) > 0.0 && sides.iter().all(|(x, y)| dot(cross(sub(*y, *x), sub(p, *x)), n) >= 0.0);
-    if over {
-        nearest.min(dot(sub(p, a), n).abs() / dot(n, n).sqrt())
-    } else {
-        nearest
+    let size = [p, a, b, c].iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+    let reach = far + ROUNDS * (size + far);
+    let (lo, hi): (D, D) = (std::array::from_fn(|k| a[k].min(b[k]).min(c[k])), std::array::from_fn(|k| a[k].max(b[k]).max(c[k])));
+    if off_box(p, lo, hi) > reach {
+        return false;
     }
+    let sides = [(a, b), (b, c), (c, a)];
+    let side = |(x, y): &(D, D)| {
+        let (e, w) = (sub(*y, *x), sub(p, *x));
+        let t = if dot(e, e) > 0.0 { (dot(w, e) / dot(e, e)).clamp(0.0, 1.0) } else { 0.0 };
+        length(std::array::from_fn(|k| w[k] - e[k] * t))
+    };
+    if sides.iter().any(|s| side(s) <= reach) {
+        return true;
+    }
+    let (e1, e2) = (sub(b, a), sub(c, a));
+    let (n, long) = (cross(e1, e2), length(e1) * length(e2));
+    let normal = length(n);
+    if normal <= ROUNDS * long {
+        return true;
+    }
+    let to = sub(p, a);
+    let plane = dot(to, n).abs() / normal;
+    if plane > reach + ROUNDS * length(to) * (1.0 + long / normal) {
+        return false;
+    }
+    sides.iter().all(|(x, y)| {
+        let (e, w) = (sub(*y, *x), sub(p, *x));
+        dot(cross(e, w), n) >= -ROUNDS * length(e) * length(w) * (normal + long)
+    })
 }
 
 /// An inner node's left child follows it and `a` is its right one (`count` 0); a leaf holds
@@ -332,26 +372,28 @@ impl Bvh {
         out
     }
 
-    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. The distance is in double
-    /// precision and has a slack of 1e-9 of `far` and of p's largest coordinate: one exactly at `far` is never lost to
-    /// a rounding, and one a little further may be in.
+    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. Conservative: it may name a
+    /// triangle a little beyond `far`, never leaves out one within it ([`near`]). None for a `far` below 0.
     pub fn within(&self, p: V3, far: f32) -> Vec<(u32, V3, V3)> {
         let (mut out, mut open) = (Vec::new(), Vec::new());
-        let slack = f64::from(far) + 1e-9 * (f64::from(far) + f64::from(p.max_abs()));
+        if far.is_nan() || far < 0.0 {
+            return out;
+        }
+        let (at, far) = (p.0.map(f64::from), f64::from(far));
         open.extend((!self.nodes.is_empty()).then_some(0usize));
-        while let Some(at) = open.pop() {
-            let n = &self.nodes[at];
-            let off = p - p.max(n.min).min(n.max);
-            // A little over, for the rounding.
-            if off.length() > far * 1.001 + 4e-7 * p.max_abs() {
+        while let Some(i) = open.pop() {
+            let n = &self.nodes[i];
+            let (min, max) = (n.min.0.map(f64::from), n.max.0.map(f64::from));
+            let size = [at, min, max].iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+            if off_box(at, min, max) > far + ROUNDS * (size + far) {
                 continue;
             }
             if n.count == 0 {
-                open.extend([at + 1, n.a as usize]);
+                open.extend([i + 1, n.a as usize]);
                 continue;
             }
             for slot in n.a as usize..(n.a + n.count) as usize {
-                if distance(p, &self.tris[slot]) <= slack {
+                if near(p, &self.tris[slot], far) {
                     out.push((self.ids[slot], n.min, n.max));
                 }
             }
@@ -463,22 +505,33 @@ pub mod tests {
     /// A thin triangle right below a point is near it: in single precision its regions are rounded away.
     #[test]
     fn thin_triangles_are_near() {
+        let one = |tri: Corners, p: V3, far: f32| built(&[tri], 1).within(p, far).len() == 1;
         let tri = [V3::ZERO, V3::new(65536.0, 0.0, 0.0), V3::new(65536.0, 2.0, 0.0)];
         let p = V3::new(49152.0, 1.0, 0.01);
-        assert!((distance(p, &tri) - 0.01).abs() < 1e-6, "{}", distance(p, &tri));
-        let tree = built(&[tri], 1);
-        assert_eq!(tree.within(p, 0.5).len(), 1);
-        assert!(tree.within(p, 0.005).is_empty() && tree.within(V3::new(49152.0, 1.6, 0.0), 0.05).is_empty());
+        assert!(one(tri, p, 0.5) && one(tri, p, 0.0101) && !one(tri, p, 0.005) && !one(tri, V3::new(49152.0, 1.6, 0.0), 0.05));
         // Beside a side, past a corner, and of a triangle that is a line.
-        assert!((distance(V3::new(1.0, -1.0, 0.0), &tri) - 1.0).abs() < 1e-9 && (distance(V3::new(-3.0, -4.0, 0.0), &tri) - 5.0).abs() < 1e-9);
+        assert!(one(tri, V3::new(1.0, -1.0, 0.0), 1.0) && !one(tri, V3::new(1.0, -1.0, 0.0), 0.99));
+        assert!(one(tri, V3::new(-3.0, -4.0, 0.0), 5.0) && !one(tri, V3::new(-3.0, -4.0, 0.0), 4.99));
         let line = [V3::ZERO, V3::new(2.0, 0.0, 0.0), V3::new(4.0, 0.0, 0.0)];
-        assert!((distance(V3::new(3.0, 0.0, 2.0), &line) - 2.0).abs() < 1e-9);
-        // Exactly at the radius, which the double precision puts a rounding past it.
+        assert!(one(line, V3::new(3.0, 0.0, 2.0), 2.0) && !one(line, V3::new(3.0, 0.0, 2.0), 1.99));
+        // Exactly at the radius, from a side and from the plane of two long sides that are all but parallel, in
+        // either order of the corners.
         let tri = [V3::ZERO, V3::new(3.0, 4.0, 0.0), V3::new(0.0, 4.0, 0.0)];
-        let p = V3::new(2.5, 2.5, 0.0);
-        assert!(distance(p, &tri) >= 0.5 && distance(p, &tri) - 0.5 < 1e-12);
-        let tree = built(&[tri], 1);
-        assert!(tree.within(p, 0.5).len() == 1 && tree.within(p, 0.4999).is_empty());
+        assert!(one(tri, V3::new(2.5, 2.5, 0.0), 0.5) && !one(tri, V3::new(2.5, 2.5, 0.0), 0.4999));
+        let [a, b, c] = [V3::new(65535.0, -49150.625, 65535.0), V3::new(0.0, 0.625, 0.0), V3::new(0.0, 0.625, -1.0 + 2f32.powi(-20))];
+        for tri in [[a, b, c], [b, c, a], [c, a, b]] {
+            assert!(one(tri, V3::ZERO, 0.5) && !one(tri, V3::ZERO, 0.49), "{tri:?}");
+        }
+        // Where a box's squared distance is past f32's end; no radius below 0.
+        let wall = [V3::new(0.0, -1.0, -1.0), V3::new(0.0, 1.0, -1.0), V3::new(0.0, 0.0, 1.0)];
+        let far = 2f32.powi(64);
+        assert!(one(wall, V3::new(far, 0.0, 0.0), far) && !one(wall, V3::new(far, 0.0, 0.0), far / 2.0));
+        let aside = V3::new(1e5, 0.0, 0.0);
+        let (there, on) = (wall.map(|c| c + aside), V3::new(0.0, 0.0, 0.5) + aside);
+        for far in [-0.00001, -1.0, f32::NAN] {
+            assert!(!one(there, on, far), "{far}");
+        }
+        assert!(one(there, on, 0.0), "on it at a radius of 0");
     }
 
     /// A random unit vector.

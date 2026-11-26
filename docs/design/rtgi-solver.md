@@ -276,9 +276,11 @@ computes:
 - **What the GPU reads.** `PreparedScene::export` gives the scene as it is after `prepare` (corners by
   triangle number, faces, materials, the two levels a texture is read at), `LampTable::of` the lamps'
   table of a solve in that light, built by the same code and refusing the same lamps (a spot of no
-  direction, a place or range past 2^21), and `SolvedVolume::points` the points of a volume and their
-  texels. `Sheared::of` is a direction as the rays see it: with its still axes at 0, which the tree, the
-  triangle test and the side met use, beside the direction as given, which the moments use.
+  direction, a place or range past 2^21), `SolvedVolume::points` the points of a volume and their texels,
+  and `PreparedScene::near` the triangles near a place, conservatively (it may include a triangle slightly
+  beyond the radius, never omits one within it). `Sheared::of` is a direction as the rays see it: with its
+  still axes at 0, which the tree, the triangle test and the side met use, beside the direction as given,
+  which the moments use.
 - **A reach whose points are classified elsewhere.** `reach_by` floods as `reach()` does, with the same
   config, seeds, limit of points and refusals in the same order, but a point's validity comes from counts
   that a classifier gives (hits, and hidden sides of them); nothing is lit. With `classified`, the CPU's

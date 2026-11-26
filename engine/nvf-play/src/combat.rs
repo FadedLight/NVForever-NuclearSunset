@@ -1079,6 +1079,8 @@ struct Flying {
     ended_at: Option<V3>,
     /// The gas clouds it has passed through, each hit once (`crate::gas_traps`, #2687).
     gassed: Vec<FormId>,
+    /// The Projectile Zone primitives (`XTRI 23`) it has crossed, each hit once (#3662).
+    proj_zones_hit: Vec<FormId>,
 }
 
 /// A hit waiting for its delivery time (hitscan: distance ÷ speed).
@@ -1342,6 +1344,9 @@ pub struct Combat {
     blood_chance_logged: bool,
     /// A reload ended and no shot has been fired since (No Jam After Reload).
     pub fresh_reload: bool,
+    /// Named NVForever option `localized-dt-dr` (off by default; #3843), synced live from
+    /// [`LocalizedDtDr`].
+    pub localized_dt_dr: bool,
 }
 
 impl Combat {
@@ -1434,6 +1439,7 @@ impl Combat {
             spent_rng: SplitMix(4),
             blood_rng: SplitMix(6),
             blood_chance_logged: false,
+            localized_dt_dr: false,
         }
     }
 
@@ -1954,6 +1960,23 @@ pub struct VatsWeapon {
     pub classic_reach: Option<f32>,
 }
 
+/// Named NVForever option `localized-dt-dr` (off by default; #3843): when enabled, head
+/// hits apply only worn head-armour DT/DR and body hits apply only worn body-armour DT/DR,
+/// while explosions still use full worn armour and innate actor DT/DR still applies
+/// everywhere [documented: JIP LN NVSE v57.30 / Settings INI v56.24 `jip_nvse.ini`
+/// `bLocalizedDTDR`; design: `docs/spec-notes/localized-dt-dr.md`].
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LocalizedDtDr(pub bool);
+
+/// Keep [`Combat::localized_dt_dr`] aligned with the live [`LocalizedDtDr`] setting so
+/// toggling it from the pause menu takes effect immediately.
+pub(crate) fn sync_localized_dt_dr(setting: Option<Res<LocalizedDtDr>>, mut combat: ResMut<Combat>) {
+    let want = setting.as_deref().is_some_and(|s| s.0);
+    if combat.localized_dt_dr != want {
+        combat.localized_dt_dr = want;
+    }
+}
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
@@ -1961,6 +1984,7 @@ impl Plugin for CombatPlugin {
         if std::env::var_os("NVF_PLAY_TEST_GOD").is_some_and(|v| v != "0") {
             set_god_mode(true);
         }
+        app.init_resource::<LocalizedDtDr>();
         crate::settings::add_setting(
             app,
             crate::settings::Setting {
@@ -1971,6 +1995,19 @@ impl Plugin for CombatPlugin {
                 switches: "",
                 get: |_| reload_slows(),
                 set: |_, on| set_reload_slows(on),
+                slider: None,
+            },
+        );
+        crate::settings::add_setting(
+            app,
+            crate::settings::Setting {
+                key: "localized-dt-dr",
+                group: crate::pause::GROUP_MENUS,
+                label: "Localized armor DT/DR",
+                note: "On: head hits use only worn head armor DT/DR and body hits only worn body armor; explosions use all worn armor and innate DT/DR still applies. Off: full worn armor everywhere.",
+                switches: "",
+                get: |w| w.resource::<LocalizedDtDr>().0,
+                set: |w, on| w.resource_mut::<LocalizedDtDr>().0 = on,
                 slider: None,
             },
         );
@@ -1996,6 +2033,7 @@ impl Plugin for CombatPlugin {
             .init_resource::<crate::dismember::Dismemberment>()
             .add_message::<crate::dismember::Dismembered>()
             .add_systems(Startup, init_combat)
+            .add_systems(Update, sync_localized_dt_dr.before(PlaySet::Activation).run_if(resource_exists::<Combat>))
             .add_systems(
                 Update,
                 (track_limbs, (perk_speed, stat_speed), player_flinch, arm_sway, weapon_state, equip_sync, run_pace, reload_pace, weapon_sounds, fire, melee, (actor_attacks, sync_player_anim_events).chain(), fly, crate::dismember::resolve, (crate::mines::tick, crate::grass_fire::tick).chain(), crate::thrown::land, disarm, death_drops, meltdown, log_combat_lines).chain().in_set(PlaySet::Activation).run_if(in_state(PlayState::Playing)).run_if(resource_exists::<Combat>),
@@ -2655,8 +2693,11 @@ pub fn bridge_player_anim_state(
     dt: f32,
     had_weapon_action: &mut bool,
 ) {
-    use fnv_game::anim_state::{AnimState, MoveDir};
-    let weapon_action = combat.player_anim_action(anim, trigger, aiming, dt);
+    use fnv_game::anim_state::{AnimAction, AnimState, MoveDir};
+    let weapon_action = game
+        .has_pending_force_jam(FormId::PLAYER_REF)
+        .then_some(AnimAction::Jam)
+        .or_else(|| combat.player_anim_action(anim, trigger, aiming, dt));
     let prev = game.anim_state(FormId::PLAYER_REF).cloned().unwrap_or_default();
     let action = match weapon_action {
         Some(a) => {
@@ -4121,7 +4162,7 @@ pub(crate) fn fire(
                     let from_muzzle = anim.muzzle.is_some() && leaving.seen.at(leaving.origin, 0.0) != eye;
                     let by = By { actor: FormId::PLAYER_REF, weapon: id, ammo: c.ammo, harmless: false, sure: None, vats: vats_shot.is_some(), sneaking: control.sneak };
                     let vats_aim = vats_shot.filter(|_| p.explosion.is_some() && !p.mine);
-                    c.flying.push(Flying { p, vats_aim, nearest: f32::INFINITY, told_off: false, id: c.next_visual, proj, shown, dir, from_muzzle, origin: leaving.origin, seen: leaving.seen, tracer, projectiles_per_shot: chain.projectiles_per_shot, force, by, rref: None, registered: false, speed_mult: 1.0, ended_at: None, gassed: Vec::new() });
+                    c.flying.push(Flying { p, vats_aim, nearest: f32::INFINITY, told_off: false, id: c.next_visual, proj, shown, dir, from_muzzle, origin: leaving.origin, seen: leaving.seen, tracer, projectiles_per_shot: chain.projectiles_per_shot, force, by, rref: None, registered: false, speed_mult: 1.0, ended_at: None, gassed: Vec::new(), proj_zones_hit: Vec::new() });
                 }
                 let seen_from = leaving.seen.at(leaving.origin, 0.0);
                 // The flash itself is the renderer's (`ShotFired`); the test aid marks
@@ -4276,15 +4317,32 @@ fn apply_forced_player_jam(
 /// The target's DT and DR from the armour it wears (its carried ARMO by the wearing rule).
 /// The simulation creates an actor's inventory on first touch (`World::inventory_mut`).
 /// Each piece protects by its condition (§17).
-pub(crate) fn target_armor(c: &Combat, mut script: Option<&mut ScriptState>, sim: &mut SimState, target: FormId) -> (f32, f32) {
+pub(crate) fn target_armor(c: &Combat, script: Option<&mut ScriptState>, sim: &mut SimState, target: FormId) -> (f32, f32) {
+    target_armor_for_zone(c, script, sim, target, None)
+}
+
+/// [`target_armor`] for a specific body hit `zone` when the optional `localized-dt-dr`
+/// setting (`Combat::localized_dt_dr`, #3843) is enabled: head hits use worn head-armour
+/// DT/DR only and body hits use worn body-armour DT/DR only [documented: JIP LN NVSE v57.30
+/// / Settings INI v56.24 `jip_nvse.ini` `bLocalizedDTDR`; no DLL or source consulted];
+/// explosions apply full worn armour (`Zone::All` / `None`) and innate actor DT/DR (AV 76 /
+/// 18) still applies everywhere [observed: `tools/capture/nvse/probes/localized_dt_dr_probe.json`,
+/// `w4e_c02_jip_localized_dtdr_explosions_innate`, 2026-11-24]. When `localized_dt_dr` is off
+/// (default) or `zone` is `None`, sums all worn armour identically to vanilla.
+pub(crate) fn target_armor_for_zone(c: &Combat, mut script: Option<&mut ScriptState>, sim: &mut SimState, target: FormId, zone: Option<Zone>) -> (f32, f32) {
     // The player's tweak: how fast worn-down armour loses its DT and DR [design: docs/design/tweaks.md].
     let penalty = script.as_deref().and_then(|s| s.rt.as_ref()).map_or(1.0, |rt| rt.game.tweaks.armor_condition_penalty as f32);
+    let localized = zone.filter(|_| c.localized_dt_dr);
     let worn = worn_armor(&c.forms, sim, target);
-    let (dt, dr) = c.forms.armor_values_worn_with(&worn, penalty);
+    let armor_for = |pen: f32| match localized {
+        Some(z) => c.forms.armor_values_worn_in_zone_with(&worn, pen, z),
+        None => c.forms.armor_values_worn_with(&worn, pen),
+    };
+    let (dt, dr) = armor_for(penalty);
     // The player's tweaks: an NPC's armour keeps its whole DR or DT however worn [design: docs/design/tweaks.md].
     let (whole_dr, whole_dt) = script.as_deref().and_then(|s| s.rt.as_ref()).map_or((false, false), |rt| (rt.game.tweaks.npc_dr_ignores_condition, rt.game.tweaks.npc_dt_ignores_condition));
     let (dt, dr) = if target != FormId::PLAYER_REF && (whole_dr || whole_dt) {
-        let (dt_whole, dr_whole) = c.forms.armor_values_worn_with(&worn, 0.0);
+        let (dt_whole, dr_whole) = armor_for(0.0);
         (if whole_dt { dt_whole } else { dt }, if whole_dr { dr_whole } else { dr })
     } else {
         (dt, dr)
@@ -4343,11 +4401,12 @@ pub fn vats_hit_estimate(c: &Combat, parts: &ActorParts, mut script: Option<&mut
     let h = HitInput { weapon: &w, projectiles: 1, condition: item_condition(sim, shooter, weapon), ammo_effects: &[], part: bp.as_ref().map_or_else(HitPart::default, BodyPart::hit_part), power };
     let t = FormId(target);
     let (ap, tp) = hit_perks(script.as_deref_mut(), sim, shooter, weapon, Some(t));
-    let (dt, dr) = target_armor(c, script.as_deref_mut(), sim, t);
+    let (hit_dt, hit_dr) = target_armor_for_zone(c, script.as_deref_mut(), sim, t, Some(Zone::of(bp.as_ref())));
     let resist = target_resist(script.as_deref_mut(), sim, t, &w);
     // A roll of 1 is never a critical.
-    let hit = damage::hit(&c.rules, &c.tuning, &h, &a, &Target { dt, dr, resist, ..Target::default() }, &ap, &tp, 1.0).dealt;
+    let hit = damage::hit(&c.rules, &c.tuning, &h, &a, &Target { dt: hit_dt, dr: hit_dr, resist, ..Target::default() }, &ap, &tp, 1.0).dealt;
     let blast = c.forms.chain_with(weapon, &w, c.ammo).explosion.and_then(|e| c.forms.explosions.get(&e)).map_or(0.0, |x| {
+        let (dt, dr) = target_armor(c, script.as_deref_mut(), sim, t);
         let raw = damage::explosion_damage(&c.tuning, x.damage, x.radius, 0.0);
         let (ap, tp) = blast_perks(script, sim, Some(Cause { actor: shooter, weapon }), t);
         damage::blast_hit(&c.rules, &c.tuning, raw, dt, dr, &ap, &tp).dealt
@@ -5083,10 +5142,10 @@ fn melee(
         for (actor, hit) in hits {
             let target = FormId(actor as u32);
             stats.melee_hits += 1;
-            let (dt_v, dr) = target_armor(c, script.as_deref_mut(), &mut sim, target);
             let mut a = attacker(script.as_deref_mut(), &mut sim, &c.rules, FormId::PLAYER_REF, &w, vats_mark.is_some());
             a.sneaking = sneak_attack(script.as_deref(), FormId::PLAYER_REF, control.sneak, target);
             let bp = body_part(c, &parts, actor, hit.part);
+            let (dt_v, dr) = target_armor_for_zone(c, script.as_deref_mut(), &mut sim, target, Some(Zone::of(bp.as_ref())));
             let part = bp.as_ref().map_or_else(HitPart::default, BodyPart::hit_part);
             // The player's tweak: sneak criticals on the head only [design: docs/design/tweaks.md].
             if !part.head && script.as_ref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.sneak_criticals_head_only) {
@@ -5308,6 +5367,26 @@ fn gas_hit(c: &Combat, sim: &mut SimState, script: Option<&mut ScriptState>, r: 
     );
 }
 
+/// A scripted Projectile Zone primitive (`XTRI 23`) crossed by a shot (#3662): runs its
+/// `OnHit` / `OnHitWith` blocks via `Game::hit_object` without stopping the shot.
+/// Re-checks `Game::present` in case an earlier crossed zone on the same shot disabled
+/// this one (e.g. `MS01TriggerJunkyard1Ref` disabling both triggers in `OnHit`).
+fn projectile_zone_hit(sim: &mut SimState, script: Option<&mut ScriptState>, r: FormId, by: By, projectile: Option<FormId>) {
+    let Some(rt) = script.and_then(|s| s.rt.as_mut()) else { return };
+    let attacker = (by.actor != FormId(0)).then_some(by.actor);
+    let weapon = (by.weapon != FormId(0)).then_some(by.weapon);
+    let ran = with_world(rt, sim, |rt| {
+        if !rt.game.present(r) {
+            return false;
+        }
+        let info = HitInfo { attacker, weapon, projectile, location: -1, ..HitInfo::default() };
+        rt.game.hit_object(r, info)
+    });
+    if ran {
+        info!("combat: shot crosses Projectile Zone {r}: its hit blocks ran");
+    }
+}
+
 /// Destructible references whose collision overlaps a sphere, with their distance.
 fn destructibles_near(phys: &mut PhysState, sim: &SimState, script: Option<&ScriptState>, at: V3, radius: f32) -> Vec<(FormId, f32)> {
     let Some(rt) = script.and_then(|s| s.rt.as_ref()) else { return Vec::new() };
@@ -5438,7 +5517,7 @@ fn actor_attacks(
             let tracer = rolled || (shown && instant(&p));
             let dir = vec::normalize(p.vel);
             c.next_visual += 1;
-            c.flying.push(Flying { p, vats_aim: None, nearest: f32::INFINITY, told_off: false, id: c.next_visual, proj, shown, dir, from_muzzle: s.muzzle.is_some(), origin: leaving.origin, seen: leaving.seen, tracer, projectiles_per_shot: chain.projectiles_per_shot, force, by, rref: None, registered: false, speed_mult: 1.0, ended_at: None, gassed: Vec::new() });
+            c.flying.push(Flying { p, vats_aim: None, nearest: f32::INFINITY, told_off: false, id: c.next_visual, proj, shown, dir, from_muzzle: s.muzzle.is_some(), origin: leaving.origin, seen: leaving.seen, tracer, projectiles_per_shot: chain.projectiles_per_shot, force, by, rref: None, registered: false, speed_mult: 1.0, ended_at: None, gassed: Vec::new(), proj_zones_hit: Vec::new() });
             if let Some(flying) = c.flying.last() {
                 grenade_probe.accepted(probe_request, s, &flying.p, flying.proj, flying.id);
                 if let Some(probe) = launch_probe.as_deref_mut() { probe.inserted(s, scripted, flying, &sim.world); }
@@ -5467,7 +5546,11 @@ fn actor_attacks(
         // The weapon: its own, else the Fists; a creature's own attack damage in the Fists'
         // place [design: the Fists' other figures stand in for a creature's].
         let Some(id) = b.weapon.or(c.fists) else { continue };
-        let Some(mut w) = c.forms.weapons.get(&id).cloned() else { continue };
+        // [design] NPCs carrying an already-modded weapon (e.g. player-modded) apply its
+        // weapon-mod stats (`WeaponStats::modded`) even when `npc-weapon-mods` is off;
+        // unmodded NPC weapons (`mods == 0`) stay identical to base weapon stats.
+        let mods = if b.creature_damage.is_none() { sim.world.peek(b.attacker).and_then(|st| st.inventory.as_ref()).map_or(0, |i| i.mods_in_use(id)) } else { 0 };
+        let Some(mut w) = c.forms.weapons.get(&id).map(|w| if mods != 0 { w.modded(mods) } else { w.clone() }) else { continue };
         script_weapon_critical_damage(script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game), id, &mut w);
         if let Some(d) = b.creature_damage {
             w.base_damage = d.round() as i32;
@@ -5489,7 +5572,7 @@ fn actor_attacks(
         if power != 1.0 {
             info!("combat: {}'s power attack {} on {}: damage x{power:.1}", b.attacker, b.anim.unwrap_or("?"), b.target);
         }
-        let (dt_v, dr) = target_armor(c, script.as_deref_mut(), &mut sim, b.target);
+        let (dt_v, dr) = target_armor_for_zone(c, script.as_deref_mut(), &mut sim, b.target, Some(Zone::of(bp.as_ref())));
         let roll = c.rng.next_f32();
         let (ap, tp) = hit_perks(script.as_deref_mut(), &mut sim, b.attacker, id, Some(b.target));
         let resist = target_resist(script.as_deref_mut(), &mut sim, b.target, &w);
@@ -5871,11 +5954,16 @@ fn fly(
     }
     // Shots whose flight ended this frame without a hit to deliver: their references go.
     let mut over: Vec<(FormId, f32)> = Vec::new();
-    // The gas clouds the shots pass through or leave from this frame (#2687): the
-    // cloud, the shot's source, whether the gun was fired inside it.
+    // The gas clouds (#2687) and scripted Projectile Zone primitives (XTRI 23, #3662)
+    // shots can cross this frame.
     // Read with the world in the runtime (`with_world`): outside it, nothing is present.
-    let gas = script.as_deref_mut().and_then(|s| s.rt.as_mut()).map(|rt| with_world(rt, &mut sim, |rt| crate::gas_traps::volumes(rt))).unwrap_or_default();
+    let (gas, proj_zones) = script
+        .as_deref_mut()
+        .and_then(|s| s.rt.as_mut())
+        .map(|rt| with_world(rt, &mut sim, |rt| (crate::gas_traps::volumes(rt), crate::script_trigger::projectile_zones(rt))))
+        .unwrap_or_default();
     let mut gas_hits: Vec<(FormId, By, bool)> = Vec::new();
+    let mut proj_zone_hits: Vec<(FormId, By, Option<FormId>)> = Vec::new();
     {
         let world = view(&mut phys, script.as_deref(), Some(&sim));
         let hold = c.tracer_hold;
@@ -5951,7 +6039,7 @@ fn fly(
                 }
             }
             // Its way this frame, from the muzzle on the first, to where it stopped.
-            if !gas.is_empty() && !f.by.harmless {
+            let shot_segment = || {
                 let to = events
                     .iter()
                     .find_map(|e| match e {
@@ -5960,11 +6048,27 @@ fn fly(
                     })
                     .unwrap_or(f.p.pos);
                 let from = if first { f.origin } else { before };
+                (from, to)
+            };
+            if !gas.is_empty() && !f.by.harmless {
+                let (from, to) = shot_segment();
                 let inside = if first { crate::gas_traps::around(&gas, f.origin) } else { Vec::new() };
                 for r in crate::gas_traps::crossed(&gas, from, to) {
                     if !f.gassed.contains(&r) {
                         f.gassed.push(r);
                         gas_hits.push((r, f.by, inside.contains(&r)));
+                    }
+                }
+            }
+            // Scripted Projectile Zone primitives (XTRI 23) crossed by this shot segment
+            // (#3662): each projectile triggers each volume at most once without stopping
+            // the shot.
+            if !proj_zones.is_empty() {
+                let (from, to) = shot_segment();
+                for r in crate::script_trigger::crossed_projectile_zones(&proj_zones, from, to) {
+                    if !f.proj_zones_hit.contains(&r) {
+                        f.proj_zones_hit.push(r);
+                        proj_zone_hits.push((r, f.by, f.rref));
                     }
                 }
             }
@@ -6087,6 +6191,9 @@ fn fly(
     for (r, by, inside) in gas_hits {
         let what = if inside { "a shot fired inside it" } else { "a shot through it" };
         gas_hit(c, &mut sim, script.as_deref_mut(), r, Some(by.actor), Some(by.weapon), inside, what);
+    }
+    for (r, by, rref) in proj_zone_hits {
+        projectile_zone_hit(&mut sim, script.as_deref_mut(), r, by, rref);
     }
     if let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()).filter(|_| !over.is_empty()) {
         with_world(rt, &mut sim, |rt| {
@@ -6437,8 +6544,16 @@ fn fly(
             p.by.actor = s.source;
         }
         let id = p.by.weapon;
-        // The player's weapon hits with its mods' figures (weapon-mods.md §2).
-        let w = if p.by.actor == FormId::PLAYER_REF { c.player_stats(id) } else { c.forms.weapons.get(&id).cloned() };
+        // Modded weapons hit with their mods' figures (weapon-mods.md §2).
+        // [design] NPCs carrying an already-modded weapon (e.g. player-modded) apply its
+        // weapon-mod stats (`WeaponStats::modded`) even when `npc-weapon-mods` is off;
+        // unmodded NPC weapons (`mods == 0`) stay identical to base weapon stats.
+        let w = if p.by.actor == FormId::PLAYER_REF {
+            c.player_stats(id)
+        } else {
+            let mods = sim.world.peek(p.by.actor).and_then(|st| st.inventory.as_ref()).map_or(0, |i| i.mods_in_use(id));
+            c.forms.weapons.get(&id).map(|w| if mods != 0 { w.modded(mods) } else { w.clone() })
+        };
         let Some(mut w) = w else { continue };
         script_weapon_critical_damage(script.as_deref().and_then(|s| s.rt.as_ref()).map(|rt| &rt.game), id, &mut w);
         if let Some(s) = &shot {
@@ -6464,7 +6579,7 @@ fn fly(
         // The player's tweak: a shot whose damage does not get through the actor's DT
         // leaves no blood on it [design: docs/design/tweaks.md].
         let wanted = script.as_deref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.armor_blocks_blood);
-        let stopped = wanted && struck.is_some_and(|r| blood_stopped(w.base_damage as f32, target_armor(c, script.as_deref_mut(), &mut sim, FormId(r)).0));
+        let stopped = wanted && struck.is_some_and(|r| blood_stopped(w.base_damage as f32, target_armor_for_zone(c, script.as_deref_mut(), &mut sim, FormId(r), Some(Zone::of(bp.as_ref()))).0));
         // The player's tweak: a shot on the weapon in an actor's hand strikes metal, sparks
         // and no blood [design: docs/design/tweaks.md].
         let on_weapon = p.part == Some(crate::hitvol::WEAPON_PART) && script.as_deref().and_then(|s| s.rt.as_ref()).is_some_and(|rt| rt.game.tweaks.weapon_impacts);
@@ -6591,7 +6706,7 @@ fn fly(
         if p.part == Some(fnv_phys::gore::GORE_PART) {
             continue;
         }
-        let (dt_v, dr) = target_armor(c, script.as_deref_mut(), &mut sim, target);
+        let (dt_v, dr) = target_armor_for_zone(c, script.as_deref_mut(), &mut sim, target, Some(Zone::of(bp.as_ref())));
         let resist = target_resist(script.as_deref_mut(), &mut sim, target, &w);
         let nerve = companion_nerve(script.as_deref_mut(), &mut sim, target);
         let d = damage::hit(&c.rules, &c.tuning, &h, &a, &Target { dt: dt_v, dr, resist, nerve, ..Target::default() }, &ap, &tp, roll);
@@ -7374,7 +7489,8 @@ mod tests {
         let mut phys = PhysState::default();
         let id = 0x1234;
         let ch = phys.world.add_character(id, fnv_phys::CharacterParams::default(), [0.0, 0.0, 0.0]);
-        phys.npcs.insert(id, NpcBody { prev_feet: ch.feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default() });
+        let standing_height = ch.params.height;
+        phys.npcs.insert(id, NpcBody { prev_feet: ch.feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default(), standing_height, sneak_crouch: false });
         phys.world.set_actor_volume(id, fnv_phys::HitVolume { feet: [0.0, 0.0, 30.0], radius: 8.0, height: 30.0, dead: false });
         phys
     }
@@ -7402,7 +7518,8 @@ mod tests {
                 phys.world.set_actor_volume(id, fnv_phys::HitVolume { feet, radius: 15.0, height: 30.0, dead: false });
                 if walking {
                     let ch = phys.world.add_character(id, fnv_phys::CharacterParams::default(), feet);
-                    phys.npcs.insert(id, NpcBody { prev_feet: feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default() });
+                    let standing_height = ch.params.height;
+                    phys.npcs.insert(id, NpcBody { prev_feet: feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default(), standing_height, sneak_crouch: false });
                 }
                 for forward in [[1.0, 0.0, 0.0], vec::normalize([1.0, 0.0, -1.0])] {
                     let mut world = view(&mut phys, None, None).for_melee();
@@ -7906,6 +8023,7 @@ mod tests {
                 kick_back: [crate::ease::Spring::default(); 2],
                 spent_rng: SplitMix(4),
                 chosen_ammo: std::collections::BTreeMap::new(),
+                localized_dt_dr: false,
             };
             let dt = 1.0 / 60.0;
             let mut had_weapon = false;
@@ -8131,6 +8249,7 @@ mod tests {
                 kick_back_goal: [0.0; 2],
                 kick_back: [crate::ease::Spring::default(); 2],
                 spent_rng: SplitMix(4),
+                localized_dt_dr: false,
             };
             (sim, combat)
         }
@@ -8358,6 +8477,222 @@ mod tests {
         }
     }
 
+    mod localized_dt_dr_tests {
+        use super::*;
+        use fnv_combat::data::ArmorStats;
+        use fnv_sim::forms::{BaseData, BaseForm, Item, ItemKind};
+
+        fn make_combat_with(forms: CombatForms) -> Combat {
+            Combat {
+                forms,
+                rules: Rules::defaults(),
+                tuning: CombatTuning::default(),
+                blood_rng: SplitMix(6),
+                blood_chance_logged: false,
+                weapon: None,
+                equipped: None,
+                mods: 0,
+                silenced_logged: None,
+                fists: None,
+                ammo: None,
+                self_ammo: false,
+                melee: false,
+                swings: Melee::default(),
+                blows: 0,
+                boom: Vec::new(),
+                meltdowns: HashSet::new(),
+                debris: Vec::new(),
+                cycle: None,
+                kick: Kick::default(),
+                flying: Vec::new(),
+                dropped_live: Vec::new(),
+                settled: Vec::new(),
+                landed: Vec::new(),
+                fire_landed: Vec::new(),
+                splashes: Vec::new(),
+                ghosts: Vec::new(),
+                looping: None,
+                ejects_seen: 0,
+                vats_throw: None,
+                last_shot: 0.0,
+                next_visual: 0,
+                pending: Vec::new(),
+                script_shots: Vec::new(),
+                guarding: HashMap::new(),
+                blocked_blows: Vec::new(),
+                fresh_reload: false,
+                guard_down_until: 0.0,
+                marks: Vec::new(),
+                rng: SplitMix(1),
+                swing_rng: SplitMix(2),
+                time: 0.0,
+                no_spread: false,
+                tracer_hold: None,
+                load_magazine: None,
+                load_ammo: None,
+                chosen_ammo: std::collections::BTreeMap::new(),
+                crosshair_cone: None,
+                player_spread: None,
+                grenade_hold: 0.0,
+                grenade_held: false,
+                vats_cone: None,
+                vats_blast: VatsBlast::default(),
+                player_blocked_at: None,
+                special_swing: None,
+                throw_logged: None,
+                spread_perks_logged: None,
+                flinch_until: 0.0,
+                flinch_end: None,
+                flinch_rng: SplitMix(3),
+                kick_rng: SplitMix(5),
+                kick_just_settled: false,
+                kick_left: [0.0; 2],
+                kick_back_goal: [0.0; 2],
+                kick_back: [crate::ease::Spring::default(); 2],
+                spent_rng: SplitMix(4),
+                localized_dt_dr: false,
+            }
+        }
+
+        #[test]
+        fn localized_dt_dr_defaults_off_separates_zones_preserves_explosions_and_innate_dt_dr() {
+            const HELMET: FormId = FormId(0x9001);
+            const ARMOR: FormId = FormId(0x9002);
+            let make_armor = |id, slots, dt, dr| BaseForm {
+                id,
+                sig: *b"ARMO",
+                edid: None,
+                name: None,
+                script: None,
+                prompt: None,
+                voice_filter: false,
+                data: BaseData::Item(Item {
+                    kind: ItemKind::Armor,
+                    value: Some(50),
+                    money: None,
+                    weight: Some(5.0),
+                    slots: Some(slots),
+                    projectile: None,
+                    health: Some(100),
+                    non_playable: false,
+                    cant_drop: false,
+                    armor_class: Default::default(),
+                    power_armor: false,
+                    armor_dr: Some(dr),
+                    armor_dt: Some(dt),
+                    weapon_damage: None,
+                    weight_mods: [0.0; 3],
+                    drawable: false,
+                    not_for_npcs: false,
+                    thrown: false,
+                    quest_item: false,
+                    icon: None,
+                    placed_count: None,
+                    teaches: None,
+                    cant_be_taken: false,
+                    modulates_voice: false,
+                    weapon_traits: None,
+                }),
+            };
+            let mut sim = crate::sim::test_world::sim(
+                vec![
+                    make_armor(HELMET, ArmorStats::HEAD_SLOTS, 4.0, 5.0),
+                    make_armor(ARMOR, ArmorStats::UPPER_BODY, 14.0, 15.0),
+                ],
+                Vec::new(),
+            );
+            sim.world.add_item(FormId::PLAYER_REF, HELMET, 1).unwrap();
+            sim.world.add_item(FormId::PLAYER_REF, ARMOR, 1).unwrap();
+            sim.world.equip(FormId::PLAYER_REF, HELMET).unwrap();
+            sim.world.equip(FormId::PLAYER_REF, ARMOR).unwrap();
+
+            let mut cf = CombatForms::default();
+            cf.armor.insert(HELMET, ArmorStats { health: 100, dt: 4.0, dr_raw: 500, slots: ArmorStats::HEAD_SLOTS, ..Default::default() });
+            cf.armor.insert(ARMOR, ArmorStats { health: 100, dt: 14.0, dr_raw: 1500, slots: ArmorStats::UPPER_BODY, ..Default::default() });
+            let mut combat = make_combat_with(cf);
+            let mut script = crate::script::ScriptState::over_no_plugins();
+
+            // 1. Default off (vanilla unchanged): every zone sums full worn armor (DT=18, DR=20).
+            assert!(!combat.localized_dt_dr, "must default to off");
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Head)), (18.0, 20.0));
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Body)), (18.0, 20.0));
+            assert_eq!(target_armor(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF), (18.0, 20.0));
+
+            // 2. Enabled: Head uses helmet only, Body uses chest only, explosions (All / target_armor) use full sum.
+            combat.localized_dt_dr = true;
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Head)), (4.0, 5.0));
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Body)), (14.0, 15.0));
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::All)), (18.0, 20.0));
+            assert_eq!(target_armor(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF), (18.0, 20.0));
+
+            // 3. Innate actor DT (AV 76) and DR (AV 18) still apply to every zone.
+            script
+                .rt
+                .as_mut()
+                .unwrap()
+                .game
+                .run_query("Begin Function {}\nPlayerREF.ModAV DamageThreshold 3\nPlayerREF.ModAV DamageResist 10\nEnd", Default::default())
+                .unwrap();
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Head)), (7.0, 15.0));
+            assert_eq!(target_armor_for_zone(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF, Some(Zone::Body)), (17.0, 25.0));
+            assert_eq!(target_armor(&combat, Some(&mut script), &mut sim, FormId::PLAYER_REF), (21.0, 30.0));
+        }
+
+        #[test]
+        fn localized_dt_dr_setting_defaults_off_syncs_and_round_trips_ini() {
+            use bevy::app::PostStartup;
+            use bevy::ecs::system::RunSystemOnce;
+            use bevy::MinimalPlugins;
+
+            let dir = std::env::temp_dir().join(format!("nvf-localized-dt-dr-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("NVForever.ini");
+
+            let make_app = |ini_path: &std::path::Path| {
+                let mut app = App::new();
+                app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+                    .init_state::<PlayState>()
+                    .insert_resource(crate::settings::SettingsFile(Some(ini_path.to_path_buf())))
+                    .init_resource::<crate::settings::GivenSwitches>()
+                    .add_plugins(CombatPlugin)
+                    .add_systems(PostStartup, crate::settings::apply_stored);
+                app.world_mut().run_schedule(PostStartup);
+                app
+            };
+
+            // 1. Fresh start with no INI: defaults to off, within note budget.
+            let mut app = make_app(&path);
+            assert!(!app.world().resource::<LocalizedDtDr>().0, "must default to off");
+            let idx = app.world().resource::<crate::settings::Settings>().index("localized-dt-dr").expect("setting registered");
+            let row = &app.world().resource::<crate::settings::Settings>().list()[idx];
+            assert_eq!(crate::settings::note_over_budget(row.note), None, "note must fit within 200-char budget");
+
+            // Live sync propagates to Combat when flipped on and writes NVForever.ini.
+            app.insert_resource(make_combat_with(CombatForms::default()));
+            assert_eq!(crate::settings::flip(app.world_mut(), idx), Some(true));
+            app.world_mut().run_system_once(sync_localized_dt_dr).unwrap();
+            assert!(app.world().resource::<LocalizedDtDr>().0);
+            assert!(app.world().resource::<Combat>().localized_dt_dr);
+            let ini = std::fs::read_to_string(&path).unwrap();
+            assert!(ini.contains("localized-dt-dr=1"), "persisted to NVForever.ini: {ini}");
+
+            // 2. Next start restores ON from NVForever.ini.
+            let mut reloaded = make_app(&path);
+            assert!(reloaded.world().resource::<LocalizedDtDr>().0, "restored from NVForever.ini");
+
+            // 3. Flipping back off writes 0 and restores off on next start.
+            let idx2 = reloaded.world().resource::<crate::settings::Settings>().index("localized-dt-dr").unwrap();
+            assert_eq!(crate::settings::flip(reloaded.world_mut(), idx2), Some(false));
+            let ini_off = std::fs::read_to_string(&path).unwrap();
+            assert!(ini_off.contains("localized-dt-dr=0"), "off persisted: {ini_off}");
+            let reloaded_off = make_app(&path);
+            assert!(!reloaded_off.world().resource::<LocalizedDtDr>().0, "off restored from NVForever.ini");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
     /// Issue #3753: holding Block with bare fists suppresses taps and holds through the
     /// real player input path (`control::read_controls` -> `combat::melee`) when Power
     /// Attack From a Block is off, resumes normally when Block ends, and preserves both
@@ -8555,6 +8890,7 @@ mod tests {
                 kick_back_goal: [0.0; 2],
                 kick_back: [crate::ease::Spring::default(); 2],
                 spent_rng: SplitMix(4),
+                localized_dt_dr: false,
             };
 
             let mut fx_forms = FxForms::default();

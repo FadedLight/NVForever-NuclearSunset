@@ -67,6 +67,8 @@ pub mod swing_traps;
 pub mod flashlight;
 pub mod free_cam;
 pub mod script_camera;
+pub mod photo_lights;
+pub mod photo_mode;
 pub mod shake;
 pub mod sprint;
 pub mod game_start;
@@ -93,6 +95,7 @@ pub mod aim_assist;
 pub mod knockouts;
 pub mod loading;
 pub mod loading_look;
+pub mod lobby;
 pub mod main_menu;
 pub mod menu_scale;
 pub mod menu_readability;
@@ -108,6 +111,8 @@ pub mod companion_wheel;
 pub mod caravan;
 pub mod challenges;
 pub mod poker;
+pub mod flourish;
+pub mod casino_hud;
 pub mod menu;
 pub mod menu_shapes;
 pub mod mod_log;
@@ -514,9 +519,11 @@ impl Plugin for PlayPlugin {
             .add_plugins(collision_view::CollisionViewPlugin)
             .add_plugins(free_cam::FreeCamPlugin)
             .add_plugins(script_camera::ScriptCameraPlugin)
+            .add_plugins(photo_mode::PhotoModePlugin)
             .add_plugins(aim_zoom::AimZoomPlugin)
             .add_plugins(save::SavePlugin)
             .add_plugins(main_menu::MainMenuPlugin)
+            .add_plugins(lobby::LobbyPlugin)
             .add_plugins(ui_pointer::UiPointerPlugin)
             .add_plugins(intro::IntroPlugin)
             .add_plugins(screen_splatter::ScreenSplatterPlugin)
@@ -540,7 +547,8 @@ impl Plugin for PlayPlugin {
             .add_plugins(difficulty::DifficultyPlugin)
             .add_plugins(tweaks::TweaksPlugin)
             .add_plugins(hardcore::HardcorePlugin)
-            .add_plugins((ui_colour::UiColourPlugin, language::LanguagePlugin));
+            .add_plugins((ui_colour::UiColourPlugin, language::LanguagePlugin))
+            .add_plugins((casino_hud::CasinoHudPlugin, flourish::FlourishPlugin));
         test_aid::setup(app);
         stress::setup(app);
         settings::setup(app);

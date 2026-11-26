@@ -490,8 +490,9 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         }
         // Whose light the point's moments take: the kernel's own where a ray's light may differ by design.
         let own_light = (at_once || met) && same_counts(c);
-        let agreed = if finite && (matches!(k, Kind::Same | Kind::TieSame) || own_light) {
-            Some(c)
+        // The answer agreed with, and whether its lamps are in shadow (a named answer of no light).
+        let (agreed, dark) = if finite && (matches!(k, Kind::Same | Kind::TieSame) || own_light) {
+            (Some(c), false)
         } else {
             let other = |(o, shadowed): (&Option<Bounce>, bool)| match o {
                 None => !g.hit,
@@ -500,10 +501,10 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
                     g.hit && o.hidden == g.hidden && light && (o.p - g.p).max_abs() <= 0.02 && same_counts(&Some(*o))
                 }
             };
-            let found = others.iter().map(|(o, shadowed)| (&o[i], *shadowed)).find(|o| finite && other(*o)).map(|o| o.0);
+            let found = others.iter().map(|(o, shadowed)| (&o[i], *shadowed)).find(|o| finite && other(*o));
             either += usize::from(found.is_some());
             named[i / n] |= found.is_some();
-            found
+            found.map_or((None, false), |(o, shadowed)| (Some(o), shadowed))
         };
         let used = agreed.unwrap_or(c);
         if agreed.is_none() {
@@ -511,7 +512,9 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         }
         let [a, b, l, s] = counts(used);
         sums[i / n] = [sums[i / n][0] + a, sums[i / n][1] + b, sums[i / n][2] + l, sums[i / n][3] + s];
-        let l = if own_light { g.light } else { used.map_or(V3::ZERO, |u| if u.hidden { V3::ZERO } else { u.light }) };
+        // The moments take the light of the answer agreed with: none of one in shadow, the kernel's own where a ray's
+        // light is not compared.
+        let l = if own_light { g.light } else { used.filter(|u| !u.hidden && !dark).map_or(V3::ZERO, |u| u.light) };
         let (d, m) = (f.along[i % n], &mut moments[i / n]);
         *m = [m[0] + l, m[1] + l * (2.0 * d[0]), m[2] + l * (2.0 * d[1]), m[3] + l * (2.0 * d[2])];
     }

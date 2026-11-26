@@ -93,8 +93,34 @@ Every stored field in `YuiConfig` has a live engine consumer:
   comment: `"; replace hotkey icons with ycons"`; design: NVForever's own precedence
   keeping `SetItemHotkeyIconPath` above ySI icons, and leaving hotkey icon replacement
   off when `yUI.ini` is absent].
+- `[Sorting and Icons] bEnableCategories` (default `1`, gated by `bSortingIcons`):
+  enables JSON-defined clickable Pip-Boy inventory category folders and nested subfolders
+  declared in `menus/ySI/*.json` `"icons"` entries (`name`, `tab` `0..=4`, `count`,
+  `filename`, `template`, `icon`, and member/child `"category"` links) [documented: yUI
+  v1.4d (`https://www.nexusmods.com/newvegas/mods/74357`), `Data\NVSE\Plugins\yUI.ini`
+  verbatim comment: `"; enable keyring-like clickable categories (this destroys vanilla
+  keyring, so you have to have .json files supplying a new keyring category, i.e.
+  ySI.json)"`; ySI - Sorting Ycons v1.4b (`https://www.nexusmods.com/newvegas/mods/74358`),
+  shipped `menus/ySI/ySI.json` `"icons"` entries for `(jdc0)` Notes, `(jdd0)` Keyring,
+  and `(jde0)` Caravan Deck (`"name"`, `"tab": 3`, `"count": 2`, `"icon"`, and child
+  `"category"` references); no plugin DLL or source code consulted].
+  - `[hypothesis]` `count` specifies the minimum number of distinct matching rows needed
+    before a category collapses into a folder row (items below the threshold stay flat at
+    the parent level), and a category folder row's displayed count is the number of
+    distinct matching item rows grouped inside it.
+  - `[design]` NVForever's own behavior beyond the INI/JSON files: when `yUI.ini`/`ySI.ini`
+    are absent or `bSortingIcons = 0` or `bEnableCategories = 0`, Pip-Boy inventory keeps
+    the vanilla flat tabs and native Misc `Keyring` / `Caravan Cards` folders untouched.
+    When enabled and categories exist for tab `3` (Misc), ySI categories replace the
+    hardcoded Misc folders while continuing to include `AddCardToPlayer` Caravan cards so
+    Caravan Deck rules match them. Nested parent->child category folders are supported with
+    cycle protection (max depth 16) and a breadcrumb stack (`Back` / `IM_CancelButton`
+    steps up one level and restores selection to the exited folder). Active search queries
+    bypass collapsed folders so matching items stay directly selectable. Inside ySI
+    category folders on Weapons/Apparel tabs, `Repair` and `Mod` remain usable on selected
+    item rows.
 
-## Already-avoided / intentionally unbuilt keys
+## Already-avoided keys
 
 Skipped during parsing with no dead struct fields:
 
@@ -103,7 +129,3 @@ Skipped during parsing with no dead struct fields:
   condition bits, `ContainerMenu` lists all rows, and `InventoryMenu` tabline tracks only
   the active tab natively in NVForever) [documented: yUI v1.4d
   `Data\NVSE\Plugins\yUI.ini` comments].
-- `[Sorting and Icons] bEnableCategories`: JSON-defined clickable inventory category
-  folders (`category`/`tab`/`count` entries in `menus/ySI/*.json` replacing the vanilla
-  keyring) are not built in this slice; NVForever keeps its native Misc `Keyring` and
-  `Caravan Cards` folders until a dedicated categories PR is implemented.

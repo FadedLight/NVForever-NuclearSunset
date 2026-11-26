@@ -344,8 +344,8 @@ impl Shown {
             device,
             figures,
             repair,
-            modify: tab == 0 && m.folder.is_none(),
-            modify_lit: selected.is_some(),
+            modify: tab == 0 && (m.folder.is_none() || matches!(m.folder, Some(crate::menu::model::Folder::Ysi(_)))),
+            modify_lit: selected.is_some_and(|r| r.folder.is_none()),
             ammo: selected.is_some_and(|r| r.kind == Some(ItemKind::Ammo)),
             equippable: selected.is_some_and(|r| matches!(r.kind, Some(ItemKind::Weapon | ItemKind::Armor | ItemKind::Aid)) && r.condition.is_none_or(|c| c > 0.0)),
             hotkey_lit: selected.is_some_and(|r| r.folder.is_none() && r.kind.is_some_and(crate::hotkeys::can_hold)),
@@ -966,8 +966,10 @@ fn pass(p: &mut ItemsPage<'_, '_>, late: bool) -> Option<Result<TileId, String>>
         let last = p.tiles.written.shown.as_ref().and_then(|s| s.repair.word);
         let upkeep = crate::pipboy::labels::label(MAINTAIN_SETTING, REPAIR_UPKEEP);
         let word = repair_word(offer.as_ref().map(|o| fnv_game::repair::hint(o.gear, o.condition)), tab, last, upkeep);
-        // Inside a Misc folder Cancel stands in its place.
-        let repair = RepairButton { shown: m.folder.is_none(), usable: offer.as_ref().is_some_and(|o| o.usable()), word };
+        // Inside a vanilla Misc folder Cancel stands in Repair's place; inside a ySI category
+        // folder (e.g. Weapons/Apparel) Repair remains available for selected items [design].
+        let in_vanilla_misc_folder = matches!(m.folder, Some(crate::menu::model::Folder::Keys | crate::menu::model::Folder::Cards));
+        let repair = RepairButton { shown: !in_vanilla_misc_folder, usable: offer.as_ref().is_some_and(|o| o.usable()), word };
         let panel = hold.and_then(|h| h.slot);
         let game = &script.rt.as_ref()?.game;
         let words = (hints_of(game), fnv_game::ui_loading::game_string(game, CONDITION_TITLE));

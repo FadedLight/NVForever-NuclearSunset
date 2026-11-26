@@ -261,6 +261,36 @@ the same.
   are out of date.
 - What a solve or a fit takes in time and memory in play is not measured here.
 
+## For another tracer: the live solve
+
+[design] The plan has moved on from a solve on entry: the bounce light is to be solved on the GPU with
+ray queries from the first frame of a visit, live by default, with this CPU solver as the reference that
+the GPU's results are held against. Both are NVForever's own, home-grown for this engine. It comes in
+slices; the first adds only plain data and the seams for it, on the CPU, and changes nothing that a solve
+computes:
+
+- **What the GPU reads.** `PreparedScene::export` gives the scene as it is after `prepare` (corners by
+  triangle number, faces, materials, the two levels a texture is read at), `LampTable::of` the lamps'
+  table of a solve in that light, built by the same code and refusing the same lamps (a spot of no
+  direction, a place or range past 2^21), and `SolvedVolume::points` the points of a volume and their
+  texels. `Sheared::of` is a direction as the rays see it: with its still axes at 0, which the tree, the
+  triangle test and the side met use, beside the direction as given, which the moments use.
+- **A reach whose points are classified elsewhere.** `reach_by` floods as `reach()` does, with the same
+  config, seeds, limit of points and refusals in the same order, but a point's validity comes from counts
+  that a classifier gives (hits, and hidden sides of them); nothing is lit. With `classified`, the CPU's
+  own counts, it is `reach()`'s reach. A classifier's counts that cannot be are the crate's fault.
+- **Light gathered elsewhere, packed as a solve packs it.** `SolvedVolume::of_points` makes the same box,
+  texture and bytes from the same places and moments.
+- **`nvf-rtgi-live`.** The scene, a light and a volume's points as the words a kernel reads, made on any
+  thread. What a shader could not compute as the solver does is refused there with the reason (corners
+  past 1e5, colours or factors past 1e10, texture coordinates past 1e5, lights brighter than 1e6
+  together) and stays the CPU solver's. The kernel, the device side and a runner that compares both
+  come in the next slices.
+
+Tests hold the seams to the solver on made scenes: a reach by the CPU's counts is `reach()`'s and
+`solve()`'s, `reach()`'s points packed again are `solve()`'s bytes, and the table names the lamps the
+solver's lookup names, at the grid's edges too.
+
 ## Units
 
 Bevy's world space in game units (y up, -z north), linear colour unless called a display value.

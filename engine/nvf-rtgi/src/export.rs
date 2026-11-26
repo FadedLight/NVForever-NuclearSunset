@@ -8,6 +8,7 @@ use crate::gather::{counted, probe};
 use crate::grid::{point, Place};
 use crate::light::{LightState, Lights};
 use crate::parallel::cancellable;
+use crate::reach::EMISSIONS;
 use crate::scene::Material;
 use crate::solve::SolvedVolume;
 use crate::texture::{Sampler, Texels};
@@ -110,11 +111,15 @@ pub struct Bounce {
 }
 
 /// What each ray (from, along) meets and brings, for another tracer's single rays: of a point's rays the lights are
-/// what its [`crate::Probe`] sums, and the counts add up to its counts. `emission` as [`crate::GatherConfig`]'s.
+/// what its [`crate::Probe`] sums, and the counts add up to its counts. `emission` as [`crate::GatherConfig`]'s, and
+/// refused as there.
 pub fn bounces(scene: &PreparedScene, light: &LightState, rays: &[(V3, V3)], emission: f32, threads: usize, cancel: Cancel) -> Result<Vec<Option<Bounce>>, Failed> {
     guarded(|| {
         if !(1..=MOST_THREADS).contains(&threads) {
             return unavailable(Reason::Input("threads"));
+        }
+        if !EMISSIONS.contains(&emission) {
+            return unavailable(Reason::Input("emission"));
         }
         let lights = Lights::new(light, cancel)?;
         cancellable(rays.len(), threads, cancel, |i| {
@@ -248,5 +253,8 @@ mod tests {
         assert_eq!((sum * (1.0 / 64.0), counts), (probe.moments.c[0], [probe.hits, probe.backs, probe.lamps, probe.shadow_rays]));
         assert!(b.iter().flatten().all(|b| (b.start - b.p).length() > 0.0099 && b.weights.iter().all(|w| (0.0..=1.0).contains(w))));
         assert_eq!(bounces(&world, &light(), &rays, 0.25, 0, NEVER), Err(Failed::Unavailable(Reason::Input("threads"))));
+        for emission in [-0.1, 1.001, f32::NAN] {
+            assert_eq!(bounces(&world, &light(), &rays, emission, 1, NEVER), Err(Failed::Unavailable(Reason::Input("emission"))));
+        }
     }
 }

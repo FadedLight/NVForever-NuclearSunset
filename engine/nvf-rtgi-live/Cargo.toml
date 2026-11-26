@@ -1,0 +1,12 @@
+[package]
+name = "nvf-rtgi-live"
+description = "A cell's bounce light solved on the GPU with ray queries, as nvf-rtgi solves it on the CPU"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Plain data for now: the scene, the light and the points as the words a kernel reads. The kernel and the device
+# side come next, with wgpu.
+[dependencies]
+nvf-rtgi.workspace = true

@@ -301,6 +301,21 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
   SystemSave to the system slot, ForceSave as a new save.
 - Registered in `engine/nvf-play/src/save.rs`
 
+## Gameplay › Combat
+
+### `localized-dt-dr`: Localized armor DT/DR
+
+- On the page: On: head hits use only worn head armor DT/DR and body hits only worn body
+  armor; explosions use all worn armor and innate DT/DR still applies. Off: full worn armor
+  everywhere.
+- In full: Default Off (vanilla sums all worn armor DT/DR across head and body slots on
+  every hit). When On, head hits benefit only from worn head-slot armor DT/DR and body hits
+  benefit only from worn body-slot armor DT/DR, while explosions still apply full worn armor
+  and actor innate DT/DR (AV 76/18) still applies everywhere. Optional NVForever setting
+  following the public `bLocalizedDTDR` behaviour in JIP LN NVSE Plugin v57.30
+  (`docs/spec-notes/localized-dt-dr.md`, #3843).
+- Registered in `engine/nvf-play/src/combat.rs`
+
 ## Gameplay › Bug Reports
 
 ### `send-reports`: Send reports to help fix NVForever

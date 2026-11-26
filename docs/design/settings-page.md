@@ -138,6 +138,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 |---|---|---|
 | Gameplay | Game | `difficulty`, `hardcore`, `kill-camera`, `vats-style`, `vats-slowdown`, `reload-slows`, `UsePipBoy` |
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
+| Gameplay | Combat | `localized-dt-dr` (#3843) |
 | Gameplay | Dialogue | `menu-pause`, `dialogue-goodbye-hint`, `dialogue-look`, `dialogue-recentre`, `dialogue-zoom`, `lip-sync` |
 | Gameplay | Camera | `detached-camera`, `true-iron-sights`, `first-person-body`, `weapon-lower`, `field-of-view`, `viewmodel-field-of-view` |
 | Gameplay | World | `grass-fire` (#2662), `sound-cover` (#2688) |
@@ -177,8 +178,9 @@ right after the first), #2701's `full-detail` and #3014's `distant-objects` (Gra
 and Distance, after `distant-lod`), #3013's `distant-lights` (Detail and Distance, the last
 row), #3569's `difficulty-player-damage`, `difficulty-npc-damage` and `difficulty-kill-xp`
 (Gameplay › Game, under `difficulty`, greyed unless Custom), #3348's `hdr-output` (Display › Screen,
-after `resolution`: a list, so before the switch `borderless`), and #3783's `occlusion-culling`
-(Detail and Distance, after `mesh-terrain-blend`; read at the next start). The
+after `resolution`: a list, so before the switch `borderless`), #3783's `occlusion-culling`
+(Detail and Distance, after `mesh-terrain-blend`; read at the next start), and #3843's
+`localized-dt-dr` (Gameplay › Combat). The
 original puts the HUD and Pip-Boy colours and the crosshair in its Display category
 [observed: #1953], hence Interface there.
 

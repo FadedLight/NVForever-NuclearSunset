@@ -12,13 +12,13 @@ pub type Corners = [V3; 3];
 /// from about 1e-20 to 1e20 in a scene of the game's size.
 #[derive(Clone, Copy, Debug)]
 pub struct Ray {
-    o: V3,
-    d: V3,
-    inverse: V3,
+    pub(crate) o: V3,
+    pub(crate) d: V3,
+    pub(crate) inverse: V3,
     /// The axes it does not move along.
-    still: [bool; 3],
-    axes: [usize; 3],
-    shear: V3,
+    pub(crate) still: [bool; 3],
+    pub(crate) axes: [usize; 3],
+    pub(crate) shear: V3,
 }
 
 impl Ray {
@@ -56,7 +56,7 @@ impl Ray {
 }
 
 /// Distance and corner weights where the ray's line meets the triangle.
-fn meet(r: &Ray, tri: &Corners) -> Option<(f32, [f32; 3])> {
+pub(crate) fn meet(r: &Ray, tri: &Corners) -> Option<(f32, [f32; 3])> {
     let [x, y, z] = r.axes;
     let p = tri.map(|c| {
         let v = c - r.o;
@@ -74,6 +74,34 @@ fn meet(r: &Ray, tri: &Corners) -> Option<(f32, [f32; 3])> {
     let det = w[0] + w[1] + w[2];
     let t = (w[0] * p[0][2] + w[1] * p[1][2] + w[2] * p[2][2]) / det;
     (det != 0.0 && t.is_finite()).then(|| (t, w.map(|f| f / det)))
+}
+
+/// The place on a triangle nearest to `p` (by its regions: corners, sides, the inside).
+fn nearest(p: V3, [a, b, c]: &Corners) -> V3 {
+    let (ab, ac) = (*b - *a, *c - *a);
+    let to = |v: V3| (ab.dot(p - v), ac.dot(p - v));
+    let ((d1, d2), (d3, d4), (d5, d6)) = (to(*a), to(*b), to(*c));
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return *a;
+    }
+    if d3 >= 0.0 && d4 <= d3 {
+        return *b;
+    }
+    if d6 >= 0.0 && d5 <= d6 {
+        return *c;
+    }
+    let (va, vb, vc) = (d3 * d6 - d5 * d4, d5 * d2 - d1 * d6, d1 * d4 - d3 * d2);
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        return *a + ab * (d1 / (d1 - d3));
+    }
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        return *a + ac * (d2 / (d2 - d6));
+    }
+    if va <= 0.0 && d4 >= d3 && d5 >= d6 {
+        return *b + (*c - *b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    }
+    let whole = 1.0 / (va + vb + vc);
+    *a + ab * (vb * whole) + ac * (vc * whole)
 }
 
 /// An inner node's left child follows it and `a` is its right one (`count` 0); a leaf holds
@@ -296,6 +324,40 @@ impl Bvh {
     pub fn bounds(&self) -> Option<(V3, V3)> {
         let out = self.tris.iter().flatten().fold((EMPTY.0, EMPTY.1), |b, p| (b.0.min(*p), b.1.max(*p)));
         (!self.tris.is_empty()).then_some(out)
+    }
+
+    /// The corners by the triangles' numbers.
+    pub fn in_order(&self) -> Vec<Corners> {
+        let mut out = vec![[V3::ZERO; 3]; self.tris.len()];
+        for (tri, id) in self.tris.iter().zip(&self.ids) {
+            out[*id as usize] = *tri;
+        }
+        out
+    }
+
+    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes.
+    pub fn within(&self, p: V3, far: f32) -> Vec<(u32, V3, V3)> {
+        let (mut out, mut open) = (Vec::new(), Vec::new());
+        open.extend((!self.nodes.is_empty()).then_some(0usize));
+        while let Some(at) = open.pop() {
+            let n = &self.nodes[at];
+            let off = p - p.max(n.min).min(n.max);
+            // A little over, for the rounding.
+            if off.length() > far * 1.001 + 4e-7 * p.max_abs() {
+                continue;
+            }
+            if n.count == 0 {
+                open.extend([at + 1, n.a as usize]);
+                continue;
+            }
+            for slot in n.a as usize..(n.a + n.count) as usize {
+                if (nearest(p, &self.tris[slot]) - p).length() <= far {
+                    out.push((self.ids[slot], n.min, n.max));
+                }
+            }
+        }
+        out.sort_unstable_by_key(|n| n.0);
+        out
     }
 
     pub fn node_count(&self) -> usize {

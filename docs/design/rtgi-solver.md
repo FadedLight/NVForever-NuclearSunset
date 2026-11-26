@@ -292,7 +292,8 @@ computes:
   a volume's points as the words a kernel reads, made on any thread. What a shader could not compute as
   the solver does is refused there with the reason (corners past 1e5, colours or factors past 1e10, a
   transformed texture coordinate that could pass 1e5 anywhere between the corners, or one as given past 1e30, lights brighter than
-  1e6 together) and stays the CPU solver's.
+  1e6 together, a surface's albedo past 2^80 on a channel, a lamp's range above 0 below 1e-6, where a device
+  could overflow or drop a decisive subnormal) and stays the CPU solver's.
 - **The kernel and its batches (`nvf-rtgi-live`, second slice).** `kernel.wgsl` gathers a point's rays with
   ray queries over one bottom level structure of all triangles (those with an alpha test a geometry of their
   own) and a top level one of it alone, built once for fast tracing, never compacted. Entry points: `solve`

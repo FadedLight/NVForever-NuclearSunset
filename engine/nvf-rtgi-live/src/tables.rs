@@ -32,8 +32,11 @@ const MOST: f32 = 1e10;
 const NEAR: f32 = 0.5;
 const LEAST_NEAR: f32 = 0.02;
 const MOST_NEAR: usize = 64;
-/// No texture's coordinate is more: a texel's number, of at most [`SIDE`] a side, is no more than an i32 then.
+/// No texture's coordinate is more, transformed, with a little to spare for the rounding: a texel's number, of at most
+/// [`SIDE`] a side, is no more than an i32 then.
 const REPEATS: f32 = 1e5;
+/// Nor, as given, is any corner's: a blend of them, of weights that add up to about 1, is no infinity.
+const RAW: f32 = 1e30;
 const SIDE: usize = 1 << 14;
 /// All lights' display values together are no more, whatever they add or take.
 const BRIGHT: f32 = 1e6;
@@ -120,10 +123,11 @@ impl Tables {
                 return Err(format!("triangle {i}: its colours"));
             }
             if m.texture.is_some() && face.uv.as_flattened().iter().all(|c| c.is_finite()) {
-                // The coordinates are blended, then transformed: each term of any place between the corners is no larger
-                // than this, which holds no cancellation of large terms.
+                // The coordinates are blended, then transformed: no blend is past the corners' largest, and each term of
+                // any place between them is no larger than this, which holds no cancellation of large terms.
                 let most = |k: usize| face.uv.iter().fold(0.0f32, |m, uv| m.max(uv[k].abs()));
-                let far = m.uv.iter().any(|r| r[0].abs() * most(0) + r[1].abs() * most(1) + r[2].abs() > REPEATS);
+                let terms = |r: &[f32; 3]| (r[0].abs() * most(0) + r[1].abs() * most(1) + r[2].abs()) * 1.001;
+                let far = most(0).max(most(1)) > RAW || m.uv.iter().any(|r| terms(r) > REPEATS);
                 if far {
                     return Err(format!("triangle {i}: its texture's coordinates"));
                 }
@@ -230,7 +234,7 @@ impl Tables {
                     return Err(format!("a level of {} x {} texels", t.alpha.width, t.alpha.height));
                 }
                 // A colour is a word, an alpha a byte: the first and the last of each read are numbers of a u32.
-                let fits = |first: usize, n: usize| u32::try_from(first + n).map(|_| first as u32).map_err(|_| "too many texels".to_string());
+                let fits = |first: usize, n: usize| u32::try_from(first + n.saturating_sub(1)).map(|_| first as u32).map_err(|_| "too many texels".to_string());
                 [row[4], row[5]] = side(t.color);
                 row[3] = fits(self.texels.len(), t.color.texels.len())?;
                 self.texels.extend(t.color.texels.iter().map(|c| u32::from_le_bytes(*c)));
@@ -574,6 +578,9 @@ mod tests {
         assert!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &corners).is_err());
         assert_eq!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &|m| m.uv0 = vec![[1e4, 3e4]; 4]), Ok(0));
         assert!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &|m| m.uv0 = vec![[3e4, 9e4]; 4]).is_err(), "3 x 3e4 and 9e4");
+        // A blend of the largest coordinates is past f32's end before a small transform brings it back.
+        let tiny = Material { uv: [[2f32.powi(-112), 0.0, 0.0], [0.0; 3]], ..cut() };
+        assert!(of(tiny, &|m| m.uv0 = vec![[f32::MAX, 0.0]; 4]).is_err() && of(tiny, &|m| m.uv0 = vec![[1e30, 0.0]; 4]) == Ok(0));
         // An alpha past the end of f32 stops as one that is no number does; where it is so in part there is no telling.
         let alpha = |a: [f32; 4]| move |m: &mut Mesh| m.colors = a.map(|a| [1.0, 1.0, 1.0, a]).to_vec();
         let large = Material { base: [1.0, 1.0, 1.0, 1e3], ..cut() };

@@ -170,12 +170,13 @@ fn surfaces(out: &mut Vec<Fixture>) {
     shown.0.colors = vec![[0.02, 0.5, 1.0, 1.0], [0.9, 0.03, 0.4, 1.0], [1.0; 4], [0.2; 4]];
     f.parts.extend([fence, shown]);
     out.push(f);
-    // A sum far below 1e-12 under an albedo of about 4e27 (a display colour of 1e8, a factor of 3e8): 0.02 to 0.1.
-    let mut floor = rectangle(v(7.0, 0.0, 3.0), v(0.0, 0.0, 50.0), v(50.0, 0.0, 0.0), Material { display_colors: true, base: [3e8, 3e8, 3e8, 1.0], ..Material::default() });
-    floor.0.colors = vec![[1e8, 1e8, 1e8, 1.0]; 4];
-    let faint = LightState { lamps: vec![lamp(v(0.0, 10.0, 0.0), V3([1e-13; 3]), 1000.0)], ..LightState::default() };
+    // A sum of 1.4e-13 to 3e-13, far below 1e-12, under an albedo of about 8.8e23, near the most packing admits (a display
+    // colour of 1e6, a factor of 4e9): 5e-5 to 2.5e-4, where a floor of 1e-12 under the power would bring 5.5e-3.
+    let mut floor = rectangle(v(7.0, 0.0, 3.0), v(0.0, 0.0, 50.0), v(50.0, 0.0, 0.0), Material { display_colors: true, base: [4e9, 4e9, 4e9, 1.0], ..Material::default() });
+    floor.0.colors = vec![[1e6, 1e6, 1e6, 1.0]; 4];
+    let faint = LightState { lamps: vec![lamp(v(0.0, 10.0, 0.0), V3([3e-13; 3]), 1000.0)], ..LightState::default() };
     let along = directions(64).into_iter().filter(|d| d[1] < -0.8).collect();
-    let small: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.light.max_abs() > 0.01 && b.light.max_abs() < 0.5));
+    let small: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.light.max_abs() > 1e-5 && b.light.max_abs() < 1e-3));
     out.push(Fixture::new("a faint lamp on a surface of a large albedo", vec![floor], faint, vec![v(3.0, 20.0, 4.0)], along, small));
 }
 
@@ -237,11 +238,11 @@ fn close_spot(out: &mut Vec<Fixture>) {
     let half: Shows = |b| b[0].is_some_and(|b| b.light.max_abs() > 0.01 && b.shadow_rays == 1) && b[1].is_some_and(|b| b.light == V3::ZERO && b.shadow_rays == 0);
     let light = LightState { ambient: V3([0.1; 3]), lamps: vec![spot], ..LightState::default() };
     out.push(Fixture::new("a spot 0.005 above the place, at half brightness", vec![floor.clone()], light, vec![v(0.0, 30.0, 0.0), v(0.005, 30.0, 0.0)], vec![v(0.0, -1.0, 0.0)], half));
-    // A lamp of the least range packed, a hit half a unit off in its one cell: out of range, no light and no shadow ray,
-    // where d2 / range^2 is about 6e36.
-    let tiny = LightState { ambient: V3([0.1; 3]), lamps: vec![lamp(v(0.2, 0.0, 0.1), V3([0.8; 3]), 2e-19)], ..LightState::default() };
+    // A lamp of the least range packed, 0.3 above the floor and 0.58 from the hit, in the hit's cell of the lamps' grid
+    // (which a far lamp makes 1.3 a side): out of range, no light and no shadow ray, though the place faces it.
+    let tiny = LightState { ambient: V3([0.1; 3]), lamps: vec![lamp(v(0.2, 0.3, 0.1), V3([0.8; 3]), 1e-6), lamp(v(40.0, -20.0, 40.0), V3([0.8; 3]), 1.0)], ..LightState::default() };
     let out_of_range: Shows = |b| b[0].is_some_and(|b| b.lamps == 1 && b.shadow_rays == 0 && b.light == V3::ZERO);
-    out.push(Fixture::new("a lamp of range 2e-19 in the cell of a hit half a unit off", vec![floor], tiny, vec![v(0.5, 20.0, 0.5)], vec![v(0.0, -1.0, 0.0)], out_of_range));
+    out.push(Fixture::new("a lamp of the least range in the cell of a hit 0.58 off", vec![floor], tiny, vec![v(0.5, 20.0, 0.5)], vec![v(0.0, -1.0, 0.0)], out_of_range));
 }
 
 /// Straight down at the faces of the lamps' grid, and at its far edge where a place is rounded onto it.

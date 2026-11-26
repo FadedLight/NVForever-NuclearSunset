@@ -668,7 +668,8 @@ fn lean_lobes(xz: Vec2, col: &crate::volumetric_clouds_model2::Column, g: &crate
     let fragments = smoothstep(-0.10, 0.34, 0.70 * fine + 0.40 * coarse + erosion.dot(Vec3::new(0.58, 0.32, 0.18)));
     let fringe_water = 0.065 + 0.075 * smoothstep(0.32, 0.72, h) + 0.035 * exterior;
     let density = core.max(lean_open_bank_weight(u) * fringe_water * margin * fragments * erosion_strength.min(1.0));
-    let boundary = (1.0 - smoothstep(0.90, 1.0, developed_above / g.extent)) * smoothstep(0.0, 0.012, col.over);
+    let rim_width = 0.012 + (0.045 - 0.012) * crate::volumetric_clouds_model2::mixed_sheet(u);
+    let boundary = (1.0 - smoothstep(0.90, 1.0, developed_above / g.extent)) * smoothstep(0.0, rim_width, col.over);
     (smoothstep(0.02, 0.13, h) * density * boundary, (h / roof).clamp(0.0, 1.0))
 }
 
@@ -687,7 +688,7 @@ fn lean_material(xz: Vec2, col: &crate::volumetric_clouds_model2::Column, g: &cr
         return puff;
     }
     let bank = m2::density(g, col.types, s, u, reads);
-    let a = (1.0 - blend) * bank.0;
+    let a = (1.0 - blend) * m2::bank_water(g.cover, puff.0, u) * bank.0;
     let b = blend * puff.0;
     (a + b, (a * bank.1 + b * puff.1) / (a + b).max(1e-8))
 }

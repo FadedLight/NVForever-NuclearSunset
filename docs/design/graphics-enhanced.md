@@ -3765,9 +3765,9 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   from 0.04 to 0.12, the vigour from 0.55 to 0.85) and none elsewhere. `..._TYPE=sheet|cumulus|tower`
   forces one type everywhere.
 - **The body: the lean model** [design; the look judged by eye, 2026-11-23]. Functions `vc_m2_*`
-  of the march, CPU mirror `volumetric_clouds_model2.rs`. Every column has **one flat condensation base**,
-  the domain's base in the bent frame, so the bases line up toward the horizon; the density fades in
-  over the lowest 300 units. What the column gives (`vc_m2_column`, `vc_prepare_column`) depends on world
+  of the march, CPU mirror `volumetric_clouds_model2.rs`. Columns share the domain's base in the bent
+  frame, so the bases line up toward the horizon. Density fades in over the lowest 300 units and
+  can start higher in dry pockets. What the column gives (`vc_m2_column`, `vc_prepare_column`) depends on world
   x, z and the footprint alone: the placement's excess, the types, the vigour, the height.
   - *Cover and height*: the cover is a smooth step of the excess up to 0.12 (`vc_m2_cover`); the parent
     bank's height the types' share of the domain times the vigour's scale, up to 55 % more in a deep deck
@@ -3784,6 +3784,10 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
     (`vc_m2_fair_profile`), so the masses are wider than tall (test
     `the_fair_masses_are_wider_than_tall`: at domains of 24,000 and 40,000 and amounts 0.15 and 0.29 the
     median width over height at least 1.7, no mass under 0.7).
+  - *Isolated mixed banks* (Goodsprings Hazy): the sampling interval includes headroom for the lobes.
+    Inside that interval, the sheet's crown tapers toward the placement boundary, and drier parts of its
+    base condense higher. The sheet holds more water under dense lobes and near the center of the bank,
+    allowing thin ends to fade in the view and in the shadows they cast.
   - *Banks, decks and towers* (`vc_m2_density`): a signed field `F = cover x profile(h) - R (1 - n) - G D`
     whose zero is the surface: the envelope against the base noise `n` (relief `R` by type, times
     `SHAPE`), less the erosion's displacement `D` (world units, taken into field units through `G`, the

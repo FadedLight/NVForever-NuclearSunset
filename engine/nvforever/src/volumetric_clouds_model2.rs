@@ -132,6 +132,7 @@ pub struct Geometry {
     pub crown_top: f32,
     pub crown_cover: f32,
     pub deck_relief: f32,
+    pub base_humidity: f32,
     pub parent: f32,
     pub cover: f32,
     pub extent: f32,
@@ -233,10 +234,12 @@ pub fn geometry(col: &Column, u: &CloudVolumeUniform) -> Geometry {
     let tau = top_threshold(col.types, u);
     let bank_top = top(c, tau, col.types, u);
     let saddle = smoothstep(0.50, 1.0, c) * smoothstep(0.0, 0.28, -col.head);
-    let crown_cover = cover(col.over + 0.18 * col.head) * (1.0 - 0.44 * saddle);
+    let attachment_width = 0.045 * mixed_sheet(u);
+    let crown_head = if attachment_width > 0.0 { col.head * smoothstep(0.0, attachment_width, col.over) } else { col.head };
+    let crown_cover = cover(col.over + 0.18 * crown_head) * (1.0 - 0.44 * saddle);
     let peak = if crown_cover == c { bank_top } else { top(crown_cover, tau, col.types, u) };
     let crown_top = stretch(parent * peak, parent, extent, FOOT * parent);
-    Geometry { parent, cover: c, crown_cover, crown_top, deck_relief: col.deck_relief.x, extent, top: bank_top, relief: relief(col.types, u) }
+    Geometry { parent, cover: c, crown_cover, crown_top, deck_relief: col.deck_relief.x, base_humidity: col.base_humidity, extent, top: bank_top, relief: relief(col.types, u) }
 }
 
 /// How much of each band a filter width `ew` keeps (march `vc_m2_keeps`).
@@ -308,7 +311,9 @@ pub fn density(g: &Geometry, w: Vec3, s: &Sample, u: &CloudVolumeUniform, reads:
     let most = gr * amp * (0.5 * (c[0] + c[1] + c[2]) + c[1]);
     let widest = ramp + 0.5 * gr * amp * c[1];
     let reach = 0.58 * gr * amp * c[0] * (1.0 - smoothstep(0.55, 0.72, u.scale.w));
-    let bed = 0.48 * g.parent * (-g.deck_relief).max(0.0);
+    let mixed = mixed_sheet(u);
+    let dry_base = 1.0 - smoothstep(0.25, 0.75, g.base_humidity);
+    let bed = 0.48 * g.parent * (-g.deck_relief).max(0.0) + mixed * dry_base * (0.16 * g.parent).min(600.0);
     let soft = (0.6 * u.profile.x).max(1.0);
     let fair_skin = fair * (0.32 + 0.68 * side) * (0.34 * g.parent).min(1150.0);
     let skin = storm * (1.0 - w.x) * (0.16 * g.parent).min(840.0) + fair_skin;
@@ -320,7 +325,7 @@ pub fn density(g: &Geometry, w: Vec3, s: &Sample, u: &CloudVolumeUniform, reads:
     let n = spread((reads.base)(base_width), u);
     let lower_edge = (bed + skin * (0.65 - n)).max(0.0);
     let height_in_bank = s.above - lower_edge;
-    let pocket = storm * (1.0 - w.x) * (1.0 - smoothstep(0.20, 0.65, n));
+    let pocket = (storm * (1.0 - w.x)).max(0.45 * mixed) * (1.0 - smoothstep(0.20, 0.65, n));
     let water = 1.0 - 0.76 * pocket * (1.0 - smoothstep(0.0, (1.5 * skin).max(1.0), height_in_bank));
     let bottom = water * smoothstep(0.0, soft, height_in_bank);
     let cut = r * (1.0 - (n + (0.5 - n) * core));
@@ -415,6 +420,18 @@ pub fn plume_height(height: f32, parent: f32, scale: f32) -> f32 {
 
 pub fn open_bank_weight(u: &CloudVolumeUniform) -> f32 {
     1.0 - smoothstep(0.35, 0.55, u.scale.w)
+}
+
+pub fn mixed_sheet(u: &CloudVolumeUniform) -> f32 {
+    4.0 * u.mix.x * (1.0 - u.mix.x) * open_bank_weight(u)
+}
+
+/// The sheet's share retained under the local lobes (march `vc_m2_material`).
+pub fn bank_water(cover: f32, puff_density: f32, u: &CloudVolumeUniform) -> f32 {
+    let condensed = smoothstep(0.025, 0.48, puff_density);
+    let dry_water = 0.015 + 0.40 * cover;
+    let shallow_water = dry_water + (1.0 - dry_water) * condensed;
+    1.0 + (shallow_water - 1.0) * mixed_sheet(u)
 }
 
 pub fn fair_profile(col: &Column, g: &Geometry, u: &CloudVolumeUniform) -> FairProfile {
@@ -667,8 +684,17 @@ mod tests {
             "let shoulder = vc_m2_caps(uv, 16u, 0.37, width, v);",
             "let head = vc_m2_caps(uv, 32u, 0.0, width, v);",
             "let bud = vc_m2_caps(tuft_uv, 64u, 0.37, 1.6181 * width, v);",
-            "var crown_cover = smoothstep(0.0, VC_M2_COVER, col.over + 0.18 * col.head);",
-            "let bed = 0.48 * parent * max(-column.deck_relief.x, 0.0);",
+            "return 4.0 * sheet * (1.0 - sheet) * vc_m2_open_bank_weight(v);",
+            "let attachment_width = 0.045 * vc_m2_mixed_sheet(v);",
+            "crown_head *= smoothstep(0.0, attachment_width, col.over);",
+            "var crown_cover = smoothstep(0.0, VC_M2_COVER, col.over + 0.18 * crown_head);",
+            "+ mixed_sheet * dry_base * min(0.16 * parent, 600.0);",
+            "let pocket = max(storm * (1.0 - w.x), 0.45 * mixed_sheet) * (1.0 - smoothstep(0.20, 0.65, n));",
+            "let rim_width = mix(0.012, 0.045, vc_m2_mixed_sheet(v));",
+            "let condensed = smoothstep(0.025, 0.48, puff.x);",
+            "let shallow_water = mix(0.015 + 0.40 * column.m2.x, 1.0, condensed);",
+            "let bank_water = mix(1.0, shallow_water, vc_m2_mixed_sheet(v));",
+            "let shares = vec2<f32>((1.0 - blend) * bank_water * bank.x, blend * puff.x);",
             "col.head = fair * attachment * (max(nested, 0.0) + 0.40 * min(nested, 0.0));",
             "let h = vc_m2_stretch(above, column.m2.y, parent, VC_M2_FOOT * parent) / parent;",
             "let base_width = max(lw, mix(1600.0 * (1.0 - max(upper, side)), 240.0, storm));",
@@ -1043,6 +1069,66 @@ mod tests {
         let at = |g: &Geometry, height| run(g, Vec3::Y, &view(height * g.parent, 300.0), &u, 0.5, 0.5).0.0;
         assert_eq!(at(&low, 0.25), at(&high, 0.25));
         assert!(at(&high, 0.78) > at(&low, 0.78) + 0.75);
+    }
+
+    #[test]
+    fn a_mixed_crown_loses_density_at_the_placement_boundary() {
+        let mut u = lean_uniform(0.07, None);
+        u.kind.x = 1.0;
+        let types = u.mix.truncate();
+        let head = 1.55 * lobe_weight(types, &u);
+        let at = |over| {
+            let g = geometry(&Column { head, types, ..cumulus(over) }, &u);
+            let sample = view(0.68 * g.parent, 60.0);
+            (g.crown_cover, run(&g, types, &sample, &u, 1.0, 0.5).0.0)
+        };
+        // Probe just inside the cutoff with a bright base texel. A cut-off bank
+        // would still have positive crown cover and optical density here.
+        assert!(head > 0.0 && mixed_sheet(&u) > 0.9);
+        assert_eq!(at(0.0), (0.0, 0.0));
+        let edge = at(0.0001);
+        assert!(edge.0 < 0.001 && edge.1 == 0.0, "{edge:?}");
+        let interior = at(0.055);
+        assert!(interior.0 > 0.8 && interior.1 > 0.5, "{interior:?}");
+    }
+
+    #[test]
+    fn a_shallow_sheet_retains_water_under_lobes_and_thins_at_open_edges() {
+        let mut u = lean_uniform(0.07, None);
+        u.mix = Vec3::new(0.5, 0.5, 0.0).extend(0.0);
+        let dry_edge = bank_water(0.05, 0.0, &u);
+        let dry_interior = bank_water(0.95, 0.0, &u);
+        let damp_edge = bank_water(0.05, 0.25, &u);
+        assert!(dry_edge > 0.0 && dry_edge < 0.05);
+        assert!(dry_interior > 0.35 && dry_interior < damp_edge && damp_edge < 0.95);
+        assert_eq!(bank_water(0.05, 0.6, &u), 1.0);
+
+        // Pure cumulus, pure sheet, and a closed mixed deck keep their existing material.
+        for (sheet, amount) in [(0.0, 0.29), (1.0, 0.07), (0.5, 0.73)] {
+            u.mix = Vec3::new(sheet, 1.0 - sheet, 0.0).extend(0.0);
+            u.scale.w = amount;
+            assert_eq!(bank_water(0.05, 0.0, &u), 1.0);
+        }
+    }
+
+    #[test]
+    fn humidity_raises_the_mixed_bank_base_but_spares_pure_cumulus_and_decks() {
+        let mut clear = lean_uniform(0.29, None);
+        clear.mix = Vec3::Y.extend(0.0);
+        for u in [lean_uniform(0.07, None), clear, lean_uniform(0.73, None)] {
+            let types = u.mix.truncate();
+            let at = |base_humidity| {
+                let g = geometry(&Column { types, base_humidity, ..cumulus(0.30) }, &u);
+                run(&g, types, &view(200.0, 40.0), &u, 1.0, 0.5).0.0
+            };
+            let (wet, dry) = (at(1.0), at(0.0));
+            if u.scale.w < 0.1 {
+                assert!(wet > 0.8 && dry == 0.0, "{wet}, {dry}");
+            } else {
+                assert_eq!(mixed_sheet(&u), 0.0);
+                assert_eq!(wet, dry);
+            }
+        }
     }
 
     /// The sampled storm underside has distinct lower edges within a single

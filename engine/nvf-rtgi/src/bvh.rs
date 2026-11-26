@@ -76,32 +76,29 @@ pub(crate) fn meet(r: &Ray, tri: &Corners) -> Option<(f32, [f32; 3])> {
     (det != 0.0 && t.is_finite()).then(|| (t, w.map(|f| f / det)))
 }
 
-/// The place on a triangle nearest to `p` (by its regions: corners, sides, the inside).
-fn nearest(p: V3, [a, b, c]: &Corners) -> V3 {
-    let (ab, ac) = (*b - *a, *c - *a);
-    let to = |v: V3| (ab.dot(p - v), ac.dot(p - v));
-    let ((d1, d2), (d3, d4), (d5, d6)) = (to(*a), to(*b), to(*c));
-    if d1 <= 0.0 && d2 <= 0.0 {
-        return *a;
+/// How far `p` is from a triangle, in double precision: from its plane where `p` is over the inside, else from the
+/// nearest side. Where a thin triangle's inside is not clear, the sides decide, and they are as near.
+fn distance(p: V3, tri: &Corners) -> f64 {
+    type D = [f64; 3];
+    let sub = |x: D, y: D| -> D { std::array::from_fn(|k| x[k] - y[k]) };
+    let dot = |x: D, y: D| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let cross = |x: D, y: D| -> D { [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]] };
+    let (p, [a, b, c]) = (p.0.map(f64::from), tri.map(|v| v.0.map(f64::from)));
+    let side = |x: D, y: D| {
+        let (e, w) = (sub(y, x), sub(p, x));
+        let t = if dot(e, e) > 0.0 { (dot(w, e) / dot(e, e)).clamp(0.0, 1.0) } else { 0.0 };
+        let off: D = std::array::from_fn(|k| w[k] - e[k] * t);
+        dot(off, off).sqrt()
+    };
+    let sides = [(a, b), (b, c), (c, a)];
+    let nearest = sides.iter().map(|(x, y)| side(*x, *y)).fold(f64::INFINITY, f64::min);
+    let n = cross(sub(b, a), sub(c, a));
+    let over = dot(n, n) > 0.0 && sides.iter().all(|(x, y)| dot(cross(sub(*y, *x), sub(p, *x)), n) >= 0.0);
+    if over {
+        nearest.min(dot(sub(p, a), n).abs() / dot(n, n).sqrt())
+    } else {
+        nearest
     }
-    if d3 >= 0.0 && d4 <= d3 {
-        return *b;
-    }
-    if d6 >= 0.0 && d5 <= d6 {
-        return *c;
-    }
-    let (va, vb, vc) = (d3 * d6 - d5 * d4, d5 * d2 - d1 * d6, d1 * d4 - d3 * d2);
-    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
-        return *a + ab * (d1 / (d1 - d3));
-    }
-    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
-        return *a + ac * (d2 / (d2 - d6));
-    }
-    if va <= 0.0 && d4 >= d3 && d5 >= d6 {
-        return *b + (*c - *b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
-    }
-    let whole = 1.0 / (va + vb + vc);
-    *a + ab * (vb * whole) + ac * (vc * whole)
 }
 
 /// An inner node's left child follows it and `a` is its right one (`count` 0); a leaf holds
@@ -351,7 +348,7 @@ impl Bvh {
                 continue;
             }
             for slot in n.a as usize..(n.a + n.count) as usize {
-                if (nearest(p, &self.tris[slot]) - p).length() <= far {
+                if distance(p, &self.tris[slot]) <= f64::from(far) {
                     out.push((self.ids[slot], n.min, n.max));
                 }
             }
@@ -458,6 +455,21 @@ pub mod tests {
 
     fn built(tris: &[Corners], threads: usize) -> Bvh {
         Bvh::build(tris, threads, &|| false).unwrap()
+    }
+
+    /// A thin triangle right below a point is near it: in single precision its regions are rounded away.
+    #[test]
+    fn thin_triangles_are_near() {
+        let tri = [V3::ZERO, V3::new(65536.0, 0.0, 0.0), V3::new(65536.0, 2.0, 0.0)];
+        let p = V3::new(49152.0, 1.0, 0.01);
+        assert!((distance(p, &tri) - 0.01).abs() < 1e-6, "{}", distance(p, &tri));
+        let tree = built(&[tri], 1);
+        assert_eq!(tree.within(p, 0.5).len(), 1);
+        assert!(tree.within(p, 0.005).is_empty() && tree.within(V3::new(49152.0, 1.6, 0.0), 0.05).is_empty());
+        // Beside a side, past a corner, and of a triangle that is a line.
+        assert!((distance(V3::new(1.0, -1.0, 0.0), &tri) - 1.0).abs() < 1e-9 && (distance(V3::new(-3.0, -4.0, 0.0), &tri) - 5.0).abs() < 1e-9);
+        let line = [V3::ZERO, V3::new(2.0, 0.0, 0.0), V3::new(4.0, 0.0, 0.0)];
+        assert!((distance(V3::new(3.0, 0.0, 2.0), &line) - 2.0).abs() < 1e-9);
     }
 
     /// A random unit vector.

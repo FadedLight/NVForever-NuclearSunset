@@ -88,20 +88,14 @@ impl GatherConfig {
 
     /// The grid after its flood, and what is reached: one point at least. The config is one that gave the lights.
     pub(crate) fn flood<'a>(&self, world: &'a PreparedScene, lights: &'a Lights<'a>, seeds: &[V3], cancel: Cancel<'a>) -> Result<(Grid<'a>, BTreeSet<Place>, Coverage), Failed> {
-        let GatherConfig { spacing: space, rays, emission, limits, threads } = *self;
-        let mut grid = Grid::new(Work { world, lights, emission, rays, space, threads, limit: limits.points, cancel });
-        let (reached, coverage) = grid.flood(seeds)?;
-        if reached.is_empty() {
-            return unavailable(Reason::NothingReached { seeds: seeds.len() });
-        }
-        Ok((grid, reached, coverage))
+        self.flood_by(world, lights, seeds, None, cancel)
     }
 
-    /// [`GatherConfig::flood`], its points made by `by` ([`Grid::flood_by`]).
-    fn flood_by<'a>(&self, world: &'a PreparedScene, lights: &'a Lights<'a>, seeds: &[V3], by: &mut Classify, cancel: Cancel<'a>) -> Result<(Grid<'a>, BTreeSet<Place>, Coverage), Failed> {
+    /// [`GatherConfig::flood`]; with `by`, its points made by what that says ([`Grid::flood_by`]).
+    fn flood_by<'a>(&self, world: &'a PreparedScene, lights: &'a Lights<'a>, seeds: &[V3], by: Option<&mut Classify>, cancel: Cancel<'a>) -> Result<(Grid<'a>, BTreeSet<Place>, Coverage), Failed> {
         let GatherConfig { spacing: space, rays, emission, limits, threads } = *self;
         let mut grid = Grid::new(Work { world, lights, emission, rays, space, threads, limit: limits.points, cancel });
-        let (reached, coverage) = grid.flood_by(seeds, Some(by))?;
+        let (reached, coverage) = grid.flood_by(seeds, by)?;
         if reached.is_empty() {
             return unavailable(Reason::NothingReached { seeds: seeds.len() });
         }
@@ -157,7 +151,7 @@ impl ReachedBy {
             calls += 1;
             classify(places, points)
         };
-        let (grid, reached, coverage) = config.flood_by(scene, &lights, seeds, &mut counted, cancel)?;
+        let (grid, reached, coverage) = config.flood_by(scene, &lights, seeds, Some(&mut counted), cancel)?;
         let classified = grid.made().count();
         Ok(ReachedBy { spacing: config.spacing, reached, coverage, classified, calls })
     }

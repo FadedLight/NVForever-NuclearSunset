@@ -241,6 +241,7 @@ impl<'a> Grid<'a> {
     }
 
     /// What the seeds reach.
+    #[cfg(test)]
     pub fn flood(&mut self, seeds: &[V3]) -> Result<(BTreeSet<Place>, Coverage), Failed> {
         self.flood_by(seeds, None)
     }

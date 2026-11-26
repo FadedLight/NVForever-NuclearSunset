@@ -8,7 +8,7 @@ use crate::light::LightState;
 use crate::reach::{GatherConfig, EMISSIONS, SPACINGS};
 use crate::trace::PreparedScene;
 use crate::vec3::V3;
-use crate::volume::{allowed, packed};
+use crate::volume::{allowed, packed, Reader, Refused};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// From where a cell is reached.
@@ -171,7 +171,8 @@ impl SolvedVolume {
 
 impl SolvedVolume {
     /// A volume of points whose light was gathered elsewhere, such as at the places of a [`crate::reach_by`], packed
-    /// as a solve packs the points it reaches: the same places and light are the same box, texture and bytes. The
+    /// as a solve packs the points it reaches: the same places and light are the same box, texture and bytes. What its
+    /// [`crate::Reader`] would refuse is refused. The
     /// config's spacing, emission, offset and bytes are the volume's. Its counts are of the reached points alone, the
     /// rest of the box unknown; its stats are none.
     pub fn of_points(points: &BTreeMap<Place, Moments>, coverage: Coverage, config: &SolveConfig) -> Result<SolvedVolume, Failed> {
@@ -188,13 +189,20 @@ impl SolvedVolume {
                 low = std::array::from_fn(|k| low[k].min(at[k]));
                 high = std::array::from_fn(|k| high[k].max(at[k]));
             }
-            let dimensions: [u32; 3] = std::array::from_fn(|k| high[k].abs_diff(low[k]) + 1);
+            // A box of every i32 has no u32 side: saturated, it is one too large.
+            let dimensions: [u32; 3] = std::array::from_fn(|k| high[k].abs_diff(low[k]).saturating_add(1));
             let (atlas, _) = allowed(dimensions, config.atlas_bytes)?;
             let rgba16f_le = packed(low, dimensions, points.iter(), config.atlas_bytes, &|| false)?;
             let all: usize = dimensions.iter().map(|d| *d as usize).product();
             let counts = Counts { points: all, reached: points.len(), unknown: all - points.len(), ..Counts::default() };
             let origin = low.map(|c| c as f32 * spacing);
-            Ok(SolvedVolume { low, origin, spacing, offset: config.offset, emission, dimensions, atlas, rgba16f_le, counts, coverage, stats: Stats::default() })
+            let out = SolvedVolume { low, origin, spacing, offset: config.offset, emission, dimensions, atlas, rgba16f_le, counts, coverage, stats: Stats::default() };
+            // Light that no solve has, such as a luminance below 0, is what its reader refuses.
+            match Reader::scanned(&out, &|| false, |_| ()) {
+                Ok(_) => Ok(out),
+                Err(Refused::Cancelled) => Err(Failed::Cancelled),
+                Err(Refused::Because(_)) => unavailable(Reason::Input("moments")),
+            }
         })
     }
 }
@@ -208,6 +216,7 @@ mod tests {
     use crate::reach::{GatherLimits, MOST_RAYS};
     use crate::scene::{Material, SceneInput};
     use crate::trace::tests::{prepared, scene};
+    use crate::volume::tests::volume;
     use crate::volume::{from_half, Reader};
     use crate::{reach, solve};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -455,6 +464,13 @@ mod tests {
         let mut bright = moments.clone();
         bright.insert([0, 1, 1], Moments { c: [V3([1e6; 3]); 4] });
         assert_eq!(refused(&bright, config), Failed::Unavailable(Reason::OutOfRange { at: [0, 1, 1] }));
+        // A luminance below 0, which the reader refuses; a box wider than a u32.
+        let dark = BTreeMap::from([([0, 0, 0], Moments { c: [V3([-1.0; 3]), V3::ZERO, V3::ZERO, V3::ZERO] })]);
+        assert!(Reader::new(&volume(&([0; 3], [1; 3], dark.clone()))).is_err());
+        assert_eq!(refused(&dark, config), Failed::Unavailable(Reason::Input("moments")));
+        let one = Moments { c: [V3([0.5; 3]), V3::ZERO, V3::ZERO, V3::ZERO] };
+        let wide = BTreeMap::from([([i32::MIN, 0, 0], one), ([i32::MAX, 0, 0], one)]);
+        assert_eq!(refused(&wide, config), Failed::Unavailable(Reason::TooLarge { dimensions: [u32::MAX, 1, 1] }));
     }
 
     /// Before any work, between the pieces of it, and not after its end; a panic of the caller's check is a

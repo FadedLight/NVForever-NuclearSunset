@@ -118,6 +118,18 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
 - In full: Off by default. When on, each non-player NPC (`NPC_`, including leveled `LVLN` picks) rolls once when its main weapon is outfitted for a `Min(60, Max(10, Level * 2))`% chance to attach 1-3 random weapon mods from the weapon's valid `WMI1`-`WMI3` slots, without overwriting already-modded weapons or re-rolling across ticks. Never reads `jip_nvse.ini` (`docs/design/extender-compat.md` §8.4). Follows JIP LN NVSE Plugin `57.30` (`https://www.nexusmods.com/newvegas/mods/58277`) `jip_nvse.ini` `[GamePatches]` `bNPCWeaponMods` (`uWMChancePerLevel=2`, `uWMChanceMin=10`, `uWMChanceMax=60`; no DLL or source consulted): "When enabled, all NPCs will have a chance for their main weapon to include weapon mods. The chance is based on each NPC's level - the higher the level, the greater the chance. The type of mod(s) is selected randomly from the ones available for the particular weapon. Weapons have a chance to include multiple mods, though 2 mods is rare, and a fully-modded weapon is uncommon." NVForever's deterministic per-NPC seed, multi-mod probability curve, and single-roll tracking are NVForever's own (`[design]`, `docs/spec-notes/npc-weapon-mods.md`, #3876).
 - Registered in `engine/nvf-play/src/tweaks.rs`
 
+### `sneak-bounding-box`: Crouch height collision
+
+- On the page: On: crouching shrinks collision height for you and crouching human companions
+  to fit under low spaces, holding sneak if headroom is blocked. Off: fixed standing height.
+- In full: Default Off (vanilla keeps the standing character collider height while sneaking).
+  When On, crouching scales the collision capsule height for the player and crouching human
+  companions so they can move under low clearances, and keeps sneak active if overhead
+  geometry blocks standing back up. Optional NVForever setting following the public
+  `bSneakBoundingBoxFix` behaviour in JIP LN NVSE Plugin v57.30
+  (`docs/spec-notes/sneak-bounding-box.md`, #3845).
+- Registered in `engine/nvf-play/src/player.rs`
+
 ## Gameplay › V.A.T.S.
 
 ### `vats-style`: V.A.T.S. style

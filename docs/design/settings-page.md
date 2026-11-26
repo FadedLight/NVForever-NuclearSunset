@@ -136,7 +136,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 
 | Tab | Heading | Rows (keys), in order |
 |---|---|---|
-| Gameplay | Game | `difficulty`, `hardcore`, `kill-camera`, `vats-style`, `vats-slowdown`, `reload-slows`, `UsePipBoy`, `npc-weapon-mods` (#3876) |
+| Gameplay | Game | `difficulty`, `hardcore`, `kill-camera`, `vats-style`, `vats-slowdown`, `reload-slows`, `UsePipBoy`, `npc-weapon-mods` (#3876), `sneak-bounding-box` (#3845) |
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
 | Gameplay | Combat | `localized-dt-dr` (#3843) |
 | Gameplay | Menus | `quantity-select-short-keys` (#3799) |

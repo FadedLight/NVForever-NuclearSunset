@@ -7489,7 +7489,8 @@ mod tests {
         let mut phys = PhysState::default();
         let id = 0x1234;
         let ch = phys.world.add_character(id, fnv_phys::CharacterParams::default(), [0.0, 0.0, 0.0]);
-        phys.npcs.insert(id, NpcBody { prev_feet: ch.feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default() });
+        let standing_height = ch.params.height;
+        phys.npcs.insert(id, NpcBody { prev_feet: ch.feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default(), standing_height, sneak_crouch: false });
         phys.world.set_actor_volume(id, fnv_phys::HitVolume { feet: [0.0, 0.0, 30.0], radius: 8.0, height: 30.0, dead: false });
         phys
     }
@@ -7517,7 +7518,8 @@ mod tests {
                 phys.world.set_actor_volume(id, fnv_phys::HitVolume { feet, radius: 15.0, height: 30.0, dead: false });
                 if walking {
                     let ch = phys.world.add_character(id, fnv_phys::CharacterParams::default(), feet);
-                    phys.npcs.insert(id, NpcBody { prev_feet: feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default() });
+                    let standing_height = ch.params.height;
+                    phys.npcs.insert(id, NpcBody { prev_feet: feet, ch, velocity: [0.0; 2], jump: false, sink: 0.0, lift: Default::default(), standing_height, sneak_crouch: false });
                 }
                 for forward in [[1.0, 0.0, 0.0], vec::normalize([1.0, 0.0, -1.0])] {
                     let mut world = view(&mut phys, None, None).for_melee();

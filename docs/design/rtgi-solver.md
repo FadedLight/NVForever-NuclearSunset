@@ -292,8 +292,28 @@ computes:
   a volume's points as the words a kernel reads, made on any thread. What a shader could not compute as
   the solver does is refused there with the reason (corners past 1e5, colours or factors past 1e10, a
   transformed texture coordinate that could pass 1e5 anywhere between the corners, or one as given past 1e30, lights brighter than
-  1e6 together) and stays the CPU solver's. The kernel, the device side and a runner that compares both
-  come in the next slices.
+  1e6 together) and stays the CPU solver's.
+- **The kernel and its batches (`nvf-rtgi-live`, second slice).** `kernel.wgsl` gathers a point's rays with
+  ray queries over one bottom level structure of all triangles (those with an alpha test a geometry of their
+  own) and a top level one of it alone, built once for fast tracing, never compacted. Entry points: `solve`
+  (each point's moments and its hits, backs, lamps and shadow rays), `reach` (hits and backs alone, nothing
+  lit), and `replay` and `meetings` (each ray, the triangle test) for checks. It follows the solver's rules:
+  the triangles near a point (its packed list) and those about the structure's nearest hit are decided by the
+  solver's triangle test in the solver's order of roundings, a candidate's alpha by the same correctly rounded
+  weights as the winner's; the direction as the rays go for the structure, the test and the side met, as given
+  for the moments; the lamps' table takes a place rounded onto its far edge as the last cell, its cell from the
+  correctly rounded quotient; a spot's cone from the unit direction from the lamp, none right at it, apart from
+  the floored one that a surface's facing uses. Away from a point the structure's own barycentrics decide an
+  alpha exactly at the cutoff and where a shadow ray ends. `Live` holds a room's points, the light and a
+  batch's uniform; `encode` records one batch, `read_back` returns what the batches wrote. The device and the
+  queue come from outside; nothing of it is in the game yet.
+- **The check.** `cargo run --release -p nvf-rtgi-live --example rtgi-live-check -- [--validation]
+  [--adapter <part of a name>]` builds scenes in code (no game data), runs the kernel and holds it against
+  `nvf_rtgi`: each ray's surface, light (within 5e-4), lamps and shadow rays against `bounces`, each point's
+  counts against their sums and its reach against `classified`, and 100,000 triangle tests against `meet`, bit
+  for bit. Exit 0 when all pass, 1 on a failure, 2 without a Vulkan adapter that has ray queries. One known
+  difference, a single ray from the edge of two walls near the origin, is reported as KNOWN with its reason and
+  decides nothing.
 
 Tests hold the seams to the solver on made scenes: a reach by the CPU's counts is `reach()`'s and
 `solve()`'s, `reach()`'s points packed again are `solve()`'s bytes, and the table names the lamps the

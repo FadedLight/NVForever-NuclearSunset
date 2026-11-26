@@ -323,6 +323,13 @@ pub struct Tweaks {
     // ---- batch 28 ----
     /// `bNoScaleNpcDamageByCondition`: NPCs' weapons hit as if whole.
     pub npc_weapons_whole: bool,
+    /// Named NVForever option `npc-weapon-mods` (off by default; #3876): non-player NPCs
+    /// roll a level-scaled chance (10%-60%, +2%/level) for their main weapon to include
+    /// random weapon mods from its valid `WMI1`-`WMI3` slots [documented: JIP LN NVSE
+    /// Plugin 57.30 `jip_nvse.ini` `[GamePatches]` `bNPCWeaponMods`; no DLL or source
+    /// consulted; design: `docs/spec-notes/npc-weapon-mods.md`]. Never read from
+    /// `jip_nvse.ini`.
+    pub npc_weapon_mods: bool,
     /// `bLethalHitsIncreaseLimbChallenges`: a killing knockdown still counts for the
     /// knockdown challenges.
     pub lethal_knockdowns_count: bool,
@@ -970,6 +977,7 @@ impl Default for Tweaks {
             skip_lock_margin: 0.0,
             pick_up_disarmed: false,
             npc_weapons_whole: false,
+            npc_weapon_mods: false,
             lethal_knockdowns_count: false,
             crippling_never_disarms: false,
             no_spin_up: false,

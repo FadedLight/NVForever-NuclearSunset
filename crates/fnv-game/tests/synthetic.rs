@@ -3770,6 +3770,32 @@ fn set_delay_elapsed_returns_zero_and_updates_remaining_delay() {
 }
 
 #[test]
+fn get_debug_mode_state_reports_combat_ai_default_and_toggles() {
+    // [observed 2026-11-24: w6t2_24_jip_fall_time_and_is_in_air_edges -> dbg(0,1,1,0,0,0,tgm=1)]
+    use fnv_script::vm::XVal;
+    let f = udf_fixture();
+    let mut g = game(&f);
+    let q = |g: &mut fnv_game::Game, body: &str| {
+        g.run_query(&format!("Begin Function {{ }}\n{body}\nEnd\n"), Default::default()).unwrap()
+    };
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 0)"), XVal::Num(0.0), "god mode off by default");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 1)"), XVal::Num(1.0), "AI enabled by default");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 2)"), XVal::Num(1.0), "Combat AI enabled by default");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 3)"), XVal::Num(0.0), "collision debug off by default");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 4)"), XVal::Num(0.0), "borders off by default");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 5)"), XVal::Num(0.0), "out-of-range mode reads 0");
+
+    g.toggles.god_mode = true;
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 0)"), XVal::Num(1.0), "tgm sets mode 0 to 1");
+    g.toggles.god_mode = false;
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 0)"), XVal::Num(0.0));
+
+    g.toggles.actors_ai_off = true;
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 1)"), XVal::Num(0.0), "tai sets mode 1 to 0");
+    assert_eq!(q(&mut g, "SetFunctionValue (GetDebugModeState 2)"), XVal::Num(1.0), "mode 2 stays 1 independently");
+}
+
+#[test]
 fn queries_run_function_scripts_and_keep_what_they_change() {
     // The runner's `query` action (Game::run_query): JIP's auxiliary variables set by one
     // query are read by the next, and the saved ones are in the snapshot.

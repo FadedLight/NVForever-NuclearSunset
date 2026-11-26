@@ -334,6 +334,12 @@ pub struct RefExtra {
     /// The current package reached its goal ([`Game::package_goal_met`]).
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub package_goal_met: bool,
+    /// A script relocated the actor (`MoveTo`, `MoveToMarkerWithFade`, scripted door)
+    /// while its current package was running: Must Complete and Must Reach Location no
+    /// longer hold that pre-relocation package past its schedule or failed conditions
+    /// ([`Game::package_held`], issue #3041). Cleared when a new package is chosen.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub package_relocated: bool,
     /// Once Per Day packages: GameDaysPassed when the actor last chose each.
     #[serde(skip_serializing_if = "BTreeMap::is_empty", default)]
     pub package_chosen_at: BTreeMap<FormId, f32>,

@@ -101,6 +101,12 @@ pub struct PhysState {
     /// Placed references whose pose [`PhysState::settle_placed`] wrote to the simulation
     /// this frame (for `crate::moved`).
     pub moved_now: Vec<u32>,
+    /// Placed references whose pose another game owns: a co-op guest's copies of what the
+    /// host's world moves (`nvforever::coop::replication`). [`PhysState::settle_placed`]
+    /// does not write them back, so this game's own simulation of them never overrides
+    /// the host's pose; their collision is built again where the host puts them. Always
+    /// empty outside co-op.
+    pub follow_only: BTreeSet<u32>,
     /// Placed clutter and dropped items drawn between physics steps this frame
     /// ([`PhysState::drawn_ref_pose`]).
     pub between: DrawnBetween,
@@ -226,6 +232,7 @@ impl Default for PhysState {
             created: BTreeMap::new(),
             placed_dynamic: BTreeMap::new(),
             moved_now: Vec::new(),
+            follow_only: BTreeSet::new(),
             between: DrawnBetween::default(),
             doors: BTreeMap::new(),
             animated: BTreeMap::new(),
@@ -1340,6 +1347,19 @@ impl PhysState {
         }
     }
 
+    /// Where a reference with one dynamic body is now, by its body (position and angles,
+    /// as the settle write-back would put them), and whether the body sleeps. Co-op
+    /// replication sends a guest's carried object to the host with it.
+    pub fn ref_pose_now(&self, id: u32) -> Option<([f32; 3], [f32; 3], bool)> {
+        let (local, scale) = match self.created.get(&id) {
+            Some(cb) => cb.local.filter(|_| cb.dynamic).map(|l| (l, 1.0))?,
+            None => self.placed_dynamic.get(&id).map(|p| (p.local, p.scale))?,
+        };
+        let b = self.world.ref_bodies(id).first().copied()?;
+        let (pos, rot) = dropped::ref_pose_from_body(&b, &local, scale);
+        Some((pos, ref_angles(&rot), b.sleeping))
+    }
+
     /// A script moved or turned reference `id` (SetPos, SetAngle, Rotate, SetScale, the
     /// console's too) at time `now` (seconds): its collision is built again at the
     /// simulation's pose when it is not there already.
@@ -1711,6 +1731,9 @@ impl PhysState {
     pub fn settle_placed(&mut self, sim: &mut World) -> Vec<u32> {
         let mut changed = Vec::new();
         for (&id, p) in self.placed_dynamic.iter_mut() {
+            if self.follow_only.contains(&id) {
+                continue;
+            }
             let Some(b) = self.world.ref_bodies(id).first().copied() else { continue };
             if b.sleeping && !p.moved {
                 continue;

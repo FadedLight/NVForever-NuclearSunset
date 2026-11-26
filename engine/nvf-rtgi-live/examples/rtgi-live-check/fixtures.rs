@@ -236,7 +236,12 @@ fn close_spot(out: &mut Vec<Fixture>) {
     let spot = Lamp { cone: Some(Cone::new(v(0.0, -1.0, 0.0), 0.3, 0.5)), ..lamp(v(0.0, 0.005, 0.0), V3([0.8; 3]), 100.0) };
     let half: Shows = |b| b[0].is_some_and(|b| b.light.max_abs() > 0.01 && b.shadow_rays == 1) && b[1].is_some_and(|b| b.light == V3::ZERO && b.shadow_rays == 0);
     let light = LightState { ambient: V3([0.1; 3]), lamps: vec![spot], ..LightState::default() };
-    out.push(Fixture::new("a spot 0.005 above the place, at half brightness", vec![floor], light, vec![v(0.0, 30.0, 0.0), v(0.005, 30.0, 0.0)], vec![v(0.0, -1.0, 0.0)], half));
+    out.push(Fixture::new("a spot 0.005 above the place, at half brightness", vec![floor.clone()], light, vec![v(0.0, 30.0, 0.0), v(0.005, 30.0, 0.0)], vec![v(0.0, -1.0, 0.0)], half));
+    // A lamp of the least range packed, a hit half a unit off in its one cell: out of range, no light and no shadow ray,
+    // where d2 / range^2 is about 6e36.
+    let tiny = LightState { ambient: V3([0.1; 3]), lamps: vec![lamp(v(0.2, 0.0, 0.1), V3([0.8; 3]), 2e-19)], ..LightState::default() };
+    let out_of_range: Shows = |b| b[0].is_some_and(|b| b.lamps == 1 && b.shadow_rays == 0 && b.light == V3::ZERO);
+    out.push(Fixture::new("a lamp of range 2e-19 in the cell of a hit half a unit off", vec![floor], tiny, vec![v(0.5, 20.0, 0.5)], vec![v(0.0, -1.0, 0.0)], out_of_range));
 }
 
 /// Straight down at the faces of the lamps' grid, and at its far edge where a place is rounded onto it.
@@ -389,7 +394,12 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
     let (mut sums, mut moments, mut named) = (vec![[0u32; 4]; f.from.len()], vec![[V3::ZERO; 4]; f.from.len()], vec![false; f.from.len()]);
     let (mut off, mut alternatives, mut exempt, mut known, mut backs) = (Vec::new(), Vec::new(), Vec::new(), None, vec![0i64; f.from.len()]);
     for (i, (c, g)) in cpu.iter().zip(&answers).enumerate() {
-        let finite = !g.hit || (g.light.finite() && g.p.finite() && g.start.finite() && g.t.is_finite());
+        let finite = !g.hit || (g.light.finite() && g.p.finite() && g.start.finite() && g.t.is_finite() && g.weights.iter().all(|w| w.is_finite()));
+        // Its shadow rays start off the face it met, on the side it met, as the solver lifts them.
+        let lifted = order.get(g.primitive as usize).is_some_and(|t| {
+            let n = if g.front { normals[*t as usize] } else { -normals[*t as usize] };
+            (g.start - (g.p + n * lift(g.p))).max_abs() <= 1e-6 * (1.0 + g.p.max_abs())
+        });
         let same_counts = |o: &Option<Bounce>| counts(o)[2..] == [g.lamps, g.shadow_rays];
         let mut k = kind(c, g, order, &normals);
         if matches!(k, Kind::Same | Kind::TieSame) && !same_counts(c) {
@@ -406,9 +416,9 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
             exempt.push((i / n, i % n));
         }
         let near_known = (g.light - V3(KNOWN.light)).max_abs() <= TOLERANCE && g.free == KNOWN.free;
-        let pinned = f.name == KNOWN.fixture && i == KNOWN.ray && n == 512 && finite && g.hit && k == Kind::Edge && c.is_some_and(|c| c.tri == KNOWN.cpu && c.hidden) && order.get(g.primitive as usize) == Some(&KNOWN.gpu) && g.front && !g.hidden && near_known;
+        let pinned = f.name == KNOWN.fixture && i == KNOWN.ray && n == 512 && finite && g.hit && k == Kind::Edge && c.is_some_and(|c| c.tri == KNOWN.cpu && c.hidden) && order.get(g.primitive as usize) == Some(&KNOWN.gpu) && g.front && !g.hidden && near_known && lifted;
         let delta = c.map(|c| [0, -i64::from(c.hidden), i64::from(g.lamps) - i64::from(c.lamps), i64::from(g.shadow_rays) - i64::from(c.shadow_rays)]);
-        let tie = k == Kind::TieSame && !f.exact;
+        let tie = k == Kind::TieSame && !f.exact && lifted;
         let (agreed, dark) = if finite && (k == Kind::Same || tie || own_light) {
             (Some(*c), false)
         } else if pinned && delta == Some(KNOWN.delta) {
@@ -420,7 +430,7 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
             let other = |(o, shadowed): (&Option<Bounce>, bool)| match o {
                 None => !g.hit,
                 Some(o) => {
-                    let light = if shadowed { g.light == V3::ZERO } else { (o.light - g.light).max_abs() <= 4.0 * TOLERANCE };
+                    let light = if shadowed { g.light == V3::ZERO && g.free == 0 } else { (o.light - g.light).max_abs() <= 4.0 * TOLERANCE };
                     let place = order.get(g.primitive as usize) == Some(&o.tri) && o.front == g.front && (o.p - g.p).max_abs() <= 0.02 && (o.start - g.start).max_abs() <= 2.0 * lift(o.p);
                     g.hit && o.hidden == g.hidden && light && place && same_counts(&Some(*o))
                 }

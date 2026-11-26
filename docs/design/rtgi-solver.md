@@ -289,7 +289,7 @@ computes:
 - **`nvf-rtgi-live`.** A solve's inputs packed on the CPU for the future GPU solve: the scene, a light and
   a volume's points as the words a kernel reads, made on any thread. What a shader could not compute as
   the solver does is refused there with the reason (corners past 1e5, colours or factors past 1e10, a
-  transformed texture coordinate that could pass 1e5 anywhere between the corners, lights brighter than
+  transformed texture coordinate that could pass 1e5 anywhere between the corners, or one as given past 1e30, lights brighter than
   1e6 together) and stays the CPU solver's. The kernel, the device side and a runner that compares both
   come in the next slices.
 

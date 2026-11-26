@@ -723,6 +723,11 @@ def run_launch(launch: Launch, env: Env, locks: Locks | None) -> tuple[int | Non
                 except subprocess.TimeoutExpired:
                     code, err = None, "timed out"
                     break
+                except OSError as e:
+                    # No fnvtool built (or not runnable): this launch fails with the reason, and
+                    # the run goes on to the rest and its summary (#4740).
+                    code, err = None, f"cannot start fnvtool at {env.fnvtool}: {e}"
+                    break
                 if r.returncode != 0:
                     code = r.returncode
                     break

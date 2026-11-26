@@ -312,8 +312,8 @@ computes:
   `nvf_rtgi`: each ray's surface, light (within 5e-4), lamps and shadow rays against `bounces`, each point's
   counts and moments against their sums and its reach against `classified`, and 100,000 triangle tests against
   `meet`, bit for bit (0 and -0 held as one, and counted). Where a ray's light may differ by design (a shadow ray
-  that starts in another surface's plane, a ray along the surface it starts on, a limit the structure decides) it
-  is counted and listed, and bounded by answers the CPU computes on its own. Exit 0 when all pass, 1 on a failure,
+  that starts in another surface's plane, a limit the structure decides) it is listed ray by ray and bounded by
+  answers the CPU computes on its own, the lamps it sees too. Exit 0 when all pass, 1 on a failure,
   2 without a Vulkan adapter that has ray queries. One known difference, ray 865 from the edge of two walls near
   the origin, is pinned exactly and reported as KNOWN with its reason; its point is held to it and nothing else.
 

@@ -1,16 +1,14 @@
 //! Scenes made here, without game data, whose rays, points and reach are held against the CPU's.
 //!
 //! They have to agree: the same surface met (or another in its very place, parallel, with the same light), the same
-//! light, the same lamps and shadow rays. Three exemptions, each counted in the output and each bounded by answers the
-//! CPU computes on its own:
+//! light, the same lamps and shadow rays. Two exemptions, each listed in the output and each bounded by answers the CPU
+//! computes on its own:
 //! - Where an answer is a rounding's on either side of a limit that the kernel leaves to the structure (an alpha
 //!   exactly at the cutoff away from the points, a shadow ray's end), it may be one of those named for it: the CPU's
 //!   of scenes a little to either side of the limit, the same triangle, side, place and shadow rays.
 //! - From a seam, a ray whose shadow rays start in another surface's plane may see other lamps than the CPU's (they
-//!   are the structure's, whose rounding is not the solver's): its light is then one of those of its triangle alone
-//!   in the light of each set of the lamps, all of them in sight.
-//! - A ray along a surface from on it ("at once") has its place on it by the rounding: its light is within 4 times
-//!   the tolerance of the CPU's.
+//!   are the structure's, whose rounding is not the solver's): its light and the lamps it sees are then those of its
+//!   triangle alone in the light of a set of the lamps, all of them in sight.
 //!
 //! A point's counts and moments are the sums of the answers its rays agreed with.
 
@@ -32,6 +30,10 @@ struct Known {
     gpu: u32,
     /// GPU less CPU of the point's hits, backs, lamps and shadow rays.
     delta: [i64; 4],
+    /// The kernel's light of it, as first recorded (on the prototype's kernel and on this one, 2026-11-26), and the
+    /// lamps it saw.
+    light: [f32; 3],
+    free: u32,
     why: &'static str,
 }
 
@@ -41,6 +43,8 @@ const KNOWN: Known = Known {
     cpu: 6,
     gpu: 3,
     delta: [0, -1, 2, 1],
+    light: [0.472_521_36, 0.202_482_91, 0.085_289_24],
+    free: 1,
     why: "point 1 (one float inside the x wall, on the y wall), direction 353: the CPU meets the y wall's hidden back at their shared edge, the kernel the x wall's front 1e-5 nearer; on the prototype kernel too, its cause not yet found",
 };
 
@@ -55,6 +59,8 @@ pub struct Fixture {
     pub others: Vec<(Parts, LightState, bool)>,
     /// From a seam: a ray whose shadow rays start in another surface's plane may see other lamps.
     pub seam: bool,
+    /// Every ray meets the CPU's own triangle: no other in its place.
+    pub exact: bool,
     pub textures: Vec<Option<Texture>>,
     pub light: LightState,
     pub from: Vec<V3>,
@@ -123,7 +129,7 @@ pub fn any(_: &[Option<Bounce>]) -> bool {
 
 impl Fixture {
     pub fn new(name: impl Into<String>, parts: Parts, light: LightState, from: Vec<V3>, along: Vec<V3>, shows: Shows) -> Fixture {
-        Fixture { name: name.into(), parts, others: Vec::new(), seam: false, textures: Vec::new(), light, from, along, shows }
+        Fixture { name: name.into(), parts, others: Vec::new(), seam: false, exact: false, textures: Vec::new(), light, from, along, shows }
     }
 
     fn scene(&self, parts: &Parts) -> SceneInput {
@@ -218,8 +224,9 @@ fn thresholds(out: &mut Vec<Fixture>, how: &str, height: f32, behind: f32) -> Re
     let light = one_lamp(v(300.0, 0.0, 60.0));
     let stops: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.tri >= 2));
     let goes_on: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.tri < 2));
-    out.push(Fixture::new(format!("alpha at a hit's own weight, {how}, the cutoff that weight"), with(&at), light.clone(), from.clone(), along.clone(), stops));
-    out.push(Fixture::new(format!("alpha at a hit's own weight, {how}, the cutoff the float above"), with(&above), light, from, along, goes_on));
+    // The sheet or the wall itself, on every ray: the wall is in the sheet's place for a tie.
+    out.push(Fixture { exact: true, ..Fixture::new(format!("alpha at a hit's own weight, {how}, the cutoff that weight"), with(&at), light.clone(), from.clone(), along.clone(), stops) });
+    out.push(Fixture { exact: true, ..Fixture::new(format!("alpha at a hit's own weight, {how}, the cutoff the float above"), with(&above), light, from, along, goes_on) });
     Ok(())
 }
 
@@ -329,9 +336,9 @@ fn counts(b: &Option<Bounce>) -> [u32; 4] {
 }
 
 /// The light of a ray's triangle alone, from the same place along the same direction, in the light of each set of the
-/// lamps: every lamp of the set in sight. A seam's ray whose shadow rays start in another surface's plane brings one of
-/// these.
-fn in_sight(f: &Fixture, e: &Export, tri: u32, ray: (V3, V3)) -> Result<Vec<V3>, String> {
+/// lamps: every lamp of the set in sight, so that its shadow rays are the lamps it sees. A seam's ray whose shadow rays
+/// start in another surface's plane brings one of these.
+fn in_sight(f: &Fixture, e: &Export, tri: u32, ray: (V3, V3)) -> Result<Vec<(V3, u32)>, String> {
     let face = &e.faces[tri as usize];
     let mesh = Mesh { positions: e.corners[tri as usize].map(|c| c.0).to_vec(), normals: face.normals.to_vec(), uv0: face.uv.to_vec(), colors: face.colors.to_vec(), indices: vec![0, 1, 2] };
     let input = SceneInput { meshes: vec![mesh], instances: vec![Instance { mesh: 0, material: face.material as usize, world_from_local: SAME }], materials: e.materials.to_vec(), textures: f.textures.clone() };
@@ -341,7 +348,7 @@ fn in_sight(f: &Fixture, e: &Export, tri: u32, ray: (V3, V3)) -> Result<Vec<V3>,
     for set in 0..1usize << lamps.len().min(4) {
         let light = LightState { lamps: lamps.iter().enumerate().filter(|(i, _)| set >> i & 1 == 1).map(|(_, l)| *l).collect(), ..f.light.clone() };
         let b = bounces(&alone, &light, &[ray], EMISSION, 1, &|| false).map_err(|e| e.to_string())?;
-        out.extend(b[0].map(|b| b.light));
+        out.extend(b[0].map(|b| (b.light, b.shadow_rays)));
     }
     Ok(out)
 }
@@ -380,29 +387,29 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
     // Of each point: the sums of the answers its rays agreed with (their counts, their light's moments), whether any
     // was another than the scene's own, and what the known ray moves its hidden sides by.
     let (mut sums, mut moments, mut named) = (vec![[0u32; 4]; f.from.len()], vec![[V3::ZERO; 4]; f.from.len()], vec![false; f.from.len()]);
-    let (mut off, mut either, mut exempt, mut known, mut backs) = (Vec::new(), 0, Vec::new(), None, vec![0i64; f.from.len()]);
+    let (mut off, mut alternatives, mut exempt, mut known, mut backs) = (Vec::new(), Vec::new(), Vec::new(), None, vec![0i64; f.from.len()]);
     for (i, (c, g)) in cpu.iter().zip(&answers).enumerate() {
-        let from = f.from[i / n];
         let finite = !g.hit || (g.light.finite() && g.p.finite() && g.start.finite() && g.t.is_finite());
         let same_counts = |o: &Option<Bounce>| counts(o)[2..] == [g.lamps, g.shadow_rays];
         let mut k = kind(c, g, order, &normals);
         if matches!(k, Kind::Same | Kind::TieSame) && !same_counts(c) {
             k = Kind::Counts;
         }
-        // The exemptions of a ray's light: met at once along the surface it starts on; from a seam, in sight of other
-        // lamps than the CPU's where its shadow rays start in another surface's plane.
-        let at_once = k == Kind::Place && c.is_some_and(|c| c.hidden == g.hidden && [c.p, g.p].iter().all(|p| (*p - from).length() < 1.0) && (c.light - g.light).max_abs() <= 4.0 * TOLERANCE);
+        // From a seam, in sight of other lamps than the CPU's where its shadow rays start in another surface's plane: the
+        // light and the lamps in sight of one set of the lamps.
         let mut seam = false;
-        if let Some(b) = c.filter(|b| f.seam && k == Kind::Light && b.hidden == g.hidden && starts_on_another(&scene, b)) {
-            seam = in_sight(f, &e, b.tri, rays[i])?.iter().any(|l| (*l - g.light).max_abs() <= TOLERANCE);
+        if let Some(b) = c.filter(|b| f.seam && finite && k == Kind::Light && b.hidden == g.hidden && starts_on_another(&scene, b)) {
+            seam = in_sight(f, &e, b.tri, rays[i])?.iter().any(|(l, seen)| (*l - g.light).max_abs() <= TOLERANCE && *seen == g.free);
         }
-        let own_light = finite && (at_once || seam) && same_counts(c);
+        let own_light = seam && same_counts(c);
         if own_light {
-            exempt.push((i / n, i % n, if at_once { "at once" } else { "seam" }));
+            exempt.push((i / n, i % n));
         }
-        let pinned = f.name == KNOWN.fixture && i == KNOWN.ray && n == 512 && k == Kind::Edge && c.is_some_and(|c| c.tri == KNOWN.cpu && c.hidden) && order.get(g.primitive as usize) == Some(&KNOWN.gpu) && g.front && !g.hidden;
+        let near_known = (g.light - V3(KNOWN.light)).max_abs() <= TOLERANCE && g.free == KNOWN.free;
+        let pinned = f.name == KNOWN.fixture && i == KNOWN.ray && n == 512 && finite && g.hit && k == Kind::Edge && c.is_some_and(|c| c.tri == KNOWN.cpu && c.hidden) && order.get(g.primitive as usize) == Some(&KNOWN.gpu) && g.front && !g.hidden && near_known;
         let delta = c.map(|c| [0, -i64::from(c.hidden), i64::from(g.lamps) - i64::from(c.lamps), i64::from(g.shadow_rays) - i64::from(c.shadow_rays)]);
-        let (agreed, dark) = if finite && (matches!(k, Kind::Same | Kind::TieSame) || own_light) {
+        let tie = k == Kind::TieSame && !f.exact;
+        let (agreed, dark) = if finite && (k == Kind::Same || tie || own_light) {
             (Some(*c), false)
         } else if pinned && delta == Some(KNOWN.delta) {
             // The known ray: the point is held to the kernel's answer of it, every other ray to the CPU's.
@@ -418,10 +425,12 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
                     g.hit && o.hidden == g.hidden && light && place && same_counts(&Some(*o))
                 }
             };
-            let found = others.iter().map(|(o, shadowed)| (&o[i], *shadowed)).find(|o| finite && other(*o));
-            either += usize::from(found.is_some());
-            named[i / n] |= found.is_some();
-            found.map_or((None, false), |(o, shadowed)| (Some(*o), shadowed))
+            let found = others.iter().enumerate().map(|(j, (o, shadowed))| (j, &o[i], *shadowed)).find(|(_, o, shadowed)| finite && other((o, *shadowed)));
+            if let Some((j, ..)) = found {
+                alternatives.push((i / n, i % n, j));
+                named[i / n] = true;
+            }
+            found.map_or((None, false), |(_, o, shadowed)| (Some(*o), shadowed))
         };
         if agreed.is_none() {
             off.push((i, k));
@@ -458,9 +467,12 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         _ => "FAIL",
     };
     let met = [cpu.iter().flatten().count(), answers.iter().filter(|g| g.hit).count()];
-    println!("{verdict} {}: {} rays, {} differ, {either} another answer that is named, {} of their own light bounded; hits {} / {}; {} points, {} off{}", f.name, cpu.len(), off.len(), exempt.len(), met[0], met[1], f.from.len(), points_off.len(), if shows { "" } else { "; the CPU's answers do not show what it is for" });
+    println!("{verdict} {}: {} rays, {} differ, {} another answer that is named, {} from a seam in sight of other lamps; hits {} / {}; {} points, {} off{}", f.name, cpu.len(), off.len(), alternatives.len(), exempt.len(), met[0], met[1], f.from.len(), points_off.len(), if shows { "" } else { "; the CPU's answers do not show what it is for" });
+    if !alternatives.is_empty() {
+        println!("    named answers (point, direction, which): {alternatives:?}");
+    }
     if !exempt.is_empty() {
-        println!("    own light (point, direction, why): {:?}{}", &exempt[..exempt.len().min(8)], if exempt.len() > 8 { " ..." } else { "" });
+        println!("    from a seam, in sight of other lamps (point, direction): {exempt:?}");
     }
     if known.is_some() {
         println!("    known: ray {}, {}", KNOWN.ray, KNOWN.why);

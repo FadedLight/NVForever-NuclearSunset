@@ -943,7 +943,7 @@ fn sync_cards(mut active: ResMut<ActiveMenu>, mut sim: ResMut<SimState>, mut scr
 /// ySI is active in `game`, honoring `yUI.ini` `[Sorting and Icons]` `bSortInventory`,
 /// `bAddInventoryIcons`, and `bEnableCategories` (zero-cost no-op in vanilla sessions
 /// without ySI) [design: `docs/spec-notes/ysi-filename.md`, `docs/spec-notes/yui-ini.md`].
-fn sync_ysi_model(m: &mut MenuModel, game: &mut fnv_game::Game<'_>) {
+pub(crate) fn sync_ysi_model(m: &mut MenuModel, game: &mut fnv_game::Game<'_>) {
     let sort_by_tag = game.ysi_sort_inventory();
     let add_icons = game.ysi_add_inventory_icons();
     let categories = if m.mode == Mode::Inventory {
@@ -1162,7 +1162,9 @@ fn apply_input(
                     let allowed = crate::script::with_world(rt, &mut sim, |rt| rt.game.pre_activate_inventory_item(FormId::PLAYER_REF, row.item, 0, !row.equipped));
                     if !allowed {
                         info!("menu: {cmd:?}: {} activation prevented by script", row.name);
-                        let _ = m.refresh(&mut sim.world);
+                        if m.refresh(&mut sim.world).is_ok() {
+                            sync_ysi_model(m, &mut rt.game);
+                        }
                         continue;
                     }
                 }

@@ -340,3 +340,48 @@ fn tab_switch_search_icons_off_and_vanilla_disabled_behave_cleanly() {
     m.apply(&mut world, Command::SetCategory(Side::Player, Category::Misc));
     assert_eq!(m.list(Side::Player).rows[0].folder, Some(FolderRow::Open(Folder::Keys)));
 }
+
+#[test]
+fn repair_mod_or_stats_refresh_inside_ysi_folder_preserves_back_subfolders_and_icons() {
+    let (forms, refs) = build_fixture();
+    let mut world = World::new(&forms, &refs, SimConfig::default());
+    let mut m = MenuModel::open_inventory(&mut world).unwrap();
+    m.set_ysi_categories(Some(sample_categories()));
+    m.apply(&mut world, Command::SetCategory(Side::Player, Category::Weapons));
+    m.apply_ysi_options(true, true, tag_for);
+
+    // Enter Guns (Folder::Ysi(0)), which contains Back, Pistols subfolder, and Varmint Rifle.
+    m.apply(&mut world, Command::One);
+    m.apply_ysi_options(true, true, tag_for);
+    assert_eq!(m.folder, Some(Folder::Ysi(0)));
+    assert_eq!(m.list(Side::Player).rows[0].folder, Some(FolderRow::Back));
+
+    // Simulate a Pip-Boy Repair/Mod/Stats inventory mutation followed by `m.refresh` + `sync_ysi_model`.
+    world.add_item(PLAYER, FormId(PISTOL), 1).unwrap();
+    m.refresh(&mut world).unwrap();
+    // Raw `m.refresh` rebuilds flat rows without ySI metadata; re-running `apply_ysi_options`
+    // (as `crate::menu::sync_ysi_model` now does after repair/mod/stats refreshes) restores
+    // subfolder folding, the Back row, and all `r.ysi` icons while staying in `Folder::Ysi(0)`.
+    m.apply_ysi_options(true, true, tag_for);
+
+    assert_eq!(m.folder, Some(Folder::Ysi(0)));
+    let rows = &m.list(Side::Player).rows;
+    let names: Vec<(&str, Option<FolderRow>)> = rows.iter().map(|r| (r.name.as_str(), r.folder)).collect();
+    assert_eq!(
+        names,
+        vec![
+            ("Back", Some(FolderRow::Back)),
+            ("Pistols", Some(FolderRow::Open(Folder::Ysi(1)))),
+            ("Varmint Rifle", None),
+        ]
+    );
+    assert_eq!(
+        rows[1].ysi.as_ref().and_then(|y| y.icon.as_deref()),
+        Some("interface\\icons\\cat_pistols.dds")
+    );
+    assert_eq!(
+        rows[2].ysi.as_ref().and_then(|y| y.icon.as_deref()),
+        Some("interface\\icons\\rifle.dds")
+    );
+}
+

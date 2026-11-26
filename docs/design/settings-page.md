@@ -139,6 +139,7 @@ Audio and Controls, observed in the original's pause menu, 2026-11-09].
 | Gameplay | Game | `difficulty`, `hardcore`, `kill-camera`, `vats-style`, `vats-slowdown`, `reload-slows`, `UsePipBoy`, `npc-weapon-mods` (#3876) |
 | Gameplay | Saving | `autosave-travel`, `autosave-fast-travel`, `autosave-wait`, `autosave-sleep`, `autosave-scripts` |
 | Gameplay | Combat | `localized-dt-dr` (#3843) |
+| Gameplay | Menus | `quantity-select-short-keys` (#3799) |
 | Gameplay | Dialogue | `menu-pause`, `dialogue-goodbye-hint`, `dialogue-look`, `dialogue-recentre`, `dialogue-zoom`, `lip-sync` |
 | Gameplay | Camera | `detached-camera`, `true-iron-sights`, `first-person-body`, `weapon-lower`, `field-of-view`, `viewmodel-field-of-view` |
 | Gameplay | World | `grass-fire` (#2662), `sound-cover` (#2688) |

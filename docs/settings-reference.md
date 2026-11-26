@@ -322,6 +322,22 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
   (`docs/spec-notes/localized-dt-dr.md`, #3843).
 - Registered in `engine/nvf-play/src/combat.rs`
 
+## Gameplay › Menus
+
+### `quantity-select-short-keys`: Quantity select shortcuts
+
+- On the page: In inventory, container and barter menus, Shift transfers or drops the whole
+  stack, Ctrl acts on one item, and weightless container stacks open the quantity prompt.
+- In full: Off by default (unmodded menu behaviour unchanged). On: in Inventory, Container
+  and Barter menus, holding Shift transfers or drops the entire stack and holding Ctrl
+  transfers or drops a single item without opening the quantity prompt (Shift takes
+  precedence if both are held); picking up a stack of more than one weightless item (such
+  as ammo outside Hardcore mode) from a container opens the quantity prompt instead of
+  taking without asking. Optional NVForever setting following the public `bQttSelectShortKeys`
+  behaviour in JIP LN NVSE Plugin v57.30 (`docs/spec-notes/quantity-select-short-keys.md`,
+  #3799).
+- Registered in `engine/nvf-play/src/menu.rs`
+
 ## Gameplay › Bug Reports
 
 ### `send-reports`: Send reports to help fix NVForever

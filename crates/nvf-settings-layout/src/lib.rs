@@ -166,6 +166,7 @@ pub const SECTIONS: &[Section] = &[
     section("Gameplay", Some("Dialogue"), &["dialogue-zoom", "dialogue-look", "dialogue-recentre", "menu-pause", "dialogue-goodbye-hint", "lip-sync"]),
     section("Gameplay", Some("Saving"), &["autosave-travel", "autosave-fast-travel", "autosave-wait", "autosave-sleep", "autosave-scripts"]),
     section("Gameplay", Some("Combat"), &["localized-dt-dr"]),
+    section("Gameplay", Some("Menus"), &["quantity-select-short-keys"]),
     section("Gameplay", Some("Bug Reports"), &["send-reports", "reports-delete"]),
     section("Gameplay", Some("Co-op"), &["coop"]),
     section("Display", Some("Screen"), &["monitor", "resolution", "hdr-output", "borderless"]),

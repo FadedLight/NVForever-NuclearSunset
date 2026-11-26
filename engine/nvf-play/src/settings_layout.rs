@@ -349,6 +349,7 @@ mod shared_table_tests {
         ("sound-cover", "Gameplay"),
         ("caravan-tips", "Gameplay"),
         ("npc-weapon-mods", "Gameplay"),
+        ("quantity-select-short-keys", "Gameplay"),
         ("menu-pause", "Gameplay"),
         ("dialogue-goodbye-hint", "Gameplay"),
         ("reload-slows", "Gameplay"),
@@ -759,6 +760,7 @@ mod shared_table_tests {
         assert_eq!(at("caravan-tips"), "Display > Interface");
         assert_eq!(at("localized-dt-dr"), "Gameplay > Combat", "#3843");
         assert_eq!(at("npc-weapon-mods"), "Gameplay > Game", "#3876");
+        assert_eq!(at("quantity-select-short-keys"), "Gameplay > Menus", "#3799");
         assert_eq!(at("volumetric-light"), "Graphics > Lighting and Effects", "with the other experimental effects (#3032)");
         assert_eq!(at("volumetric-light-strength"), "Graphics > Lighting and Effects", "right after its switch");
         // The strength is greyed while its switch is off.

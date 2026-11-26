@@ -593,6 +593,13 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
   make, as detection counts them. Not in the original.
 - Registered in `engine/nvf-play/src/sneak_gauges.rs`
 
+### `caravan-tips`: Caravan tips
+
+- On the page: On: the Caravan table says what the chosen card does and why a card can't be
+  played, and the menu has a Tips button. Off: only the game's short messages. Not in
+  the original.
+- Registered in `engine/nvf-play/src/caravan.rs`
+
 ### `dynamic-crosshair`: Dynamic crosshair
 
 - On the page: On: with a gun or thrown weapon drawn the crosshair opens with how wide your

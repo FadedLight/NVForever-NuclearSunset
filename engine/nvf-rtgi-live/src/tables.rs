@@ -7,17 +7,17 @@ use std::collections::HashMap;
 /// Words of a material, a texture and a direction.
 const MATERIAL: usize = 16;
 const TEXTURE: usize = 8;
-const DIRECTION: usize = 13;
+pub(crate) const DIRECTION: usize = 13;
 /// Where a direction's parts are in its words: as given (for the moments), as the rays go (still axes 0: for the
 /// tree, the triangle test and the side met), the shear, the axes (two bits each, then a bit each for the still ones)
 /// and the reciprocals.
-const GIVEN: usize = 0;
-const ALONG: usize = 3;
-const SHEAR: usize = 6;
-const AXES: usize = 9;
-const INVERSE: usize = 10;
+pub(crate) const GIVEN: usize = 0;
+pub(crate) const ALONG: usize = 3;
+pub(crate) const SHEAR: usize = 6;
+pub(crate) const AXES: usize = 9;
+pub(crate) const INVERSE: usize = 10;
 /// Words of a point.
-const PLACE: usize = 7;
+pub(crate) const PLACE: usize = 7;
 /// Of the lights' words, before the rows.
 const LIGHTS: usize = 16;
 const NONE: u32 = u32::MAX;
@@ -269,28 +269,28 @@ impl Tables {
     }
 
     /// Three a primitive, in [`Tables::order`].
-    pub fn corners(&self) -> &[[f32; 3]] {
+    pub(crate) fn corners(&self) -> &[[f32; 3]] {
         &self.corners
     }
 
     /// A primitive's material (and whether its texture is read at 0, 0), its row of colours, its normal, its corners'
     /// normals and texture coordinates, and the scene's number of it.
-    pub fn faces(&self) -> &[u32] {
+    pub(crate) fn faces(&self) -> &[u32] {
         &self.faces
     }
 
     /// Materials, then from [`Tables::starts`] on the textures, the rows of colours, the sRGB table and the directions:
     /// as given, as the rays go, the shear, the axes and the still ones, the reciprocals.
-    pub fn data(&self) -> &[u32] {
+    pub(crate) fn data(&self) -> &[u32] {
         &self.data
     }
 
-    pub fn starts(&self) -> [u32; 4] {
+    pub(crate) fn starts(&self) -> [u32; 4] {
         self.at
     }
 
     /// The colour levels' texels, and the alpha tests' four alphas a word.
-    pub fn texels(&self) -> &[u32] {
+    pub(crate) fn texels(&self) -> &[u32] {
         &self.texels
     }
 

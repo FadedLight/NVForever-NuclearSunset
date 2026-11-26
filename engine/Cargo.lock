@@ -4745,7 +4745,10 @@ version = "0.8.1"
 name = "nvf-rtgi-live"
 version = "0.8.1"
 dependencies = [
+ "bytemuck",
+ "naga",
  "nvf-rtgi",
+ "wgpu",
 ]
 
 [[package]]

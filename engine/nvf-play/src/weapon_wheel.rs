@@ -384,6 +384,9 @@ type Availability<'w> = (
     Option<Res<'w, NextState<PlayState>>>,
 );
 
+/// The wheel's scroll, the scope (whose wheel zoom it yields to) and combat (a reload under way).
+type Extras<'w> = (Option<Res<'w, bevy::input::mouse::AccumulatedMouseScroll>>, Option<Res<'w, crate::aim_zoom::Scope>>, Option<Res<'w, crate::combat::Combat>>);
+
 /// The frame's keys, mouse and stick into the wheel; its outcomes carried out.
 #[allow(clippy::too_many_arguments)]
 fn read(
@@ -400,7 +403,7 @@ fn read(
     (mut sounds, anim, mut wait): (MessageWriter<UiSound>, Option<Res<crate::combat::WeaponAnim>>, Local<SwapWait>),
     tweaks: Option<Res<crate::tweaks::TweakSettings>>,
     mut script: Option<ResMut<crate::script::ScriptState>>,
-    (scroll, scope, combat): (Option<Res<bevy::input::mouse::AccumulatedMouseScroll>>, Option<Res<crate::aim_zoom::Scope>>, Option<Res<crate::combat::Combat>>),
+    (scroll, scope, combat): Extras<'_>,
 ) {
     // The player's Weapon Requirements Matter tweak: a slot whose weapon the player may
     // not equip says why instead [design: docs/design/tweaks.md].

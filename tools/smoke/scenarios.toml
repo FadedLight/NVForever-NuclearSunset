@@ -21572,6 +21572,20 @@ expect = [
 ]
 
 [[scenario]]
+name = "goodbye-greeting-plays-out"
+source = "issue #4683: talking to an actor again while it says its Goodbye greeting at the player does nothing; the line plays to its end and no second line starts [player report: \"New phrase should trigger only after previous phrase has ended\"] (dialogue.md section 5, script.rs talk_after_except)"
+areas = ["dialogue"]
+paths = ["engine/nvf-play/src/script.rs"]
+note = "GoodspringsSettler04Ref says a Goodbye greeting (goodbye-greeting-stops-walker); the second talk 0.4 s after the first lands while she is still saying it"
+env = { NVF_PLAY_TEST_TALK = "20:GoodspringsSettler04Ref=;20.4:GoodspringsSettler04Ref=" }
+args = ["--cell", "Goodsprings", "--play", "--npc-packages", "GoodspringsSettler04Ref", "--hour", "21.9", "--no-voice"]
+run_seconds = 30
+expect = [
+  { re = 'dialogue: \S+ says its greeting \S+ at the player \(a Goodbye line: no conversation\)', count = 1, label = "one greeting said" },
+  { re = 'dialogue: the player talks to \S+, still saying its greeting: it says it to the end', count = 1, label = "the second talk lets the line play out" },
+]
+
+[[scenario]]
 name = "mq-ending-legion"
 kind = "tool"
 source = "docs/handoff/mq-walkthrough-2026-10-27.md: the headless walkthrough crates/fnv-game/walkthrough/ending-legion.actions.json, the end slides from VHDLegionBattle 100 (the Legion ending, story state 62): VEnding starts, the narrator's SayTo chain runs every slide to VEndingConclusion, FadeToCreditsTimer fades out and calls ExitGame"

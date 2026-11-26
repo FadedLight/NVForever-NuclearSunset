@@ -83,19 +83,22 @@ const STRENGTH: f32 = 0.55;
 /// = 1 - strength x (1 - visibility). Open flat ground has visibility 1 (ssao.wesl
 /// `gtao_visibility` divides by the slices' open integral), so it stays as bright as with the
 /// switch off; a floor point at the foot of a wall has 0.5 (the wall hides half the
-/// cosine-weighted hemisphere), which this darkens to 0.8, about what the old estimate gave
+/// cosine-weighted hemisphere), which this darkens to 0.77 (0.8 until 2026-11-25), about what the old estimate gave
 /// in such a crease [engineering choice, from that estimate, not yet from pictures: the
 /// factor still multiplies all light, so it is kept low as the old one was]. The picture
 /// placement's (`NVF_PLAY_DEBUG_AO=post`, and the fallback while the lighting hook is not in
-/// place): stage one's value, unchanged.
-const GTAO_STRENGTH: f32 = 0.4;
+/// place): stage one's 0.4, raised with the lighting placement's ([`LIGHTING_STRENGTH`]).
+const GTAO_STRENGTH: f32 = 0.46;
 /// The ground-truth estimate's strength in the lighting placement (the default): there the
 /// factor reaches only the ambient light and the lamps that cast no shadow, never the sun,
 /// the moon or highlights, so the reason for keeping the picture placement's low is gone
 /// [engineering choice, the player's: at exponent 1 and lamps 1, indoors 0.4 and 0.8 looked
 /// about the same and neither too dark, and outdoors 0.8 with `thin+soft` "feels about right"
-/// (observed 2026-11-18, the player's play test)].
-const LIGHTING_STRENGTH: f32 = 0.8;
+/// (observed 2026-11-18, the player's play test)]. 0.92 since 2026-11-25, 0.8 until then
+/// [design, set by eye: the factor darkens the ambient light, and once the display sum
+/// showed its dark values as they are (lights/display_shader.rs `nvf_display_to_linear`)
+/// the creases at 0.8 read as too light; both placements' strengths went up by 15%].
+const LIGHTING_STRENGTH: f32 = 0.92;
 /// The remedies for the shimmer on plants in the lighting placement: `thin` and `soft`
 /// ([`AoVariant`]). Measured on the occlusion alone at the Goodsprings street, two bush crops
 /// (median change per pixel between frames 0.12 s apart, levels of 255): the plain estimate
@@ -1635,8 +1638,8 @@ mod tests {
         );
         // The lighting's line names the remedies that run: the default without the aid's
         // name, `none` and a chosen one with it.
-        assert!(AoDebug::default().describe(true).contains("depth-aware denoise, variant soft+thin, strength 0.8, in the lighting"));
-        assert!(none.describe(true).contains("depth-aware denoise, variant none (NVF_PLAY_DEBUG_AO_VARIANT), strength 0.8"));
+        assert!(AoDebug::default().describe(true).contains("depth-aware denoise, variant soft+thin, strength 0.92, in the lighting"));
+        assert!(none.describe(true).contains("depth-aware denoise, variant none (NVF_PLAY_DEBUG_AO_VARIANT), strength 0.92"));
         assert!(AoDebug { variant: Some(AoVariant::default()), ..post }.describe(false).contains("denoise, variant none (NVF_PLAY_DEBUG_AO_VARIANT), on the picture"));
     }
 
@@ -1957,7 +1960,7 @@ mod tests {
     #[test]
     fn the_log_line_names_the_estimate_and_the_placement() {
         let start = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise";
-        assert_eq!(AoDebug::default().describe(true), format!("{start}, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour"));
+        assert_eq!(AoDebug::default().describe(true), format!("{start}, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour"));
         let post = AoDebug { post: true, ..AoDebug::default() };
         assert_eq!(post.describe(false), format!("{start}, on the picture (NVF_PLAY_DEBUG_AO=post)"));
         // The default asked for, on the picture while the hook is not in place: stage one's.
@@ -2031,7 +2034,7 @@ mod tests {
         // A surface facing the camera with one side hidden up to the view vector keeps half.
         let half = visible_arc(-FRAC_PI_2, 0.0) + visible_arc(0.0, 0.0);
         assert!((half - 0.5).abs() < 1e-6);
-        assert!((1.0 - GTAO_STRENGTH * (1.0 - half) - 0.8).abs() < 1e-6, "the crease's factor GTAO_STRENGTH's comment gives");
+        assert!((1.0 - GTAO_STRENGTH * (1.0 - half) - 0.77).abs() < 1e-6, "the crease's factor GTAO_STRENGTH's comment gives");
     }
 
     /// Quality is the estimate as it was before the row had levels, uniform for uniform;
@@ -2056,12 +2059,12 @@ mod tests {
         let line = AoDebug::default().describe_with(true, Some(AoLevel::Performance));
         assert_eq!(
             line,
-            "ambient occlusion: ground-truth estimate (GTAO), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance"
+            "ambient occlusion: ground-truth estimate (GTAO), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance"
         );
         assert_eq!(AoDebug::default().describe_with(true, Some(AoLevel::Quality)), format!("{}, level Quality", AoDebug::default().describe(true)));
         // The aid's `none` at Performance: one slice, no remedies named.
         let none = AoDebug { variant: Some(AoVariant::default()), ..AoDebug::default() };
-        assert!(none.describe_with(true, Some(AoLevel::Performance)).contains("1 slice x 4 steps a side at half resolution, depth-aware denoise, variant none (NVF_PLAY_DEBUG_AO_VARIANT), strength 0.8"));
+        assert!(none.describe_with(true, Some(AoLevel::Performance)).contains("1 slice x 4 steps a side at half resolution, depth-aware denoise, variant none (NVF_PLAY_DEBUG_AO_VARIANT), strength 0.92"));
         assert!(!old.describe_with(false, Some(AoLevel::Performance)).contains("level"), "the old estimate has no level");
         assert_eq!(AO_CHOICES, ["Off", AoLevel::Performance.name(), AoLevel::Quality.name()]);
     }

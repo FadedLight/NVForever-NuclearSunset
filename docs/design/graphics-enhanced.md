@@ -235,8 +235,8 @@ in closed form, ¼(−cos(2h − γ) + cos γ + 2h sin γ) for each horizon h.
   pixels show, as the normal is, not at display-pixel centres with a texel's depth (which lie
   off the surface and occluded themselves); a step that lands in the pixel's own texel
   raises no horizon. Without upscaling the two are the same.
-- **Strength** (`ssao.rs` `GTAO_STRENGTH` = 0.4, the picture placement's; the lighting's is
-  0.8, §3.1.2): factor = 1 − 0.4 (1 − visibility). It still multiplies all light, so it is kept
+- **Strength** (`ssao.rs` `GTAO_STRENGTH` = 0.46 since 2026-11-25, 0.4 before, the picture
+  placement's; the lighting's is 0.92, §3.1.2): factor = 1 − 0.46 (1 − visibility). It still multiplies all light, so it is kept
   low as the old 0.55 was. Open flat ground has
   visibility 1 and stays as bright as with the switch off (the old estimate did not
   guarantee that); a floor point at the foot of a wall has 0.5 (the wall hides half the
@@ -361,7 +361,9 @@ more than 2 levels at strength 0.8, mean darkening 1.85 against 2.34 levels) [ob
 placement's low (it darkened the sun's light too) is gone. Indoors 0.4 and 0.8 looked about the
 same and neither too dark; outdoors 0.8 with the remedies below "feels about right" [observed
 2026-11-18, the player's play test at exponent 1 and lamps 1] [engineering choice: the
-player's].
+player's]. 0.92 since 2026-11-25 [design, set by eye in Primm's casino once the display sum
+showed its dark values by the sRGB curve (world.md §8 "Dark values of the sum"): the creases
+at 0.8 read as too light; the picture placement's went up by the same 15%, 0.4 to 0.46].
 
 **Remedies on plants** (`ssao.rs` `LIGHTING_VARIANT`, `thin+soft`; `NVF_PLAY_DEBUG_AO_VARIANT`).
 The ground-truth estimate shimmers on swaying alpha-tested plants, more than the old one. The
@@ -394,7 +396,7 @@ took in place of its colour, at the very end of the material's colour (after the
 image-space grade and the light glow's eye adaptation still follow (`--no-grade`, light glow
 off, for a plain picture). The start's line says what runs: `ambient occlusion: ground-truth
 estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant
-soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by
+soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by
 1, exponent 1` (an aid's value is named after it); then `lights: ambient occlusion hook
 installed`, `ambient occlusion: on the ambient light in the lighting (main camera)` when the
 view takes the bindings and `ambient occlusion: off the lighting` when it gives them up; a
@@ -4631,7 +4633,7 @@ factor each fragment took; on the picture, `post` runs the ground-truth estimate
 estimate and its blur, `view` the ground-truth estimate's factor alone as a grey picture,
 `view-old` the old one's. Anything else is unknown (a warning; the default runs).
 `NVF_PLAY_DEBUG_AO_STRENGTH=<number>` (read once at the start) replaces the ground-truth
-estimate's strength (0.8 in the lighting, `LIGHTING_STRENGTH`; 0.4 on the picture,
+estimate's strength (0.92 in the lighting, `LIGHTING_STRENGTH`; 0.46 on the picture,
 `GTAO_STRENGTH`), held to 0..1; the old estimate keeps its 0.55; the log line then names it
 `strength <number> (NVF_PLAY_DEBUG_AO_STRENGTH)`. `NVF_PLAY_DEBUG_AO_VARIANT=<names>` picks the
 remedies for the plants' shimmer (unset: `thin+soft` in the lighting, none on the picture;

@@ -1235,7 +1235,7 @@ run_seconds = 14
 order = [
   [
     { re = 'graphics: ambient occlusion, light glow$', label = "the switch is on from the start (Goodsprings, MSAA)" },
-    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (Goodsprings, MSAA)" },
+    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (Goodsprings, MSAA)" },
   ],
   [
     "lights: ambient occlusion hook installed",
@@ -1268,7 +1268,7 @@ run_seconds = 14
 order = [
   [
     { re = 'graphics: ambient occlusion, light glow$', label = "the switch is on from the start (the saloon)" },
-    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (the saloon)" },
+    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (the saloon)" },
   ],
   [
     "lights: ambient occlusion hook installed",
@@ -1301,7 +1301,7 @@ run_seconds = 14
 order = [
   [
     { re = 'graphics: ambient occlusion, .*temporal anti-aliasing', label = "the switch and TAA on from the start" },
-    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (TAA)" },
+    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (TAA)" },
   ],
   [
     "lights: ambient occlusion hook installed",
@@ -1334,7 +1334,7 @@ args = ["--cell", "GSDocMitchellHouse", "--play", "--size", "1280x720", "--fsr",
 run_seconds = 16
 order = [
   [
-    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (FSR)" },
+    { text = "ambient occlusion: ground-truth estimate (GTAO), 2 slices x 4 steps a side at half resolution, depth-aware denoise, variant soft+thin, strength 0.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1", label = "the default: in the lighting, with the player's strength, remedies, lamps and exponent (FSR)" },
     { text = "FSR dispatch active: 3.1.4, 853x480 -> 1280x720", label = "FSR draws at the render size after the occlusion said where it runs (the estimate line comes with the camera, FSR's with its first dispatch)" },
   ],
   [
@@ -1478,7 +1478,7 @@ env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TE
 args = ["--cell", "Novac", "--play", "--hour", "12", "--no-voice", "--no-messages", "--graphics", "enhanced", "--ambient-occlusion=performance"]
 run_seconds = 28
 expect = [
-  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (Novac at 12:00, Performance)" },
+  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (Novac at 12:00, Performance)" },
   { text = "ambient occlusion: on the ambient light in the lighting (main camera)", label = "the bindings on the main camera (Novac at 12:00, Performance)" },
   { text = "ambient occlusion: the multisampled depth resolved once to one sample for the passes", label = "under 4x multisampling the passes read the resolved depth (Novac at 12:00, Performance)" },
 ]
@@ -1501,7 +1501,7 @@ env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TE
 args = ["--cell", "Novac", "--play", "--hour", "12", "--no-voice", "--no-messages", "--graphics", "enhanced", "--ambient-occlusion=performance", "--upscaler", "dlss", "--upscaler-quality", "quality"]
 run_seconds = 28
 expect = [
-  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (Novac at 12:00, Performance with DLSS Quality)" },
+  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (Novac at 12:00, Performance with DLSS Quality)" },
   { text = "ambient occlusion: on the ambient light in the lighting (main camera)", label = "the bindings on the main camera (Novac at 12:00, Performance with DLSS Quality)" },
 ]
 forbid = [
@@ -1521,7 +1521,7 @@ env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TE
 args = ["--cell", "UnderpassRanchInterior01", "--play", "--hour", "12", "--no-voice", "--no-messages", "--graphics", "enhanced", "--ambient-occlusion=performance"]
 run_seconds = 28
 expect = [
-  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.8, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (UnderpassRanchInterior01, Performance)" },
+  { re = 'ambient occlusion: ground-truth estimate \(GTAO\), 1 slice x 4 steps a side at half resolution, depth-aware denoise, variant soft\+thin, strength 0\.92, in the lighting: on the ambient light and on lamps without a shadow by 1, exponent 1, multi-bounce by surface colour, level Performance$', count = 1, label = "Performance: one slice, the rest as Quality (UnderpassRanchInterior01, Performance)" },
   { text = "ambient occlusion: on the ambient light in the lighting (main camera)", label = "the bindings on the main camera (UnderpassRanchInterior01, Performance)" },
   { text = "ambient occlusion: the multisampled depth resolved once to one sample for the passes", label = "under 4x multisampling the passes read the resolved depth (UnderpassRanchInterior01, Performance)" },
 ]

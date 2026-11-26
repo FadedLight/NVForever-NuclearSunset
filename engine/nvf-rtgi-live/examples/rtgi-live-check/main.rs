@@ -10,6 +10,7 @@
 //! 2 when no Vulkan adapter has ray queries. `--validation` turns the Vulkan validation layer on; any error it or
 //! wgpu reports is a FAIL, and so is a layer that is not installed.
 
+mod corpus;
 mod fixtures;
 mod gpu;
 

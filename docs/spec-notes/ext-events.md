@@ -193,7 +193,19 @@ name of the event being handled, so one function can serve several events
   priority is a map from priority to handler arrays; with a priority filter, that level
   is skipped. Each handler entry is an array: [0] the script (or, for a plugin handler,
   a string map with "Plugin" and "Handler", possibly empty), [1] a string map of its
-  filters [documented: GetEventHandlers].
+  filters [documented: GetEventHandlers]. With no handlers registered, `"ShowOff:OnAdd"`
+  returns an empty Map (`ar_Size == 0`), whereas `"OnCrosshairOn"` returns `ar_Null`
+  (`ar_Size == -1`); filter StringMap keys are `"first"` / `"second"` for
+  `SetEventHandler` and `"0"` / `"1"` (stringified argument indices) for
+  `SetEventHandlerAlt` [observed: 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`),
+  Fallout: New Vegas 1.4.0.525 + xNVSE 6.4.9 + ShowOffNVSE 184 + JIP LN 57.30 with the
+  10 official base masters, isolated clean-room staging copy (read-only `PrintToConsole`
+  probe; zero writes to game install or Saves), committed probe
+  `w6t2_16_xnvse_get_event_handlers_filter_keys`
+  (`tools/capture/nvse/catalogs/wave6_t2_get_event_handlers.json`):
+  `PROBE|w6t2_16_xnvse_get_event_handlers_filter_keys|empty(cross=-1,soAdd=0)|std(first,second)|alt(0,1)`;
+  zero DLL, PDB, or third-party source consulted; hypothesis: the other 10 implemented
+  `ShowOff:*` events in `nvse_handler_lists::KNOWN` behave like `ShowOff:OnAdd`].
 - **DumpEventHandlers** (same filters): prints them by event and priority, plugin
   handlers included [documented: DumpEventHandlers].
 - **GetHigherPriorityEventHandlers / GetLowerPriorityEventHandlers** `event, handler,

@@ -15,3 +15,5 @@ bytemuck = "1"
 # The kernel's parse and validation; the version engine/vendor/naga patches.
 [dev-dependencies]
 naga = { version = "=30.0.1", features = ["wgsl-in", "spv-out"] }
+# The check's logger (examples/rtgi-live-check).
+log = "0.4"

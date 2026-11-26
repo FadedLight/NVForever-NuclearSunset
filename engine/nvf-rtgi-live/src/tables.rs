@@ -339,6 +339,11 @@ fn light_words(light: &LightState) -> Result<(Vec<u32>, u32), String> {
     if sum.is_nan() || sum > BRIGHT {
         return Err(format!("lights of {sum} together"));
     }
+    // A range whose square is 0 or no normal number: the solver divides by it (0 / 0 at the lamp itself, a light that
+    // is no number and a shadow ray), a device may take it as 0.
+    if let Some(l) = light.lamps.iter().find(|l| l.range > 0.0 && l.range * l.range < f32::MIN_POSITIVE) {
+        return Err(format!("a lamp of range {}", l.range));
+    }
     let mut out = Vec::with_capacity(LIGHTS + 6 * light.directionals.len() + 16 * light.lamps.len() + grid.start.len() + grid.lamps.len());
     out.extend(words(&light.ambient.0));
     out.push(light.directionals.len() as u32);
@@ -623,7 +628,15 @@ mod tests {
         for lamps in [vec![lamp(2_097_153.0)], vec![Lamp { cone: Some(Cone::new(V3::ZERO, 0.2, 0.4)), ..lamp(0.0) }]] {
             assert!(PackedLight::of(&LightState { lamps, ..light.clone() }).is_err());
         }
-        assert!(PackedLight::of(&LightState { ambient: V3([f32::NAN; 3]), ..light }).is_err());
+        assert!(PackedLight::of(&LightState { ambient: V3([f32::NAN; 3]), ..light.clone() }).is_err());
+        // A range whose square is 0, at the place a ray meets: the solver's light there is no number, and it counts a
+        // shadow ray; refused here. One whose square is subnormal too; none at all, or a small one, is not.
+        let w = made(vec![Material::default()], Vec::new(), |_| ());
+        let at = |range: f32| LightState { lamps: vec![Lamp { range, ..lamp(0.0) }], ..light.clone() };
+        let coincident = LightState { lamps: vec![Lamp { position: V3::new(2.0, 2.0, 0.0), range: 1e-24, ..lamp(0.0) }], ..light.clone() };
+        let b = nvf_rtgi::bounces(&w, &coincident, &[(V3::new(2.0, 2.0, 5.0), V3::new(0.0, 0.0, -1.0))], 0.25, 1, &|| false).unwrap()[0].unwrap();
+        assert!(b.p == V3::new(2.0, 2.0, 0.0) && b.shadow_rays == 1 && PackedLight::of(&coincident).is_err());
+        assert!([1e-24, 1e-20, 1e-19].iter().all(|r| PackedLight::of(&at(*r)).is_err()) && [0.0, -1.0, 2e-19, 1e-3].iter().all(|r| PackedLight::of(&at(*r)).is_ok()));
     }
 
     /// The points of a solve where its texture has them, with the triangles near them.

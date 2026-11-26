@@ -25,8 +25,9 @@ type Shows = fn(&[Option<Bounce>]) -> bool;
 struct Fixture {
     name: String,
     parts: Parts,
-    /// What else a ray's answer may be: that of one of these.
-    others: Vec<(Parts, LightState)>,
+    /// What else a ray's answer may be: that of one of these; of one marked, its place and counts with its lamps in
+    /// shadow (no light).
+    others: Vec<(Parts, LightState, bool)>,
     /// What is met is compared, and how many shadow rays it has, not what they say: they start in other surfaces' planes,
     /// and are the structure's, whose rounding is not the solver's.
     place_only: bool,
@@ -265,7 +266,7 @@ fn shadows(out: &mut Vec<Fixture>) {
             };
             let lamp = one_lamp(v(0.0, 100.0, 0.0));
             // At the end itself it may be on either side.
-            let others = if edge { [with(y - 5e-3), with(y + 5e-3)].map(|parts| (parts, lamp.clone())).to_vec() } else { Vec::new() };
+            let others = if edge { [with(y - 5e-3), with(y + 5e-3)].map(|parts| (parts, lamp.clone(), false)).to_vec() } else { Vec::new() };
             let f = Fixture::new(format!("a shadow's end, {kind} at {y}"), with(y), lamp, vec![v(30.0, 30.0, 0.0)], vec![unit(v(-1.0, -1.0, 0.0))], shows);
             out.push(Fixture { others, textures: vec![Some(flat(255))], ..f });
         }
@@ -291,7 +292,7 @@ fn sheets(out: &mut Vec<Fixture>) {
         sheet.0.colors = vec![[1.0, 1.0, 1.0, alpha]; 4];
         vec![wall(), sheet]
     };
-    let mut add = |name: &str, others: Vec<(Parts, LightState)>, material: Material, alpha: f32, textures: Vec<Option<Texture>>, shows| {
+    let mut add = |name: &str, others: Vec<(Parts, LightState, bool)>, material: Material, alpha: f32, textures: Vec<Option<Texture>>, shows| {
         let f = Fixture::new(name, parts(material, alpha), before.clone(), vec![v(1.0, 2.0, 40.0), v(1.5, -2.5, -30.0)], along.clone(), shows);
         out.push(Fixture { others, textures, ..f });
     };
@@ -300,8 +301,10 @@ fn sheets(out: &mut Vec<Fixture>) {
     // With its back's normal turned, so that the lamp beyond it does not light it, whatever its own shadow.
     let cut = |alpha: f32| Material { double_sided: true, cutoff: 0.5, cull: Cull::None, base: [1.0, 0.5, 0.5, alpha], ..Material::default() };
     add("alpha below the cutoff", Vec::new(), cut(0.499), 1.0, Vec::new(), through);
-    // Far from the points the structure's weights decide: through it or not, and what is met behind it lit or not.
-    let others = vec![(parts(cut(0.499), 1.0), before.clone()), (parts(cut(0.501), 1.0), before.clone()), (parts(cut(0.499), 1.0), LightState { lamps: Vec::new(), ..before.clone() })];
+    // Far from the points (none of them has the sheet in its list) the structure's barycentrics decide, the exact
+    // weights only near a point and about the structure's nearest hit: a ray stopped or through it, and of one through
+    // it, its shadow ray to the lamp stopped by it or not.
+    let others = vec![(parts(cut(0.499), 1.0), before.clone(), false), (parts(cut(0.501), 1.0), before.clone(), false), (parts(cut(0.499), 1.0), before.clone(), true)];
     add("alpha at the cutoff", others, cut(0.5), 1.0, Vec::new(), any);
     add("alpha above the cutoff", Vec::new(), cut(0.501), 1.0, Vec::new(), stopped);
     let textured = |alpha| Material { texture: Some(0), ..cut(alpha) };
@@ -353,7 +356,7 @@ fn thresholds(out: &mut Vec<Fixture>) -> Result<(), String> {
 }
 
 /// Straight down at the faces of the lamps' grid, and at its far edge where a place is rounded onto it.
-fn grid(out: &mut Vec<Fixture>) {
+fn grid(out: &mut Vec<Fixture>) -> Result<(), String> {
     let floor = rectangle(V3::ZERO, v(0.0, 0.0, 1500.0), v(1500.0, 0.0, 0.0), coloured(0.6, 0.6, 0.6));
     let light = LightState { ambient: V3([0.1; 3]), lamps: vec![lamp(v(-300.0, 80.0, 10.0), V3([0.9; 3]), 400.0), lamp(v(250.0, 90.0, 0.0), v(0.2, 0.9, 0.5), 350.0), lamp(v(10.0, 120.0, -60.0), v(1.0, 0.1, 0.3), 200.0)], ..LightState::default() };
     if let Ok(table) = LampTable::of(&light, &|| false) {
@@ -369,13 +372,26 @@ fn grid(out: &mut Vec<Fixture>) {
         out.push(Fixture::new("the faces of the lamps' grid", vec![floor], light, from, vec![v(0.0, -1.0, 0.0)], |b| lit(b) && b.iter().flatten().any(|b| b.lamps == 0)));
     }
     // Main's cases (light.rs `the_grid_at_its_edges`): the place's c is rounded to `cells` itself, and is the last cell's.
-    let edge: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.lamps > 0 && b.shadow_rays > 0));
+    // The place is about main's, on the axis through the lamps, where the near lamp's sphere still holds it (a room's: 1e-5
+    // inside a range of 100), on a wall whose triangles' shared side is elsewhere.
+    let edge: Shows = |b| b.iter().all(|b| b.is_some_and(|b| b.lamps > 0 && b.shadow_rays > 0 && b.light.max_abs() > 0.0));
     let lamps = |l: &[(f32, f32)]| LightState { ambient: V3([0.1; 3]), lamps: l.iter().map(|(x, range)| lamp(v(*x, 0.0, 0.0), V3([0.8; 3]), *range)).collect(), ..LightState::default() };
-    let wall = |x: f32, half: f32| rectangle(v(x, 0.0, 0.0), v(0.0, 0.0, half), v(0.0, half, 0.0), coloured(0.6, 0.6, 0.6));
+    let wall = |c: V3, half: f32| rectangle(c, v(0.0, 0.0, half), v(0.0, half, 0.0), coloured(0.6, 0.6, 0.6));
     let rooms = lamps(&[(-2900.3, 100.0), (-100.0, 100.0)]);
-    out.push(Fixture::new("the lamps' grid's far edge, a room's", vec![wall(-1e-5, 30.0)], rooms, vec![v(-50.0, 3.1, 2.7)], vec![v(1.0, 0.0, 0.0)], edge));
     let worlds = lamps(&[(-2_097_152.0, 1.0), (-786_491.0 - 0.8125, 60.01), (0.0, 1.0)]);
-    out.push(Fixture::new("the lamps' grid's far edge, a world's", vec![wall(0.99, 0.5)], worlds, vec![v(0.2, 0.11, 0.07)], vec![v(1.0, 0.0, 0.0)], edge));
+    for (name, light, wall, from) in [("a room's", rooms, wall(v(-1e-5, 7.0, 5.0), 30.0), v(-50.0, 0.001, 0.002)), ("a world's", worlds, wall(v(0.99, 0.0, 0.0), 0.5), v(0.2, 0.11, 0.07))] {
+        let f = Fixture::new(format!("the lamps' grid's far edge, {name}"), vec![wall], light, vec![from], vec![v(1.0, 0.0, 0.0)], edge);
+        // That the CPU's place is on the edge: c along x is the cells' number itself.
+        let scene = prepare(f.scene(&f.parts), &SceneLimits::default(), 1, &|| false).map_err(|e| e.to_string())?;
+        let h = scene.transport(&Ray::new(from, f.along[0]), f32::INFINITY).ok_or("the wall is not met")?;
+        let t = LampTable::of(&f.light, &|| false).map_err(|e| e.to_string())?;
+        let c = (h.p[0] - t.min[0]) / t.side;
+        if c != t.cells[0] as f32 {
+            return Err(format!("{}: the place {:?} is at {c} of {} cells", f.name, h.p.0, t.cells[0]));
+        }
+        out.push(f);
+    }
+    Ok(())
 }
 
 /// As the solver's shadow rays are lifted, and how far surfaces that are in one place are apart at most.
@@ -443,7 +459,7 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         Ok::<_, String>((scene, cpu))
     };
     let (scene, cpu) = of(&f.parts, &f.light)?;
-    let others = f.others.iter().map(|(parts, light)| Ok(of(parts, light)?.1)).collect::<Result<Vec<_>, String>>()?;
+    let others = f.others.iter().map(|(parts, light, shadowed)| Ok((of(parts, light)?.1, *shadowed))).collect::<Result<Vec<_>, String>>()?;
     let tables = Tables::new(&scene, &f.along)?;
     let normals: Vec<V3> = scene.export().faces.iter().map(|f| f.normal).collect();
     let points = Points::at(f.from.clone(), &scene, &tables)?;
@@ -457,8 +473,9 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
     if answers.len() != rays.len() || probes.len() != f.from.len() || reach.len() != f.from.len() {
         return Err(format!("{}: {} answers, {} probes, {} reaches for {} rays", f.name, answers.len(), probes.len(), reach.len(), rays.len()));
     }
-    // Of each point: the sums of the answers its rays agreed with, and whether any was another than the scene's own.
-    let (mut sums, mut means, mut named) = (vec![[0u32; 4]; f.from.len()], vec![V3::ZERO; f.from.len()], vec![false; f.from.len()]);
+    // Of each point: the sums of the answers its rays agreed with (their counts, their light's moments), and whether
+    // any was another than the scene's own.
+    let (mut sums, mut moments, mut named) = (vec![[0u32; 4]; f.from.len()], vec![[V3::ZERO; 4]; f.from.len()], vec![false; f.from.len()]);
     let (mut off, mut either) = (Vec::new(), 0);
     for (i, (c, g)) in cpu.iter().zip(&answers).enumerate() {
         let from = f.from[i / n];
@@ -471,14 +488,19 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         if matches!(k, Kind::Same | Kind::TieSame) && !same_counts(c) {
             k = Kind::Counts;
         }
-        let agreed = if finite && (matches!(k, Kind::Same | Kind::TieSame) || ((at_once || met) && same_counts(c))) {
+        // Whose light the point's moments take: the kernel's own where a ray's light may differ by design.
+        let own_light = (at_once || met) && same_counts(c);
+        let agreed = if finite && (matches!(k, Kind::Same | Kind::TieSame) || own_light) {
             Some(c)
         } else {
-            let other = |o: &Option<Bounce>| match o {
+            let other = |(o, shadowed): (&Option<Bounce>, bool)| match o {
                 None => !g.hit,
-                Some(o) => g.hit && o.hidden == g.hidden && (o.light - g.light).max_abs() <= 4.0 * TOLERANCE && (o.p - g.p).max_abs() <= 0.02 && same_counts(&Some(*o)),
+                Some(o) => {
+                    let light = if shadowed { g.light == V3::ZERO } else { (o.light - g.light).max_abs() <= 4.0 * TOLERANCE };
+                    g.hit && o.hidden == g.hidden && light && (o.p - g.p).max_abs() <= 0.02 && same_counts(&Some(*o))
+                }
             };
-            let found = others.iter().map(|o| &o[i]).find(|o| finite && other(o));
+            let found = others.iter().map(|(o, shadowed)| (&o[i], *shadowed)).find(|o| finite && other(*o)).map(|o| o.0);
             either += usize::from(found.is_some());
             named[i / n] |= found.is_some();
             found
@@ -489,20 +511,25 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         }
         let [a, b, l, s] = counts(used);
         sums[i / n] = [sums[i / n][0] + a, sums[i / n][1] + b, sums[i / n][2] + l, sums[i / n][3] + s];
-        means[i / n] = means[i / n] + used.map_or(V3::ZERO, |u| if u.hidden { V3::ZERO } else { u.light });
+        let l = if own_light { g.light } else { used.map_or(V3::ZERO, |u| if u.hidden { V3::ZERO } else { u.light }) };
+        let (d, m) = (f.along[i % n], &mut moments[i / n]);
+        *m = [m[0] + l, m[1] + l * (2.0 * d[0]), m[2] + l * (2.0 * d[1]), m[3] + l * (2.0 * d[2])];
     }
-    // A point is off where its counts are not the sums, its mean light not theirs, or its reach not the CPU's.
+    // A point is off where its counts are not the sums, a moment of its light not theirs (C0 within the tolerance, the
+    // bands, of twice the light, within twice it), or its reach not the CPU's.
+    let tolerances = [TOLERANCE, 2.0 * TOLERANCE, 2.0 * TOLERANCE, 2.0 * TOLERANCE];
     let mut points_off = Vec::new();
     for (k, (p, r)) in probes.iter().zip(&reach).enumerate() {
         let cpu_reach = if named[k] { [sums[k][0], sums[k][1]] } else { counted[k] };
         let main = cpu[k * n..(k + 1) * n].iter().fold([0; 2], |s, b| [s[0] + counts(b)[0], s[1] + counts(b)[1]]);
-        let mean = (p.moments.c[0] - means[k] * (1.0 / n as f32)).max_abs();
-        if [p.hits, p.backs, p.lamps, p.shadow_rays] != sums[k] || mean > TOLERANCE || *r != cpu_reach || counted[k] != main {
-            points_off.push(k);
+        let mean = moments[k].map(|m| m * (1.0 / n as f32));
+        let apart: [f32; 4] = std::array::from_fn(|j| (p.moments.c[j] - mean[j]).max_abs());
+        if [p.hits, p.backs, p.lamps, p.shadow_rays] != sums[k] || (0..4).any(|j| apart[j] > tolerances[j]) || *r != cpu_reach || counted[k] != main {
+            points_off.push((k, mean, apart));
         }
     }
     let shows = (f.shows)(&cpu);
-    let known = f.name == KNOWN.0 && off.len() <= 1 && points_off.iter().all(|k| off.iter().any(|(i, _)| i / n == *k));
+    let known = f.name == KNOWN.0 && off.len() <= 1 && points_off.iter().all(|(k, ..)| off.iter().any(|(i, _)| i / n == *k));
     let passed = off.is_empty() && points_off.is_empty() && shows;
     let verdict = if passed {
         "PASS"
@@ -523,9 +550,12 @@ fn check(gpu: &Gpu, f: &Fixture) -> Result<(bool, bool), String> {
         println!("      CPU {:?}", cpu[*i]);
         println!("      GPU {:?}", answers[*i]);
     }
-    for k in points_off.iter().take(4) {
+    for (k, mean, apart) in points_off.iter().take(4) {
         let p = &probes[*k];
         println!("    point {k} at {:?}: GPU hits, backs, lamps, shadow rays {:?}, reach {:?}; CPU {:?}, reach {:?}", f.from[*k].0, [p.hits, p.backs, p.lamps, p.shadow_rays], reach[*k], sums[*k], counted[*k]);
+        for (j, name) in ["C0", "Cx", "Cy", "Cz"].iter().enumerate() {
+            println!("      {name}: GPU {:?}, CPU {:?}, off by {} (tolerance {})", p.moments.c[j].0, mean[j].0, apart[j], tolerances[j]);
+        }
     }
     Ok((passed, verdict == "KNOWN"))
 }
@@ -635,7 +665,7 @@ pub fn run(gpu: &Gpu) -> Result<bool, String> {
     shadows(&mut all);
     sheets(&mut all);
     thresholds(&mut all)?;
-    grid(&mut all);
+    grid(&mut all)?;
     let (mut failed, mut known) = (0, 0);
     for f in &all {
         let (passed, is_known) = check(gpu, f).map_err(|e| format!("{}: {e}", f.name))?;

@@ -1,6 +1,6 @@
 [package]
 name = "nvf-rtgi-live"
-description = "A cell's bounce light solved on the GPU with ray queries, as nvf-rtgi solves it on the CPU"
+description = "A cell's bounce-light inputs packed on the CPU for a future GPU solve that matches nvf-rtgi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -8,8 +8,16 @@ use std::collections::HashMap;
 const MATERIAL: usize = 16;
 const TEXTURE: usize = 8;
 const DIRECTION: usize = 13;
+/// Where a direction's parts are in its words: as given (for the moments), as the rays go (still axes 0: for the
+/// tree, the triangle test and the side met), the shear, the axes (two bits each, then a bit each for the still ones)
+/// and the reciprocals.
+const GIVEN: usize = 0;
+const ALONG: usize = 3;
+const SHEAR: usize = 6;
+const AXES: usize = 9;
+const INVERSE: usize = 10;
 /// Words of a point.
-pub const PLACE: usize = 7;
+const PLACE: usize = 7;
 /// Of the lights' words, before the rows.
 const LIGHTS: usize = 16;
 const NONE: u32 = u32::MAX;
@@ -31,7 +39,7 @@ const SIDE: usize = 1 << 14;
 const BRIGHT: f32 = 1e6;
 
 /// The scene's part: what does not change while a room is the same.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tables {
     /// Three a primitive: those without an alpha test first, else in the scene's order.
     corners: Vec<[f32; 3]>,
@@ -87,7 +95,7 @@ impl Tables {
     pub fn until(scene: &PreparedScene, directions: &[V3], cancel: Cancel) -> Result<Tables, String> {
         let given_up = |i: usize| i.is_multiple_of(4096) && cancel();
         let e = scene.export();
-        let mut out = Tables { rays: directions.len() as u32, ..Tables::default() };
+        let mut out = Tables { corners: Vec::new(), faces: Vec::new(), data: Vec::new(), texels: Vec::new(), order: Vec::new(), opaque: 0, at: [0; 4], rays: directions.len() as u32 };
         if directions.is_empty() || directions.len() > nvf_rtgi::MOST_RAYS || directions.iter().any(|d| !(0.999..1.001).contains(&d.length())) {
             return Err(format!("{} directions, or one that is not unit", directions.len()));
         }
@@ -112,8 +120,10 @@ impl Tables {
                 return Err(format!("triangle {i}: its colours"));
             }
             if m.texture.is_some() && face.uv.as_flattened().iter().all(|c| c.is_finite()) {
-                // A place between them is between these.
-                let far = face.uv.iter().any(|uv| m.uv.iter().any(|r| !(-REPEATS..=REPEATS).contains(&(r[0] * uv[0] + r[1] * uv[1] + r[2]))));
+                // The coordinates are blended, then transformed: each term of any place between the corners is no larger
+                // than this, which holds no cancellation of large terms.
+                let most = |k: usize| face.uv.iter().fold(0.0f32, |m, uv| m.max(uv[k].abs()));
+                let far = m.uv.iter().any(|r| r[0].abs() * most(0) + r[1].abs() * most(1) + r[2].abs() > REPEATS);
                 if far {
                     return Err(format!("triangle {i}: its texture's coordinates"));
                 }
@@ -169,11 +179,12 @@ impl Tables {
         out.data.reserve(DIRECTION * directions.len());
         for d in directions {
             let Sheared { along, axes: [x, y, z], shear, inverse, still } = Sheared::of(*d);
-            out.data.extend(words(&d.0));
-            out.data.extend(words(&along));
-            out.data.extend(words(&shear));
-            out.data.push(x | y << 2 | z << 4 | u32::from(still[0]) << 6 | u32::from(still[1]) << 7 | u32::from(still[2]) << 8);
-            out.data.extend(words(&inverse));
+            let mut row = [0u32; DIRECTION];
+            for (at, part) in [(GIVEN, d.0), (ALONG, along), (SHEAR, shear), (INVERSE, inverse)] {
+                row[at..at + 3].copy_from_slice(&part.map(f32::to_bits));
+            }
+            row[AXES] = x | y << 2 | z << 4 | u32::from(still[0]) << 6 | u32::from(still[1]) << 7 | u32::from(still[2]) << 8;
+            out.data.extend(row);
         }
         Ok(out)
     }
@@ -218,12 +229,14 @@ impl Tables {
                 if [t.alpha, t.color].iter().any(|l| l.width.max(l.height) > SIDE) {
                     return Err(format!("a level of {} x {} texels", t.alpha.width, t.alpha.height));
                 }
+                // A colour is a word, an alpha a byte: the first and the last of each read are numbers of a u32.
+                let fits = |first: usize, n: usize| u32::try_from(first + n).map(|_| first as u32).map_err(|_| "too many texels".to_string());
                 [row[4], row[5]] = side(t.color);
-                row[3] = self.texels.len() as u32;
+                row[3] = fits(self.texels.len(), t.color.texels.len())?;
                 self.texels.extend(t.color.texels.iter().map(|c| u32::from_le_bytes(*c)));
                 if *tested {
                     [row[1], row[2]] = side(t.alpha);
-                    row[0] = u32::try_from(4 * self.texels.len()).map_err(|_| "too many texels")?;
+                    row[0] = fits(4 * self.texels.len(), t.alpha.texels.len())?;
                     self.texels.extend(t.alpha.texels.chunks(4).map(|four| u32::from_le_bytes(std::array::from_fn(|k| four.get(k).map_or(0, |c| c[3])))));
                 }
                 row[6] = wrap(t.wrap[0]) | wrap(t.wrap[1]) << 2 | u32::from(t.srgb) << 4;
@@ -439,7 +452,7 @@ impl Points {
         4 * ((PLACE + 1) * self.positions.len() + self.near.len()) as u64
     }
 
-    /// [`PLACE`] words a point (its position, its texel in two words, where its triangles' list is and how long), the
+    /// Seven words a point (its position, its texel in two words, where its triangles' list is and how long), the
     /// points' order, then the lists: a primitive and its leaf's box, seven words each.
     pub fn words(&self) -> Result<Vec<u32>, String> {
         let texel = |t: &[u32; 3]| t.iter().all(|c| *c < 1 << 16);
@@ -511,9 +524,36 @@ mod tests {
         assert_eq!((t.data.len(), t.bytes()), (t.at[3] as usize + DIRECTION * 64, 4 * (18 * 3 + 6 * FACE + t.data.len() + t.texels.len()) as u64));
         // The fifth direction: as given, as the rays go (the same, none of its axes is still), its axes and reciprocal.
         let (row, d) = (&t.data[t.at[3] as usize + 5 * DIRECTION..][..DIRECTION], directions(64)[5]);
-        let z = (row[9] >> 4 & 3) as usize;
-        assert!((0..3).all(|k| row[k] == d[k].to_bits() && row[3 + k] == row[k] && d[z].abs() >= d[k].abs()));
-        assert!([8, 10 + z].map(|k| f32::from_bits(row[k])) == [1.0 / d[z]; 2] && row[9] >> 6 == 0);
+        let z = (row[AXES] >> 4 & 3) as usize;
+        assert!((0..3).all(|k| row[GIVEN + k] == d[k].to_bits() && row[ALONG + k] == row[GIVEN + k] && d[z].abs() >= d[k].abs()));
+        assert!([SHEAR + 2, INVERSE + z].map(|k| f32::from_bits(row[k])) == [1.0 / d[z]; 2] && row[AXES] >> 6 == 0);
+    }
+
+    /// A grazing direction's row, where the one given and the one the rays go differ; the last texel of each level.
+    #[test]
+    fn rows_at_their_ends() {
+        let w = made(vec![cut()], vec![None, Some(texture())], |_| ());
+        let t = Tables::new(&w, &[V3::new(0.0, 0.6, 0.8), V3::new(1.0, 1e-30, 0.0)]).unwrap();
+        let row = &t.data()[t.starts()[3] as usize + DIRECTION..][..DIRECTION];
+        let f = |k: usize| f32::from_bits(row[k]);
+        assert_eq!([f(GIVEN), f(GIVEN + 1), f(GIVEN + 2)], [1.0, 1e-30, 0.0], "as given, for the moments");
+        assert_eq!([f(ALONG), f(ALONG + 1), f(ALONG + 2)], [1.0, 0.0, 0.0], "as the rays go");
+        assert_eq!([f(SHEAR), f(SHEAR + 1), f(SHEAR + 2)], [0.0, 0.0, 1.0]);
+        assert_eq!((row[AXES] & 63, row[AXES] >> 6), (1 | 2 << 2, 0b110), "axes y, z, x; y and z still");
+        assert_eq!([f(INVERSE), f(INVERSE + 1), f(INVERSE + 2)], [1.0, 0.0, 0.0]);
+        assert_eq!(t.data().len(), t.starts()[3] as usize + 2 * DIRECTION);
+        // The colour level (8 x 8) from its first word, the alpha level (128 x 128) a byte each from its first byte.
+        let texture = &t.data()[t.starts()[0] as usize + TEXTURE..][..TEXTURE];
+        let (colour, alpha) = (texture[3] as usize, texture[0] as usize);
+        assert_eq!((t.texels()[colour + 63], t.texels().len()), (u32::from_le_bytes([63, 2, 3, 64]), 64 + 128 * 128 / 4));
+        let byte = |i: usize| t.texels()[(alpha + i) / 4].to_le_bytes()[(alpha + i) % 4];
+        assert_eq!([byte(0), byte(128 * 128 - 1)], [1, (16383u32 as u8).wrapping_add(1)]);
+        // A level of a size that is no multiple of four: its last alpha in a word of its own, the rest of it 0.
+        let odd = Texture { levels: vec![Level { width: 3, height: 3, texels: (0..9).map(|i| [i, 0, 0, 10 + i]).collect() }], srgb: false, wrap: [Wrap::Repeat; 2] };
+        let t = Tables::new(&made(vec![cut()], vec![None, Some(odd)], |_| ()), &directions(8)).unwrap();
+        let texture = &t.data()[t.starts()[0] as usize + TEXTURE..][..TEXTURE];
+        assert_eq!((texture[..6].to_vec(), t.texels().len()), (vec![4 * 9, 3, 3, 0, 3, 3], 9 + 3));
+        assert_eq!((t.texels()[8], t.texels()[11]), (u32::from_le_bytes([8, 0, 0, 18]), 18));
     }
 
     #[test]
@@ -528,6 +568,12 @@ mod tests {
         // A coordinate too far, read; one that nothing reads.
         assert!(of(cut(), &|m| m.uv0[0][0] = 2e5).is_err() && of(Material { uv: [[1e6, 0.0, 0.0], [0.0, 1.0, 0.0]], ..cut() }, &|m| m.uv0[0][0] = 1.0).is_err());
         assert_eq!(of(Material { texture: None, ..cut() }, &|m| m.uv0[0][0] = 2e5), Ok(0));
+        // 3u - v is 0 at each corner, u 2^48 and the next f32, v 3u rounded; between them it is not.
+        let u = [2f32.powi(48), f32::from_bits(2f32.powi(48).to_bits() + 1)];
+        let corners = move |m: &mut Mesh| m.uv0 = [0, 1, 0, 1].map(|i| [u[i], 3.0 * u[i]]).to_vec();
+        assert!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &corners).is_err());
+        assert_eq!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &|m| m.uv0 = vec![[1e4, 3e4]; 4]), Ok(0));
+        assert!(of(Material { uv: [[3.0, -1.0, 0.0], [0.0; 3]], ..cut() }, &|m| m.uv0 = vec![[3e4, 9e4]; 4]).is_err(), "3 x 3e4 and 9e4");
         // An alpha past the end of f32 stops as one that is no number does; where it is so in part there is no telling.
         let alpha = |a: [f32; 4]| move |m: &mut Mesh| m.colors = a.map(|a| [1.0, 1.0, 1.0, a]).to_vec();
         let large = Material { base: [1.0, 1.0, 1.0, 1e3], ..cut() };

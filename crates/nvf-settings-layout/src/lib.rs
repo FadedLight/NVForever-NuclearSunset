@@ -503,6 +503,7 @@ pub const SECTIONS: &[Section] = &[
             "tweak-repair-at-workbench",
             "tweak-modding-needs-skill",
             "tweak-barter-repair-discount",
+            "tweak-crafted-item-health-pct",
             "tweak-repair-xp",
             "tweak-free-item-price",
         ],

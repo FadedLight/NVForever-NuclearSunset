@@ -1933,6 +1933,7 @@ impl Plugin for TweaksPlugin {
             ),
         );
         switch!(app, "repair-scales-crafting", "Crafting Uses Repair", "Weapons and armour made at a workbench come out at a condition set by Repair: half at 0, whole at 100. (Stewie's Tweaks bRepairScalesCraftingCondition)", game.repair_scales_crafting);
+        amount!(app, "crafted-item-health-pct", "Crafted Item Condition", "Percent condition of weapons and armour made at a workbench; 0 leaves it unchanged. (Stewie's Tweaks fCraftedItemHealthPct)", 100.0, f32, game.crafted_item_health_pct);
         switch!(app, "no-healing-in-combat", "No Healing In Combat", "Aid that restores health or a limb cannot be used from the Pip-Boy while something fights the player. (Stewie's Tweaks bNoHealingInCombat)", game.no_healing_in_combat);
         switch!(app, "power-attack-if-blocking", "Power Attack From a Block", "While blocking with a melee weapon, a press of attack is a power attack at once, with no hold. (Stewie's Tweaks bPowerAttackIfBlocking)", power_attack_if_blocking);
         amount!(app, "breath-regain", "Slow Breath Regen", "Seconds of breath each second at the surface gives back; the meter stays up until it is whole. 0 refills it at once. (Stewie's Tweaks bSlowBreathRegen)", 20.0, f32, game.breath_regain);
@@ -3513,6 +3514,7 @@ mod tests {
         assert!(!t.game.no_lock_encounter_zone_levels);
         assert!(!t.game.faster_sleep_wait);
         assert!(!t.game.wasd_as_arrow_keys);
+        assert_eq!(t.game.crafted_item_health_pct, 0.0);
         assert_eq!(t.sneak_run_ap_base, 0.0);
         assert_eq!(t.sneak_run_ap_endurance_mult, 0.0);
         assert_eq!(t.console_label(), "Console");
@@ -3637,6 +3639,7 @@ mod tests {
              bNoLockEncounterZoneLevels = 1\n\
              bFasterSleepWait = 1\n\
              bUseWASDAsArrowKeys = 1\n\
+             fCraftedItemHealthPct = 80.0\n\
              iDateFormat = 2\n\
              [Critical Hits]\n\
              fCriticalDamageMult = 1.5\n",
@@ -3671,6 +3674,7 @@ mod tests {
             assert!(settings.game.no_lock_encounter_zone_levels);
             assert!(settings.game.faster_sleep_wait);
             assert!(settings.game.wasd_as_arrow_keys);
+            assert_eq!(settings.game.crafted_item_health_pct, 80.0);
             assert_eq!(settings.date_style, 2);
             assert_eq!(settings.game.crit_damage_scale, 2.0);
         }
@@ -3685,6 +3689,7 @@ mod tests {
         assert!(final_settings.game.no_lock_encounter_zone_levels, "unmentioned modular key stays enabled");
         assert!(final_settings.game.faster_sleep_wait, "unmentioned modular key stays enabled");
         assert!(final_settings.game.wasd_as_arrow_keys, "unmentioned modular key stays enabled");
+        assert_eq!(final_settings.game.crafted_item_health_pct, 80.0, "unmentioned modular key stays applied");
         assert_eq!(final_settings.date_style, 2);
         // Toggling the registered switch in NVForever.ini overrides the modular INI back to off.
         let idx = app.world().resource::<crate::settings::Settings>().index("tweak-no-lock-encounter-zone-levels").unwrap();
@@ -3696,6 +3701,9 @@ mod tests {
         let wasd_idx = app.world().resource::<crate::settings::Settings>().index("tweak-wasd-as-arrow-keys").unwrap();
         crate::settings::flip(app.world_mut(), wasd_idx);
         assert!(!app.world().resource::<TweakSettings>().game.wasd_as_arrow_keys, "UI switch toggles off");
+        let craft_idx = app.world().resource::<crate::settings::Settings>().index("tweak-crafted-item-health-pct").unwrap();
+        crate::settings::set_slider(app.world_mut(), craft_idx, 0.5);
+        assert_eq!(app.world().resource::<TweakSettings>().game.crafted_item_health_pct, 50.0, "UI slider updates condition pct");
 
         let _ = std::fs::remove_dir_all(&root);
     }

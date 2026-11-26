@@ -609,7 +609,7 @@ mod shared_table_tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait wasd-as-arrow-keys";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait wasd-as-arrow-keys crafted-item-health-pct";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     pub(super) fn tweak_rows() -> Vec<(&'static str, &'static str)> {

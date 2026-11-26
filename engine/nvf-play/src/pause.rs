@@ -904,11 +904,11 @@ impl Entry {
     }
 }
 
-/// The quit question and its choices [observed: the owner's screenshot of the original's
-/// quit question].
-const WARNING_TITLE: &str = "Warning";
-const WARNING: &str = "Any unsaved progress will be lost.";
-const QUESTION: &str = "Are you sure you want to quit?";
+/// The quit question and its choices [design: NVForever's own words, #2984; the title is
+/// the Quit entry's own word].
+const WARNING_TITLE: &str = "Quit";
+const WARNING: &str = "Progress since your last save will not be kept.";
+const QUESTION: &str = "Leave the game?";
 const CONFIRM: [&str; 3] = ["Main Menu", "Exit Game", "Cancel"];
 /// The keep question's answers [design].
 const KEEP_ANSWERS: [&str; 2] = ["Keep", "Revert"];
@@ -2152,7 +2152,7 @@ fn spawn_page(commands: &mut Commands, d: &Drawn, look: &PauseLook, settings: &[
                 Page::Main => {
                     if let Some(sel) = d.confirm {
                         // The question in two columns of three lines [design: owner 2026-11-15,
-                        // third test]: at the left "Warning" (bold), what is lost and the
+                        // third test]: at the left "Quit" (bold), what is lost and the
                         // question, ending left of the answers; at the right the answers, bold,
                         // each on the line of its left line; all at the titles' size.
                         let lines = [(&f.title, tr(WARNING_TITLE)), (&f.entry, tr(WARNING)), (&f.entry, tr(QUESTION))];

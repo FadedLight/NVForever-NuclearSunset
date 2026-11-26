@@ -381,8 +381,8 @@ impl Bvh {
     }
 
     /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. Conservative: it never leaves
-    /// out one within `far`, and may name one beyond it by no more than its width across its longest side ([`near`]).
-    /// None for a `far` below 0.
+    /// out one within `far`, and may name one beyond it by no more than its width across its longest side and a small
+    /// allowance for rounding ([`near`]). None for a `far` below 0.
     pub fn within(&self, p: V3, far: f32) -> Vec<(u32, V3, V3)> {
         let (mut out, mut open) = (Vec::new(), Vec::new());
         if far.is_nan() || far < 0.0 {

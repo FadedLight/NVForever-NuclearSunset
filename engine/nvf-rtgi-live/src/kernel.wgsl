@@ -380,7 +380,9 @@ fn lamp_light(l: u32, at: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let d = lf3(l) - at;
     let d2 = blend(d, d);
     let rr = times(range, range);
-    if !(range > 0.0 && rr > 0.0) {
+    // Out of range before any quotient (the solver's 1 - d2 / rr is 0 there): of a tiny range the quotient is far past
+    // what the correction of `quotient` can multiply.
+    if !(range > 0.0 && rr > 0.0) || d2 >= rr {
         return vec3<f32>(0.0);
     }
     let reach = clamp(keep(1.0 - share(d2, rr)), 0.0, 1.0);

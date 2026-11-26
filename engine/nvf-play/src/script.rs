@@ -2231,6 +2231,8 @@ type UsesAndLoads<'w> = (
     Option<ResMut<'w, crate::doors::Doors>>,
     MessageWriter<'w, crate::save::LoadRefused>,
     Option<Res<'w, crate::save::PendingEngine>>,
+    // A co-op guest's join in progress: its triggers are not fired (`crate::save::KeepSolo`).
+    Option<Res<'w, crate::save::KeepSolo>>,
     Option<Res<'w, crate::tweaks::TweakSettings>>,
 );
 
@@ -2295,7 +2297,7 @@ pub(crate) fn run_scripts(
     mut travel: MessageWriter<TravelRequest>,
     mut open: MessageWriter<OpenContainer>,
     mut used: MessageReader<ItemUsed>,
-    (mut sit, mut terminals, mut doors, mut refused, pending_engine, tweak_settings): UsesAndLoads,
+    (mut sit, mut terminals, mut doors, mut refused, pending_engine, joining, tweak_settings): UsesAndLoads,
     paused: Res<crate::pause::Paused>,
     (mut screen, bindings, tiles, page, mut mods_ticks, menu_to_open): ScreenAndMenus,
 ) {
@@ -2686,7 +2688,7 @@ pub(crate) fn run_scripts(
         // `script_trigger::update`, #2571).
         rt.game.loading = loading;
         if !rt.game.paused() {
-            crate::script_trigger::update(rt, &play, &phys, player_capsule);
+            crate::script_trigger::update(rt, &play, &phys, player_capsule, joining.is_some());
         }
         rt.game.cfg.frame_seconds = dt;
         // Scripts' GetFallTimeElapsed (`fnv_game::nvse_gaps`).

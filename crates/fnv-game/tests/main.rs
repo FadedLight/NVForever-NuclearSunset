@@ -42,6 +42,7 @@ mod death_items;
 mod destruction_stage_blocks;
 mod dialogue_data;
 mod dialogue;
+mod coop_encounters;
 mod difficulty;
 mod effect_updates;
 mod experience;

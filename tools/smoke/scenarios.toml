@@ -35548,7 +35548,7 @@ name = "load-phases-goodsprings"
 source = "#2407: players' Goodsprings door and save loads took 20-37 s; a loading screen now logs, and a slow load reports, when each thing it waited for came in, its longest frame and what the game files gave under it (nvf_play::loading::LoadPhases, fnv_vfs::read_stats). Out of Doc Mitchell's house into Goodsprings, the heaviest door of a new game"
 note = "2026-11-15 on the bench (i9-14900K, RTX 4070, SATA SSD, files in the OS cache): the start 2.4 s, the door 2.5 s with 2,106 files (248 MB) read. The cap is the reports' slow-load limit (reports/anomaly.rs SLOW_LOAD_MS), far above it"
 areas = ["loading", "streaming"]
-paths = ["engine/nvf-play/src/loading.rs", "crates/fnv-vfs/src/lib.rs", "engine/nvforever/src/reports/mod.rs"]
+paths = ["engine/nvf-play/src/loading.rs", "crates/fnv-vfs/src/lib.rs", "engine/nvforever/src/reports/mod.rs", "engine/vendor/bevy_render/src/render_resource/pipeline_cache.rs"]
 env = { NVFOREVER_HOME = "load-phases-home", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_FACE = "10:00103E61", NVF_PLAY_TEST_ACTIVATE = "12" }
 args = ["--cell", "GSDocMitchellHouse", "--play", "--hour", "12", "--no-voice"]
 run_seconds = 20
@@ -35559,6 +35559,7 @@ order = [[
 ]]
 expect = [
   { re = 'loading screen down after (?P<n>[\d.]+) s$', range = [0, 20], all = true, label = "the door's load stays under the 20 s slow-load limit" },
+  { re = 'loading screen phases: up .*; (?P<n>\d+) pipelines compiled: [\d.]+ s queued for a thread, [\d.]+ s for the shader cache, [\d.]+ s composing, [\d.]+ s making modules, [\d.]+ s creating', range = [1, 100000], label = "the start's screen says where its pipelines' time went (#2407)" },
 ]
 
 [[scenario]]

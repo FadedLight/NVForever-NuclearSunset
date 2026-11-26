@@ -1402,9 +1402,10 @@ PLAYERLAYMINE 56; the other PLAYER… topics have none.
   1. `Game::select_package` kept the current list package when `check_package` returned
      anything other than `ConditionsFail`; because `check_package` tests the schedule
      first, a package that was both out of schedule (08:00) and failing its conditions
-     (`StalkersOn == 0`) returned `OutOfSchedule` and was kept [design: now checks the
-     current package's own conditions directly regardless of schedule, keeping an
-     out-of-schedule package only while its conditions still pass].
+     (`StalkersOn == 0`) returned `OutOfSchedule` and was kept [design: keep the existing
+     check and also evaluate the current package's own conditions directly. A package
+     ruled out by its schedule or a target problem stays current only while its own
+     conditions pass].
   2. `Game::package_held` still held an unfinished `Must Complete` / `Must Reach Location`
      package after a script relocated the actor (`MoveTo` / `MoveToMarkerWithFade`)
      [design: `RefExtra::package_relocated` releases that hold once relocated; if the

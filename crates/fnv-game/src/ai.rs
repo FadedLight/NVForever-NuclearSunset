@@ -246,13 +246,11 @@ impl<'a> Game<'a> {
         let valid = list.iter().copied().find(|&p| self.check_package(actor, p) == PackageCheck::Valid);
         let kept = match valid {
             Some(_) => None,
-            // Only a schedule expiry or Once Per Day may leave the current list package
-            // running when no other applies, and only while its own conditions still pass:
-            // `check_package` returns `OutOfSchedule` before testing conditions, so check
-            // conditions directly here too (issue #3041: night stalkers at 08:00 with
-            // VERStalkersSouth01.StalkersOn == 0 kept their 23:00 raid package).
+            // Keep the current list package when no other applies and its conditions
+            // pass. Check them directly because a schedule or target problem can
+            // short-circuit check_package before it reaches the conditions (#3041).
             None => self.extra.get(&actor).and_then(|e| e.current_package).filter(|c| list.contains(c)).filter(|&c| {
-                matches!(self.check_package(actor, c), PackageCheck::OutOfSchedule | PackageCheck::OncePerDay)
+                self.check_package(actor, c) != PackageCheck::ConditionsFail
                     && self.package_conditions_pass(actor, c)
             }),
         };

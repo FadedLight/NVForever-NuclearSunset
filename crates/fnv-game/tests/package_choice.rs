@@ -114,6 +114,7 @@ const P_FIND_2H: u32 = 0x82C;
 const P_PATROL_3H: u32 = 0x82D;
 const P_SCRIPT_3H: u32 = 0x82E;
 const P_MUST_SANDBOX: u32 = 0x82F;
+const P_PATROL_COND: u32 = 0x830;
 // Actor bases and references.
 const NPC_A: u32 = 0x840;
 const NPC_B: u32 = 0x841;
@@ -124,6 +125,7 @@ const NPC_F: u32 = 0x845;
 const NPC_G: u32 = 0x846;
 const NPC_H: u32 = 0x847;
 const NPC_I: u32 = 0x848;
+const NPC_J: u32 = 0x849;
 const STAT: u32 = 0x850;
 const CELL: u32 = 0x860;
 const CELL_FAR: u32 = 0x861;
@@ -139,6 +141,7 @@ const REF_G: u32 = 0x878;
 const REF_FAR: u32 = 0x879;
 const REF_H: u32 = 0x87A;
 const REF_I: u32 = 0x87B;
+const REF_J: u32 = 0x87C;
 
 const TRAVEL: u8 = 6;
 const SLEEP: u8 = 4;
@@ -176,6 +179,7 @@ fn plugin_bytes() -> Vec<u8> {
         p(P_PATROL_3H, "SandboxOnceADay3h", flags::ONCE_PER_DAY, SANDBOX, NEAR_EDITOR, -1, 3, -1, None),
         p(P_SCRIPT_3H, "MustTravel3h", flags::MUST_COMPLETE, TRAVEL, NEAR_EDITOR, -1, 3, -1, None),
         p(P_MUST_SANDBOX, "MustSandbox", flags::MUST_COMPLETE, SANDBOX, NEAR_EDITOR, -1, 0, -1, None),
+        p(P_PATROL_COND, "ConditionalLinkedPatrol", 0, PATROL, NEAR_LINKED, -1, 0, -1, Some(G_SWITCH)),
     ]
     .concat();
     let npcs = [
@@ -189,6 +193,7 @@ fn plugin_bytes() -> Vec<u8> {
         npc(NPC_G, "G", &[P_SUNDAY, P_WEEKEND, P_DEFAULT]),
         npc(NPC_H, "H", &[P_FIND_2H, P_PATROL_3H, P_DEFAULT]),
         npc(NPC_I, "I", &[P_NIGHT_COND]),
+        npc(NPC_J, "J", &[P_PATROL_COND]),
     ]
     .concat();
     let stat = record(b"STAT", STAT, &[sub(b"EDID", z("Marker"))]);
@@ -204,6 +209,7 @@ fn plugin_bytes() -> Vec<u8> {
         placed(b"ACHR", REF_G, "GRef", NPC_G, None),
         placed(b"ACHR", REF_H, "HRef", NPC_H, None),
         placed(b"ACHR", REF_I, "IRef", NPC_I, None),
+        placed(b"ACHR", REF_J, "JRef", NPC_J, None),
     ]
     .concat();
     let cell = |id: u32, edid: &str, refs: &[u8]| {
@@ -316,6 +322,34 @@ fn with_no_valid_package_the_actor_keeps_the_one_it_runs() {
     set(&mut g2, G_HOUR, 23.0);
     assert_eq!(g2.evaluate_package(c), None);
     assert_eq!(g2.current_package(c), None);
+}
+
+#[test]
+fn a_current_package_with_a_target_problem_is_kept_while_its_conditions_pass() {
+    let f = fixture();
+    let actor = id(REF_J);
+    let package = id(P_PATROL_COND);
+    for check in [PackageCheck::NoLinkedRef, PackageCheck::Unreachable] {
+        let mut g = game(&f, None);
+        set(&mut g, G_SWITCH, 1.0);
+        g.jip2.links.insert(actor, id(MARKER));
+        assert_eq!(g.evaluate_package(actor), Some(package));
+
+        if check == PackageCheck::NoLinkedRef {
+            g.jip2.links.remove(&actor);
+        } else {
+            // Seed the cooldown with a current package to exercise the keep rule.
+            // block_package clears the current package before reevaluation.
+            g.extra.get_mut(&actor).unwrap().package_blocked.insert(package, 6.0);
+        }
+        assert_eq!(g.check_package(actor, package), check);
+        assert_eq!(g.evaluate_package(actor), Some(package), "{check:?}");
+
+        set(&mut g, G_SWITCH, 0.0);
+        assert_eq!(g.check_package(actor, package), check);
+        assert_eq!(g.evaluate_package(actor), None, "{check:?}");
+        assert_eq!(g.current_package(actor), None);
+    }
 }
 
 #[test]

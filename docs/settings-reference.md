@@ -319,6 +319,16 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
 - More: docs/design/player-reports.md
 - Registered in `engine/nvforever/src/reports/delete.rs`
 
+## Gameplay › Co-op
+
+### `coop`: Co-op
+
+- On the page: On: the main menu shows Join Lobby and the pause menu a Co-op screen to open
+  a lobby. It stays on while a lobby is open or joined.
+- Off by default; kept in `NVForever.ini` `[Settings]` [design].
+- Greyed while a lobby is open or this game is a guest in one.
+- Registered in `engine/nvf-play/src/lobby.rs`
+
 ## Display › Screen
 
 ### `monitor`: Monitor

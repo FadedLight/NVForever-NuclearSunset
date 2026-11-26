@@ -134,7 +134,7 @@ impl Casino {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct OpenPoker {
     pub casino: Casino,
-    /// The poker table in the world it was opened at (`crate::poker_tables`), if any.
+    /// The poker table in the world it was opened at, if any.
     pub table: Option<FormId>,
 }
 
@@ -178,7 +178,7 @@ pub struct Session {
     /// Hands played and won by the player, for the summary.
     hands: u32,
     won: u32,
-    /// The poker table in the world this was opened at (`crate::poker_tables`): the engine
+    /// The poker table in the world this was opened at: the engine
     /// draws the table there, the room around it.
     pub table_ref: Option<FormId>,
 }
@@ -591,7 +591,7 @@ fn log_events(s: &mut Session, events: &[Event], now: f32) {
                 }
                 // The player's win is a highlight.
                 if *seat == PLAYER {
-                    s.wins.push((now + 0.3, "YOU WIN THE HAND".to_string()));
+                    s.wins.push((now + 0.3, fnv_util::words::tr("YOU WIN THE HAND").to_string()));
                 }
                 let who = if *seat == PLAYER { "You win".to_string() } else { format!("{} wins", name(*seat)) };
                 let line = format!("{who} {amount}{with}");

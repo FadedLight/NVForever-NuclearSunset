@@ -316,7 +316,7 @@ impl Session {
                     (tr("Discard Card"), self.hint(&[KeyQ]), CaravanInput::Discard, discard),
                     (tr("Discard Track"), self.hint(&[KeyE]), CaravanInput::DiscardTrack, track),
                     (tr("Cancel"), self.hint(&[KeyR]), CaravanInput::Cancel, mine || self.game.as_ref().is_some_and(|g| g.phase != Phase::Over)),
-                    (if tips() { "Tips On" } else { "Tips Off" }, String::new(), CaravanInput::Tips, true),
+                    (if tips() { tr("Tips On") } else { tr("Tips Off") }, String::new(), CaravanInput::Tips, true),
                 ]
             }
             _ => Vec::new(),

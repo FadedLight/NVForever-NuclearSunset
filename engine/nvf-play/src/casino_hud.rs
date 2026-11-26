@@ -7,6 +7,7 @@
 
 use bevy::image::CompressedImageFormatSupport;
 use bevy::prelude::*;
+use fnv_util::words::{tr, trf};
 use nvf_assets::GameData;
 
 use crate::interface::{amber, bc_supported, scaled_face, u, Face};
@@ -263,8 +264,11 @@ pub fn leaderboard(p: &mut ChildSpawnerCommands, f: &CasinoFaces, winner: &str, 
 
 /// "<NAME> WINS"; "YOU WIN" and "<A> & <B> WIN" for this player and for teams.
 pub fn win_title(winner: &str) -> String {
-    let verb = if winner == "You" || winner.contains(" & ") { "WIN" } else { "WINS" };
-    format!("{} {verb}", winner.to_uppercase())
+    if winner == "You" {
+        return tr("YOU WIN").to_string();
+    }
+    let name = winner.to_uppercase();
+    if winner.contains(" & ") { trf("{name} WIN", &[("name", &name)]) } else { trf("{name} WINS", &[("name", &name)]) }
 }
 
 /// A help line at the HUD's bottom left, in the HUD font.

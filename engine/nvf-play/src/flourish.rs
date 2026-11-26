@@ -26,6 +26,7 @@ use bevy::image::CompressedImageFormatSupport;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use fnv_sim::FormId;
+use fnv_util::words::tr;
 use nvf_assets::GameData;
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -67,7 +68,7 @@ impl Highlight {
 
     fn words(self) -> &'static str {
         match self {
-            Highlight::HandWon => "YOU WIN THE HAND",
+            Highlight::HandWon => tr("YOU WIN THE HAND"),
         }
     }
 }

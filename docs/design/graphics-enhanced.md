@@ -478,9 +478,32 @@ copy it makes is read per sample by the water's edge test (`water.wesl`, every s
 the fragment) and bound as a multisampled texture in every material's view bindings (bevy_pbr
 `mesh_view_bindings`), so it cannot become a single sample without changing those readers.
 
+**Shadowed lamps, highlights and a moving pattern** (2026-11-24, play tests in Doc
+Mitchell's house with the ALC shadows row on). Lamps whose shadow is looked up (the
+flashlight, the Pip-Boy light, the ALC shadows row's lamps) took none of the factor, so with
+that row on a room's occlusion was left on the ambient light alone (0.7% of pixels changed
+by the occlusion in Doc Mitchell's house against 2.5% with the lamps casting none). They now
+take half of the lamps' factor (`ssao_lighting.rs` `SHADOWED_LAMPS`; a shadow map's texels
+are several units wide and its edges filtered wider, so the creases the occlusion finds are
+below what it resolves; at 1 a crease the shadow already darkens is darkened twice): 1.8% of
+that room's pixels change by 4 levels or more against none before, 4.6% at 1. The factor
+reaches the highlights of point and spot lamps (`ssao_lighting.wesl`
+`nvf_specular_visibility`, the specular occlusion of Lagarde and de Rousiers from the
+ambient's factor, the view's angle and the roughness, `HIGHLIGHTS` 1; in a world view Bevy's
+`direct_light` holds only the lamps' highlights, and the hook takes back what its line added
+without the factor): a bottle, a metal shelf or a wet floor no longer glints in a crease as
+in the open. Not the sun's or the moon's, nor the ambient highlight. Under a temporal method
+(TAA, FSR, DLSS) the 4 x 4 sample pattern moves a cell each frame (`ssao.wesl`
+`frame_shift`): the denoise's 4 x 4 texels still hold every turn once, so a plane's factor is
+unchanged (0.4% of pixels differ in a still), and the grain left on leaves and outlines
+becomes noise the temporal method averages. Test aids: `NVF_PLAY_DEBUG_AO_SHADOWED`,
+`NVF_PLAY_DEBUG_AO_HIGHLIGHTS`, `NVF_PLAY_DEBUG_AO_STILL`. An Ultra level (the pass at full
+resolution, 0.41 ms against 0.13 at 4K with DLSS Quality) was built and dropped after a play
+test: "basically not noticeable even at 4k native".
+
 **Not done:** a bent normal (the ambient is a flat colour with no direction), occlusion on
-decals and blended shapes (not in the prepass), on lamps that cast a shadow and on highlights
-(no environment reflections exist yet for a specular occlusion to act on, §3 gaps).
+decals and blended shapes (not in the prepass), and on the ambient highlight (no environment
+reflections exist yet for a specular occlusion to act on, §3 gaps).
 
 ### 3.2 Longer sun shadows (`fine-shadows`)
 

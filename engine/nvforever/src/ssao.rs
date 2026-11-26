@@ -151,7 +151,10 @@ pub const AO_CHOICES: [&str; 3] = ["Off", "Performance", "Quality"];
 /// How much the ambient occlusion costs while it is on: the Ambient occlusion row's
 /// Performance and Quality ([`AO_CHOICES`]; `--ambient-occlusion[=performance|quality]`).
 /// Quality is the estimate as it was before the row had levels; Performance the same pass
-/// with one slice direction a pixel ([`PERFORMANCE_SLICES`]).
+/// with one slice direction a pixel ([`PERFORMANCE_SLICES`]). An Ultra level, Quality's at
+/// full resolution (a texel a pixel, four times the pass's pixels: 0.41 ms against 0.13 at 4K
+/// with DLSS Quality), was built and dropped on 2026-11-24: "basically not noticeable even at
+/// 4k native" [observed: a play test].
 #[derive(clap::ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AoLevel {
     Performance,
@@ -686,18 +689,40 @@ impl Plugin for SsaoPlugin {
     }
 }
 
+/// `NVF_PLAY_DEBUG_AO_STILL=1` (a test aid): the sample pattern stays where it lies under a
+/// temporal method too, as before 2026-11-24, for comparing.
+fn moving_pattern() -> bool {
+    static MOVING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MOVING.get_or_init(|| {
+        let still = std::env::var("NVF_PLAY_DEBUG_AO_STILL").is_ok_and(|v| v.trim() == "1");
+        if still {
+            info!("ambient occlusion: NVF_PLAY_DEBUG_AO_STILL=1, the sample pattern does not move with the frame");
+        }
+        !still
+    })
+}
+
+/// The uniform's `variant.w` for frame `frame`: 0 for the pattern as it lies, else 1 + the
+/// frame's number in 0..15 (ssao.wesl `frame_shift`).
+pub fn frame_code(frame: u32, moving: bool) -> f32 {
+    if moving { (frame % 16 + 1) as f32 } else { 0.0 }
+}
+
 /// The camera's projection into the uniform (the aspect follows the window), and the
 /// strength and remedies of the placement that runs this frame: on the picture until the
 /// lighting hook is in place (or for good if it failed), then the lighting's.
-pub(crate) fn follow_projection(mut cams: Query<(&Projection, &mut AmbientOcclusion), With<FlyCam>>) {
+pub(crate) fn follow_projection(mut cams: Query<(&Projection, &mut AmbientOcclusion, Has<bevy::render::camera::TemporalJitter>), With<FlyCam>>, frame: Res<bevy::diagnostic::FrameCount>) {
     let lighting = AO_DEBUG.in_lighting_now();
-    for (proj, mut ao) in &mut cams {
+    for (proj, mut ao, jitters) in &mut cams {
         let Projection::Perspective(p) = proj else { continue };
         let y = 1.0 / (p.fov * 0.5).tan();
         let x = y / p.aspect_ratio.max(1e-3);
         let params = Vec4::new(RADIUS, AO_DEBUG.strength(lighting), p.near, FADE_END);
         let projv = Vec4::new(x, y, max_screen_radius(), FADE_START);
-        let variant = AO_DEBUG.variant_at(lighting, ao.level()).uniform();
+        let mut variant = AO_DEBUG.variant_at(lighting, ao.level()).uniform();
+        // The sample pattern moves each frame while the camera jitters (ssao.wesl
+        // `frame_shift`): a temporal method then averages what the 4 x 4 denoise cannot.
+        variant.w = frame_code(frame.0, jitters && moving_pattern());
         if ao.params != params || ao.proj != projv || ao.variant != variant {
             ao.params = params;
             ao.proj = projv;

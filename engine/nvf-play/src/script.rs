@@ -1180,6 +1180,16 @@ impl Runtime {
         let mut done = None;
         for (i, actor) in wanted {
             let g = &mut self.game;
+            // Still saying its Goodbye greeting at the player: the line plays to its end and
+            // the activation does nothing, neither cutting it nor saying another
+            // [player report #4683: "New phrase should trigger only after previous phrase
+            // has ended"; dialogue.md §5].
+            if g.greets_player(actor) {
+                self.skip.insert(i);
+                info!("dialogue: the player talks to {}, still saying its greeting: it says it to the end", g.data.name(actor));
+                done = done.or(Some(ByHand::Greeted));
+                continue;
+            }
             // A teammate: the companion wheel opens instead (`crate::companion_wheel`).
             if g.has_companion_wheel(actor) {
                 if g.open_companion_wheel(actor) {

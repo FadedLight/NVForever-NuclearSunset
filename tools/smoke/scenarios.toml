@@ -15255,19 +15255,19 @@ expect = [
 [[scenario]]
 name = "no-crosshair-reloading-only-while-reloading"
 source = "issue #4611 (player report R-UTJBMC55): with the No Crosshair While Reloading tweak on, the crosshair and every activation prompt were hidden from the load on, unarmed: the reticle read `WeaponAnim::reload` (the weapon's reload clip, set for every weapon held) as reloading. Now it reads the weapon's cycle (`Combat::player_reloading`); No Hotkeys While Reloading read the same and now the same"
-note = "the tweak flipped on the settings page at 3.5 s; the 10mm pistol (0000434F) drawn at 8 s, two shots at 11 s, a reload at 12.5 s"
+note = "the tweak flipped on the settings page at 3.5 s; the 10mm pistol (0000434F) drawn at 16 s, two shots at 19 s, a reload at 21 s (no god mode: it never reloads): after the message boxes the scripts open about 5 to 13 s in, which take the inputs while they show (as in shoot-bottles)"
 areas = ["combat", "ui"]
 paths = ["engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/weapon_wheel.rs"]
-env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_PAUSE = "3:5", NVF_PLAY_TEST_SETTINGS = "3.5:tweak-hide-crosshair-reloading", NVF_PLAY_TEST_EQUIP = "0000434F", NVF_PLAY_TEST_GIVE = "00004241:50", NVF_PLAY_TEST_CONTROL = "8:weapon,11:fire,11.3:fire,12.5:reload" }
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_PAUSE = "3:5", NVF_PLAY_TEST_SETTINGS = "3.5:tweak-hide-crosshair-reloading", NVF_PLAY_TEST_EQUIP = "0000434F", NVF_PLAY_TEST_GIVE = "00004241:50", NVF_PLAY_TEST_CONTROL = "16:weapon,19:fire,19.4:fire,21:reload" }
 args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12"]
-run_seconds = 20
+run_seconds = 28
 expect = [
-  { text = "test aid NVF_PLAY_TEST_SETTINGS: 3.5:tweak-hide-crosshair-reloading", label = "the tweak is switched on" },
+  { text = "settings: tweak-hide-crosshair-reloading on", label = "the tweak is switched on" },
   { text = "crosshair: hidden while reloading", count = 1, label = "the reload hides the crosshair, once" },
   { text = "crosshair: shown again", label = "it is back after the reload" },
   { re = 'crosshair: hidden down the true iron sights', count = 0, label = "nothing else hides it: not the weapon held, not the load" },
 ]
-order = [["test aid NVF_PLAY_TEST_SETTINGS", "crosshair: hidden while reloading", "crosshair: shown again"]]
+order = [["settings: tweak-hide-crosshair-reloading on", "crosshair: hidden while reloading", "crosshair: shown again"]]
 
 [[scenario]]
 name = "aim-reload-lowers-sights"

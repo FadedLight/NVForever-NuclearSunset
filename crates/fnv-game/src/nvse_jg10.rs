@@ -336,10 +336,14 @@ pub(crate) fn call(g: &mut Game, name: &str, subject: Option<FormId>, args: &[XV
         }
         // `[mode]`: 0 on again, 1 off for all, 2 the player's, 3 NPCs' [documented]; a
         // mode outside 0–3 leaves the setting unchanged and returns exact `u32::MAX`
-        // (`4_294_967_295`, `0xFFFFFFFF`) [observed: Fallout: New Vegas 1.4.0.525 + xNVSE
+        // (`4_294_967_295`, `0xFFFFFFFF`, printed as `FFFFFFFF` under `%x` and
+        // `4.29497e+09` under `%g`) [observed: Fallout: New Vegas 1.4.0.525 + xNVSE
         // 6.4.9 + JohnnyGuitarNVSE 528, 2026-11-24, `GSDocMitchellHouse` (`0x00103DF9`),
-        // 10 official base masters, `w4c_b3_10_jg10_safe_edges` (`dm(4.29497e+09,0)`) and
-        // `w6t2p2_27_jg10_apply_poison_and_muzzle_hex`
+        // 10 official base masters, `w4c_b3_10_jg10_safe_edges` (`dm(4.29497e+09,0)`),
+        // `w4h_06_disable_muzzle_flash_hex`
+        // (`tools/capture/nvse/catalogs/wave4h_reconcile.json`, #3803):
+        // `PROBE|w4h_06_disable_muzzle_flash_hex|dm99(hex=FFFFFFFF,i=00000000,g=4.29497e+09)|dm1(1,1)|dm0(0,0)|dt(c1=1,ex1=1,c2=-1,ex2=1,ex3=0)|getOps(0,0,0)`,
+        // and `w6t2p2_27_jg10_apply_poison_and_muzzle_hex`
         // (`tools/capture/nvse/catalogs/wave6_t2_observed_matches.json`):
         // `muz=4294967295,neg=4.29497e+09`; zero DLL, PDB, or third-party source
         // consulted].

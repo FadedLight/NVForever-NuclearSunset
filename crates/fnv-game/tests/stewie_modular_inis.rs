@@ -180,6 +180,7 @@ fn sorted_modular_tweak_inis_override_base_ini_and_reach_tweaks_and_stewval() {
          bMenuSearch = 1\n\
          bNoLockEncounterZoneLevels = 1\n\
          bFasterSleepWait = 1\n\
+         bUseWASDAsArrowKeys = 1\n\
          bCritChanceIgnoresFireRate = 1\n\
          bHardcoreTweaks = 1\n\
          iPerksPerLevel = 3\n\
@@ -217,6 +218,7 @@ fn sorted_modular_tweak_inis_override_base_ini_and_reach_tweaks_and_stewval() {
     assert!(g.tweaks.menu_search);
     assert!(g.tweaks.no_lock_encounter_zone_levels);
     assert!(g.tweaks.faster_sleep_wait);
+    assert!(g.tweaks.wasd_as_arrow_keys);
     assert!(g.tweaks.crit_ignores_fire_rate);
     assert!(g.tweaks.hardcore_tweaks);
     assert!(!g.tweaks.hardcore_ammo_weight);
@@ -246,6 +248,8 @@ fn sorted_modular_tweak_inis_override_base_ini_and_reach_tweaks_and_stewval() {
     assert_eq!(eval_expr(&mut g, r#"StewieGetValue "bNoLockEncounterZoneLevels:Tweaks""#), XVal::Num(1.0));
     assert_eq!(eval_expr(&mut g, r#"StewVal "bFasterSleepWait:Tweaks""#), XVal::Num(1.0));
     assert_eq!(eval_expr(&mut g, r#"StewieGetValue "bFasterSleepWait:Tweaks""#), XVal::Num(1.0));
+    assert_eq!(eval_expr(&mut g, r#"StewVal "bUseWASDAsArrowKeys:Tweaks""#), XVal::Num(1.0));
+    assert_eq!(eval_expr(&mut g, r#"StewieGetValue "bUseWASDAsArrowKeys:Tweaks""#), XVal::Num(1.0));
     assert_eq!(eval_expr(&mut g, r#"StewVal "fCraftedItemHealthPct:Tweaks""#), XVal::Num(80.0));
     assert_eq!(eval_expr(&mut g, r#"StewieGetValue "fCraftedItemHealthPct:Tweaks""#), XVal::Num(80.0));
     assert_eq!(eval_expr(&mut g, r#"StewieGetValue "fCriticalDamageMult:Critical Hits""#), XVal::Num(1.75));

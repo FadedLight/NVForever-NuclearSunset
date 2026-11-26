@@ -69,7 +69,23 @@ pub struct FadePlugin;
 
 impl Plugin for FadePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<RefFade>().init_resource::<Fades>().add_systems(Update, (start, step).chain().after(crate::activate::sync_visuals).in_set(PlaySet::Sync)).add_systems(
+        // A model drawn while its reference fades (one a script enabled, drawn by
+        // `script_draw::sync` the frame it fades) is given the fade's held copy before its rig
+        // binds: `step` runs after the drawing and its copy goes on before
+        // `bind_rig_materials`, so the rig binds under it ([`HeldCopy`]). Otherwise the rig's
+        // own is put on over the copy and the fade gives back the model's material (#3919).
+        app.add_message::<RefFade>()
+            .init_resource::<Fades>()
+            .add_systems(
+                Update,
+                (start, step)
+                    .chain()
+                    .after(crate::activate::sync_visuals)
+                    .after(crate::script_draw::sync)
+                    .in_set(PlaySet::Sync)
+                    .before(nvf_assets::material_anim::bind_rig_materials),
+            )
+            .add_systems(
             Update,
             follow_rig_materials.after(nvf_assets::material_anim::bind_rig_materials).after(nvf_assets::material_anim::animate_rig_materials).after(step),
         );

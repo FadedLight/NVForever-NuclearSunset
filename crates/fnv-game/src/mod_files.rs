@@ -65,6 +65,14 @@ impl Roots {
         }
     }
 
+    /// The roots to look in for one file on disk: [`Roots::disk_roots`], except for a file
+    /// at Data's top level (no folder in its path). The host's index leaves those out
+    /// (fnv-vfs `index_loose` keeps only keys with a folder), so every read root is looked
+    /// in for it: a plugin or INI that sits only in a mod folder.
+    pub fn disk_roots_for(&self, path: &str) -> Vec<&PathBuf> {
+        if path.contains(['\\', '/']) { self.disk_roots() } else { self.read.iter().collect() }
+    }
+
     /// Whether some read roots are left to the host's index ([`Roots::disk_roots`]).
     fn hosted(&self) -> bool {
         self.disk_roots().len() < self.read.len()
@@ -166,7 +174,7 @@ pub(crate) fn udf_data_path(path: &str) -> Option<String> {
 /// A Data file's bytes: the first read root's loose copy (NVForever's layer before the
 /// game's Data), else through the host (archives included).
 pub fn read_data_file(path: &str) -> Option<Vec<u8>> {
-    roots().disk_roots().into_iter().filter_map(|root| on_disk_any_case(root, path)).find_map(|p| std::fs::read(p).ok()).or_else(|| read_data(path))
+    roots().disk_roots_for(path).into_iter().filter_map(|root| on_disk_any_case(root, path)).find_map(|p| std::fs::read(p).ok()).or_else(|| read_data(path))
 }
 
 /// [`on_disk`], each part of the path matched to what is on disk in any case, as Windows
@@ -204,7 +212,7 @@ pub fn data_dir() -> Option<PathBuf> {
 pub fn exists(path: &str) -> bool {
     // (`lookup` is the host's index, a Mod Organizer 2 merge's files included.)
     let r = roots();
-    r.lookup.as_ref().is_some_and(|f| f(path) > 0) || r.disk_roots().into_iter().any(|root| on_disk(root, path).is_some_and(|p| p.is_file()) || find_file(root, path).is_some())
+    r.lookup.as_ref().is_some_and(|f| f(path) > 0) || r.disk_roots_for(path).into_iter().any(|root| on_disk(root, path).is_some_and(|p| p.is_file()) || find_file(root, path).is_some())
 }
 
 /// Whether the host answers for the archives (the engine, once the game's Data is open):
@@ -418,7 +426,7 @@ fn find_file(base: &Path, rel: &str) -> Option<PathBuf> {
 pub fn read_loose(rel: &str) -> Option<Vec<u8>> {
     let r = roots();
     let host = rel.replace('/', "\\");
-    r.disk_roots()
+    r.disk_roots_for(rel)
         .into_iter()
         .find_map(|root| std::fs::read(find_file(root, rel)?).ok())
         .or_else(|| (r.lookup.as_ref().is_some_and(|f| f(&host) == 1)).then(|| r.reader.as_ref().and_then(|f| f(&host))).flatten())
@@ -1648,7 +1656,7 @@ pub(crate) fn call(g: &mut Game, name: &str, args: &[XVal]) -> Option<Result<XVa
             let hosted = if folder { r.hosted() && !host_listing(&r, &p).is_empty() } else { r.lookup.as_ref().is_some_and(|f| f(&p) == 1) };
             let loose = hosted
                 || (!folder && g.mod_files.written.contains_key(&norm(&p)))
-                || r.disk_roots().into_iter().any(|root| if folder { find_dir(root, &p).is_some() } else { find_file(root, &p).is_some() });
+                || (if folder { r.disk_roots() } else { r.disk_roots_for(&p) }).into_iter().any(|root| if folder { find_dir(root, &p).is_some() } else { find_file(root, &p).is_some() });
             if loose {
                 XVal::Num(1.0)
             } else if !folder {
@@ -1732,6 +1740,9 @@ mod hosted_roots_tests {
         assert_eq!(disk, vec![&read[0], &read[3]]);
         assert!(r.hosted());
         // Without NVForever's layer (no mods folder): Data alone.
+        // A Data top-level file (no folder) is not in the host's index: every root.
+        assert_eq!(r.disk_roots_for("Patch.esp").len(), 4);
+        assert_eq!(r.disk_roots_for("meshes\\a.nif"), vec![&read[0], &read[3]]);
         r.hosted_from = Some(0);
         assert_eq!(r.disk_roots(), vec![&read[3]]);
         r.hosted_from = None;

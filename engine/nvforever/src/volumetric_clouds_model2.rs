@@ -295,7 +295,13 @@ pub fn density(g: &Geometry, w: Vec3, s: &Sample, u: &CloudVolumeUniform, reads:
     if e <= 0.0 {
         return (0.0, hs);
     }
-    let lw = if s.eroded { s.width.max(s.fw) } else { 2.0 * s.width.max(light_cell(u)) };
+    let lw = if s.eroded {
+        let step_width = s.width.max(s.fw);
+        let sample_area = ((s.width * u.dshape.w).max(1.0) * step_width).sqrt();
+        step_width + (sample_area - step_width) * mixed_sheet(u)
+    } else {
+        2.0 * s.width.max(light_cell(u))
+    };
     let core = (1.0 - smoothstep(0.55, 0.72, u.scale.w)) * smoothstep(0.50, 0.90, g.cover) * (1.0 - upper);
     let r = g.relief * (1.0 - 0.60 * core);
     let gr = grad(r, u);
@@ -427,11 +433,31 @@ pub fn mixed_sheet(u: &CloudVolumeUniform) -> f32 {
 }
 
 /// The sheet's share retained under the local lobes (march `vc_m2_material`).
-pub fn bank_water(cover: f32, puff_density: f32, u: &CloudVolumeUniform) -> f32 {
+pub fn bank_water(cover: f32, puff_density: f32, mixed: f32) -> f32 {
     let condensed = smoothstep(0.025, 0.48, puff_density);
     let dry_water = 0.015 + 0.40 * cover;
     let shallow_water = dry_water + (1.0 - dry_water) * condensed;
-    1.0 + (shallow_water - 1.0) * mixed_sheet(u)
+    1.0 + (shallow_water - 1.0) * mixed
+}
+
+/// Density and extinction-weighted height for a mixed bank (march `vc_m2_material`).
+pub fn mixed_material(bank: (f32, f32), puff: (f32, f32), cover: f32, blend: f32, s: &Sample, pwidth: f32, u: &CloudVolumeUniform) -> (f32, f32) {
+    let mixed = mixed_sheet(u);
+    let attached = smoothstep(0.0, 0.25, blend);
+    let mut lobe_share = blend;
+    if s.eroded {
+        let across = (s.width * u.dshape.w).max(1.0);
+        let shoulder = 1.0 / (32.0 * u.nscale.x).max(1e-8);
+        let placement_across = (s.width * (1.0 + (u.dshape.w - 1.0) * mixed)).max(1.0);
+        let aspect = pwidth / placement_across;
+        let extra_span = across * (aspect * aspect - 1.0).max(0.0);
+        let clustered = 0.90 * mixed * attached * smoothstep(0.09 * shoulder, 0.31 * shoulder, extra_span);
+        lobe_share = blend + (1.0 - blend) * clustered;
+    }
+    let bank_density = (1.0 - lobe_share) * bank_water(cover, puff.0, mixed * attached) * bank.0;
+    let puff_density = lobe_share * puff.0;
+    let total = bank_density + puff_density;
+    (total, (bank_density * bank.1 + puff_density * puff.1) / total.max(1e-8))
 }
 
 pub fn fair_profile(col: &Column, g: &Geometry, u: &CloudVolumeUniform) -> FairProfile {
@@ -595,6 +621,38 @@ mod tests {
         Sample { above, width, fw: width, eroded: true, detail: true, wisp_g: 0.0 }
     }
 
+    #[test]
+    fn the_mixed_bank_filters_view_texels_across_the_step_and_light_at_its_cell() {
+        let mut u = lean_uniform(0.07, None);
+        u.mix = Vec3::new(0.5, 0.5, 0.0).extend(0.0);
+        u.lcell.x = 800.0;
+        let types = u.mix.truncate();
+        let g = geometry(&Column { types, ..cumulus(0.07) }, &u);
+        let read_width = |weather: &CloudVolumeUniform, fw: f32, eroded: bool| {
+            let sample = Sample { fw, eroded, ..view(0.60 * g.parent, 600.0) };
+            let mut used = None;
+            let mut base = |width| {
+                used = Some(width);
+                raw_base(0.5, weather)
+            };
+            density(&g, types, &sample, weather, &mut Reads { base: &mut base, erode: &mut |_| [raw_erode(0.5, weather); 3] });
+            used.expect("the bank margin samples the base texture")
+        };
+        for side in [1.0, 2.0, 3.0] {
+            u.dshape.w = 1.0 / side;
+            for step in [600.0_f32, 1200.0] {
+                let expected = (600.0 / side * step).sqrt();
+                assert!((read_width(&u, step, true) - expected).abs() < 0.001);
+                assert_eq!(read_width(&u, step, false), 1600.0);
+            }
+        }
+        for (sheet, amount) in [(0.0, 0.29), (1.0, 0.07), (0.5, 0.73)] {
+            u.scale.w = amount;
+            u.mix = Vec3::new(sheet, 1.0 - sheet, 0.0).extend(0.0);
+            assert_eq!(read_width(&u, 1200.0, true), 1200.0);
+        }
+    }
+
     /// [`BASE_GRAD`] is the bake's: the base noise's spread value's mean gradient per repeat where it is
     /// 0.35..0.65 (central differences on level 0 of the CPU copy), within 10 %.
     #[test]
@@ -655,7 +713,11 @@ mod tests {
             "let tau = 0.5 * r;",
             "return VC_M2_ERODE_FREQ * vc_erosion_coord(pos, yb, v);",
             "let e = mix(c, column.crown_cover, upper) * clamp(vc_profile(h, w, v), 0.0, 1.0) * (1.0 - neck);",
-            "lw = max(width, fw);",
+            "let texel = mix(1.0, v.dshape.w, vc_m2_mixed_sheet(v));",
+            "return mix(footprint * texel, projected, deck);",
+            "let step_width = max(width, fw);",
+            "let sample_area = sqrt(max(1.0, width * v.dshape.w) * step_width);",
+            "lw = mix(step_width, sample_area, vc_m2_mixed_sheet(v));",
             "lw = 2.0 * max(width, vc_light_cell(v));",
             "let ramp = max(intrinsic, select(min(footprint, 0.42), footprint, eroded));",
             "let amp = (1.0 - storm) * vc_m2_billow(w, v) * max(upper, side) * min(1.0, 0.12 + 2.0 * (1.0 - e));",
@@ -693,8 +755,16 @@ mod tests {
             "let rim_width = mix(0.012, 0.045, vc_m2_mixed_sheet(v));",
             "let condensed = smoothstep(0.025, 0.48, puff.x);",
             "let shallow_water = mix(0.015 + 0.40 * column.m2.x, 1.0, condensed);",
-            "let bank_water = mix(1.0, shallow_water, vc_m2_mixed_sheet(v));",
-            "let shares = vec2<f32>((1.0 - blend) * bank_water * bank.x, blend * puff.x);",
+            "let attached = smoothstep(0.0, 0.25, blend);",
+            "let bank_water = mix(1.0, shallow_water, mixed_sheet * attached);",
+            "var lobe_share = blend;\n    if eroded {",
+            "let shoulder = 1.0 / max(32.0 * v.nscale.x, 1e-8);",
+            "let placement_across = max(width * mix(1.0, v.dshape.w, mixed_sheet), 1.0);",
+            "let aspect = pwidth / placement_across;",
+            "let extra_span = across * max(aspect * aspect - 1.0, 0.0);",
+            "let clustered = 0.90 * mixed_sheet * attached * smoothstep(0.09 * shoulder, 0.31 * shoulder, extra_span);",
+            "lobe_share = mix(blend, 1.0, clustered);",
+            "let shares = vec2<f32>((1.0 - lobe_share) * bank_water * bank.x, lobe_share * puff.x);",
             "col.head = fair * attachment * (max(nested, 0.0) + 0.40 * min(nested, 0.0));",
             "let h = vc_m2_stretch(above, column.m2.y, parent, VC_M2_FOOT * parent) / parent;",
             "let base_width = max(lw, mix(1600.0 * (1.0 - max(upper, side)), 240.0, storm));",
@@ -707,7 +777,8 @@ mod tests {
             "ls.column.y = d.y * VC_M2_FILL * max(above / d.w, 1.0);",
             // The dispatch: the flat base before the rejection, the lean field and support, the bounds.
             "let above = yb - v.slab.x;\n    if above <= 0.0 || (col.edge <= 0.0 && col.res >= 1.0) {",
-            "return vc_m2_shape(pos, yb, above, column, width, nb, ns, ne, eroded, detail, fw, v);",
+            "return vc_m2_shape(pos, yb, above, column, width, pwidth, nb, ns, ne, eroded, detail, fw, v);",
+            "let m2 = vc_m2_material(column, above, pos, yb, width, pwidth, fw, eroded, detail, nb, ns, ne, v);",
             "let m2 = vc_m2_geometry(col, v);",
             "return (col.edge > 0.0 && above < vc_m2_extent(col, v)) || sheet2;",
             "let inside = in_domain && vc_m2_support(col, yb - v.slab.x, v);",
@@ -1096,18 +1167,51 @@ mod tests {
     fn a_shallow_sheet_retains_water_under_lobes_and_thins_at_open_edges() {
         let mut u = lean_uniform(0.07, None);
         u.mix = Vec3::new(0.5, 0.5, 0.0).extend(0.0);
-        let dry_edge = bank_water(0.05, 0.0, &u);
-        let dry_interior = bank_water(0.95, 0.0, &u);
-        let damp_edge = bank_water(0.05, 0.25, &u);
+        let mixed = mixed_sheet(&u);
+        let dry_edge = bank_water(0.05, 0.0, mixed);
+        let dry_interior = bank_water(0.95, 0.0, mixed);
+        let damp_edge = bank_water(0.05, 0.25, mixed);
         assert!(dry_edge > 0.0 && dry_edge < 0.05);
         assert!(dry_interior > 0.35 && dry_interior < damp_edge && damp_edge < 0.95);
-        assert_eq!(bank_water(0.05, 0.6, &u), 1.0);
+        assert_eq!(bank_water(0.05, 0.6, mixed), 1.0);
 
         // Pure cumulus, pure sheet, and a closed mixed deck keep their existing material.
         for (sheet, amount) in [(0.0, 0.29), (1.0, 0.07), (0.5, 0.73)] {
             u.mix = Vec3::new(sheet, 1.0 - sheet, 0.0).extend(0.0);
             u.scale.w = amount;
-            assert_eq!(bank_water(0.05, 0.0, &u), 1.0);
+            assert_eq!(bank_water(0.05, 0.0, mixed_sheet(&u)), 1.0);
+        }
+    }
+
+    #[test]
+    fn a_grazing_mixed_bank_shifts_weight_to_lobes_but_retains_its_sheet() {
+        let mut u = lean_uniform(0.07, None);
+        u.mix = Vec3::new(0.5, 0.5, 0.0).extend(0.0);
+        let shoulder = 1.0 / (32.0 * u.nscale.x);
+        let across = 300.0;
+        let projected = |extra: f32| (across * (across + extra * shoulder)).sqrt();
+        let blend = 0.35;
+        // At equal density the total stays one and the mixed height shows the lobe weight.
+        let at = |width: f32, pwidth: f32, weather: &CloudVolumeUniform| {
+            let (density, height) = mixed_material((1.0, 0.0), (1.0, 1.0), 0.5, blend, &view(0.0, width), pwidth, weather);
+            assert!((density - 1.0).abs() < 1e-6);
+            height
+        };
+        assert_eq!(at(across, across, &u), blend, "square view footprint");
+        u.dshape.w = 1.0 / 3.0;
+        let width = 3.0 * across;
+        assert_eq!(at(width, across, &u), blend, "face-on reconstructed texel");
+        let mid = at(width, projected(0.20), &u);
+        let far = at(width, projected(0.40), &u);
+        assert!(blend < mid && mid < far);
+        assert!((1.0 - far - 0.10 * (1.0 - blend)).abs() < 1e-6);
+        let (density, height) = mixed_material((0.25, 0.0), (1.0, 1.0), 0.5, blend, &view(0.0, width), projected(0.40), &u);
+        assert!((density - (0.25 * (1.0 - far) + far)).abs() < 1e-6);
+        assert!((density * height - far).abs() < 1e-6);
+        for (sheet, amount) in [(0.0, 0.29), (1.0, 0.07), (0.5, 0.73)] {
+            u.scale.w = amount;
+            u.mix = Vec3::new(sheet, 1.0 - sheet, 0.0).extend(0.0);
+            assert_eq!(at(width, projected(0.40), &u), blend);
         }
     }
 

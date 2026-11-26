@@ -3787,7 +3787,12 @@ and names its functions `vc_m2_*`); a run draws with it and nothing else.
   - *Isolated mixed banks* (Goodsprings Hazy): the sampling interval includes headroom for the lobes.
     Inside that interval, the sheet's crown tapers toward the placement boundary, and drier parts of its
     base condense higher. The sheet holds more water under dense lobes and near the center of the bank,
-    allowing thin ends to fade in the view and in the shadows they cast.
+    allowing thin ends to fade in the view and in the shadows they cast. At grazing angles the projected
+    sample can span several shoulders. Placement uses the texel that the temporal pass reconstructs,
+    and the sheet's texture filter accounts for both that texel and the length of the step along the ray.
+    As the projection across the layer grows long enough to span gaps, the view sample gives more weight
+    to the rounded lobes for both density and shading height. It retains at least a tenth of the sheet
+    contribution. The local sun probes and the light grid use the same physical mixture at every angle.
   - *Banks, decks and towers* (`vc_m2_density`): a signed field `F = cover x profile(h) - R (1 - n) - G D`
     whose zero is the surface: the envelope against the base noise `n` (relief `R` by type, times
     `SHAPE`), less the erosion's displacement `D` (world units, taken into field units through `G`, the

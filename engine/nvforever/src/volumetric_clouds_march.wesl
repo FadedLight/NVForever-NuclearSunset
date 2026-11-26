@@ -447,7 +447,10 @@ fn vc_place_width(rel: vec3<f32>, dir: vec3<f32>, width: f32, v: CloudVolume) ->
         // both axes by the longer projected axis erases distant groups. An isotropic
         // footprint of equal area preserves their spacing. A sheet uses the long axis.
         let deck = smoothstep(0.55, 0.72, v.scale.w);
-        return mix(sqrt(width * projected), projected, deck);
+        let footprint = sqrt(width * projected);
+        // Each mixed-bank shoulder occupies individual reconstructed texels along the skyline.
+        let texel = mix(1.0, v.dshape.w, vc_m2_mixed_sheet(v));
+        return mix(footprint * texel, projected, deck);
     }
     return projected;
 }
@@ -1010,7 +1013,10 @@ fn vc_m2_density(column: VcPreparedColumn, above: f32, pos: vec3<f32>, yb: f32, 
     }
     var lw = width;
     if eroded {
-        lw = max(width, fw);
+        let step_width = max(width, fw);
+        // Filter the sheet over the same view footprint as the lobes it connects.
+        let sample_area = sqrt(max(1.0, width * v.dshape.w) * step_width);
+        lw = mix(step_width, sample_area, vc_m2_mixed_sheet(v));
     } else {
         lw = 2.0 * max(width, vc_light_cell(v));
     }
@@ -1242,7 +1248,7 @@ fn vc_m2_lobes(column: VcPreparedColumn, above: f32, pos: vec3<f32>, yb: f32, wi
     return vec2<f32>(foot * density * boundary, clamp(h / roof, 0.0, 1.0));
 }
 
-fn vc_m2_material(column: VcPreparedColumn, above: f32, pos: vec3<f32>, yb: f32, width: f32, fw: f32, eroded: bool, detail: bool, nb: texture_3d<f32>, ns: sampler, ne: texture_3d<f32>, v: CloudVolume) -> vec2<f32> {
+fn vc_m2_material(column: VcPreparedColumn, above: f32, pos: vec3<f32>, yb: f32, width: f32, pwidth: f32, fw: f32, eroded: bool, detail: bool, nb: texture_3d<f32>, ns: sampler, ne: texture_3d<f32>, v: CloudVolume) -> vec2<f32> {
     let blend = vc_m2_lobe_weight(column.col.types, v);
     if blend <= 0.0 {
         return vc_m2_density(column, above, pos, yb, width, fw, eroded, detail, nb, ns, ne, v);
@@ -1264,8 +1270,22 @@ fn vc_m2_material(column: VcPreparedColumn, above: f32, pos: vec3<f32>, yb: f32,
     // Away from them, let the sheet thin as the column approaches its edge.
     let condensed = smoothstep(0.025, 0.48, puff.x);
     let shallow_water = mix(0.015 + 0.40 * column.m2.x, 1.0, condensed);
-    let bank_water = mix(1.0, shallow_water, vc_m2_mixed_sheet(v));
-    let shares = vec2<f32>((1.0 - blend) * bank_water * bank.x, blend * puff.x);
+    let mixed_sheet = vc_m2_mixed_sheet(v);
+    let attached = smoothstep(0.0, 0.25, blend);
+    let bank_water = mix(1.0, shallow_water, mixed_sheet * attached);
+    var lobe_share = blend;
+    if eroded {
+        // Recover the projected area's aspect from like placement widths, including
+        // during weather transitions. Estimate the gaps crossed by the view texel.
+        // Sun taps and the world light grid both integrate the physical sheet.
+        let shoulder = 1.0 / max(32.0 * v.nscale.x, 1e-8);
+        let placement_across = max(width * mix(1.0, v.dshape.w, mixed_sheet), 1.0);
+        let aspect = pwidth / placement_across;
+        let extra_span = across * max(aspect * aspect - 1.0, 0.0);
+        let clustered = 0.90 * mixed_sheet * attached * smoothstep(0.09 * shoulder, 0.31 * shoulder, extra_span);
+        lobe_share = mix(blend, 1.0, clustered);
+    }
+    let shares = vec2<f32>((1.0 - lobe_share) * bank_water * bank.x, lobe_share * puff.x);
     let total = shares.x + shares.y;
     return vec2<f32>(total, dot(shares, vec2<f32>(bank.y, puff.y)) / max(total, 1e-8));
 }
@@ -1283,7 +1303,7 @@ fn vc_m2_sigma(w: vec3<f32>, v: CloudVolume) -> f32 {
 // share (`profile.y`) one sheet tall, the types' profile over it, at the weather table's extinction over a
 // sheet, never carved: the two optical densities mixed by `res`, the extinction mixed by `res` (so
 // res 1 is the resolved sample exactly), the height share weighted by the optical densities.
-fn vc_m2_shape(pos: vec3<f32>, yb: f32, above: f32, column: VcPreparedColumn, width: f32, nb: texture_3d<f32>, ns: sampler, ne: texture_3d<f32>, eroded: bool, detail: bool, fw: f32, v: CloudVolume) -> vec4<f32> {
+fn vc_m2_shape(pos: vec3<f32>, yb: f32, above: f32, column: VcPreparedColumn, width: f32, pwidth: f32, nb: texture_3d<f32>, ns: sampler, ne: texture_3d<f32>, eroded: bool, detail: bool, fw: f32, v: CloudVolume) -> vec4<f32> {
     let col = column.col;
     let fade = smoothstep(0.0, max(v.profile.x, 1.0), above);
     let amount = clamp(v.scale.w, 0.0, 1.0);
@@ -1302,7 +1322,7 @@ fn vc_m2_shape(pos: vec3<f32>, yb: f32, above: f32, column: VcPreparedColumn, wi
     var shape = 0.0;
     var h = 0.0;
     if col.edge > 0.0 {
-        let m2 = vc_m2_material(column, above, pos, yb, width, fw, eroded, detail, nb, ns, ne, v);
+        let m2 = vc_m2_material(column, above, pos, yb, width, pwidth, fw, eroded, detail, nb, ns, ne, v);
         shape = m2.x;
         h = m2.y;
     }
@@ -1446,7 +1466,7 @@ fn vc_shape_with_column(pos: vec3<f32>, yb: f32, col: VcColumn, width: f32, pwid
             * clamp(v.nscale.z, 0.0, 1.0);
     }
     *column_out = column;
-    return vc_m2_shape(pos, yb, above, column, width, nb, ns, ne, eroded, detail, fw, v);
+    return vc_m2_shape(pos, yb, above, column, width, pwidth, nb, ns, ne, eroded, detail, fw, v);
 }
 
 // 1 up to 0.75 of the horizon distance, 0 at it, by the distance where the ray enters the

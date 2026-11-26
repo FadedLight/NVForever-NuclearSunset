@@ -401,6 +401,7 @@ mod shared_table_tests {
         ("pipboy-blue", "Interface"),
         ("language", "Interface"),
         ("menu-font", "Interface"),
+        ("location-load-screens", "Interface"),
         ("head-tracking", "World"),
         ("foot-ik", "World"),
         ("sky-clock", "World"),
@@ -760,6 +761,7 @@ mod shared_table_tests {
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
         assert_eq!(at("caravan-tips"), "Display > Interface");
         assert_eq!(at("localized-dt-dr"), "Gameplay > Combat", "#3843");
+        assert_eq!(at("location-load-screens"), "Display > Interface", "#3844");
         assert_eq!(at("npc-weapon-mods"), "Gameplay > Game", "#3876");
         assert_eq!(at("quantity-select-short-keys"), "Gameplay > Menus", "#3799");
         assert_eq!(at("sneak-bounding-box"), "Gameplay > Game", "#3845");

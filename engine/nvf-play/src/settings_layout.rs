@@ -334,7 +334,7 @@ mod shared_table_tests {
     /// full-detail scenery row; #3014's distant objects row; #2993's aerial perspective row;
     /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row;
     /// #2991's volumetric clouds row; #3348's HDR output row; #3783's occlusion culling row;
-    /// #3032's volumetric light row and its strength; #3845's crouch height collision row),
+    /// #3032's volumetric light row and its strength; #3843's localized armor DT/DR row),
     /// by the group it registers with.
     pub(super) const KNOWN: &[(&str, &str)] = &[
         ("detached-camera", "Gameplay"),
@@ -351,6 +351,7 @@ mod shared_table_tests {
         ("menu-pause", "Gameplay"),
         ("dialogue-goodbye-hint", "Gameplay"),
         ("reload-slows", "Gameplay"),
+        ("localized-dt-dr", "Gameplay"),
         ("grass-fire", "Gameplay"),
         ("quick-loot", "Gameplay"),
         ("quick-loot-scale", "Gameplay"),
@@ -495,6 +496,7 @@ mod shared_table_tests {
         ("terrain-wireframe", "Debug"),
         ("send-reports", "Reports"),
         ("reports-delete", "Reports"),
+        ("coop", "Gameplay"),
     ];
 
     /// What every tweak's key starts with (#1892's `tweaks.rs`: `concat!("tweak-", $key)`).
@@ -607,7 +609,7 @@ mod shared_table_tests {
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo keep-chosen-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training \
         sleep-misc-stat-requires-duration revive-on-cell-change no-self-explosion-non-hostiles grabbing-is-theft-min-value \
-        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait";
+        sneak-run-ap-cost sneak-run-ap-endurance no-lock-encounter-zone-levels faster-sleep-wait wasd-as-arrow-keys";
 
     /// [`TWEAK_ROWS`] as keys, under the Tweaks tab's group.
     pub(super) fn tweak_rows() -> Vec<(&'static str, &'static str)> {
@@ -753,6 +755,7 @@ mod shared_table_tests {
         assert_eq!(at("terrain-shadows"), "Graphics > Shadows", "after Cloud shadows (#2671)");
         assert_eq!(at("light-shadows"), "Graphics > Shadows", "after Terrain shadows (light_shadows.rs)");
         assert_eq!(at("sound-cover"), "Gameplay > Game", "#2688");
+        assert_eq!(at("localized-dt-dr"), "Gameplay > Combat", "#3843");
         assert_eq!(at("sneak-bounding-box"), "Gameplay > Game", "#3845");
         assert_eq!(at("volumetric-light"), "Graphics > Lighting and Effects", "with the other experimental effects (#3032)");
         assert_eq!(at("volumetric-light-strength"), "Graphics > Lighting and Effects", "right after its switch");

@@ -273,6 +273,7 @@ mod vigor_view;
 mod walk_probe;
 mod water;
 mod weapon_models;
+mod wind_dust;
 mod window_icon;
 mod window_mode;
 mod keep_awake;

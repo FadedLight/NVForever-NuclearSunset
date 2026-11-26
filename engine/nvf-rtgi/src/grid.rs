@@ -246,7 +246,7 @@ impl<'a> Grid<'a> {
         self.flood_by(seeds, None)
     }
 
-    /// [`Grid::flood`], its points made by [`Grid::make_by`].
+    /// What the seeds reach; with `by`, its points made by what that says ([`Grid::make_by`]).
     pub fn flood_by(&mut self, seeds: &[V3], mut by: Option<&mut Classify>) -> Result<(BTreeSet<Place>, Coverage), Failed> {
         let space = self.work.space;
         let mut out = Flood::default();

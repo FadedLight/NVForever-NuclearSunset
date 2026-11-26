@@ -332,9 +332,12 @@ impl Bvh {
         out
     }
 
-    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes.
+    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. The distance is in double
+    /// precision and has a slack of 1e-9 of `far` and of p's largest coordinate: one exactly at `far` is never lost to
+    /// a rounding, and one a little further may be in.
     pub fn within(&self, p: V3, far: f32) -> Vec<(u32, V3, V3)> {
         let (mut out, mut open) = (Vec::new(), Vec::new());
+        let slack = f64::from(far) + 1e-9 * (f64::from(far) + f64::from(p.max_abs()));
         open.extend((!self.nodes.is_empty()).then_some(0usize));
         while let Some(at) = open.pop() {
             let n = &self.nodes[at];
@@ -348,7 +351,7 @@ impl Bvh {
                 continue;
             }
             for slot in n.a as usize..(n.a + n.count) as usize {
-                if distance(p, &self.tris[slot]) <= f64::from(far) {
+                if distance(p, &self.tris[slot]) <= slack {
                     out.push((self.ids[slot], n.min, n.max));
                 }
             }
@@ -470,6 +473,12 @@ pub mod tests {
         assert!((distance(V3::new(1.0, -1.0, 0.0), &tri) - 1.0).abs() < 1e-9 && (distance(V3::new(-3.0, -4.0, 0.0), &tri) - 5.0).abs() < 1e-9);
         let line = [V3::ZERO, V3::new(2.0, 0.0, 0.0), V3::new(4.0, 0.0, 0.0)];
         assert!((distance(V3::new(3.0, 0.0, 2.0), &line) - 2.0).abs() < 1e-9);
+        // Exactly at the radius, which the double precision puts a rounding past it.
+        let tri = [V3::ZERO, V3::new(3.0, 4.0, 0.0), V3::new(0.0, 4.0, 0.0)];
+        let p = V3::new(2.5, 2.5, 0.0);
+        assert!(distance(p, &tri) >= 0.5 && distance(p, &tri) - 0.5 < 1e-12);
+        let tree = built(&[tri], 1);
+        assert!(tree.within(p, 0.5).len() == 1 && tree.within(p, 0.4999).is_empty());
     }
 
     /// A random unit vector.

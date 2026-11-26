@@ -4745,6 +4745,8 @@ fn compile_script_reads_a_udf_file_and_print_var_names_variables() {
     let ctx = fnv_game::game::RunCtx::default;
     let q = |g: &mut fnv_game::Game, body: &str| g.run_query(&format!("ref rF\nref rG\nfloat fRes\narray_var aA\nBegin Function {{ }}\n{body}\nEnd\n"), ctx());
     assert_eq!(q(&mut g, "let rF := CompileScript \"Sub/Add.txt\"\nSetFunctionValue (Call rF 2 3)"), Ok(XVal::Num(5.0)));
+    // A compiled script is a valid form while it lasts (#4491).
+    assert_eq!(q(&mut g, "let rF := CompileScript \"Sub/Add.txt\"\nSetFunctionValue (IsFormValid rF)"), Ok(XVal::Num(1.0)));
     assert_eq!(q(&mut g, "let rF := CompileScript \"sub\\add.txt\"\nlet rG := GetUDFFromFile \"Sub/Add.txt\"\nSetFunctionValue (rF == rG)"), Ok(XVal::Num(1.0)), "cached by path");
     assert_eq!(q(&mut g, "SetFunctionValue (CompileScript \"Sub/None.txt\")"), Ok(XVal::Ref(0)), "no file");
     fnv_game::mod_files::set_roots(fnv_game::mod_files::Roots { read: Vec::new(), config: None, write: None, lookup: None, reader: None, archives: Vec::new() });
@@ -5542,6 +5544,9 @@ fn built_in_plugins_report_installed() {
     assert_eq!(q(&mut g, "GetPluginVersion \"SUP NVSE Plugin\" >= 250"), Ok(XVal::Num(1.0)));
     assert_eq!(q(&mut g, "GetPluginVersion \"CUI\""), Ok(XVal::Num(120.0)));
     assert_eq!(q(&mut g, "GetPluginVersion \"Improved Console\""), Ok(XVal::Num(3.0)));
+    // No script functions; the engine does their work itself (#4491).
+    assert_eq!(q(&mut g, "GetPluginVersion \"Engine Optimizations\""), Ok(XVal::Num(100.0)));
+    assert_eq!(q(&mut g, "GetPluginVersion \"HighResLocalMaps\""), Ok(XVal::Num(12.0)));
     for name in ["yUI", "NVTF", "No Such Plugin"] {
         assert_eq!(q(&mut g, &format!("IsPluginInstalled \"{name}\"")), Ok(XVal::Num(0.0)), "{name}");
         assert_eq!(q(&mut g, &format!("GetPluginVersion \"{name}\"")), Ok(XVal::Num(-1.0)), "{name}");

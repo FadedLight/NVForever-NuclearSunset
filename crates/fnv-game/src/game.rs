@@ -8168,6 +8168,14 @@ impl Host for Exec<'_, '_> {
         if self.game.temp_item(f).is_some() {
             return Some(*b"REFR");
         }
+        // A script CompileScript made, or a lambda, is a script form while it lasts
+        // [documented: CompileScript returns "a reference to the compiled script";
+        // observed in FadedLight's Nuclear Sunset fork: Scaled Recurring Challenges'
+        // `ln_addHandler.txt` checks `IsFormValid` on it and showed "There was a problem
+        // compiling" although it compiled (#4491)].
+        if self.game.compiled_slots.contains_key(&form) || self.game.lambda_slots.contains_key(&form) {
+            return Some(*b"SCPT");
+        }
         let f = self.game.unclone(f);
         // The player reference is no record of a plugin [documented: PlayerREF, 00000014].
         if let Some(s) = self.game.data.sig(f).or_else(|| (f == FormId::PLAYER_REF).then_some(*b"ACHR")) {

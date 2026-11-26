@@ -143,11 +143,13 @@ impl Room {
 pub struct Config {
     /// Of a batch; fewer where the rays would be more than [`MOST_RAYS_A_DISPATCH`].
     pub points: u32,
-    /// As [`nvf_rtgi::GatherConfig::emission`].
+    /// As [`nvf_rtgi::GatherConfig::emission`]: 0..=1.
     pub emission: f32,
-    /// A ray meets nothing up to this distance (for a shadow ray in units of its segment). The solver's is an open 0,
-    /// which the least positive numbers are: a triangle at a computed 0 is not met whether the driver takes the
-    /// near end as open or not. Above that it is for looking into differences.
+    /// Where the structure's queries start: of a ray in units of its direction, of a shadow ray of its segment. The
+    /// solver's is an open 0, which the least positive numbers are: a triangle at a computed 0 is not met whether the
+    /// driver takes the near end as open or not. Above that it is for looking into differences, and it is the
+    /// structure's alone: the solver's own test, which decides a point's listed triangles and those in the place of
+    /// the structure's nearest, meets above 0 whatever it is, as on the CPU.
     pub near: f32,
 }
 
@@ -186,8 +188,8 @@ impl Live {
     pub fn packed(device: &wgpu::Device, kernel: Arc<Kernel>, room: Arc<Room>, points: &Points, light: &PackedLight, config: &Config) -> Result<Live, String> {
         let limits = device.limits();
         let Config { emission, near, .. } = *config;
-        // With the light of a ray at most 1 or the emission, every sum stays small.
-        if !((0.0..=1e3).contains(&emission) && near > 0.0 && near < 1.0) {
+        // A solve's emission (nvf-rtgi reach.rs `EMISSIONS`); the light of a ray is at most 1 then.
+        if !((0.0..=1.0).contains(&emission) && near > 0.0 && near < 1.0) {
             return Err(format!("{config:?}"));
         }
         let count = u32::try_from(points.positions().len()).map_err(|_| "too many points")?;

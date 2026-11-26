@@ -63,7 +63,8 @@ struct Params {
     directions_at: u32,
     order_at: u32,
     emission: f32,
-    // Rays start after this distance: above 0, so that a surface at 0 is not met (bvh.rs `closest`: t > near).
+    // The structure's queries start after this distance: above 0, so that a surface at 0 is not met (bvh.rs `closest`:
+    // t > near). The solver's own test meets above 0, as on the CPU.
     near: f32,
     // 0, which no compiler knows (`keep`).
     zero: u32,
@@ -413,9 +414,11 @@ fn base(n: vec3<f32>) -> vec3<f32> {
     return lf3(0u) + sum;
 }
 
-// max(s, 0)^2.2; no sum is above 1e6 (tables.rs).
+// max(s, 0)^2.2, of every positive sum as it is (light.rs `lit`): no pow of 0 or less, whose place takes a 1 that is
+// not used. No sum is above 1e6 (tables.rs).
 fn power(s: vec3<f32>) -> vec3<f32> {
-    return select(pow(clamp(s, vec3<f32>(1e-12), vec3<f32>(1e6)), vec3<f32>(2.2)), vec3<f32>(0.0), s <= vec3<f32>(0.0));
+    let none = s <= vec3<f32>(0.0);
+    return select(pow(min(select(s, vec3<f32>(1.0), none), vec3<f32>(1e6)), vec3<f32>(2.2)), vec3<f32>(0.0), none);
 }
 
 fn lit(a: vec3<f32>, s: vec3<f32>) -> vec3<f32> {
@@ -510,6 +513,14 @@ fn entered(at: u32, o: vec3<f32>, r: u32) -> bool {
         last = min(last, times(max(a, b), bitcast<f32>(0x3f800005u)));
     }
     return first <= last;
+}
+
+// A shadow segment's direction as the solver's rays take it (bvh.rs `Ray::new`): a part below 1e-20 of the largest is 0.
+// Its other rule, a part whose reciprocal overflows, is within this one here: a segment that is traced is longer than
+// the lift, 0.01.
+fn as_rays_go(d: vec3<f32>) -> vec3<f32> {
+    let a = abs(d);
+    return select(d, vec3<f32>(0.0), a < vec3<f32>(times(1e-20, max(a.x, max(a.y, a.z)))));
 }
 
 // Whether a triangle is one of a list's.
@@ -608,7 +619,8 @@ fn gather(at: vec3<f32>, first: u32, step: u32, list: vec2<u32>, shade: bool) ->
             w = weights(h.barycentrics);
             t = h.t;
             // All that is in the place of the structure's nearest is tested, for what is nearest by the solver's test;
-            // nothing is committed, so that every triangle there is a candidate.
+            // nothing is committed, so that every triangle there is a candidate. Those of the point's list were decided
+            // above, with their leaves' boxes.
             let reach = min(WINDOW / max(abs(blend(geometric(tri), dir)), GRAZING), WIDEST);
             var met = false;
             rayQueryInitialize(&sq, scene, RayDesc(RAY_FLAG_FORCE_NO_OPAQUE, 0xffu, 0.0, 2.0 * reach, on(tri, w) - dir * reach, dir));
@@ -616,6 +628,9 @@ fn gather(at: vec3<f32>, first: u32, step: u32, list: vec2<u32>, shade: bool) ->
                 let c = rayQueryGetCandidateIntersection(&sq);
                 if c.kind == RAY_QUERY_INTERSECTION_TRIANGLE {
                     let k = number(c.geometry_index, c.primitive_index);
+                    if listed(k, list) {
+                        continue;
+                    }
                     let m = meet(k, at, r);
                     if m.met && m.t > 0.0 && (k < p.opaque || solid(k, shares(m))) {
                         met = true;
@@ -686,7 +701,7 @@ fn gather(at: vec3<f32>, first: u32, step: u32, list: vec2<u32>, shade: bool) ->
                 // Stopped in the open (0, end) alone: after `near` and up to the last number below the end.
                 if end > 1e-20 {
                     let last = bitcast<f32>(bitcast<u32>(end) - 1u);
-                    rayQueryInitialize(&sq, scene, RayDesc(RAY_FLAG_TERMINATE_ON_FIRST_HIT, 0xffu, min(p.near, last), last, start, d));
+                    rayQueryInitialize(&sq, scene, RayDesc(RAY_FLAG_TERMINATE_ON_FIRST_HIT, 0xffu, min(p.near, last), last, start, as_rays_go(d)));
                     while rayQueryProceed(&sq) {
                         let c = rayQueryGetCandidateIntersection(&sq);
                         if c.kind == RAY_QUERY_INTERSECTION_TRIANGLE {

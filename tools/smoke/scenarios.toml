@@ -567,6 +567,23 @@ forbid = [
 ]
 
 [[scenario]]
+name = "water-volumetric-cloud-reflection"
+source = "[design] The Cottonwood Cove mirror draws the live volumetric sky on reflective water, including when the player looks down. Switching clouds off and back on must hand the mirror back to the newly prepared volume."
+areas = ["renderer", "graphics", "water", "sky"]
+paths = ["engine/nvforever/src/reflection*", "engine/nvforever/src/reflection/**", "engine/nvforever/src/medium*", "engine/nvforever/src/medium/**", "engine/nvforever/src/volumetric_clouds*"]
+env = { NVF_PLAY_TEST_LOOK = "3:107:1,19:107:-36", NVF_PLAY_TEST_PAUSE = "24:27,36:39", NVF_PLAY_TEST_SETTINGS = "25:volumetric-clouds=Off,37:volumetric-clouds=High" }
+args = ["--play", "--cell", "17,-23", "--pos=65664,-90752,-2178", "--heading", "107", "--pitch=1", "--hour", "7.3", "--weather", "NVWastelandClear", "--no-actors", "--no-messages", "--no-voice", "--graphics-only", "volumetric-clouds-high,water-effects,water-reflections"]
+run_seconds = 57
+order = [[
+  "water reflection: volumetric clouds ready",
+  "test aid: look heading 107.0 pitch -36.0",
+  "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off",
+  "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=High",
+  "water reflection: volumetric clouds ready",
+]]
+forbid = ["Caught rendering error", "failed and will not be tried again", "DeviceLost"]
+
+[[scenario]]
 name = "water-effects-submerged"
 source = "[design, #2674] The explorer camera starts 60 units below Lake Mead and above the surveyed bed at Boulder Beach (physics.md section 6.6). Both the water fog and the underwater receiver pass must activate."
 areas = ["renderer", "graphics", "water"]

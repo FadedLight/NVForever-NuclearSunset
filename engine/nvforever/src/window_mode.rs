@@ -4,7 +4,8 @@
 //! switches it while the game runs (`settings.rs`), kept in `NVForever.ini` like every
 //! switch. Alt+Enter flips the same row from anywhere in the game (#2209,
 //! `nvf_play::full_screen_key`). Each mode the primary window settles on is logged with the size
-//! its surface really has, and the size it was asked for when the two differ (#4381).
+//! its surface really has, and the size it was asked for when the two differ (#4381); the
+//! surface's physical and logical size and its scale factor print on a line of their own (#3884).
 //!
 //! **The resolution** is the Display group's first row, a dropdown of the sizes the
 //! window's monitor can show (its video modes, smallest first) [owner 2026-10-18: a
@@ -584,13 +585,64 @@ fn mode_line(mode: WindowMode, asked: Option<UVec2>, surface: UVec2) -> String {
     }
 }
 
+/// Last physical surface reported by [`log_mode`], to log the actual physical size and
+/// scale factor on startup, mode switches, scale changes, full-screen compositor resizes,
+/// and windowed mismatches against `--size` without spamming every pixel of an interactive
+/// border drag [design, #3884].
+#[derive(Default)]
+struct SurfaceLog {
+    last: Option<(WindowMode, UVec2, u32)>,
+    last_asked: Option<String>,
+}
+
+/// Format the `window: surface ...` diagnostic line when the window's physical surface
+/// state should be logged; `None` when unchanged or suppressed mid-drag.
+fn surface_line(state: &mut SurfaceLog, mode: WindowMode, physical: UVec2, logical: Vec2, scale: f32, asked: &str) -> Option<String> {
+    let scale_bits = scale.to_bits();
+    let now = (mode, physical, scale_bits);
+    let asked_size = parse_size(asked);
+    let should_log = match state.last {
+        None => true,
+        Some(prev) if prev == now => false,
+        Some((prev_mode, prev_size, prev_scale)) => {
+            prev_mode != mode
+                || prev_scale != scale_bits
+                || mode != WindowMode::Windowed
+                || state.last_asked.as_deref() != Some(asked)
+                || asked_size == Some(physical)
+                || asked_size == Some(prev_size)
+        }
+    };
+    state.last_asked = Some(asked.to_string());
+    if !should_log {
+        return None;
+    }
+    state.last = Some(now);
+    let mismatch = if mode == WindowMode::Windowed && asked_size.is_some_and(|a| a != physical) {
+        format!(" (asked {asked})")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "window: surface {} physical, {:.0}x{:.0} logical, scale {scale:.3}{mismatch}",
+        size_text(physical),
+        logical.x,
+        logical.y
+    ))
+}
+
 /// One line each time the primary window settles on a mode and a surface size (the first: the
 /// start's), in every mode including borderless full screen, so a size that is not the one asked
-/// for is diagnosable from the log alone (#4381, the pixels #3884 cost a code trace over).
-fn log_mode(args: Res<Args>, modes: Res<MonitorModes>, windows: Query<&Window, With<PrimaryWindow>>, mut log: Local<LogState>) {
+/// for is diagnosable from the log alone (#4381, the pixels #3884 cost a code trace over). The
+/// physical size, logical size and scale factor print apart ([`surface_line`], #3884).
+fn log_mode(args: Res<Args>, modes: Res<MonitorModes>, windows: Query<&Window, With<PrimaryWindow>>, mut log: Local<LogState>, mut surface: Local<SurfaceLog>) {
     let Ok(w) = windows.single() else { return };
-    let Some((mode, surface)) = log.holds((w.mode, w.physical_size())) else { return };
-    info!("{}", mode_line(mode, asked_size(mode, &args, &modes), surface));
+    if let Some((mode, size)) = log.holds((w.mode, w.physical_size())) {
+        info!("{}", mode_line(mode, asked_size(mode, &args, &modes), size));
+    }
+    if let Some(line) = surface_line(&mut surface, w.mode, w.physical_size(), Vec2::new(w.resolution.width(), w.resolution.height()), w.resolution.scale_factor(), &args.size) {
+        info!("{line}");
+    }
 }
 
 #[cfg(test)]
@@ -775,5 +827,30 @@ mod tests {
         modes.monitors = vec![MonitorInfo { name: r"\.\DISPLAY2".to_string(), entity: e, size: UVec2::new(1920, 1080), position: IVec2::ZERO, primary: false }];
         assert_eq!(device_of(&modes, MonitorSelection::Entity(e)).as_deref(), Some(r"\.\DISPLAY2"));
         assert_eq!(device_of(&modes, MonitorSelection::Primary), None);
+    }
+
+    /// #3884: the physical surface size and scale factor are logged on startup (including
+    /// when the OS hands back a different height than `--size`), on scale or full-screen
+    /// surface changes, and on transitions away from `--size`, without spamming mid-drag.
+    #[test]
+    fn surface_log_reports_mismatches_and_full_screen_resizes_without_drag_spam() {
+        let mut s = SurfaceLog::default();
+        let first = surface_line(&mut s, WindowMode::Windowed, UVec2::new(1280, 720), Vec2::new(1280.0, 720.0), 1.0, "1280x720");
+        assert_eq!(first.as_deref(), Some("window: surface 1280x720 physical, 1280x720 logical, scale 1.000"));
+        assert_eq!(surface_line(&mut s, WindowMode::Windowed, UVec2::new(1280, 720), Vec2::new(1280.0, 720.0), 1.0, "1280x720"), None);
+        // OS configure hands back 1280x721 while --size asked for 1280x720: logged once with "(asked 1280x720)".
+        let off = surface_line(&mut s, WindowMode::Windowed, UVec2::new(1280, 721), Vec2::new(1280.0, 721.0), 1.0, "1280x720");
+        assert_eq!(off.as_deref(), Some("window: surface 1280x721 physical, 1280x721 logical, scale 1.000 (asked 1280x720)"));
+        // Subsequent drag frames away from --size stay quiet.
+        assert_eq!(surface_line(&mut s, WindowMode::Windowed, UVec2::new(1284, 725), Vec2::new(1284.0, 725.0), 1.0, "1280x720"), None);
+        // Scale factor change logs immediately.
+        let scaled = surface_line(&mut s, WindowMode::Windowed, UVec2::new(1284, 725), Vec2::new(642.0, 362.5), 2.0, "1280x720");
+        assert_eq!(scaled.as_deref(), Some("window: surface 1284x725 physical, 642x362 logical, scale 2.000 (asked 1280x720)"));
+        // Borderless full screen logs both the mode switch and the compositor's subsequent resize.
+        let fs = WindowMode::BorderlessFullscreen(MonitorSelection::Primary);
+        let enter = surface_line(&mut s, fs, UVec2::new(1280, 721), Vec2::new(1280.0, 721.0), 1.0, "1280x720");
+        assert_eq!(enter.as_deref(), Some("window: surface 1280x721 physical, 1280x721 logical, scale 1.000"));
+        let full = surface_line(&mut s, fs, UVec2::new(3840, 2161), Vec2::new(3840.0, 2161.0), 1.0, "1280x720");
+        assert_eq!(full.as_deref(), Some("window: surface 3840x2161 physical, 3840x2161 logical, scale 1.000"));
     }
 }

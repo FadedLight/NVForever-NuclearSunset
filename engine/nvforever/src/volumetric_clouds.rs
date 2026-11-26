@@ -1230,14 +1230,15 @@ pub fn place_width(rel: Vec3, dir: Vec3, width: f32, r: f32) -> f32 {
     width / dir.dot(n).abs().max(1e-3)
 }
 
-/// Isotropic footprint for filtering the placement (march `vc_place_width`). Fair banks use the area of
-/// the projected footprint.
+/// Isotropic footprint for filtering placement (march `vc_place_width`). Fair banks use the
+/// projected area. An isolated mixed bank resolves the reconstructed texel across that area.
 /// As coverage becomes a continuous deck the horizontal base dominates again.
 fn cloud_place_width(rel: Vec3, dir: Vec3, width: f32, u: &CloudVolumeUniform) -> f32 {
     let projected = place_width(rel, dir, width, u.reach.y);
     if u.scale.w < 0.72 {
         let deck = smoothstep(0.55, 0.72, u.scale.w);
-        let fair = (width * projected).sqrt();
+        let texel = 1.0 + (u.dshape.w - 1.0) * crate::volumetric_clouds_model2::mixed_sheet(u);
+        let fair = (width * projected).sqrt() * texel;
         fair + (projected - fair) * deck
     } else {
         projected
@@ -1716,7 +1717,7 @@ pub fn uniform(i: &VolumeInputs) -> CloudVolumeUniform {
         slab: Vec4::new(finite(i.plane_height), domain, source_range(horizon, i.above_ground, domain), horizon),
         march: Vec4::new(step_near(i.steps), LIGHT_STEPS as f32, non_negative(i.density), LIGHT_THRESHOLD),
         reach: Vec4::new(LIGHT_REACH, shell_radius(horizon, i.above_ground), STOP_TRANSMITTANCE, RAY_BUDGET as f32),
-        phase: Vec4::new(G_FORWARD, G_BACK, BACK_WEIGHT, PHASE_CAP),
+        phase: Vec4::new(G_FORWARD, G_BACK, BACK_WEIGHT, i.light_aids.phase_cap(crate::volumetric_clouds_light::night_share(i.sky.elevation))),
         light_dir: dir.extend(unit(i.light_strength)),
         light: lit.light.extend(0.0),
         map: Vec4::new(uv_scale(i.uv_scale.x), uv_scale(i.uv_scale.y), 0.0, 0.0),
@@ -2854,7 +2855,7 @@ pub(crate) mod tests {
 
     /// The launch judged by eye on 2026-11-23, as it was given before its values became the defaults:
     /// the start variables (without the prefix; those of removed parts left out) and the tune file
-    /// (its LOWER line at 1).
+    /// (its LOWER line at 1; the night's keys are newer than that launch and at their start values here).
     const ACCEPTED_VARS: [(&str, &str); 6] = [
         ("LIGHT_TAPS", "2"), ("HEIGHT", "24000"), ("PUFF", "1"),
         ("REFINED_STRIDE", "4"), ("LIGHT_REUSE", "1"), ("AIR", ".82"),
@@ -2875,7 +2876,7 @@ pub(crate) mod tests {
         assert!(tune.bad.is_empty(), "{:?}", tune.bad);
         let launch = cloud_start_from(accepted);
         // Over aids of other values, so that every live value is the tune file's.
-        let other = CloudAids { shape: 3.0, erosion: 3.0, density: 3.0, wisp: 3.0, light: crate::volumetric_clouds_light::LightAids { weights: [3.0; crate::volumetric_clouds_light::LIGHT_WEIGHTS], sun_colour: 1.0 }, ..launch.aids };
+        let other = CloudAids { shape: 3.0, erosion: 3.0, density: 3.0, wisp: 3.0, light: crate::volumetric_clouds_light::LightAids { weights: [3.0; crate::volumetric_clouds_light::LIGHT_WEIGHTS], sun_colour: 1.0, ..launch.aids.light }, ..launch.aids };
         let launch = CloudStart { aids: other.with(&tune.overrides), ..launch };
         assert_eq!(default, launch);
         assert_eq!((default.puff, default.refined_stride, default.light_reuse, default.air, default.aids.height), (1.0, 4, true, 0.82, 24_000.0));

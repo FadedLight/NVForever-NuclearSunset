@@ -4725,6 +4725,7 @@ dependencies = [
  "fnv-voice",
  "fnv-world",
  "infinitier_bik_decoder",
+ "jiff",
  "nvf-assets",
  "nvf-settings-layout",
  "png",

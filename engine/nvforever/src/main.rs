@@ -141,6 +141,7 @@ mod light_shadow_casters;
 mod light_shadow_detail;
 mod light_shadows;
 mod lights;
+mod photo_lights;
 mod limbs;
 mod lips;
 mod memory_budget;
@@ -221,6 +222,7 @@ mod shadow_thin;
 mod shafts;
 mod heat_haze;
 mod sun_heightfield;
+mod bokeh;
 mod imagespace;
 mod imposters;
 mod sky;
@@ -2022,7 +2024,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     #[cfg(target_os = "android")]
     let default_plugins = default_plugins.disable::<bevy::gilrs::GilrsPlugin>();
     app.add_plugins(default_plugins)
-    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, keep_awake::KeepAwakePlugin, hdr::HdrPlugin))
+    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, keep_awake::KeepAwakePlugin, hdr::HdrPlugin, photo_lights::PhotoLightsPlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)

@@ -400,7 +400,7 @@ fn read(
     (mut sounds, anim, mut wait): (MessageWriter<UiSound>, Option<Res<crate::combat::WeaponAnim>>, Local<SwapWait>),
     tweaks: Option<Res<crate::tweaks::TweakSettings>>,
     mut script: Option<ResMut<crate::script::ScriptState>>,
-    (scroll, scope): (Option<Res<bevy::input::mouse::AccumulatedMouseScroll>>, Option<Res<crate::aim_zoom::Scope>>),
+    (scroll, scope, combat): (Option<Res<bevy::input::mouse::AccumulatedMouseScroll>>, Option<Res<crate::aim_zoom::Scope>>, Option<Res<crate::combat::Combat>>),
 ) {
     // The player's Weapon Requirements Matter tweak: a slot whose weapon the player may
     // not equip says why instead [design: docs/design/tweaks.md].
@@ -414,7 +414,9 @@ fn read(
         crate::script::with_world(rt, sim, |rt| rt.game.weapon_requirement_unmet(item))
     }
     // The player's tweak: no weapon hotkeys while reloading [design: docs/design/tweaks.md].
-    let reloading_blocks = tweaks.as_ref().is_some_and(|t| t.no_hotkeys_while_reloading) && anim.as_ref().is_some_and(|a| a.reload.is_some());
+    // Reloading now, not `WeaponAnim::reload` (the weapon's reload clip, set for every weapon
+    // held: it blocked the hotkeys for good, #4611).
+    let reloading_blocks = tweaks.as_ref().is_some_and(|t| t.no_hotkeys_while_reloading) && combat.as_deref().is_some_and(crate::combat::Combat::player_reloading);
     let toggle_in_hand = tweaks.as_ref().is_some_and(|t| t.hotkey_toggles_in_hand);
     let quiet = tweaks.as_ref().is_some_and(|t| t.quiet_hotkeys);
     let hotkeys_off = tweaks.as_ref().is_some_and(|t| t.no_weapon_hotkeys);

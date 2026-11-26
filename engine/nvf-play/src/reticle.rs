@@ -541,7 +541,7 @@ fn draw(
     (combat, hostile, bar, camera, time, dynamic, control): (Option<Res<crate::combat::Combat>>, Option<Res<crate::hud_target::AimHostile>>, Option<Res<crate::hud_target::HudTarget>>, Query<&Projection, With<crate::PlayerCamera>>, Res<Time>, Option<Res<DynamicCrosshair>>, Option<Res<crate::control::PlayerControl>>),
     mut spread: Local<f32>,
     mut logged: Local<(bool, i32, bool, Option<String>, Option<bool>, Option<bool>, Option<CrosshairStyle>)>,
-    (locks, bindings, creator, sights, scope, driven, kill_cam, tweaks, anim, vats): (
+    (locks, bindings, creator, sights, scope, driven, kill_cam, tweaks, vats): (
         Option<Res<ControlLocks>>,
         Option<Res<crate::bindings::Bindings>>,
         Option<Res<crate::creator::CreatorMenu>>,
@@ -550,7 +550,6 @@ fn draw(
         Option<Res<crate::player::ViewDriven>>,
         Option<Res<crate::kill_cam::KillCam>>,
         Option<Res<crate::tweaks::TweakSettings>>,
-        Option<Res<crate::combat::WeaponAnim>>,
         Option<Res<crate::vats_mode::VatsMode>>,
     ),
     data: Option<Res<GameData>>,
@@ -607,13 +606,16 @@ fn draw(
     // (docs/spec-notes/weapon-scopes.md §2): no crosshair.
     let scoped = scope.is_some_and(|s| s.on);
     // The player's tweak hides it while reloading too [design: docs/design/tweaks.md].
-    let reloading = tweaks.as_ref().is_some_and(|t| t.hide_crosshair_reloading) && anim.as_ref().is_some_and(|a| a.reload.is_some());
+    // Reloading now (a reload or a jam's clearing), not `WeaponAnim::reload`, which names the
+    // weapon's reload clip and is set for every weapon held: read as "reloading" it hid the
+    // crosshair and every prompt for good with this tweak on (#4611).
+    let reloading = tweaks.as_ref().is_some_and(|t| t.hide_crosshair_reloading) && combat.as_deref().is_some_and(crate::combat::Combat::player_reloading);
     // The player's tweak keeps it down the iron sights (a scope still hides it) [design: docs/design/tweaks.md].
     let keep = tweaks.as_ref().is_some_and(|t| t.crosshair_when_aiming);
     let sights = (sights.is_some_and(|s| s.0) && !keep) || scoped || reloading;
     if sights != logged.2 {
         logged.2 = sights;
-        info!("crosshair: {}", if !sights { "shown again" } else if scoped { "hidden by the scope" } else { "hidden down the true iron sights" });
+        info!("crosshair: {}", if !sights { "shown again" } else if scoped { "hidden by the scope" } else if reloading { "hidden while reloading" } else { "hidden down the true iron sights" });
     }
     for mut v in &mut root {
         // The Tweaks tab's crosshair key hides it [design: docs/design/tweaks.md].

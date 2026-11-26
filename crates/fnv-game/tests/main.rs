@@ -64,6 +64,7 @@ mod hit_effects;
 mod idles_holstered;
 mod idles;
 mod imagespace_weather_fog_gmst;
+mod ini_display_size;
 mod item_ref_health;
 mod jg_nif;
 mod jg10;

@@ -103,10 +103,11 @@ fn off_box(p: D, min: D, max: D) -> f64 {
 }
 
 /// Whether a triangle may be no further from `p` than `far` (not below 0), in double precision and conservative:
-/// it may say so of one a little further, never not of one within it. The triangle's box has to be within reach;
-/// then a side within it is enough, or else the plane within it where `p` is not clearly outside one of the sides,
-/// each with the room its roundings need. A triangle whose normal is lost in the rounding (it is all but a line)
-/// is near when its box is.
+/// it never says no of one within `far`, and says yes of one further by no more than its width across its longest
+/// side (the third corner's distance from that side) and a rounding. The triangle's box has to be within reach, and
+/// so does the longest side less that width: all of the triangle is within the width of that side. Then a side
+/// within reach is enough, or else the plane where `p` is not clearly outside one of the sides, each with the room
+/// its roundings need. A triangle whose normal is lost in the rounding (it is all but a line) is near then too.
 fn near(p: V3, tri: &Corners, far: f64) -> bool {
     let (p, [a, b, c]) = (p.0.map(f64::from), tri.map(|v| v.0.map(f64::from)));
     let size = [p, a, b, c].iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
@@ -116,11 +117,18 @@ fn near(p: V3, tri: &Corners, far: f64) -> bool {
         return false;
     }
     let sides = [(a, b), (b, c), (c, a)];
-    let side = |(x, y): &(D, D)| {
-        let (e, w) = (sub(*y, *x), sub(p, *x));
+    let from = |q: D, (x, y): &(D, D)| {
+        let (e, w) = (sub(*y, *x), sub(q, *x));
         let t = if dot(e, e) > 0.0 { (dot(w, e) / dot(e, e)).clamp(0.0, 1.0) } else { 0.0 };
         length(std::array::from_fn(|k| w[k] - e[k] * t))
     };
+    let side = |s: &(D, D)| from(p, s);
+    // Every place of the triangle is within `width` of its longest side, so p is no nearer to it than this.
+    let longest = (0..3).max_by(|i, j| length(sub(sides[*i].1, sides[*i].0)).total_cmp(&length(sub(sides[*j].1, sides[*j].0)))).unwrap_or(0);
+    let width = from([c, a, b][longest], &sides[longest]);
+    if side(&sides[longest]) - width > reach + ROUNDS * size {
+        return false;
+    }
     if sides.iter().any(|s| side(s) <= reach) {
         return true;
     }
@@ -372,8 +380,9 @@ impl Bvh {
         out
     }
 
-    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. Conservative: it may name a
-    /// triangle a little beyond `far`, never leaves out one within it ([`near`]). None for a `far` below 0.
+    /// The triangles no further from `p` than `far`, in order, with their leaves' boxes. Conservative: it never leaves
+    /// out one within `far`, and may name one beyond it by no more than its width across its longest side ([`near`]).
+    /// None for a `far` below 0.
     pub fn within(&self, p: V3, far: f32) -> Vec<(u32, V3, V3)> {
         let (mut out, mut open) = (Vec::new(), Vec::new());
         if far.is_nan() || far < 0.0 {
@@ -532,6 +541,15 @@ pub mod tests {
             assert!(!one(there, on, far), "{far}");
         }
         assert!(one(there, on, 0.0), "on it at a radius of 0");
+        // A sliver far off, all but in line with its longest side: neither its lost normal nor its plane's room for
+        // the rounding names it.
+        for h in [2f32.powi(-35), 2f32.powi(-33)] {
+            let sliver = [V3::ZERO, V3::new(10000.0, 10000.0, 0.0), V3::new(5000.0, 5000.0, h)];
+            for far in [0.02, 0.5] {
+                assert!(!one(sliver, V3::new(0.0, 10000.0, 0.0), far), "{h} {far}");
+            }
+            assert!(one(sliver, V3::new(5000.0, 5000.0, 0.01), 0.02), "{h}: beside it");
+        }
     }
 
     /// A random unit vector.

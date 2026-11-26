@@ -544,6 +544,10 @@ pub struct RefExtra {
     /// (`fnv_sim::leveled::roll_seed`).
     #[serde(skip_serializing_if = "is_zero_u32", default)]
     pub rolls: u32,
+    /// Whether the optional `npc-weapon-mods` roll (`crate::npc_weapon_mods`, #3876) has
+    /// already run for this NPC so repeated ticks never re-roll its main weapon [design].
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub npc_weapon_mods_rolled: bool,
 }
 
 fn is_zero(v: &u16) -> bool {
@@ -6189,6 +6193,7 @@ impl<'a> Game<'a> {
     pub fn outfit_loaded_actors(&mut self) {
         for a in self.package_actors() {
             let _ = self.world.outfit(a);
+            self.maybe_apply_npc_weapon_mods(a);
         }
     }
 

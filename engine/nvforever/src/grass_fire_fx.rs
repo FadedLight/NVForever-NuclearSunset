@@ -132,6 +132,7 @@ fn spawn(commands: &mut Commands, fx: &mut FlameFx, models: &mut ModelCtx, root:
     let (holder, _) = crate::shot_fx::spawn_playing_itself(commands, root, &pm, place, &full);
     let mut emitter = ModelEmitter::new(full);
     emitter.size = size;
+    emitter.scale_radius_with_holder = matches!(path, SMALL_FIRE | MEDIUM_FIRE);
     commands.entity(holder).insert(emitter);
     fx.effects += 1;
     Some(holder)
@@ -185,7 +186,7 @@ fn sync(
                     let at = Vec3::new(c[0] + (bits(shift, 4) - 0.5) * 48.0, c[1] + (bits(shift + 4, 4) - 0.5) * 48.0, z);
                     let size = 0.9 + 0.5 * bits(shift + 8, 4);
                     let place = Transform::from_translation(at).with_rotation(Quat::from_rotation_z(i as f32 * 2.1 + bits(24, 4) * std::f32::consts::TAU)).with_scale(Vec3::splat(START_SIZE));
-                    // `particles::emit` multiplies born radius by the holder's scale
+                    // `particles::emit` multiplies these flames' born radius by the holder's scale
                     // (`START_SIZE`) as well as `ModelEmitter::size` (#3673), so passing
                     // `size` keeps the initial radius factor at `size * START_SIZE`.
                     if let Some(h) = spawn(&mut commands, fx, &mut models, world_root, SMALL_FIRE, place, size) {
@@ -310,8 +311,7 @@ fn animate(
 /// Holder transform scale (spray) and `ModelEmitter::size` for a grass-fire flame of full
 /// particle factor `size` and full spray scale `scale` at growth `share`.
 ///
-/// Since `particles::emit` scales born particle radius by the holder's transform scale as
-/// well as `ModelEmitter::size` (#3673), `emitter_size` divides out the holder scale so
+/// These emitters opt in to holder scaling. `emitter_size` divides out the holder scale so
 /// the effective born radius factor stays linear (`size * share`) without quadratic
 /// double-scaling [design].
 pub(crate) fn flame_scales(size: f32, scale: f32, share: f32) -> (f32, f32) {
@@ -358,8 +358,7 @@ mod tests {
         assert_eq!(grown(100.0), 1.0);
     }
 
-    /// [design, #3673] With `particles::emit` scaling radius by holder scale as well as
-    /// `ModelEmitter::size`, grass-fire flames keep effective born radius linear in
+    /// [design, #3673] Grass-fire flames opt in to holder scaling and keep their born radius linear in
     /// `size * share` across spawn, growth, full burn, shrink, and zero-scale guard.
     #[test]
     fn flame_effective_radius_stays_linear_without_double_scaling() {

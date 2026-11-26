@@ -1342,9 +1342,10 @@ The numbers above stay put so links to them hold; each item here gives its own p
     rule in §7.7 is wrong and the cause of the misplaced spray lies elsewhere.
     Also compare placed smoke in FalloutNV.esm (#3673): `dlc03fxdarksmoke.nif` at scale
     0.23 (`0x000E72EF`, WastelandNV 28255, 32694, 5595) against the one at scale 1
-    (`0x00137F86`, -31401, -95650, 6918), measuring puff size beside nearby geometry, and
-    re-check the Ultra-Luxe fountain (`0x0016566E`) and tyre smoke (`fxtiresmoke.nif`)
-    before and after scaling particle radius by the reference's scale.
+    (`0x00137F86`, -31401, -95650, 6918), measuring puff size beside nearby geometry in
+    the original. If that comparison supports radius scaling, re-check the Ultra-Luxe
+    fountain (`0x0016566E`) and tyre smoke (`fxtiresmoke.nif`) before and after testing
+    the candidate rule.
 
 ## Added 2026-11-05 (leveled rolls and locks, issue #1567)
 

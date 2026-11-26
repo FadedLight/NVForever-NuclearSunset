@@ -198,10 +198,10 @@ pub struct ModelEmitter {
     /// one. A system not named does not emit.
     pub driven: Option<HashMap<String, Option<f32>>>,
     /// A factor on the size of the particles it gives birth to from now on (1: as the
-    /// file says), multiplying on top of the reference's and system node's scale
-    /// (particles.md §7.7, #3673); a grass fire's flames grow and die down with this
-    /// (`crate::grass_fire_fx`) [design].
+    /// file says). Placed reference scale leaves the size alone (particles.md §7.7).
     pub size: f32,
+    /// Grass-fire flame holders contribute their scale to the radius factor [design].
+    pub(crate) scale_radius_with_holder: bool,
     /// Owned by a script-attached model (`AttachModel` / camera overlay): kept isolated
     /// from the host reference's placed particle systems (`instance_refs`) [design].
     attached: bool,
@@ -214,12 +214,12 @@ pub struct ModelEmitter {
 
 impl ModelEmitter {
     pub fn new(path: impl Into<String>) -> ModelEmitter {
-        ModelEmitter { path: path.into(), age: 0.0, placed: None, clock: None, driven: None, size: 1.0, attached: false, layer: None, space_root: None }
+        ModelEmitter { path: path.into(), age: 0.0, placed: None, clock: None, driven: None, size: 1.0, scale_radius_with_holder: false, attached: false, layer: None, space_root: None }
     }
 
     /// The model of placed reference `r` (a dust cloud, a sconce's flame, a smoke column).
     pub fn placed(path: impl Into<String>, r: u32) -> ModelEmitter {
-        ModelEmitter { path: path.into(), age: 0.0, placed: Some(r), clock: None, driven: None, size: 1.0, attached: false, layer: None, space_root: None }
+        ModelEmitter { path: path.into(), age: 0.0, placed: Some(r), clock: None, driven: None, size: 1.0, scale_radius_with_holder: false, attached: false, layer: None, space_root: None }
     }
 
     /// The model of placed reference `r` whose drawn rig starts its Idle `start` seconds
@@ -228,14 +228,14 @@ impl ModelEmitter {
     /// the rest, and the mover of those that are not driven (particles.md §6.8), in step
     /// with the rig and its sounds.
     pub fn placed_from(path: impl Into<String>, r: u32, start: f32) -> ModelEmitter {
-        ModelEmitter { path: path.into(), age: start.max(0.0), placed: Some(r), clock: None, driven: None, size: 1.0, attached: false, layer: None, space_root: None }
+        ModelEmitter { path: path.into(), age: start.max(0.0), placed: Some(r), clock: None, driven: None, size: 1.0, scale_radius_with_holder: false, attached: false, layer: None, space_root: None }
     }
 
     /// The model of a weapon in an actor's hand: its systems stay off until the actor's
     /// clips switch them on (the dynamite's fuse sparks while the throw clip lights it,
     /// particles.md §7.6); `driven` is set each frame by whoever plays the clips.
     pub fn held(path: impl Into<String>) -> ModelEmitter {
-        ModelEmitter { path: path.into(), age: 0.0, placed: None, clock: None, driven: Some(HashMap::new()), size: 1.0, attached: false, layer: None, space_root: None }
+        ModelEmitter { path: path.into(), age: 0.0, placed: None, clock: None, driven: Some(HashMap::new()), size: 1.0, scale_radius_with_holder: false, attached: false, layer: None, space_root: None }
     }
 
     /// An attached NIF model's own particle emitter (`AttachModel` or a camera overlay):
@@ -243,7 +243,7 @@ impl ModelEmitter {
     /// reference's placed particle systems, optionally drawn on `layer` and simulated
     /// under `space_root` instead of `WorldRoot` [design].
     pub fn attached(path: impl Into<String>, r: u32, layer: Option<RenderLayers>, space_root: Option<Entity>) -> ModelEmitter {
-        ModelEmitter { path: path.into(), age: 0.0, placed: Some(r), clock: None, driven: None, size: 1.0, attached: true, layer, space_root }
+        ModelEmitter { path: path.into(), age: 0.0, placed: Some(r), clock: None, driven: None, size: 1.0, scale_radius_with_holder: false, attached: true, layer, space_root }
     }
 }
 
@@ -885,7 +885,7 @@ type ModelEmitterItem = (
 /// The emitter, its systems' key, its age, its placed reference, its drive, its held
 /// clips' word, the factor on its particles' size ([`ModelEmitter::size`]), optional
 /// render layer, and optional local space root (e.g. a camera overlay holder).
-type EmitSource = (Entity, Key, f32, Option<u32>, Option<Drive>, Option<HashMap<String, Option<f32>>>, f32, Option<RenderLayers>, Option<Entity>);
+type EmitSource = (Entity, Key, f32, Option<u32>, Option<Drive>, Option<HashMap<String, Option<f32>>>, (f32, bool), Option<RenderLayers>, Option<Entity>);
 
 /// Births: each add-on node in the world emits into the systems of its ADDN, each
 /// model emitter into its file's own.
@@ -934,7 +934,7 @@ fn emit(
                 p.placed_seen.insert(r);
             }
             if part_seen(part) && !hidden(em.age, v) {
-                sources.push((e, Key { source: Source::Addon(em.index), instance: None }, em.age, em.placed, None, None, 1.0, None, None));
+                sources.push((e, Key { source: Source::Addon(em.index), instance: None }, em.age, em.placed, None, None, (1.0, false), None, None));
             }
             em.age += dt;
         }
@@ -980,7 +980,7 @@ fn emit(
         // A held model whose clips switch nothing on costs nothing.
         let idle = em.driven.as_ref().is_some_and(HashMap::is_empty);
         if part_seen(part) && !hidden(em.age, v) && !idle {
-            sources.push((e, Key { source: Source::Model(em.path.clone()), instance }, em.age, em.placed, drive, em.driven.clone(), em.size.max(0.0), em.layer.clone(), em.space_root));
+            sources.push((e, Key { source: Source::Model(em.path.clone()), instance }, em.age, em.placed, drive, em.driven.clone(), (em.size.max(0.0), em.scale_radius_with_holder), em.layer.clone(), em.space_root));
         }
         em.age += dt;
     }
@@ -996,14 +996,14 @@ fn emit(
         order.sort_by(|&a, &b| places[a].translation.distance_squared(eye).total_cmp(&places[b].translation.distance_squared(eye)));
     }
     for i in order {
-        let (_, key, age, placed, drive, driven, size, layer, space_root) = &sources[i];
-        let size = *size;
+        let (_, key, age, placed, drive, driven, (size, scale_radius_with_holder), layer, space_root) = &sources[i];
         let (age, placed) = (*age, *placed);
         let sr = space_root.or_else(|| world_root.map(|(r, _)| r)).expect("source root");
         let rig = drive.as_ref().and_then(|d| rigs.get(d.rig).ok());
         let mut rng = SplitMix(p.rng.0);
         let Some(systems) = systems_of(p, key, sfx.as_deref(), &mut models, &mut commands, sr, key.instance.and_then(|e| idle_rigs.get(e).ok()), layer.as_ref(), space_root.is_some()) else { continue };
         let node = places[i];
+        let size = *size * if *scale_radius_with_holder { frame_scale(&node) } else { 1.0 };
         let mut counts = vec![0u64; systems.len()];
         let mut born = 0;
         if let Some((name, ..)) = drive.as_ref().filter(|d| d.began).and_then(|d| d.playing.as_ref()) {
@@ -1112,10 +1112,9 @@ fn emit(
                     sequence: sequence.map(|s| s.index),
                     age: 0.0,
                     life: (vals.life + vals.life_variation * spread(&mut rng) * 0.5).max(0.02),
-                    // Sized by the reference's scale and the system node's (`spray =
-                    // frame_scale(&node) * d.system_scale`), plus `ModelEmitter::size`
-                    // (particles.md §7.7, #3673; hypothesis pending observer-checks.md item 87).
-                    radius: (vals.radius + vals.radius_variation * spread(&mut rng)).max(0.0) * spray * size,
+                    // The system node sizes the drops. Placed reference scale affects
+                    // the spray but leaves that radius alone (particles.md §3, §7.7).
+                    radius: (vals.radius + vals.radius_variation * spread(&mut rng)).max(0.0) * d.system_scale * size,
                     angle: rot.angle + rot.angle_variation * spread(&mut rng),
                     spin,
                     tex: if d.subtextures.is_empty() { 0 } else { ((rng.next_f32() * d.subtextures.len() as f32) as usize).min(d.subtextures.len() - 1) },
@@ -1530,52 +1529,47 @@ mod tests {
         assert_eq!(frame_scale(&Affine3A::from_scale(Vec3::ZERO)), 1.0);
     }
 
-    /// [hypothesis, #3673] A particle born from a placed reference at scale 0.1 takes
-    /// that reference's scale on its radius (alongside `system_scale` and `ModelEmitter::size`),
-    /// while a scale-1.0 reference keeps the authored radius unchanged.
     #[test]
-    fn a_scaled_reference_sizes_its_born_particles_radius() {
-        let emit_radius = |ref_scale: f32, system_scale: f32, emitter_size: f32| -> f32 {
+    fn placed_scale_leaves_radius_alone_and_grass_fire_radius_stays_linear() {
+        let emit_radius = |holder_scale: f32, emitter_size: f32, grass_fire: bool| {
             let mut s = Scene::emitting(None, Quat::IDENTITY);
             let emitter = s.world.query_filtered::<Entity, With<ModelEmitter>>().single(&s.world).unwrap();
-            *s.world.get_mut::<Transform>(emitter).unwrap() = Transform::from_translation(AHEAD).with_scale(Vec3::splat(ref_scale));
-            s.world.get_mut::<ModelEmitter>(emitter).unwrap().size = emitter_size;
+            *s.world.get_mut::<Transform>(emitter).unwrap() = Transform::from_translation(AHEAD).with_scale(Vec3::splat(holder_scale));
+            {
+                let mut em = s.world.get_mut::<ModelEmitter>(emitter).unwrap();
+                em.size = emitter_size;
+                em.scale_radius_with_holder = grass_fire;
+                if grass_fire {
+                    em.placed = None;
+                }
+            }
             {
                 let mut p = s.world.resource_mut::<Particles>();
-                let live = p.systems.values_mut().flatten().flatten().next().unwrap();
-                live.def.rate = 100.0;
-                live.def.emitter.radius = 2447.5;
+                let (mut key, mut systems) = p.systems.drain().next().unwrap();
+                let live = systems.iter_mut().flatten().next().unwrap();
+                live.def.emitter.radius = 12.0;
                 live.def.emitter.radius_variation = 0.0;
-                live.def.system_scale = system_scale;
+                live.def.system_scale = 0.5;
+                if grass_fire {
+                    key.instance = None;
+                }
+                p.systems.insert(key, systems);
             }
             s.frame(0.05);
-            let live = s.live();
-            assert!(!live.particles.is_empty(), "particles should be born at ref_scale={ref_scale}");
-            let r = live.particles[0].radius;
-            for q in &live.particles {
-                assert!((q.radius - r).abs() < 1e-4, "every born particle shares the zero-variation radius");
-            }
-            r
+            s.live().particles[0].radius
         };
 
-        let at_one = emit_radius(1.0, 1.0, 1.0);
-        assert!((at_one - 2447.5).abs() < 1e-3, "scale 1.0 keeps full radius: {at_one}");
+        // System node scale and the explicit emitter size still apply to placed references.
+        let unscaled = emit_radius(1.0, 0.5, false);
+        assert_eq!(unscaled, 3.0);
+        assert_eq!(emit_radius(0.1, 0.5, false), unscaled);
 
-        let at_tenth = emit_radius(0.1, 1.0, 1.0);
-        assert!((at_tenth - 244.75).abs() < 1e-3, "scale 0.1 scales radius to a tenth: {at_tenth}");
-
-        let combined = emit_radius(0.1, 0.5, 0.5);
-        assert!((combined - 2447.5 * 0.1 * 0.5 * 0.5).abs() < 1e-3, "combines reference, system, and emitter size: {combined}");
-
-        // Grass-fire flames (`grass_fire_fx::flame_scales`) must stay linear in `size * share`
-        // through real `emit` without quadratic double-scaling (#3673).
-        let flame_size = 1.2_f32;
-        let spawn_r = emit_radius(crate::grass_fire_fx::START_SIZE, 1.0, flame_size);
-        assert!((spawn_r - 2447.5 * flame_size * crate::grass_fire_fx::START_SIZE).abs() < 1e-2, "grass-fire spawn radius: {spawn_r}");
-        for share in [crate::grass_fire_fx::START_SIZE, 0.5, 1.0] {
+        let flame_size = 1.2;
+        let start = crate::grass_fire_fx::START_SIZE;
+        assert!((emit_radius(start, flame_size, true) - 6.0 * flame_size * start).abs() < 1e-5);
+        for share in [start, 0.5, 1.0] {
             let (holder, em_size) = crate::grass_fire_fx::flame_scales(flame_size, 1.0, share);
-            let r = emit_radius(holder, 1.0, em_size);
-            assert!((r - 2447.5 * flame_size * share).abs() < 1e-2, "grass-fire radius at share={share}: {r}");
+            assert!((emit_radius(holder, em_size, true) - 6.0 * flame_size * share).abs() < 1e-5);
         }
     }
 

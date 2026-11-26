@@ -6,7 +6,11 @@ tests on scenes it makes itself. **Built: part 1, the ray scene, part 2, the lig
 points of the air, part 3, the volume, and part 4, the fit of its constants.** Nothing in the game
 calls it yet: there is no setting, no upload and no shader. It ships no data.
 
-## The whole
+The direction now is a live solve on the GPU from the first frame of a visit, with this solver as its
+reference ([below](#for-another-tracer-the-live-solve)). "The whole" is the earlier plan, for the CPU
+alone, and is kept for its parts 1 to 4, which both use.
+
+## The whole (the earlier CPU plan)
 
 The bounced light is to take the place of a part of the flat ambient, fitted so that the mean
 brightness of a room stays what it was. Interiors only, off by default, one bounce, no ray tracing hardware. The
@@ -280,11 +284,13 @@ computes:
   that a classifier gives (hits, and hidden sides of them); nothing is lit. With `classified`, the CPU's
   own counts, it is `reach()`'s reach. A classifier's counts that cannot be are the crate's fault.
 - **Light gathered elsewhere, packed as a solve packs it.** `SolvedVolume::of_points` makes the same box,
-  texture and bytes from the same places and moments.
-- **`nvf-rtgi-live`.** The scene, a light and a volume's points as the words a kernel reads, made on any
-  thread. What a shader could not compute as the solver does is refused there with the reason (corners
-  past 1e5, colours or factors past 1e10, texture coordinates past 1e5, lights brighter than 1e6
-  together) and stays the CPU solver's. The kernel, the device side and a runner that compares both
+  texture and bytes from the same places and moments, and refuses what its reader would (a luminance
+  below 0, a box no texture can hold).
+- **`nvf-rtgi-live`.** A solve's inputs packed on the CPU for the future GPU solve: the scene, a light and
+  a volume's points as the words a kernel reads, made on any thread. What a shader could not compute as
+  the solver does is refused there with the reason (corners past 1e5, colours or factors past 1e10, a
+  transformed texture coordinate that could pass 1e5 anywhere between the corners, lights brighter than
+  1e6 together) and stays the CPU solver's. The kernel, the device side and a runner that compares both
   come in the next slices.
 
 Tests hold the seams to the solver on made scenes: a reach by the CPU's counts is `reach()`'s and

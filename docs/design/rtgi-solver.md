@@ -293,7 +293,11 @@ computes:
   the solver does is refused there with the reason (corners past 1e5, colours or factors past 1e10, a
   transformed texture coordinate that could pass 1e5 anywhere between the corners, or one as given past 1e30, lights brighter than
   1e6 together, a surface's albedo past 2^80 on a channel, a lamp's range above 0 below 1e-6, where a device
-  could overflow or drop a decisive subnormal) and stays the CPU solver's.
+  could overflow or drop a decisive subnormal) and stays the CPU solver's. Beyond that the GPU may treat subnormal
+  values (below f32::MIN_POSITIVE) as zero (WGSL allows it): a lamp's contribution below the smallest normal float,
+  and a spot's direction within about 2^-63 units of its lamp, may then be zero on the GPU where the CPU has a
+  subnormal value. The light differs by less than 1.2e-38 and a lamp or shadow-ray count may differ by such lamps;
+  nothing visible changes.
 - **The kernel and its batches (`nvf-rtgi-live`, second slice).** `kernel.wgsl` gathers a point's rays with
   ray queries over one bottom level structure of all triangles (those with an alpha test a geometry of their
   own) and a top level one of it alone, built once for fast tracing, never compacted. Entry points: `solve`

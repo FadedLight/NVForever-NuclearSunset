@@ -45,10 +45,15 @@ const BRIGHT: f32 = 1e6;
 /// is no product that overflows on a device.
 const ALBEDO: f64 = 1_208_925_819_614_629_174_706_176.0; // 2^80
 /// No lamp's range that is above 0 is less. Its square is at least 1e-12; a part of d^2 that a device may take as 0
-/// (a square below 2^-126) then changes neither whether d^2 >= range^2 nor whether the light is 0: where every part
-/// of d^2 is below 2^-60, d^2 < 3 x 2^-60 < range^2 on both sides and 1 - d^2 / range^2 is above 1/4; where one is
-/// 2^-60 or more, half a step of any sum with it is at least 2^-85, and a sum below 2^-100, which is all that holds a
-/// part a device would drop, adds nothing to it on either side.
+/// (a square below 2^-126) then changes neither whether d^2 >= range^2 nor whether the attenuation is 0: where every
+/// part of d^2 is below 2^-60, d^2 < 3 x 2^-60 < range^2 on both sides and 1 - d^2 / range^2 is above 1/4; where one
+/// is 2^-60 or more, half a step of any sum with it is at least 2^-85, and a sum below 2^-100, which is all that holds
+/// a part a device would drop, adds nothing to it on either side.
+///
+/// Beyond these bounds the contract is this: the GPU may treat subnormal values (below f32::MIN_POSITIVE) as zero
+/// (WGSL allows it). A lamp's contribution below the smallest normal float, and a spot's direction within about 2^-63
+/// units of its lamp, may then be zero on the GPU where the CPU has a subnormal value: the light differs by less than
+/// 1.2e-38 and a lamp or shadow-ray count may differ by such lamps. Nothing visible changes.
 const LEAST_RANGE: f32 = 1e-6;
 
 /// The scene's part: what does not change while a room is the same.
@@ -590,12 +595,12 @@ mod tests {
         // The solver's own colour that overflows: black there, refused here.
         let overflow = Material { unlit: true, base: [f32::MAX, 0.5, 0.5, 1.0], ..Material::default() };
         assert!(of(overflow, &|_| ()).is_err() && of(Material::default(), &|m| m.colors = vec![[f32::MAX, 1.0, 1.0, 1.0]; 4]).is_err());
-        // An albedo up to 2^80 and past it: a display colour of 2^25 (2^60 at most, as linear) times a factor a step
-        // below and above 2^20; a factor alone is refused past 1e10 before.
+        // An albedo at 2^80 and past it: a display colour of 2^25 (2^60 at most, as linear) times a factor of 2^20 and
+        // of the float above; a factor alone is refused past 1e10 before.
         let shown = |f: f32| Material { base: [1.0, 1.0, f, 1.0], display_colors: true, ..Material::default() };
         let bright = |m: &mut Mesh| m.colors = vec![[1.0, 1.0, 2f32.powi(25), 1.0]; 4];
-        assert_eq!(of(shown(2f32.powi(20) - 1.0), &bright), Ok(2));
-        assert!(of(shown(2f32.powi(20) + 1.0), &bright).is_err());
+        assert_eq!(of(shown(2f32.powi(20)), &bright), Ok(2));
+        assert!(of(shown(2f32.powi(20).next_up()), &bright).is_err());
         // A coordinate too far, read; one that nothing reads.
         assert!(of(cut(), &|m| m.uv0[0][0] = 2e5).is_err() && of(Material { uv: [[1e6, 0.0, 0.0], [0.0, 1.0, 0.0]], ..cut() }, &|m| m.uv0[0][0] = 1.0).is_err());
         assert_eq!(of(Material { texture: None, ..cut() }, &|m| m.uv0[0][0] = 2e5), Ok(0));

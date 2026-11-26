@@ -374,7 +374,11 @@ fn on(tri: u32, w: vec3<f32>) -> vec3<f32> {
 
 // ---- Lights.
 
-// A lamp's display-value light at a surface, nothing in the way (light.rs `Lamp::light`).
+// A lamp's display-value light at a surface, nothing in the way (light.rs `Lamp::light`). The GPU may treat subnormal
+// values (below f32::MIN_POSITIVE) as zero (WGSL allows it): a lamp's contribution below the smallest normal float, and
+// a spot's direction within about 2^-63 units of its lamp, may then be zero here where the CPU has a subnormal value.
+// The light differs by less than 1.2e-38 and a lamp or shadow-ray count may differ by such lamps; nothing visible
+// changes (tables.rs `LEAST_RANGE`).
 fn lamp_light(l: u32, at: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let range = lf(l + 3u);
     let d = lf3(l) - at;

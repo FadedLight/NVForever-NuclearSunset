@@ -101,7 +101,9 @@ pub fn delete_all(home: &EngineHome) -> Result<Deleted, String> {
 }
 
 /// Removes the summaries not sent yet that were written under one of `ids`; how many of those
-/// could not be removed (a locked or read-only file), which the player is told about.
+/// could not be removed (a file another program holds open, one in a read-only folder), which
+/// the player is told about. A summary that cannot be read is counted too: its ID is unknown,
+/// so it may be one of `ids`, and it is still on disk.
 fn drop_pending(pending: &Path, ids: &[&str]) -> usize {
     let Ok(dir) = std::fs::read_dir(pending) else { return 0 };
     let mut left = 0;
@@ -111,11 +113,15 @@ fn drop_pending(pending: &Path, ids: &[&str]) -> usize {
         if !name.starts_with("session-") || !name.ends_with(".json") {
             continue;
         }
-        let id = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v.get("install_id").and_then(|i| i.as_str()).map(str::to_string));
-        if id.is_some_and(|id| ids.contains(&id.as_str())) && std::fs::remove_file(&path).is_err() && path.exists() {
+        let Some(summary) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else {
+            // Unreadable or not JSON (#4591): it is not removed, so the player hears of it.
+            if path.exists() {
+                left += 1;
+            }
+            continue;
+        };
+        let id = summary.get("install_id").and_then(|i| i.as_str());
+        if id.is_some_and(|id| ids.contains(&id)) && std::fs::remove_file(&path).is_err() && path.exists() {
             left += 1;
         }
     }
@@ -204,6 +210,38 @@ mod tests {
         // Run as root, the folder's mode does not stop the removal: nothing to count then.
         let expected = if pending.join("session-1.json").exists() { 1 } else { 0 };
         assert_eq!(r, Ok(Deleted { ids: 2, left: expected }));
+        let _ = std::fs::remove_dir_all(&h.root);
+    }
+
+    /// #4591 on Windows: a pending report another program holds open without sharing delete
+    /// (the game writing it) is counted. A read-only file is no test there: `remove_file`
+    /// deletes read-only files on Windows (its documentation, "Platform-specific behavior").
+    #[cfg(windows)]
+    #[test]
+    fn a_pending_report_held_open_is_counted() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (url, _) = serve(204);
+        let h = home("held", &url, false);
+        let file = h.reports().join("pending").join("session-1.json");
+        // FILE_SHARE_READ only: others may read it, not delete it.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0x1).open(&file).unwrap();
+        let r = delete_all(&h);
+        drop(held);
+        assert_eq!(r, Ok(Deleted { ids: 2, left: 1 }));
+        assert!(file.exists());
+        let _ = std::fs::remove_dir_all(&h.root);
+    }
+
+    /// #4591: a pending report that cannot be read (its ID unknown) is counted and kept.
+    #[test]
+    fn an_unreadable_pending_report_is_counted() {
+        let (url, _) = serve(204);
+        let h = home("unreadable", &url, false);
+        let file = h.reports().join("pending").join("session-3.json");
+        std::fs::write(&file, b"{\"install_id\":\"ol").unwrap();
+        assert_eq!(delete_all(&h), Ok(Deleted { ids: 2, left: 1 }));
+        assert!(file.exists());
+        assert!(!h.reports().join("pending").join("session-1.json").exists());
         let _ = std::fs::remove_dir_all(&h.root);
     }
 

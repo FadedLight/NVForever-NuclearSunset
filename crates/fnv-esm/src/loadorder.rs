@@ -2,10 +2,15 @@
 //!
 //! A FormID stored in a plugin is *file-local*: its top byte indexes that file's own
 //! master list (MAST order), and the value equal to the master count means "this
-//! file". At runtime the top byte is replaced by the load-order index of the file it
+//! file". At runtime the top byte is replaced by the load-order slot of the file it
 //! refers to. Later files in the load order override earlier definitions of the same
 //! (global) FormID. [documented: UESP "Tes4Mod:Mod File Format", FormID section;
 //! behaviour consistent with every shipped master, observed]
+//!
+//! Global FormIDs are 64 bits (upstream #1758): `(slot << 24) | record`, a 16-bit slot.
+//! Plugin `i` of the load order has slot `i` for `i < 0xFF`; slot 0xFF is the runtime
+//! forms', so plugins from the 256th on take slot `i + 1` [design]. For 255 plugins or
+//! fewer every global ID is the original's 32-bit one.
 
 use crate::plugin::Plugin;
 use crate::raw::{visit_records, Record};
@@ -23,10 +28,46 @@ pub enum LoadOrderError {
     Duplicate(String),
 }
 
+/// The slot of runtime-created forms; never a plugin's.
+pub const DYNAMIC_SLOT: u16 = 0xFF;
+
+/// Plugins one load order can hold: every 16-bit slot but the runtime one.
+pub const MAX_PLUGINS: usize = 0xFFFF;
+
+/// The load-order slot of the plugin at load index `pi` (skips [`DYNAMIC_SLOT`]).
+pub const fn slot_of_index(pi: usize) -> u16 {
+    if pi < DYNAMIC_SLOT as usize {
+        pi as u16
+    } else {
+        (pi + 1) as u16
+    }
+}
+
+/// The load index of the plugin in `slot`, if a plugin can have it.
+pub const fn index_of_slot(slot: u16) -> Option<usize> {
+    if slot < DYNAMIC_SLOT {
+        Some(slot as usize)
+    } else if slot == DYNAMIC_SLOT {
+        None
+    } else {
+        Some(slot as usize - 1)
+    }
+}
+
+/// The slot of a raw global FormID (bits 24-39).
+pub const fn slot_of(global: u64) -> u16 {
+    ((global >> 24) & 0xFFFF) as u16
+}
+
+/// A raw global FormID from a slot and a record number.
+pub const fn make_global(slot: u16, record: u32) -> u64 {
+    ((slot as u64) << 24) | (record & 0x00FF_FFFF) as u64
+}
+
 /// Location of one record definition: (plugin load index, ordinal in that plugin).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DefRef {
-    pub plugin: u8,
+    pub plugin: u16,
     pub ordinal: u32,
 }
 
@@ -38,14 +79,14 @@ pub type Defs = smallvec::SmallVec<[DefRef; 1]>;
 pub struct LoadOrder<'a> {
     pub plugins: &'a [Plugin],
     /// For each plugin, maps its master-list index -> load-order index.
-    master_map: Vec<Vec<u8>>,
+    master_map: Vec<Vec<u16>>,
     /// Records of each plugin in file order.
     pub records: Vec<Vec<&'a Record>>,
     /// Global FormID -> every definition in load order (last one wins).
-    pub index: HashMap<u32, Defs>,
+    pub index: HashMap<u64, Defs>,
     /// Records whose own FormID could not be mapped (none since an out-of-range master
     /// index means the plugin itself; kept for reports).
-    pub unmappable: Vec<(u8, u32)>,
+    pub unmappable: Vec<(u16, u32)>,
 }
 
 impl<'a> LoadOrder<'a> {
@@ -65,7 +106,7 @@ impl<'a> LoadOrder<'a> {
             for mr in &p.header.masters {
                 let ml = mr.name.to_ascii_lowercase();
                 match lower.iter().position(|n| *n == ml) {
-                    Some(j) if j < i => m.push(j as u8),
+                    Some(j) if j < i => m.push(j as u16),
                     Some(_) => {
                         return Err(LoadOrderError::MasterAfterDependent {
                             plugin: p.name.clone(),
@@ -92,7 +133,7 @@ impl<'a> LoadOrder<'a> {
                         // the message's editor ID names nothing [observed: #2276 job B].
                         let defs = lo.index.entry(g).or_default();
                         if defs.last().is_none_or(|d| d.plugin as usize != pi) {
-                            defs.push(DefRef { plugin: pi as u8, ordinal: ord as u32 });
+                            defs.push(DefRef { plugin: pi as u16, ordinal: ord as u32 });
                         }
                     }
                     None => {
@@ -101,7 +142,7 @@ impl<'a> LoadOrder<'a> {
                             form_id = format_args!("{:08X}", r.header.form_id),
                             "FormID's master index is outside this plugin's master list"
                         );
-                        lo.unmappable.push((pi as u8, r.header.form_id))
+                        lo.unmappable.push((pi as u16, r.header.form_id))
                     }
                 }
             }
@@ -116,34 +157,42 @@ impl<'a> LoadOrder<'a> {
     /// the game reads it [observed: capture `l1_oob_formid`, GRA's 0x02000801 placed as
     /// GRA's own; a mod whose own records all carry 0x12 with one master loads them in
     /// the game; docs/spec-notes/esm.md]. So every FormID maps; `None` is kept for callers.
-    pub fn to_global(&self, pi: usize, local: u32) -> Option<u32> {
+    pub fn to_global(&self, pi: usize, local: u32) -> Option<u64> {
         let idx = (local >> 24) as usize;
         let masters = &self.master_map[pi];
-        let target = if idx < masters.len() { masters[idx] } else { pi as u8 };
-        Some(((target as u32) << 24) | (local & 0x00FF_FFFF))
+        let target = if idx < masters.len() { masters[idx] as usize } else { pi };
+        Some(make_global(slot_of_index(target), local))
     }
 
     /// Convert a global FormID into one local to plugin `pi`, if `pi` can refer to it.
-    pub fn to_local(&self, pi: usize, global: u32) -> Option<u32> {
-        let target = (global >> 24) as u8;
-        let low = global & 0x00FF_FFFF;
-        if target as usize == pi {
+    pub fn to_local(&self, pi: usize, global: u64) -> Option<u32> {
+        let target = index_of_slot(slot_of(global))?;
+        if global >> 40 != 0 {
+            return None;
+        }
+        let low = (global & 0x00FF_FFFF) as u32;
+        if target == pi {
             return Some(((self.master_map[pi].len() as u32) << 24) | low);
         }
-        self.master_map[pi].iter().position(|&m| m == target).map(|i| ((i as u32) << 24) | low)
+        self.master_map[pi].iter().position(|&m| m as usize == target).map(|i| ((i as u32) << 24) | low)
+    }
+
+    /// The load index of the plugin a global FormID belongs to, if one is loaded there.
+    pub fn plugin_of(&self, global: u64) -> Option<usize> {
+        index_of_slot(slot_of(global)).filter(|&i| i < self.plugins.len())
     }
 
     /// The winning (last-loaded) definition of a global FormID.
-    pub fn winner(&self, global: u32) -> Option<(&'a Plugin, &'a Record)> {
+    pub fn winner(&self, global: u64) -> Option<(&'a Plugin, &'a Record)> {
         let d = *self.index.get(&global)?.last()?;
         Some((&self.plugins[d.plugin as usize], self.records[d.plugin as usize][d.ordinal as usize]))
     }
 
-    pub fn exists(&self, global: u32) -> bool {
+    pub fn exists(&self, global: u64) -> bool {
         self.index.contains_key(&global)
     }
 
-    pub fn master_map(&self, pi: usize) -> &[u8] {
+    pub fn master_map(&self, pi: usize) -> &[u16] {
         &self.master_map[pi]
     }
 }

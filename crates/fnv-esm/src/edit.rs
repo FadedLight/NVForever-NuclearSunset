@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// A placed reference (load-order FormID) at a new place: game units, radians.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Placement {
-    pub form_id: u32,
+    pub form_id: u64,
     pub pos: [f32; 3],
     pub rot: [f32; 3],
     /// Written Initially Disabled (record flag 0x800 [documented: GECK wiki, Initially
@@ -57,8 +57,8 @@ pub struct Placement {
 /// units) and rotation (radians).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct NewRef {
-    pub base: u32,
-    pub cell: u32,
+    pub base: u64,
+    pub cell: u64,
     pub pos: [f32; 3],
     pub rot: [f32; 3],
 }
@@ -90,7 +90,7 @@ pub struct Written {
     pub new_ids: Vec<u32>,
     /// The same references' load-order FormIDs, once the plugin loads where it already
     /// is, or after the others.
-    pub new_load_ids: Vec<u32>,
+    pub new_load_ids: Vec<u64>,
     pub warnings: Vec<String>,
 }
 
@@ -123,15 +123,16 @@ struct Writer<'l, 'a> {
 
 impl Writer<'_, '_> {
     /// A load-order FormID as the new file writes it.
-    fn new_local(&self, global: u32) -> Result<u32, String> {
-        let t = (global >> 24) as usize;
-        let low = global & 0x00FF_FFFF;
+    fn new_local(&self, global: u64) -> Result<u32, String> {
+        let t = crate::loadorder::index_of_slot(crate::loadorder::slot_of(global)).unwrap_or(usize::MAX);
+        let low = (global & 0x00FF_FFFF) as u32;
         if Some(t) == self.own {
             Ok((self.own_index << 24) | low)
         } else if t < self.n_masters {
             self.used.borrow_mut().insert(t);
             match &self.keep {
-                None => Ok(global),
+                // A file lists at most 255 masters [documented: UESP Mod File Format].
+                None => u32::try_from(t).ok().filter(|&t| t < 0xFF).map(|t| (t << 24) | low).ok_or_else(|| format!("{global:08X} belongs to master {t}, past the 255 a file can list")),
                 Some(k) => k[t].map(|i| (i << 24) | low).ok_or_else(|| format!("{global:08X} belongs to {}, a dropped master", self.lo.plugins[t].name)),
             }
         } else {
@@ -202,7 +203,7 @@ impl Writer<'_, '_> {
     }
 
     /// The winning record of load-order FormID `global`, copied.
-    fn copy_winner(&mut self, global: u32) -> Result<Record, String> {
+    fn copy_winner(&mut self, global: u64) -> Result<Record, String> {
         let d = *self.lo.index.get(&global).and_then(|v| v.last()).ok_or_else(|| format!("{global:08X} is not in the load order"))?;
         let r = self.lo.records[d.plugin as usize][d.ordinal as usize];
         let (h, mut subs) = self.copy(d.plugin as usize, r)?;
@@ -240,7 +241,7 @@ impl Writer<'_, '_> {
 
     /// The chain of groups a new reference in cell `cell` (load-order FormID) goes under:
     /// the cell's own, then its children and temporary children groups.
-    fn new_ref_chain(&mut self, cell: u32) -> Result<Vec<(GroupHeader, Option<Record>)>, String> {
+    fn new_ref_chain(&mut self, cell: u64) -> Result<Vec<(GroupHeader, Option<Record>)>, String> {
         let d = *self.lo.index.get(&cell).and_then(|v| v.last()).ok_or_else(|| format!("cell {cell:08X} is not in the load order"))?;
         let pi = d.plugin as usize;
         let local = self.lo.records[pi][d.ordinal as usize].header.form_id;
@@ -404,7 +405,7 @@ fn write_with(lo: &LoadOrder, schema: &Schema, plugin: &NewPlugin, edits: &[Plac
             return Err("the plugin has no object IDs left".into());
         }
         let form_id = (own_index << 24) | next;
-        new_load_ids.push(((n_masters as u32) << 24) | next);
+        new_load_ids.push(crate::loadorder::make_global(crate::loadorder::slot_of_index(n_masters), next));
         next += 1;
         let mut data = Vec::with_capacity(24);
         for v in n.pos.iter().chain(&n.rot) {

@@ -4,6 +4,7 @@
 mod app;
 pub mod catalog;
 pub mod display;
+pub mod fork;
 #[cfg(feature = "desktop")]
 mod dlss;
 #[cfg(feature = "desktop")]

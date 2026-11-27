@@ -1,6 +1,6 @@
 # NVForever for Nuclear Sunset (FNV + TTW)
 
-This branch is NVForever upstream `main` as of 2026-11-25 (commit `bd0c8f4`, after tag `v0.8.1`;
+This branch is NVForever upstream `main` as of 2026-11-27 (commit `2b7e51a`, after tag `v0.8.1`;
 first built on `v0.8.0`, `6cb47ad`) with local fixes that make the Nuclear Sunset modlist (Fallout: New Vegas + Tale of Two Wastelands, 251 plugins,
 Mod Organizer 2) start and play. The charter in `CLAUDE.md` still holds: clean room, every claim
 tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repository.
@@ -15,7 +15,7 @@ tagged `[documented]`, `[observed]` or `[hypothesis]`, no game data in the repos
 
 1. Have Nuclear Sunset installed through Wabbajack/Mod Organizer 2 as usual (its stock
    game folder, `[NoDelete] Stock New Vegas`, and a profile).
-2. Download the newest `NVForever-NuclearSunset-*.zip` from this fork's
+2. Download the newest `NVForever-ns-*.zip` (before 2026-11-27: `NVForever-NuclearSunset-*.zip`) from this fork's
    [releases](https://github.com/FadedLight/NVForever-NuclearSunset/releases) and unpack it
    anywhere **outside** the game and MO2 folders.
 3. Edit the paths at the top of `Play Nuclear Sunset.cmd` in the zip (your MO2 instance and
@@ -32,9 +32,25 @@ ModOrganizer.exe), pick the profile, **Save**. Play and Continue then start the 
 that profile; MO2 does not need to run. The **Mods** page then lists the profile's mods (with
 MO2's separators) and plugins, read only: reorder them in MO2.
 
+The launcher's **Update** button installs only this fork's releases
+(`NVForever-ns-<date>-x86_64-pc-windows-msvc.zip`), never upstream's. Don't run an upstream
+NVForever launcher from the same folder: its updater puts upstream's files there.
+
 NVForever never writes into the game folder, the MO2 folders or `Documents\My Games\FalloutNV`.
 
 ## Changelog
+
+**2026-11-27** (upstream sync; see "Sync with upstream, 2026-11-27" below)
+- Synced with upstream `main` (577 commits, merged, nothing rewritten). New from upstream
+  among them: Co-op and Photo Mode in the pause menu, the game giving graphics memory back
+  when it runs short, faster terrain, many script and quest fixes.
+- **The launcher no longer swaps itself for upstream's.** Upstream's launcher updates from
+  upstream's releases: on 2026-11-25 its Update button replaced this fork's launcher in a
+  release folder with upstream's, which has no Mod Organizer 2 card (the MO2 settings stayed
+  in `NVForever.ini`, only unread). This fork's launcher now reads only this fork's
+  releases for its update check and Home page news, calls itself "Nuclear Sunset" in its
+  title bar, and numbers itself by the fork's build (`2026.11.27`), so an update can only
+  bring this fork's next build.
 
 **2026-11-25** (after the upstream sync; notes 39–44 in
 [LOCAL-CHANGES.md](docs/nuclear-sunset/LOCAL-CHANGES.md))
@@ -84,6 +100,22 @@ In progress or queued, in order (see LOCAL-CHANGES.md and FIXES.md for what was 
   targets missing, Functional Post Game Ending's "overwritten" notice (a load-order question).
 - **Viewer screenshots** sometimes exit without writing the picture after a long delay (seen
   at 35–60 s); shorter delays work.
+
+## Sync with upstream, 2026-11-27
+
+Upstream `main` (`2b7e51a`, 577 commits past the last sync) was merged in (merge commit, no
+history rewritten). Upstream had taken several of this fork's fixes in its own form, so
+those conflicts were settled in **upstream's code**: the painted-opacity-alone terrain and
+mesh blend (#3789; our note 46), Engine Optimizations / HighResLocalMaps versions and the
+Scaled Recurring Challenges `IsFormValid` fix (#4491; notes 40, 43), the HUD mod-text widths
+(#4493), the Pip-Boy short clip (#4492) and top-level Data files outside the MO2 index.
+**Kept from this fork**: yUI reported at 140 (Quick Select), the Mod List and Bug Log pause
+entries beside upstream's Co-op and Photo Mode, the No Invisible Walls and Outdoor Fog
+Distance rows, the collision view, and the texture size cap beside upstream's new memory
+shedding. Both sides had added `loose_paths_under` (fnv-vfs) and `NEW_GAME_FILES_WAIT`
+(nvf-play); one copy each was kept. The launcher's MO2 profile list now goes through
+upstream's reworked `Layout::open`. Every fork line outside the conflicted files was checked
+to be still in the merged tree (the lesson of the 2026-11-25 merge).
 
 ## Sync with upstream, 2026-11-25
 

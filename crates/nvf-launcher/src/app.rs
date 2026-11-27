@@ -136,7 +136,7 @@ impl Upd {
 fn version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
-        std::env::var("NVF_LAUNCHER_VERSION").ok().filter(|v| update::test_aids() && update::safe_component(v)).unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        std::env::var("NVF_LAUNCHER_VERSION").ok().filter(|v| update::test_aids() && update::safe_component(v)).unwrap_or_else(|| crate::fork::BUILD.to_string())
     })
 }
 
@@ -902,7 +902,7 @@ impl App {
     }
 }
 
-const REPO: &str = "https://github.com/LootJunkieAzza/NVForever";
+const REPO: &str = crate::fork::REPO;
 
 /// How Play Co-Op starts the game: the same program and main menu start as Play, nothing
 /// co-op on the command line, so co-op stays as the game's own Co-op switch has it [design].
@@ -1002,7 +1002,24 @@ fn menu_fits(kind: &menu::Kind, v: &str) -> bool {
     match kind {
         menu::Kind::Switch => matches!(v.trim(), "0" | "1"),
         menu::Kind::Slider { .. } => v.trim().parse::<f32>().is_ok(),
-        menu::Kind::List { choices } => choices.iter().any(|c| c.name == v),
+        menu::Kind::List { choices } => list_choice(choices, v).is_some(),
+    }
+}
+
+/// A list row's choice for the INI's value `v`: by its name, any case, before a `;` (rows
+/// that keep more after their choice, HDR Output's `On;peak=600;paper=80`) [observed: the
+/// owner's NVForever.ini, 2026-11-27: the page showed that row as a text box]. Nuclear
+/// Sunset fork.
+fn list_choice<'a>(choices: &'a [menu::Choice], v: &str) -> Option<&'a menu::Choice> {
+    let head = v.split(';').next().unwrap_or(v).trim();
+    choices.iter().find(|c| c.name == head).or_else(|| choices.iter().find(|c| c.name.eq_ignore_ascii_case(head)))
+}
+
+/// `name` in place of `v`'s choice, keeping what `v` holds after its first `;`.
+fn with_list_choice(v: &str, name: &str) -> String {
+    match v.split_once(';') {
+        Some((_, rest)) => format!("{name};{rest}"),
+        None => name.to_string(),
     }
 }
 
@@ -1033,12 +1050,14 @@ fn menu_control(ui: &mut egui::Ui, key: &str, kind: &menu::Kind, v: &str, contro
             ui.add_sized([control_w, 20.0], s).changed().then(|| part_text(game_fit(f, *min, *step)))
         }
         menu::Kind::List { choices } => {
-            let shown = choices.iter().find(|c| c.name == v).map_or(v.to_string(), |c| c.label.clone());
+            let now = list_choice(choices, v);
+            let shown = now.map_or(v.to_string(), |c| c.label.clone());
             let mut picked = None;
             egui::ComboBox::from_id_salt(key).width(control_w - 8.0).selected_text(shown).show_ui(ui, |ui| {
                 for c in choices {
-                    if ui.selectable_label(c.name == v, &c.label).clicked() && c.name != v {
-                        picked = Some(c.name.clone());
+                    let on = now.is_some_and(|n| n.name == c.name);
+                    if ui.selectable_label(on, &c.label).clicked() && !on {
+                        picked = Some(with_list_choice(v, &c.name));
                     }
                 }
             });
@@ -1164,7 +1183,14 @@ impl App {
             ui.heading("Settings");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let dirty = !self.edits.is_empty();
-                if ui.add_enabled(dirty, gold_button("Save", dirty)).clicked() {
+                // Nuclear Sunset fork: while the game runs, its next settings write puts every
+                // row back as the game holds it (nvf-play settings.rs `store_now` writes all of
+                // them), so a Save here would be lost. Saved once the game has closed.
+                let game_on = self.running();
+                if game_on && dirty {
+                    ui.label(RichText::new("Close the game to save: it rewrites these when it saves its own").small().color(GOLD));
+                }
+                if ui.add_enabled(dirty && !game_on, gold_button("Save", dirty)).clicked() {
                     let r = self.save_settings();
                     self.after_write(r, Some("Settings saved: the game uses them at its next start."));
                 }
@@ -2434,6 +2460,18 @@ fn preview(body: &str, open: bool) -> (&str, bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_list_row_with_more_after_its_choice_keeps_it() {
+        let c = |n: &str| menu::Choice { name: n.into(), label: n.into() };
+        let hdr = vec![c("Off"), c("On")];
+        assert_eq!(list_choice(&hdr, "On;peak=600;paper=80").map(|c| c.name.as_str()), Some("On"));
+        assert_eq!(list_choice(&hdr, "off").map(|c| c.name.as_str()), Some("Off"));
+        assert!(list_choice(&hdr, "Maybe").is_none());
+        assert!(menu_fits(&menu::Kind::List { choices: hdr }, "On;peak=600;paper=80"));
+        assert_eq!(with_list_choice("On;peak=600;paper=80", "Off"), "Off;peak=600;paper=80");
+        assert_eq!(with_list_choice("Quality", "Balanced"), "Balanced");
+    }
+
     use super::*;
 
     /// Azza's review of #3723 item 10: Play Co-Op starts the plain game, as Play's main

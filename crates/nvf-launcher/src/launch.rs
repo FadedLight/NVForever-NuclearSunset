@@ -240,6 +240,10 @@ mod tests {
         let game = root.join("Stock Game");
         let inst = root.join("MO2");
         std::fs::create_dir_all(game.join("Data")).unwrap();
+        // A real instance has these; upstream's `Layout::open` asks for them (2026-11-27 sync).
+        for d in ["mods", "overwrite"] {
+            std::fs::create_dir_all(inst.join(d)).unwrap();
+        }
         for p in ["Default", "Modlist High"] {
             let dir = inst.join("profiles").join(p);
             std::fs::create_dir_all(&dir).unwrap();

@@ -1716,7 +1716,7 @@ pub(crate) mod tests {
     /// view layout 10 with the arrays (shadow maps 2, depth and motion prepasses 2,
     /// transmission 1, sun visibility 2 + 2, ambient occlusion 1), two more with a reflection cube
     /// on a device without binding arrays; StandardMaterial's 8 with `pbr_specular_textures`, the
-    /// NIF material's 12, the folded terrain's 27 with #3322's height maps, drawn where it is bindless
+    /// NIF material's 12, the folded terrain's 28 with #3322's and #3846's height maps, drawn where it is bindless
     /// only (its textures are in binding arrays then), and 10
     /// for the largest material that stays non-bindless when the rest are (the sky's 8 + 2).
     #[test]
@@ -1731,7 +1731,7 @@ pub(crate) mod tests {
         let nif = standard + textures(&unix_lines(include_str!("../../nvf-assets/src/nif_material.rs")), "pub struct NifSurface {", "\n}\n");
         let folded = standard + textures(&unix_lines(include_str!("terrain.rs")), "pub struct TerrainLayers {", "\n}\n");
         let sky = standard + textures(&unix_lines(include_str!("sky.rs")), "pub struct SkyDisplay {", "\n}\n");
-        assert_eq!((standard, nif, folded, sky), (8, 12, 27, 10));
+        assert_eq!((standard, nif, folded, sky), (8, 12, 28, 10));
         // Not bindless: the folded terrain is not drawn; with a reflection cube (no binding arrays)
         // 24 with the arrays, 28 with the margin.
         let others = [nif, standard + 2, standard, sky];
@@ -1743,10 +1743,10 @@ pub(crate) mod tests {
         assert!(CloudVolumeRoom::new(26, FULLEST_VIEW_TEXTURES - REFLECTION_CUBE_TEXTURES, material, false).fits, "the cube takes two of them");
         // Bindless, the cubes in binding arrays: 20 with the arrays, 24 with the margin. A bindless
         // terrain counts with what it keeps outside them.
-        assert_eq!((most_textures((0, true), &[0, 0, 0, sky]), most_textures((folded, true), &others)), (10, 27));
+        assert_eq!((most_textures((0, true), &[0, 0, 0, sky]), most_textures((folded, true), &others)), (10, 28));
         let view = FULLEST_VIEW_TEXTURES - REFLECTION_CUBE_TEXTURES;
         assert!(!CloudVolumeRoom::new(23, view, sky, true).fits && CloudVolumeRoom::new(24, view, sky, true).fits);
-        assert!(CloudVolumeRoom::new(1 << 20, FULLEST_VIEW_TEXTURES, 27, false).fits, "a desktop adapter's limit");
+        assert!(CloudVolumeRoom::new(1 << 20, FULLEST_VIEW_TEXTURES, 28, false).fits, "a desktop adapter's limit");
         // The views that take the arrays are HDR, so none tonemaps in the shader; the cube is
         // counted with the others.
         assert!(fullest_view_key().contains(MeshPipelineViewLayoutKey::ENVIRONMENT_MAP) && !fullest_view_key().contains(MeshPipelineViewLayoutKey::TONEMAP_IN_SHADER));

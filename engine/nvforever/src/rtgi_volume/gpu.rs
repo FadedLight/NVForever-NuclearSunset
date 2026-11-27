@@ -42,6 +42,8 @@ pub(super) struct RtgiGpu {
     pub(super) ended: Option<(Place, Why)>,
     /// The visit whose pipelines the log has.
     told_ready: Option<Place>,
+    /// The cache size when the pipelines for that visit were last all ready.
+    ready_pipeline_count: Option<usize>,
 }
 
 /// The main world's, at the extraction.
@@ -230,6 +232,12 @@ fn reads(descriptor: &PipelineDescriptor) -> bool {
 /// is told by the def alone, so one whose stock twin is broken too counts as well [design].
 fn observe(cache: Res<PipelineCache>, mut state: ResMut<RtgiGpu>) {
     let Some(place) = state.held.as_ref().map(|h| h.key.place).filter(|p| state.ended.is_none_or(|e| e.0 != *p)) else { return };
+    let pipeline_count = cache.pipelines().count();
+    // Shader reloads can requeue the existing pipelines without growing the cache.
+    if state.told_ready == Some(place) && state.ready_pipeline_count == Some(pipeline_count)
+        && cache.waiting_pipelines().next().is_none() {
+        return;
+    }
     let mut n = Pipelines::default();
     for p in cache.pipelines().filter(|p| reads(&p.descriptor)) {
         n.count(&p.state);
@@ -237,10 +245,12 @@ fn observe(cache: Res<PipelineCache>, mut state: ResMut<RtgiGpu>) {
             debug!("rtgi: a pipeline that reads the volume: {e}");
         }
     }
+    let ready = n.there > 0 && n.waiting == 0 && n.failed == 0;
+    state.ready_pipeline_count = ready.then_some(pipeline_count);
     if n.failed > 0 {
         state.ended = Some((place, Why::Failed));
         error!("rtgi: {} pipelines that read the volume failed ({} are there); the stock light in this visit", n.failed, n.there);
-    } else if n.there > 0 && n.waiting == 0 && state.told_ready != Some(place) {
+    } else if ready && state.told_ready != Some(place) {
         state.told_ready = Some(place);
         info!("rtgi: pipelines that read the volume: {} there, 0 to come, 0 failed", n.there);
     }

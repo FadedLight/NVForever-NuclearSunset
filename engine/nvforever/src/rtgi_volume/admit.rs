@@ -98,4 +98,3 @@ impl Asked {
         (self.clouds, self.atlas) == (clouds, atlas)
     }
 }
-

@@ -6180,7 +6180,7 @@ args = ["--cell", "GSGeneralStore", "--play", "--no-voice"]
 run_seconds = 50
 expect = [
   { re = 'Player: .*Legion Denarius x3 at (\d+|0\.\d)', label = "the denarii have a price (their Absolute Value)" },
-  { re = 'menu: figures of 10mm Pistol: DAM \d+, WG [\d.]+, VAL \d+, .*DPS \d+, .*CND', label = "the pistol's figures as the Pip-Boy's: damage, weight, value, DPS, condition" },
+  { re = 'menu: figures of 10mm Pistol: Damage \d+, WEIGHT [\d.]+, Value \d+, .*DPS \d+, .*Condition', label = "the pistol's figures as the Pip-Boy's: damage, weight, value, DPS, condition" },
 ]
 order = [["menu: a script opens the barter menu with 0x00104C79", "menu: figures of 10mm Pistol", "menu: close"]]
 
@@ -6266,7 +6266,7 @@ expect = [
   { text = "tiles: BarterMenu", count = 0, label = "no barter adapter runs" },
   { text = "tiles: QuantityMenu", count = 0, label = "no prompt adapter runs" },
   { text = "tile menu blur:", count = 0, label = "no tile blur" },
-  { re = 'menu: figures of 10mm Pistol: DAM \d+, WG [\d.]+, VAL \d+, .*DPS \d+, .*CND', label = "hand-built item card" },
+  { re = 'menu: figures of 10mm Pistol: Damage \d+, WEIGHT [\d.]+, Value \d+, .*DPS \d+, .*Condition', label = "hand-built item card" },
   { text = "menu: Accept: Traded", count = 1, label = "A accepts once" },
 ]
 order = [["menu: a script opens the barter menu with 0x00104C79", "stock in 0x00104C7A", "Selling 10mm Pistol x1", "Took back 10mm Pistol x1", "menu: Accept: Traded", "menu: close"]]
@@ -27486,7 +27486,7 @@ expect = [
   { re = 'tiles: ContainerMenu drawn from tiles \(\d+ file tiles, [1-9]\d* code tiles\)', label = "the menu's tree draws, with its rows" },
   { text = "tile menu blur: ContainerMenu radius 3", min = 1, label = "the world blurs behind the menu drawn from its tiles" },
   { text = "tile menu blur: off", min = 1, label = "and clears when it closes" },
-  { re = 'tiles: ContainerMenu drawn from tiles: "ITEMS" \d+ rows, "[^"]+" \d+ rows, "Wg   \d+/\d+", player selected "10mm Round \(70\)", figures: .*WEIGHT', label = "the pointer's row: the model's rows, headings, weight and unit figures" },
+  { re = 'tiles: ContainerMenu drawn from tiles: "ITEMS" \d+ rows, "[^"]+" \d+ rows, "Weight   \d+/\d+", player selected "10mm Round \(70\)", figures: .*WEIGHT', label = "the pointer's row: the model's rows, headings, weight and unit figures" },
   { text = "tiles: ContainerMenu Hover(Player, 0) on its tiles", count = 1, label = "the pointer onto a row selects it, once; a resting pointer over changed rows does not" },
   { text = "tiles: ContainerMenu Hover(Container, 0) on its tiles", count = 1, label = "a row of the list without the focus takes the pointer" },
   { text = "tiles: ContainerMenu Select(Player, 0) on its tiles", count = 2, label = "a click on the selected row acts on it" },

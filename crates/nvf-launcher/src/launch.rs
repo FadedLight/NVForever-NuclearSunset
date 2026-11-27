@@ -68,9 +68,71 @@ pub fn find_game(configured: Option<&Path>) -> Option<PathBuf> {
     ["release", "release-quick"].iter().map(|p| root.join("engine").join("target").join(p).join(GAME_EXE)).find(|p| p.is_file())
 }
 
+/// A Mod Organizer 2 instance and profile to play through, as the Game folder page checks
+/// it: the game folder MO2 names, the profiles it has and the chosen one's plugin count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mo2Check {
+    /// The instance's game folder (`gamePath` of its ModOrganizer.ini), the one holding Data.
+    pub game: PathBuf,
+    /// Every profile of the instance, by folder name, sorted.
+    pub profiles: Vec<String>,
+    /// The profile used: the one asked for when it exists, else the instance's selected one.
+    pub profile: String,
+    /// Plugins the profile enables.
+    pub plugins: usize,
+}
+
+/// Check a Mod Organizer 2 instance folder and profile (`profile` empty: the instance's
+/// own selected profile), in words a player can act on when something is wrong.
+pub fn check_mo2(instance: &Path, profile: &str) -> Result<Mo2Check, String> {
+    let ini = std::fs::read_to_string(instance.join(fnv_install::mo2::INI_FILE))
+        .map_err(|_| format!("No ModOrganizer.ini in {}: pick the folder that holds ModOrganizer.exe (a portable instance) or the instance's folder.", instance.display()))?;
+    let game = fnv_install::mo2::ini_game_path(&ini).ok_or("This Mod Organizer 2 instance names no game folder (gamePath).")?;
+    // The profiles folder: the selected profile's parent, else the one upstream's `open`
+    // falls back to (an only or "Default" profile), else the instance's `profiles`.
+    let dir = fnv_install::mo2::Layout::from_ini(instance, &ini)
+        .or_else(|| fnv_install::mo2::Layout::open(instance, None).ok())
+        .and_then(|l| l.profile.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| instance.join("profiles"));
+    let mut profiles: Vec<String> = std::fs::read_dir(dir)
+        .ok()
+        .map(|rd| rd.flatten().filter(|e| e.path().join("modlist.txt").is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    profiles.sort_by_key(|p| p.to_ascii_lowercase());
+    if profiles.is_empty() {
+        return Err("This Mod Organizer 2 instance has no profiles.".into());
+    }
+    let asked = profiles.iter().find(|p| p.eq_ignore_ascii_case(profile.trim())).cloned();
+    let layout = fnv_install::mo2::Layout::open(instance, asked.as_deref()).map_err(|e| e.to_string())?;
+    let plugins = layout.profile_plugins().map(|p| p.len()).unwrap_or(0);
+    if !game.join("Data").is_dir() {
+        return Err(format!("Mod Organizer 2's game folder {} has no Data folder.", game.display()));
+    }
+    Ok(Mo2Check { game, profiles, profile: layout.profile_name(), plugins })
+}
+
+/// The game's arguments for playing through an MO2 instance and profile: its game folder's
+/// Data, the instance and the profile (the engine's `--data`, `--mo2`, `--profile`).
+pub fn mo2_args(instance: &Path, check: &Mo2Check) -> Vec<String> {
+    vec![
+        "--data".into(),
+        check.game.join("Data").display().to_string(),
+        "--mo2".into(),
+        instance.display().to_string(),
+        "--profile".into(),
+        check.profile.clone(),
+    ]
+}
+
 /// Start `exe` with `start`'s arguments, in its own folder (it finds `schemas/` beside itself).
 pub fn spawn(exe: &Path, start: &Start) -> std::io::Result<Child> {
+    spawn_with(exe, start, &[])
+}
+
+/// [`spawn`] with `extra` arguments first (an MO2 instance's, [`mo2_args`]).
+pub fn spawn_with(exe: &Path, start: &Start, extra: &[String]) -> std::io::Result<Child> {
     let mut c = Command::new(exe);
+    c.args(extra);
     c.args(start.args());
     if let Some(dir) = exe.parent() {
         c.current_dir(dir);
@@ -171,6 +233,39 @@ fn open(target: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_mo2_instance_is_checked_and_gives_the_games_arguments() {
+        let root = std::env::temp_dir().join(format!("nvf-launcher-mo2-{}", std::process::id()));
+        let game = root.join("Stock Game");
+        let inst = root.join("MO2");
+        std::fs::create_dir_all(game.join("Data")).unwrap();
+        // A real instance has these; upstream's `Layout::open` asks for them (2026-11-27 sync).
+        for d in ["mods", "overwrite"] {
+            std::fs::create_dir_all(inst.join(d)).unwrap();
+        }
+        for p in ["Default", "Modlist High"] {
+            let dir = inst.join("profiles").join(p);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("modlist.txt"), "+A Mod\n").unwrap();
+            std::fs::write(dir.join("plugins.txt"), "*FalloutNV.esm\n*Mod.esp\n").unwrap();
+        }
+        let doubled = game.display().to_string().replace('\\', "\\\\");
+        std::fs::write(inst.join("ModOrganizer.ini"), format!("[General]\ngamePath=@ByteArray({doubled})\nselected_profile=@ByteArray(Default)\n")).unwrap();
+        // The profile asked for, matched without regard to case; the instance's own otherwise.
+        let c = check_mo2(&inst, "modlist high").unwrap();
+        assert_eq!(c.profile, "Modlist High");
+        assert_eq!(c.profiles, ["Default", "Modlist High"]);
+        assert_eq!(c.game, game);
+        assert_eq!(check_mo2(&inst, "").unwrap().profile, "Default");
+        let args = mo2_args(&inst, &c);
+        assert_eq!(args[0], "--data");
+        assert_eq!(PathBuf::from(&args[1]), game.join("Data"));
+        assert_eq!(&args[2..], ["--mo2".to_string(), inst.display().to_string(), "--profile".into(), "Modlist High".into()]);
+        // A folder that is no instance says so in words a player can act on.
+        assert!(check_mo2(&game, "").unwrap_err().contains("ModOrganizer.ini"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn arguments() {

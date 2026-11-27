@@ -551,12 +551,14 @@ pub struct GenState {
     /// Chunks baked this run, and read from the cache.
     pub baked: usize,
     pub cached: usize,
+    /// Whether chunks were waiting since the last "settled" log line (`poll_generated`).
+    busy: bool,
 }
 
 impl GenState {
     pub fn new(job: GenJob, radius: i32) -> GenState {
         let baker = Baker::new(job.clone(), BAKE_THREADS);
-        GenState { job, radius, baker, pending: HashSet::new(), ready: HashMap::new(), skip: HashSet::new(), baked: 0, cached: 0 }
+        GenState { job, radius, baker, pending: HashSet::new(), ready: HashMap::new(), skip: HashSet::new(), baked: 0, cached: 0, busy: false }
     }
 
     pub fn pending(&self) -> usize {
@@ -1431,6 +1433,14 @@ fn schedule_generated(lod: &mut LodState, centre_chunk: Grid, want: &[Grid]) {
 /// meshes (`update_lod` redraws their chunks, whose keys change).
 fn poll_generated(lod: &mut LodState, models: &mut ModelCtx) {
     let Some(gen) = lod.gen.as_mut() else { return };
+    // One line each time the bakes around the camera are all in, for an area queue
+    // (`results\scratch\area_queue.ps1`) to know an area's generation is done [design:
+    // owner 2026-11-20, "go to one area, do gen, go to next"].
+    if !gen.pending.is_empty() {
+        gen.busy = true;
+    } else if std::mem::take(&mut gen.busy) {
+        info!("generated LOD: settled, {} chunks ready ({} baked this run, {} from the cache), {} skipped", gen.ready.len(), gen.baked, gen.cached, gen.skip.len());
+    }
     let done: Vec<_> = std::iter::from_fn(|| gen.baker.try_recv()).take(BAKES_PER_FRAME).collect();
     for (chunk, _) in &done {
         gen.pending.remove(chunk);

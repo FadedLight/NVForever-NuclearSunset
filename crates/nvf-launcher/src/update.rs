@@ -76,7 +76,9 @@ pub fn choose_asset<'a>(assets: &'a [Asset], tag: &str, target: &str) -> Option<
 }
 
 /// Where this repository's releases keep their files on GitHub.
-pub const REPO_DOWNLOADS: &str = "https://github.com/LootJunkieAzza/NVForever/releases/download/";
+/// Nuclear Sunset fork: this fork's releases, so an update never brings upstream's launcher
+/// back (`fork.rs`).
+pub const REPO_DOWNLOADS: &str = crate::fork::DOWNLOADS;
 
 /// Whether the launcher's test aids work: in tests and debug builds only, never in a release's
 /// launcher (a local release list, a version taken for an older one, plain `http` to this

@@ -144,6 +144,19 @@ impl Owner {
     }
 }
 
+/// A placed reference's collision as one box ([`PhysWorld::ref_boxes`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefBox {
+    pub form_id: u32,
+    /// Corners, game units.
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+    /// One of its bodies is dynamic (loose clutter).
+    pub dynamic: bool,
+    /// The Havok layers of its colliders, sensors included.
+    pub layers: Vec<u8>,
+}
+
 /// An entity in the world, for filters and removal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Key {
@@ -1014,6 +1027,41 @@ impl PhysWorld {
         let k = self.k;
         let colliders = self.refs.get(&form_id)?.iter().filter_map(|&b| self.w.bodies.get(b)).flat_map(|b| b.colliders().iter().copied());
         colliders.filter_map(|c| Some(self.w.colliders.get(c)?.compute_aabb().mins.z / k - self.shell_of(c))).reduce(f32::min)
+    }
+
+    /// Every placed reference with colliders now: its FormID, the box round its solid
+    /// (non-sensor) colliders in game units, whether one of its bodies is dynamic, and the
+    /// Havok layers its colliders are on. Diagnostics: the bug hunter (`nvf-play`
+    /// `bug_hunt.rs`) compares these with the drawn models.
+    pub fn ref_boxes(&self) -> Vec<RefBox> {
+        let k = self.k;
+        let mut out = Vec::with_capacity(self.refs.len());
+        for (&form_id, bodies) in &self.refs {
+            let mut b = RefBox { form_id, min: [f32::MAX; 3], max: [f32::MIN; 3], dynamic: false, layers: Vec::new() };
+            for body in bodies.iter().filter_map(|&h| self.w.bodies.get(h)) {
+                b.dynamic |= body.is_dynamic();
+                for co in body.colliders().iter().filter_map(|&c| self.w.colliders.get(c)) {
+                    if let Some(Owner::Ref { layer, .. }) = Owner::decode(co.user_data) {
+                        if !b.layers.contains(&layer) {
+                            b.layers.push(layer);
+                        }
+                    }
+                    if co.is_sensor() {
+                        continue;
+                    }
+                    let a = co.compute_aabb();
+                    let (lo, hi) = (arr3(a.mins / k), arr3(a.maxs / k));
+                    for i in 0..3 {
+                        b.min[i] = b.min[i].min(lo[i]);
+                        b.max[i] = b.max[i].max(hi[i]);
+                    }
+                }
+            }
+            if b.min[0] <= b.max[0] {
+                out.push(b);
+            }
+        }
+        out
     }
 
     /// Lift every body of a reference by `dz` game units, as a placement (a teleport: each

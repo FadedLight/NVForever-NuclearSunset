@@ -61,6 +61,32 @@
 //! [`TELL_SHARE`] of the GPU budget the player gets a corner message that the graphics
 //! memory is almost full, and the log a line.
 //!
+//! **The texture size cap** ([`TEXTURE_CAPS`]) is the settings page's Texture size limit row
+//! too ([`TEXTURE_LIMIT_KEY`]: Auto, 2048, 1024, Off) [design: owner 2026-11-20]; the row logs
+//! `memory budget: texture size limit <choice>: …` when taken, and [`TEXTURE_CAP_ENV`], when
+//! set, decides the run over it.
+//! **Giving memory back** [design, #2754: an 8 GB RTX 4060 at 2560x1440 with 4096 shadow
+//! maps held 7,037 MB of a 6,844 MB budget and stalled 1-2 s at a time; #3349: a GTX 1080
+//! at 3840x2160 with 8x multisampling went past its budget and lost the device]. The caches
+//! cannot give back what the allocator keeps (#898), but the largest single textures can:
+//! the sun's shadow maps (a 4096² layer is 64 MiB against 16 MiB at 2048², five layers by
+//! day in first person) and the multisampled view targets (each sample is a full-size
+//! colour and depth target). Textures larger than the allocator's blocks get allocations
+//! of their own from the driver, so dropping them returns their memory [observed:
+//! `gpu-sheds-over-budget`, 2026-11-25: 4096 to 2048 maps took the use from 1,444 to
+//! 1,204 MB]; smaller ones go back into blocks the allocator keeps (#898) and return
+//! nothing. At 1920x1080 the steps gave back 240 MB (maps), 128 MB (8x to 4x) and 0 MB
+//! (4x to 2x); at 1280x720 the multisampling steps gave back 0-1 MB. The last step is kept
+//! for larger windows (a 4x target at 2560x1440 is past the largest block) [hypothesis]. When this process holds over
+//! [`SHED_SHARE`] of the GPU budget at [`SHED_AFTER_CHECKS`] checks in a row, one step of
+//! [`next_shed`] is taken (shadow maps 4096 to 2048, then multisampling 8x to 4x, then 4x
+//! to 2x), at most one every [`SHED_WAIT_SECS`]; each is logged with the use before, the
+//! next check logs the use after, and the player is told in a corner message what was
+//! lowered. The change is made as the settings page's own rows make it, so the page shows
+//! the lower value; it is kept in `NVForever.ini` only if the player saves the settings
+//! page afterwards [design: on that card the lower value is the one that fits]. Nothing
+//! is raised again in the run.
+//!
 //! Test aids, since there is no small machine to test on: `NVF_PLAY_TEST_VRAM_MB=<MB>` and
 //! `NVF_PLAY_TEST_RAM_MB=<MB>` take the GPU budget and the RAM as at most that (the RAM's
 //! free part shrinks by what was taken off).
@@ -101,8 +127,247 @@ pub const LARGE_BLOCKS_VRAM_MB: u64 = 6 * 1024;
 pub const TELL_SHARE: f64 = 0.95;
 /// What the player is told (a corner message).
 pub const TELL_TEXT: &str = "Graphics memory is almost full. If the game stutters or stops, lower the graphics settings.";
+/// The share of the GPU budget held over which a step of [`next_shed`] is taken [design:
+/// the same share at which the player is told].
+pub const SHED_SHARE: f64 = TELL_SHARE;
+/// Checks in a row (2 s apart) over [`SHED_SHARE`], with no loading screen up, before a
+/// step is taken [design: a moment's peak, such as a load, does not lower anything].
+pub const SHED_AFTER_CHECKS: u32 = 2;
+/// The least time between two steps, seconds [design: the memory of the step before is
+/// back by then; checked in `gpu-sheds-over-budget`].
+pub const SHED_WAIT_SECS: f64 = 10.0;
+
+/// A step that gives GPU memory back (module notes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shed {
+    /// The sun's shadow maps (and the other maps the Shadow resolution row sizes) from
+    /// 4096² to 2048².
+    Shadows,
+    /// Multisampling from 8x to 4x.
+    Msaa8,
+    /// Multisampling from 4x to 2x.
+    Msaa4,
+}
+
+impl Shed {
+    /// What the log and the player are told was lowered.
+    pub fn what(self) -> &'static str {
+        match self {
+            Shed::Shadows => "shadow resolution lowered to 2048",
+            Shed::Msaa8 => "anti-aliasing lowered to 4x",
+            Shed::Msaa4 => "anti-aliasing lowered to 2x",
+        }
+    }
+}
+
+/// The next step that gives memory back: the shadow maps' side now, and the multisampling
+/// drawn (`None` while the anti-aliasing is done after the picture or by an upscaler,
+/// where the samples are not drawn and lowering them gives nothing back).
+pub fn next_shed(shadow_side: usize, msaa_drawn: Option<bevy::render::view::Msaa>) -> Option<Shed> {
+    use bevy::render::view::Msaa;
+    if shadow_side > 2048 {
+        return Some(Shed::Shadows);
+    }
+    match msaa_drawn {
+        Some(Msaa::Sample8) => Some(Shed::Msaa8),
+        Some(Msaa::Sample4) => Some(Shed::Msaa4),
+        _ => None,
+    }
+}
+
+/// Take the next step of [`next_shed`] in `world`, if there is one, as the settings
+/// page's rows would.
+fn shed_one(world: &mut World) -> Option<Shed> {
+    use crate::graphics::{self, ScreenAa};
+    use bevy::render::view::Msaa;
+    let side = crate::sky::map_side(world.get_resource::<bevy::light::DirectionalLightShadowMap>());
+    let samples_drawn = world.get_resource::<graphics::Graphics>().is_some_and(|g| g.screen_aa == ScreenAa::Off) && !crate::upscaler::temporal_active(world);
+    let drawn = world.get_resource::<graphics::MsaaSetting>().map(|m| m.0).filter(|_| samples_drawn);
+    let step = next_shed(side, drawn)?;
+    match step {
+        Shed::Shadows => graphics::set_shadow_resolution_choice(world, 0),
+        Shed::Msaa8 | Shed::Msaa4 => {
+            let to = if step == Shed::Msaa8 { Msaa::Sample4 } else { Msaa::Sample2 };
+            let i = graphics::AA_CHOICES.iter().position(|&(_, a, m)| a == ScreenAa::Off && m == to)?;
+            graphics::set_aa_choice(world, i);
+        }
+    }
+    Some(step)
+}
+
 /// Says which blocks to ask for (`large` or `small`), whatever the budget.
 pub const BLOCKS_ENV: &str = "NVF_GPU_BLOCKS";
+
+/// The texture side caps the budget steps down through while this process holds more than
+/// [`GPU_PRESSURE`]`.0` of the GPU budget (`nvf_assets::texture::set_max_texture_side`):
+/// textures loaded from then on leave out their mip levels larger than the cap. Pressing the
+/// caches alone does not lower the use (the allocator keeps emptied blocks, #898), so the new
+/// loads must be smaller. [observed 2026-11-20: Nuclear Sunset at 4K outdoors held 7673 MB
+/// of a 6085 MB budget on an 8 GB card; every GPU pass slowed, FSR's fixed-cost pass from
+/// 4 ms to 164 ms, 3-7 FPS] [design: 1024 is the floor, the base game's own largest
+/// textures are 1024-2048]
+pub const TEXTURE_CAPS: [u32; 2] = [2048, 1024];
+/// Seconds between two steps down, so the caches' releases can show first [design].
+pub const TEXTURE_CAP_STEP_SECS: f64 = 20.0;
+/// The share of the GPU budget held at which the cap steps down: before [`GPU_PRESSURE`]`.0`,
+/// where the caches start dropping textures (seen in play as gray, untextured surfaces).
+/// [observed 2026-11-20: Nuclear Sunset outdoors, the caches pressed at 0.94 and the owner saw
+/// gray textures; with a 1024 cap from the start the run held at most 3844 of 7239 MB]
+pub const TEXTURE_CAP_SHARE: f64 = 0.70;
+/// A GPU budget under this starts with a 2048 cap [design: an 8 GB card reads a 5.6-7.4 GB
+/// budget; Nuclear Sunset at full size needed about 7.7 GB].
+pub const SMALL_GPU_BUDGET_MB: u64 = 10 * 1024;
+
+/// The cap a run starts with: what [`TEXTURE_CAP_ENV`] says, else 2048 on a GPU budget under
+/// [`SMALL_GPU_BUDGET_MB`], else none.
+pub fn start_texture_cap(said: u32, auto: bool, vram_mb: Option<u64>) -> u32 {
+    if said > 0 {
+        said
+    } else if auto && vram_mb.is_some_and(|mb| mb < SMALL_GPU_BUDGET_MB) {
+        TEXTURE_CAPS[0]
+    } else {
+        0
+    }
+}
+
+/// `NVF_TEXTURE_CAP=<side>` starts with that cap (the steps may still lower it);
+/// `NVF_TEXTURE_CAP=off` turns the automatic cap off.
+pub const TEXTURE_CAP_ENV: &str = "NVF_TEXTURE_CAP";
+
+/// The cap to step down to at this share of the GPU budget held, from `current` (0: none);
+/// `None` to stay.
+pub fn next_texture_cap(current: u32, share: f64) -> Option<u32> {
+    if share <= TEXTURE_CAP_SHARE {
+        return None;
+    }
+    TEXTURE_CAPS.iter().copied().find(|&c| current == 0 || c < current)
+}
+
+/// What [`TEXTURE_CAP_ENV`] says: the starting cap (0: none) and whether the steps run.
+pub fn texture_cap_setting(said: Option<&str>) -> (u32, bool) {
+    match said.map(str::trim) {
+        Some(s) if s.eq_ignore_ascii_case("off") => (0, false),
+        Some(s) => (s.parse::<u32>().ok().filter(|n| *n >= 256).unwrap_or(0), true),
+        None => (0, true),
+    }
+}
+
+/// Whether [`TEXTURE_CAP_ENV`] decides this run's cap instead of the settings page's Texture
+/// size limit row: set to anything but blanks.
+pub fn texture_env_decides(said: Option<&str>) -> bool {
+    said.is_some_and(|s| !s.trim().is_empty())
+}
+
+/// The settings page's Texture size limit row (Graphics › Detail and Distance) [design: owner
+/// 2026-11-20, "make it more human friendly to work on these games, add more settings and stuff
+/// in-game"; the cap above was reachable only through [`TEXTURE_CAP_ENV`]]: the same cap, chosen
+/// in the game and kept in `NVForever.ini` `[Settings]` like every row (as its choice's name,
+/// `texture-size-limit=1024`). A choice acts on the textures loaded from then on
+/// (`nvf_assets::texture::set_max_texture_side`): those already on the GPU keep their size until
+/// their cache lets them go, so it applies in full at the next load or start (loading a save
+/// starts the game again, handoff.rs). While [`TEXTURE_CAP_ENV`] is set the variable decides the
+/// run and the row is greyed; the row's own choice is kept for the runs without it.
+pub const TEXTURE_LIMIT_KEY: &str = "texture-size-limit";
+/// The row's note (within `nvf_play::settings::NOTE_BUDGET`).
+pub const TEXTURE_LIMIT_NOTE: &str = "Largest texture size loaded. Auto: 2048 on cards under 10 GB, lower when graphics memory runs short. Off: full size. New textures at once, all after a load.";
+/// What the row shows while [`TEXTURE_CAP_ENV`] decides.
+pub const TEXTURE_LIMIT_ENV_STATUS: &str = "Set by NVF_TEXTURE_CAP for this run.";
+
+/// The Texture size limit row's choices, by the names the page and the INI use
+/// ([`TextureLimit::name`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextureLimit {
+    /// As without the row: 2048 on a GPU budget under [`SMALL_GPU_BUDGET_MB`], none above, and
+    /// the steps down under pressure ([`next_texture_cap`]).
+    #[default]
+    Auto,
+    /// At most 2048 pixels a side from the start; the step down to 1024 still guards a full GPU
+    /// memory, as with `NVF_TEXTURE_CAP=2048`.
+    Cap2048,
+    /// At most 1024 (the steps' floor), as with `NVF_TEXTURE_CAP=1024`.
+    Cap1024,
+    /// No cap and no steps: every texture at its full size, as with `NVF_TEXTURE_CAP=off`.
+    Off,
+}
+
+impl TextureLimit {
+    pub const ALL: [TextureLimit; 4] = [TextureLimit::Auto, TextureLimit::Cap2048, TextureLimit::Cap1024, TextureLimit::Off];
+
+    /// The name on the page and in the INI.
+    pub fn name(self) -> &'static str {
+        match self {
+            TextureLimit::Auto => "Auto",
+            TextureLimit::Cap2048 => "2048",
+            TextureLimit::Cap1024 => "1024",
+            TextureLimit::Off => "Off",
+        }
+    }
+
+    /// The choice an INI text names (any case, blanks around it); `None`: not one.
+    pub fn parse(text: &str) -> Option<TextureLimit> {
+        let t = text.trim();
+        TextureLimit::ALL.into_iter().find(|l| l.name().eq_ignore_ascii_case(t))
+    }
+
+    /// The cap to set (0: none) and whether the steps run, on a GPU budget of `vram_mb`: what
+    /// [`start_texture_cap`] gives for the variable's same words.
+    pub fn cap(self, vram_mb: Option<u64>) -> (u32, bool) {
+        match self {
+            TextureLimit::Auto => (start_texture_cap(0, true, vram_mb), true),
+            TextureLimit::Cap2048 => (TEXTURE_CAPS[0], true),
+            TextureLimit::Cap1024 => (TEXTURE_CAPS[1], true),
+            TextureLimit::Off => (0, false),
+        }
+    }
+}
+
+/// Take the Texture size limit row's choice `limit`: kept on [`MemoryBudget`], and the cap it
+/// gives set for the textures loaded from now on, unless [`TEXTURE_CAP_ENV`] decides this run.
+fn take_texture_limit(world: &mut World, limit: TextureLimit) {
+    let Some(mut budget) = world.get_resource_mut::<MemoryBudget>() else { return };
+    budget.texture_limit = limit;
+    if budget.texture_env {
+        info!("memory budget: texture size limit {} kept for the runs without {TEXTURE_CAP_ENV}, which decides this one", limit.name());
+        return;
+    }
+    let (cap, auto) = limit.cap(budget.vram_mb);
+    budget.auto_texture_cap = auto;
+    nvf_assets::texture::set_max_texture_side(cap);
+    let size = if cap > 0 { format!("at most {cap} pixels a side") } else { "at full size".to_string() };
+    info!("memory budget: texture size limit {}: textures loaded from now on {size}; the automatic step down is {}", limit.name(), if auto { "on" } else { "off" });
+}
+
+fn texture_limit_chosen(w: &World) -> String {
+    w.get_resource::<MemoryBudget>().map_or(TextureLimit::Auto, |b| b.texture_limit).name().to_string()
+}
+
+fn pick_texture_limit(w: &mut World, text: &str) -> bool {
+    let Some(limit) = TextureLimit::parse(text) else { return false };
+    take_texture_limit(w, limit);
+    true
+}
+
+/// List the Texture size limit row ([`TEXTURE_LIMIT_KEY`]) under `group`, with
+/// [`MemoryBudgetPlugin`] in the app.
+pub fn register_setting(app: &mut App, group: &'static str) {
+    use nvf_play::settings::{add_choice_list, set_disabled_status, ChoiceList, Setting};
+    if !app.world().contains_resource::<MemoryBudget>() {
+        return;
+    }
+    add_choice_list(
+        app,
+        Setting { key: TEXTURE_LIMIT_KEY, group, label: "Texture size limit", note: TEXTURE_LIMIT_NOTE, switches: "", get: |_| false, set: |_, _| {}, slider: None },
+        ChoiceList {
+            names: |_| TextureLimit::ALL.iter().map(|l| l.name().to_string()).collect(),
+            chosen: texture_limit_chosen,
+            pick: pick_texture_limit,
+            save: texture_limit_chosen,
+            load: pick_texture_limit,
+            ask_keep: false,
+        },
+    );
+    set_disabled_status(app, TEXTURE_LIMIT_KEY, |w| w.get_resource::<MemoryBudget>().is_some_and(|b| b.texture_env).then_some(TEXTURE_LIMIT_ENV_STATUS));
+}
 
 /// Which blocks the GPU allocator is asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +460,23 @@ pub struct MemoryBudget {
     told: bool,
     /// The most of the GPU budget this process held at a check, MB.
     vram_peak_mb: u64,
+    /// Whether the texture cap steps down on its own ([`TEXTURE_CAPS`]).
+    auto_texture_cap: bool,
+    /// When the texture cap last stepped down (real seconds).
+    texture_cap_at: f64,
+    /// The settings page's Texture size limit ([`TextureLimit`]), kept for the runs without
+    /// [`TEXTURE_CAP_ENV`].
+    pub texture_limit: TextureLimit,
+    /// [`TEXTURE_CAP_ENV`] was set at the start: it decides this run's cap, not the row.
+    texture_env: bool,
+    /// Checks in a row over [`SHED_SHARE`].
+    over_checks: u32,
+    /// When the last step that gave memory back was taken (real seconds).
+    shed_at: Option<f64>,
+    /// The steps taken, in order.
+    pub shed: Vec<Shed>,
+    /// The step just taken and the use before it (MB), said with the next check's use.
+    shed_before: Option<(Shed, u64)>,
 }
 
 pub struct MemoryBudgetPlugin;
@@ -530,7 +812,35 @@ fn read_budgets(mut commands: Commands, device: Option<Res<RenderDevice>>, adapt
     }
     let vram_use_mb = vram.as_ref().ok().and_then(|v| v.used_mb.map(|used| (used, vram_mb.unwrap_or(v.budget_mb))));
     let ram_in_use = ram.map(|r| ram_share(r, aid_ram));
-    *budget = MemoryBudget { vram_mb, vram_use_mb, ram_share: ram_in_use, aid_vram, aid_ram, base, pressed: false, told: false, vram_peak_mb: vram_use_mb.map_or(0, |u| u.0) };
+    let said_env = std::env::var(TEXTURE_CAP_ENV).ok();
+    let (said_cap, auto_texture_cap) = texture_cap_setting(said_env.as_deref());
+    let start_cap = start_texture_cap(said_cap, auto_texture_cap, vram_mb);
+    if start_cap > 0 {
+        nvf_assets::texture::set_max_texture_side(start_cap);
+        let why = if said_cap > 0 { TEXTURE_CAP_ENV.to_string() } else { format!("GPU budget under {SMALL_GPU_BUDGET_MB} MB") };
+        info!("memory budget: textures at most {start_cap} pixels a side ({why})");
+    }
+    if !auto_texture_cap {
+        info!("memory budget: the automatic texture cap is off ({TEXTURE_CAP_ENV}=off)");
+    }
+    *budget = MemoryBudget {
+        vram_mb,
+        vram_use_mb,
+        ram_share: ram_in_use,
+        aid_vram,
+        aid_ram,
+        base,
+        pressed: false,
+        told: false,
+        vram_peak_mb: vram_use_mb.map_or(0, |u| u.0),
+        auto_texture_cap,
+        texture_cap_at: f64::NEG_INFINITY,
+        // The row's choice comes from the INI after this (`nvf_play::settings::apply_stored`,
+        // PostStartup); until then the start's, as without the row.
+        texture_limit: budget.texture_limit,
+        texture_env: texture_env_decides(said_env.as_deref()),
+        ..default()
+    };
     commands.insert_resource(base);
 }
 
@@ -542,7 +852,7 @@ fn watch_use(
     adapter: Option<Res<RenderAdapterInfo>>,
     mut budget: ResMut<MemoryBudget>,
     mut limits: ResMut<KeepLimits>,
-    mut corner: Option<ResMut<nvf_play::corner_messages::CornerMessages>>,
+    (mut corner, mut commands, loading): (Option<ResMut<nvf_play::corner_messages::CornerMessages>>, Commands, Option<Res<nvf_play::loading::Loading>>),
     mut last: Local<f64>,
 ) {
     let now = real.elapsed_secs_f64();
@@ -562,12 +872,38 @@ fn watch_use(
         let share = used as f64 / b.max(1) as f64;
         shares.push((share, GPU_PRESSURE));
         budget.vram_peak_mb = budget.vram_peak_mb.max(used);
+        if budget.auto_texture_cap && now - budget.texture_cap_at >= TEXTURE_CAP_STEP_SECS {
+            if let Some(cap) = next_texture_cap(nvf_assets::texture::max_texture_side(), share) {
+                nvf_assets::texture::set_max_texture_side(cap);
+                budget.texture_cap_at = now;
+                warn!("memory budget: GPU memory short ({used} of {b} MB): textures loaded from now on are at most {cap} pixels a side (their larger mip levels left out)");
+            }
+        }
         if share > TELL_SHARE && !budget.told {
             budget.told = true;
             warn!("memory budget: the GPU memory is almost full (this process holds {used} of {b} MB); the player is told once");
             if let Some(c) = corner.as_mut() {
                 c.push(TELL_TEXT.to_string().into());
             }
+        }
+        if let Some((step, before)) = budget.shed_before.take() {
+            info!("memory budget: after {} this process holds {used} of {b} MB (it held {before} MB)", step.what());
+        }
+        // A loading screen's peak (the cells and pipelines coming in) does not count.
+        let loading_now = loading.as_deref().is_some_and(nvf_play::loading::Loading::active);
+        budget.over_checks = if share > SHED_SHARE && !loading_now { budget.over_checks + 1 } else { 0 };
+        if budget.over_checks >= SHED_AFTER_CHECKS && budget.shed_at.is_none_or(|t| now - t >= SHED_WAIT_SECS) {
+            budget.shed_at = Some(now);
+            commands.queue(move |world: &mut World| {
+                let Some(step) = shed_one(world) else { return };
+                warn!("memory budget: over {:.0} % of the GPU budget ({used} of {b} MB) at {SHED_AFTER_CHECKS} checks in a row: {} to give memory back", SHED_SHARE * 100.0, step.what());
+                let mut m = world.resource_mut::<MemoryBudget>();
+                m.shed.push(step);
+                m.shed_before = Some((step, used));
+                if let Some(mut c) = world.get_resource_mut::<nvf_play::corner_messages::CornerMessages>() {
+                    c.push(format!("Graphics memory is full: {}.", step.what()).into());
+                }
+            });
         }
     }
     if let Some(r) = ram {
@@ -596,6 +932,118 @@ fn say_peak(mut exit: MessageReader<AppExit>, budget: Res<MemoryBudget>) {
     }
     if let Some((_, b)) = budget.vram_use_mb {
         info!("memory budget: this process held at most {} of the {b} MB GPU budget in this run", budget.vram_peak_mb);
+    }
+}
+
+#[cfg(test)]
+mod texture_cap_tests {
+    use super::{next_texture_cap, start_texture_cap, texture_cap_setting};
+
+    #[test]
+    fn small_gpus_start_capped_and_the_setting_wins() {
+        assert_eq!(start_texture_cap(0, true, Some(7366)), 2048);
+        assert_eq!(start_texture_cap(0, true, Some(16000)), 0);
+        assert_eq!(start_texture_cap(0, true, None), 0);
+        assert_eq!(start_texture_cap(1024, true, Some(16000)), 1024);
+        assert_eq!(start_texture_cap(0, false, Some(4000)), 0);
+    }
+
+    #[test]
+    fn the_texture_cap_steps_down_under_pressure_to_a_floor() {
+        assert_eq!(next_texture_cap(0, 0.65), None);
+        assert_eq!(next_texture_cap(0, 0.75), Some(2048));
+        assert_eq!(next_texture_cap(0, 0.90), Some(2048));
+        assert_eq!(next_texture_cap(2048, 0.90), Some(1024));
+        assert_eq!(next_texture_cap(1024, 0.99), None);
+        // A start cap set by hand under the floor is not raised.
+        assert_eq!(next_texture_cap(512, 0.99), None);
+        assert_eq!(next_texture_cap(4096, 0.90), Some(2048));
+    }
+
+    #[test]
+    fn the_texture_cap_setting_reads_off_a_side_or_nothing() {
+        assert_eq!(texture_cap_setting(None), (0, true));
+        assert_eq!(texture_cap_setting(Some("off")), (0, false));
+        assert_eq!(texture_cap_setting(Some(" 2048 ")), (2048, true));
+        assert_eq!(texture_cap_setting(Some("12")), (0, true));
+        assert_eq!(texture_cap_setting(Some("junk")), (0, true));
+    }
+
+    /// The Texture size limit row's choices [design: owner 2026-11-20]: each name reads back,
+    /// and each gives the cap the variable's same words give.
+    #[test]
+    fn the_texture_size_limit_row_gives_the_variables_caps() {
+        use super::TextureLimit;
+        for l in TextureLimit::ALL {
+            assert_eq!(TextureLimit::parse(l.name()), Some(l));
+        }
+        assert_eq!(TextureLimit::parse(" off "), Some(TextureLimit::Off));
+        assert_eq!(TextureLimit::parse("AUTO"), Some(TextureLimit::Auto));
+        assert_eq!(TextureLimit::parse("512"), None, "not one of the row's");
+        assert_eq!(TextureLimit::Auto.cap(Some(7366)), (2048, true), "an 8 GB card's budget");
+        assert_eq!(TextureLimit::Auto.cap(Some(16000)), (0, true));
+        assert_eq!(TextureLimit::Cap2048.cap(Some(16000)), (2048, true));
+        assert_eq!(TextureLimit::Cap1024.cap(None), (1024, true));
+        assert_eq!(TextureLimit::Off.cap(Some(4000)), (0, false));
+        for (l, words) in [(TextureLimit::Cap2048, "2048"), (TextureLimit::Cap1024, "1024"), (TextureLimit::Off, "off")] {
+            let (said, auto) = texture_cap_setting(Some(words));
+            assert_eq!(l.cap(Some(7366)), (start_texture_cap(said, auto, Some(7366)), auto), "{words}");
+        }
+        assert_eq!(TextureLimit::default(), TextureLimit::Auto, "the row starts as the game did without it");
+    }
+
+    /// The row is a list of four (never a slider: 7 or fewer values), its note within the
+    /// page's budget, kept as its choice's name.
+    #[test]
+    fn the_texture_size_limit_row_is_a_list_within_the_note_budget() {
+        use super::{register_setting, MemoryBudget, TEXTURE_LIMIT_KEY, TEXTURE_LIMIT_NOTE};
+        use bevy::prelude::App;
+        assert_eq!(nvf_play::settings::note_over_budget(TEXTURE_LIMIT_NOTE), None);
+        let mut app = App::new();
+        register_setting(&mut app, "Graphics");
+        assert!(!app.world().contains_resource::<nvf_play::settings::Settings>(), "no row without the budget");
+        app.init_resource::<MemoryBudget>();
+        register_setting(&mut app, "Graphics");
+        let settings = app.world().resource::<nvf_play::settings::Settings>();
+        let i = settings.index(TEXTURE_LIMIT_KEY).unwrap();
+        let list = settings.choices(i).expect("a list");
+        assert_eq!((list.names)(app.world()), ["Auto", "2048", "1024", "Off"]);
+        assert_eq!((list.save)(app.world()), "Auto");
+        assert_eq!(settings.disabled_status(app.world(), i), None, "not greyed without the variable");
+    }
+
+    #[test]
+    fn the_variable_decides_only_when_it_says_something() {
+        use super::texture_env_decides;
+        assert!(!texture_env_decides(None));
+        assert!(!texture_env_decides(Some("  ")));
+        assert!(texture_env_decides(Some("off")));
+        assert!(texture_env_decides(Some("1024")));
+    }
+
+    /// A choice sets the cap at once (for the textures loaded next) unless the variable decides
+    /// the run; the choice is kept either way. The cap is one global, so this is its only test.
+    #[test]
+    fn a_choice_sets_the_cap_unless_the_variable_decides() {
+        use super::{pick_texture_limit, texture_limit_chosen, MemoryBudget, TextureLimit};
+        use bevy::prelude::World;
+        let mut w = World::new();
+        w.insert_resource(MemoryBudget { vram_mb: Some(7366), auto_texture_cap: true, ..Default::default() });
+        assert!(pick_texture_limit(&mut w, "Off"));
+        assert_eq!(nvf_assets::texture::max_texture_side(), 0);
+        assert!(!w.resource::<MemoryBudget>().auto_texture_cap, "Off stops the steps");
+        assert!(pick_texture_limit(&mut w, "1024"));
+        assert_eq!(nvf_assets::texture::max_texture_side(), 1024);
+        assert!(pick_texture_limit(&mut w, "auto"));
+        assert_eq!(nvf_assets::texture::max_texture_side(), 2048, "Auto on an 8 GB card");
+        assert!(w.resource::<MemoryBudget>().auto_texture_cap);
+        assert_eq!(texture_limit_chosen(&w), "Auto");
+        assert!(!pick_texture_limit(&mut w, "huge"));
+        w.resource_mut::<MemoryBudget>().texture_env = true;
+        assert!(pick_texture_limit(&mut w, "Off"));
+        assert_eq!(nvf_assets::texture::max_texture_side(), 2048, "the variable's run keeps its cap");
+        assert_eq!(w.resource::<MemoryBudget>().texture_limit, TextureLimit::Off, "kept for the runs without it");
+        nvf_assets::texture::set_max_texture_side(0);
     }
 }
 
@@ -667,6 +1115,17 @@ mod tests {
         assert_eq!(vram_by_client([one, other]), Some(594), "two clients add up");
         assert_eq!(vram_by_client(["drm-memory-vram: \t2048 KiB\n"]), Some(2), "no client id: counts alone");
         assert_eq!(vram_by_client(["drm-memory-gtt: 1 KiB\n"]), None, "no VRAM line: none");
+    }
+
+    #[test]
+    fn memory_is_given_back_shadows_first_then_samples_down_to_2x() {
+        use bevy::render::view::Msaa;
+        assert_eq!(next_shed(4096, Some(Msaa::Sample8)), Some(Shed::Shadows));
+        assert_eq!(next_shed(2048, Some(Msaa::Sample8)), Some(Shed::Msaa8));
+        assert_eq!(next_shed(2048, Some(Msaa::Sample4)), Some(Shed::Msaa4));
+        assert_eq!(next_shed(2048, Some(Msaa::Sample2)), None);
+        assert_eq!(next_shed(2048, None), None, "samples not drawn: nothing to give back");
+        assert_eq!(next_shed(4096, None), Some(Shed::Shadows));
     }
 
     #[test]

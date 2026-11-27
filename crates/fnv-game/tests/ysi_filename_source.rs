@@ -1990,7 +1990,8 @@ fn ysi_get_and_set_trait_match_observed_yui140_string_metadata_fallback_and_worl
         XVal::Str(String::new())
     );
 
-    // Honest yUI version gate remains unadvertised until full yUI 140 parity.
-    assert_eq!(success(&mut g, "SetFunctionValue (IsPluginInstalled \"yUI\")"), XVal::Num(0.0));
-    assert_eq!(success(&mut g, "SetFunctionValue (GetPluginVersion \"yUI\")"), XVal::Num(-1.0));
+    // Nuclear Sunset fork: yUI is reported at 140 so Quick Select's set-up runs (fork change
+    // #3, `fnv_script::vm::jip::PLUGINS`); upstream leaves it unadvertised until full parity.
+    assert_eq!(success(&mut g, "SetFunctionValue (IsPluginInstalled \"yUI\")"), XVal::Num(1.0));
+    assert_eq!(success(&mut g, "SetFunctionValue (GetPluginVersion \"yUI\")"), XVal::Num(140.0));
 }

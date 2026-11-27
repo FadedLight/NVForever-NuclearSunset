@@ -7,6 +7,11 @@ Bethesda content and contains no Bethesda or Gamebryo code.
 NVForever is not affiliated with or endorsed by Bethesda Softworks, ZeniMax Media,
 Microsoft or Obsidian Entertainment. See [LEGAL.md](LEGAL.md).
 
+> **This fork (branch `nuclear-sunset`)** is NVForever with fixes for the **Nuclear Sunset**
+> modlist (Fallout: New Vegas + Tale of Two Wastelands, Mod Organizer 2). How to install and
+> play it, and every change with how it was tested: [NUCLEAR-SUNSET.md](NUCLEAR-SUNSET.md).
+> Builds: [this fork's releases](https://github.com/FadedLight/NVForever-NuclearSunset/releases).
+
 ## Getting started
 
 1. Own and install *Fallout: New Vegas* (base game; DLC optional).

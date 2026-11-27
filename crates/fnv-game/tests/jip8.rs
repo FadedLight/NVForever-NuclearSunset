@@ -458,6 +458,7 @@ fn cells_and_water() {
     assert_eq!(n(&mut g, "GetWorldspaceFlag TestWorld 0"), 1.0);
     assert_eq!(n(&mut g, "GetCellFlag TestFactionList 8"), 0.0);
     assert_eq!(n(&mut g, "GetCellFlag 0 0"), 0.0);
+    assert_eq!(n(&mut g, "GetCellFlag TestWater 0"), 0.0);
     // Water form and effect, read by GetCellWaterForm and GetWaterFormEffect.
     assert_eq!(n(&mut g, "GetCellWaterForm TestCell"), f64::from(WATR));
     q(&mut g, "SetCellWaterForm TestCell TestWater2");

@@ -97,6 +97,7 @@ mod decals;
 mod dismember;
 mod distant_lights;
 mod knockouts;
+mod coop;
 mod player_knockdown;
 mod detection;
 mod dialogue_look;
@@ -117,6 +118,7 @@ mod hdr_calibrate;
 mod aerial;
 mod fly;
 mod foot_ik;
+mod upright;
 mod anti_lag;
 mod dlss;
 mod dlss_download;
@@ -139,6 +141,7 @@ mod light_shadow_casters;
 mod light_shadow_detail;
 mod light_shadows;
 mod lights;
+mod photo_lights;
 mod limbs;
 mod lips;
 mod memory_budget;
@@ -158,6 +161,11 @@ mod terminal_view;
 mod scope_lens;
 mod scope_view;
 mod poker_view;
+mod slots_view;
+mod caravan_pot;
+mod caravan_view;
+mod card_shape;
+mod slots_seat;
 mod lod;
 mod locomotion;
 mod combat_face;
@@ -184,6 +192,9 @@ mod pipboy_ready;
 mod player_body;
 mod stealth_field;
 mod stray_commands;
+mod nvr_look;
+mod height_fog;
+mod cinema;
 mod post;
 mod quality;
 mod quality_probe;
@@ -196,6 +207,7 @@ mod talk_clips;
 mod readahead;
 mod reflection;
 mod reflection_sky;
+mod rtgi_volume;
 mod minimap_render;
 mod refraction;
 mod residents;
@@ -218,6 +230,7 @@ mod shadow_thin;
 mod shafts;
 mod heat_haze;
 mod sun_heightfield;
+mod bokeh;
 mod imagespace;
 mod imposters;
 mod sky;
@@ -268,8 +281,10 @@ mod vigor_view;
 mod walk_probe;
 mod water;
 mod weapon_models;
+mod wind_dust;
 mod window_icon;
 mod window_mode;
+mod keep_awake;
 mod world;
 mod worldspace;
 mod zones;
@@ -1328,6 +1343,17 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             }
             None => (l.mod_archives(), false),
         };
+        // An archive an active plugin's name claims is mounted anyway (`fnv_vfs`'s plugin
+        // archives: `<stem>.bsa`, `<stem> - *`, `<stem>N…`, `<stem> *`), so it is no warning.
+        let stems: Vec<String> = l.profile_plugins().unwrap_or_default().iter().map(|p| p.rsplit_once('.').map_or(p.as_str(), |(s, _)| s).to_ascii_lowercase()).collect();
+        let claimed = |a: &str| {
+            let a = a.to_ascii_lowercase();
+            stems.iter().any(|s| a.strip_prefix(s.as_str()).is_some_and(|r| {
+                let r = r.trim_start_matches(|c: char| c.is_ascii_digit());
+                r == ".bsa" || r.starts_with(' ')
+            }))
+        };
+        let archives: Vec<String> = archives.into_iter().filter(|a| !claimed(a)).collect();
         if !archives.is_empty() {
             let shown: Vec<&str> = archives.iter().take(5).map(String::as_str).collect();
             eprintln!(
@@ -1498,10 +1524,15 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // NVFOREVER_HOME, every file created new, then mounted over every other loose layer for
     // this run only (nvf_assets pbr_field/ground.rs `seed_ground_pack`, terrain.rs
     // `ground_pack_diffuses`). No mods folder is written.
-    let ground_pack: Option<PathBuf> = if nvf_assets::ground_pack_requested() {
-        match terrain::ground_pack_diffuses(&opened.plugins, &args.esm_schema).and_then(|d| nvf_assets::seed_ground_pack(&d)) {
+    let ground_pack: Option<PathBuf> = if let Some(kind) = nvf_assets::ground_pack_requested() {
+        match terrain::ground_pack_diffuses(&opened.plugins, &args.esm_schema).and_then(|d| nvf_assets::seed_ground_pack(kind, &d)) {
             Ok((dir, sets, files)) => {
                 eprintln!("pbr ground pack: {sets} height-only sets for the landscape textures ({files} generated files, depth {}) written under {} (this run's own folder, mounted over every other loose layer)", nvf_assets::GROUND_DEPTH, dir.display());
+                match kind {
+                    nvf_assets::GroundPack::Heights => {}
+                    nvf_assets::GroundPack::Alpha => eprintln!("pbr ground pack: and a diffuse for each, one flat colour with a checkerboard alpha, and a flat normal map"),
+                    nvf_assets::GroundPack::AlphaHeight => eprintln!("pbr ground pack: no sets; a diffuse for each landscape texture with the height map in its alpha, and a flat normal map"),
+                }
                 Some(dir)
             }
             Err(e) => {
@@ -2013,7 +2044,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     #[cfg(target_os = "android")]
     let default_plugins = default_plugins.disable::<bevy::gilrs::GilrsPlugin>();
     app.add_plugins(default_plugins)
-    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, hdr::HdrPlugin))
+    .add_plugins((window_icon::WindowIconPlugin, window_mode::WindowModePlugin, keep_awake::KeepAwakePlugin, hdr::HdrPlugin, photo_lights::PhotoLightsPlugin))
     .add_plugins(nvf_play::audio_out::AudioOutPlugin)
     .add_plugins((ArchivePlugin(game), lights::LightsPlugin, fog::FogPlugin, haze::HazePlugin, aerial::AerialPlugin, eye_adapt::EyeAdaptPlugin, emittance::EmittancePlugin, water::WaterPlugin, underwater_caustics::UnderwaterCausticsPlugin, tree::TreePlugin, terrain::TerrainPlugin, reflection::ReflectionPlugin, ripples::RipplesPlugin))
     .add_plugins(night_sky::NightSkyPlugin)
@@ -2026,6 +2057,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     .add_plugins(sun_visibility::SunVisibilityPlugin)
     // The ambient occlusion's shader for the lighting (imported only under its def).
     .add_plugins(ssao_lighting::SsaoLightingPlugin)
+    // The bounce light volume: its shader for the lighting (imported only under its def), its bindings (only on request).
+    .add_plugins(rtgi_volume::RtgiVolumePlugin)
     // Shadows of placed lights, the ALC shadows row (off by default).
     .add_plugins(light_shadows::LightShadowsPlugin(args.light_shadows.unwrap_or(light_shadows::LightShadowMode::Off)))
     .add_plugins(light_shadow_detail::LightShadowDetailPlugin)
@@ -2116,6 +2149,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         centre: None,
         waiting: Vec::new(),
         model_overrides: Default::default(),
+        coop_areas: Vec::new(),
         travels: 0,
     })
     .insert_resource(world)
@@ -2289,6 +2323,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         app.add_plugins(roulette_view::RouletteViewPlugin);
         // The blackjack table (blackjack_view.rs).
         app.add_plugins(blackjack_view::BlackjackViewPlugin);
+        // The reels turning on the placed slot machine, its arm and spin camera (slots_view.rs).
+        app.add_plugins(slots_view::SlotsViewPlugin);
         // Test aid NVF_PLAY_TEST_TERRAIN_PARALLAX_AB: the terrain parallax's readback (#3322).
         terrain_parallax_ab::install(&mut app);
         // The terminal's monitor (terminal_view.rs).
@@ -2298,6 +2334,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         app.add_plugins(scope_view::ScopeViewPlugin);
         // The poker table (poker_view.rs).
         app.add_plugins(poker_view::PokerViewPlugin);
+        // The Caravan table in 3D (caravan_view.rs).
+        app.add_plugins(caravan_view::CaravanViewPlugin);
     }
     if let Some(a) = actor_world {
         if let Some(c) = creator_data.take() {
@@ -2315,6 +2353,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
         app.add_plugins(turret_aim::TurretAimPlugin);
         // Also with --no-foot-ik: the settings page can switch it on.
         app.add_plugins(foot_ik::FootIkPlugin { enabled: !args.no_foot_ik });
+        app.add_plugins(upright::UprightPlugin);
         // Actors jumping and falling: their jump and landing clips (actor_jumps.rs); the
         // --npc-travel walkers' too, without --play.
         app.add_plugins(actor_jumps::ActorJumpsPlugin { physics: play.is_some() });
@@ -2337,6 +2376,8 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             app.insert_resource(inertia);
             app.add_plugins(decals::DecalsPlugin);
             app.add_plugins(knockouts::KnockoutsPlugin);
+            // Co-op: idle until a lobby is opened or joined.
+            app.add_plugins(coop::CoopPlugin(coop::Config { host: None, join: None, name: "Courier".to_string() }));
             // The stress tests' samples (NVF_PLAY_TEST_SAMPLE; nothing without it).
             app.add_plugins(stress_sample::StressSamplePlugin);
             // The span profile (NVF_PLAY_TEST_PROFILE; nothing without it; profile.rs).
@@ -2396,6 +2437,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             app.add_plugins(npc_combat::NpcCombatPlugin);
             // NPCs heal with the stimpaks they carry (npc_stimpaks.rs).
             app.add_plugins(npc_stimpaks::NpcStimpaksPlugin);
+            // A slot machine played in the world: the body's idles and win celebration
+            // (slots_seat.rs).
+            app.add_plugins(slots_seat::SlotsSeatPlugin);
             // Creatures fight with their body weapons and switch between them (body_weapons.rs).
             app.add_plugins(body_weapons::BodyWeaponsPlugin);
             // Scripted weapon use: UseWeapon, Use Weapon packages (use_weapon.rs).

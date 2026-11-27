@@ -31,6 +31,8 @@ enum Page {
     Settings,
     Mods,
     Game,
+    /// Co-op: what it is and Play Co-Op (the game's main menu, where co-op is turned on).
+    Coop,
 }
 
 enum NewsState {
@@ -134,7 +136,7 @@ impl Upd {
 fn version() -> &'static str {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| {
-        std::env::var("NVF_LAUNCHER_VERSION").ok().filter(|v| update::test_aids() && update::safe_component(v)).unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        std::env::var("NVF_LAUNCHER_VERSION").ok().filter(|v| update::test_aids() && update::safe_component(v)).unwrap_or_else(|| crate::fork::BUILD.to_string())
     })
 }
 
@@ -170,6 +172,9 @@ pub struct App {
     edits: BTreeMap<String, String>,
     // Game folder.
     game_edit: String,
+    /// The Game folder page's Mod Organizer 2 instance box and profile (`[Launcher]` `Mo2Instance`, `Mo2Profile`).
+    mo2_edit: String,
+    mo2_profile: String,
     /// The Mods page's new-game start fields (src/start.rs), as typed.
     start_edit: crate::start::Fields,
     /// The start card's Custom… window, open while `Some`: the quest and film as typed there,
@@ -178,6 +183,9 @@ pub struct App {
     // Mods.
     mods: Option<plugins::PluginList>,
     mods_dirty: bool,
+    /// The Mods page's Mod Organizer 2 view: the search text and whether it lists plugins (else mods).
+    mo2_filter: String,
+    mo2_plugins: bool,
     /// The row being dragged on the Mods page.
     mods_drag: Option<usize>,
     /// The displays, for the Resolution and Monitor lists (asked once at start).
@@ -189,7 +197,7 @@ pub struct App {
     /// DLSS: what this PC has (read at start and after a download), and the licence open.
     dlss: crate::dlss::Status,
     dlss_licence: bool,
-    reports_rx: Option<Receiver<Result<usize, String>>>,
+    reports_rx: Option<Receiver<Result<crate::reports::Deleted, String>>>,
     // News.
     news: Vec<(Post, Option<Arc<[u8]>>)>,
     news_state: NewsState,
@@ -211,7 +219,7 @@ pub struct App {
     exe: Option<PathBuf>,
     child: Option<Child>,
     /// Test aid: `NVF_LAUNCHER_SHOT=<file.png>[;page]` saves the window once the news has
-    /// settled and closes (`NVF_LAUNCHER_PAGE`: home, settings, mods, game).
+    /// settled and closes (`NVF_LAUNCHER_PAGE`: home, settings, mods, game, coop).
     shot: Option<(PathBuf, u32)>,
 }
 
@@ -241,10 +249,14 @@ impl App {
             stored: BTreeMap::new(),
             edits: BTreeMap::new(),
             game_edit: String::new(),
+            mo2_edit: String::new(),
+            mo2_profile: String::new(),
             start_edit: crate::start::Fields::default(),
             start_custom: None,
             mods: None,
             mods_dirty: false,
+            mo2_filter: String::new(),
+            mo2_plugins: false,
             mods_drag: None,
             monitors: crate::display::monitors(),
             languages: crate::display::language_choices(&fnv_util::words::dirs(
@@ -277,6 +289,7 @@ impl App {
             Ok("settings") => Page::Settings,
             Ok("mods") => Page::Mods,
             Ok("game") => Page::Game,
+            Ok("coop") => Page::Coop,
             Ok("update") => {
                 app.upd_open = true;
                 Page::Home
@@ -384,6 +397,8 @@ impl App {
         self.tab = on.and_then(|on| self.tabs.iter().position(|t| *t == on)).unwrap_or(0);
         self.game_edit = Config::from_ini(&self.ini_text).game_dir.map(|p| p.display().to_string()).unwrap_or_default();
         self.ini = IniForm::read(&self.ini_text);
+        self.mo2_edit = ini_get(&self.ini_text, LAUNCHER, "Mo2Instance").unwrap_or_default();
+        self.mo2_profile = ini_get(&self.ini_text, LAUNCHER, "Mo2Profile").unwrap_or_default();
         // None set: the box starts on Steam's usual folder when the game is there; it is
         // stored only by Save (#2938).
         if self.game_edit.is_empty() {
@@ -406,9 +421,77 @@ impl App {
         launch::game_from_ini(&self.ini_text)
     }
 
-    /// Whether the game would find its folder when started now ([`launch::folder_known`]).
+    /// Whether the game would find its folder when started now ([`launch::folder_known`]),
+    /// or plays through a saved Mod Organizer 2 instance that checks out.
     fn folder_known(&self) -> bool {
-        launch::folder_known(self.game().is_some(), fnv_install::mo2::usvfs_loaded(), std::env::var_os("NVFOREVER_DATA").as_deref())
+        self.saved_mo2().is_some() || launch::folder_known(self.game().is_some(), fnv_install::mo2::usvfs_loaded(), std::env::var_os("NVFOREVER_DATA").as_deref())
+    }
+
+    /// The saved Mod Organizer 2 instance and its check, when one is saved and checks out.
+    fn saved_mo2(&self) -> Option<(PathBuf, launch::Mo2Check)> {
+        let dir = ini_get(&self.ini_text, LAUNCHER, "Mo2Instance").filter(|s| !s.trim().is_empty())?;
+        let profile = ini_get(&self.ini_text, LAUNCHER, "Mo2Profile").unwrap_or_default();
+        let dir = PathBuf::from(dir.trim());
+        launch::check_mo2(&dir, &profile).ok().map(|c| (dir, c))
+    }
+
+    /// The Game folder page's Mod Organizer 2 card: pick the instance folder (browse, or find
+    /// the one this PC uses), choose a profile from its list, see in plain words what NVForever
+    /// will use, and save or clear it. Saved, Play starts the game through that profile.
+    fn mo2_card(&mut self, ui: &mut egui::Ui) {
+        card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("Play a Mod Organizer 2 modlist (Nuclear Sunset, Tale of Two Wastelands, …) without starting MO2. Pick the folder that holds ModOrganizer.exe, or the instance's folder. NVForever only reads it.").small().color(WEAK));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.mo2_edit).hint_text("Mod Organizer 2 folder").desired_width(ui.available_width() - 260.0));
+                if cfg!(windows) && ui.button("Browse…").clicked() {
+                    if let Some(d) = pick_folder("Your Mod Organizer 2 folder (the one holding ModOrganizer.exe)") {
+                        self.mo2_edit = d.display().to_string();
+                    }
+                }
+                if ui.button("Find it").on_hover_text("Use the instance Mod Organizer 2 itself would open on this PC.").clicked() {
+                    match fnv_install::mo2::instance_dir() {
+                        Some(d) => self.mo2_edit = d.display().to_string(),
+                        None => self.message = Some(("No Mod Organizer 2 instance found on this PC: use Browse… to pick its folder.".into(), true)),
+                    }
+                }
+            });
+            let dir = self.mo2_edit.trim().to_string();
+            if dir.is_empty() {
+                ui.label(RichText::new("Not set: Play uses the game folder above.").small().color(WEAK));
+                return;
+            }
+            match launch::check_mo2(std::path::Path::new(&dir), &self.mo2_profile) {
+                Ok(c) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Profile");
+                        egui::ComboBox::from_id_salt("mo2-profile").selected_text(c.profile.clone()).show_ui(ui, |ui| {
+                            for p in &c.profiles {
+                                if ui.selectable_label(*p == c.profile, p).clicked() {
+                                    self.mo2_profile = p.clone();
+                                }
+                            }
+                        });
+                    });
+                    ui.label(RichText::new(format!("{} plugins enabled; the game itself from {}.", c.plugins, c.game.display())).color(GOOD));
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("Save").strong()).clicked() {
+                            let (dir, profile) = (dir.clone(), c.profile.clone());
+                            let r = self.write_ini(|t| ini_set(&ini_set(&t, LAUNCHER, "Mo2Instance", &dir), LAUNCHER, "Mo2Profile", &profile));
+                            self.after_write(r, Some("Saved: Play starts the game through this Mod Organizer 2 profile."));
+                        }
+                        if ui.button("Clear").on_hover_text("Play the game folder above again, without Mod Organizer 2.").clicked() {
+                            let r = self.write_ini(|t| ini_set(&ini_set(&t, LAUNCHER, "Mo2Instance", ""), LAUNCHER, "Mo2Profile", ""));
+                            self.after_write(r, Some("Mod Organizer 2 cleared."));
+                        }
+                    });
+                }
+                Err(e) => {
+                    ui.label(RichText::new(e).color(BAD));
+                }
+            }
+        });
     }
 
     /// Read the latest file first, keeping every other line.
@@ -565,7 +648,8 @@ impl App {
             self.message = Some((format!("{} was not found beside the launcher: pick it on the Game folder page.", launch::GAME_EXE), true));
             return;
         };
-        match launch::spawn(&exe, &start) {
+        let extra = self.saved_mo2().map(|(dir, c)| launch::mo2_args(&dir, &c)).unwrap_or_default();
+        match launch::spawn_with(&exe, &start, &extra) {
             Ok(c) => {
                 self.child = Some(c);
                 self.message = Some((STARTING.into(), false));
@@ -574,6 +658,33 @@ impl App {
                 }
             }
             Err(e) => self.message = Some((format!("{}: {e}", exe.display()), true)),
+        }
+    }
+
+    /// Play Co-Op: the plain game at its main menu, as Play's main menu start. Co-op is part
+    /// of the game itself (no separate co-op program), run in the game's own home with its
+    /// saves, settings and mods; the game's Co-op switch (off by default) turns it on.
+    fn start_coop(&mut self, ctx: &egui::Context) {
+        self.start(ctx, COOP_START);
+    }
+
+    /// The Co-op page: what co-op is, how it is turned on, and Play Co-Op.
+    fn coop_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Co-op");
+        ui.label(RichText::new(COOP_ABOUT).color(WEAK));
+        ui.add_space(8.0);
+        let running = self.child.is_some();
+        ui.add_enabled_ui(self.exe.is_some() && !running, |ui| {
+            if big_button(ui, "Play Co-Op", "the main menu: then host or join", true).clicked() {
+                self.start_coop(ui.ctx());
+            }
+        });
+        if self.exe.is_none() {
+            ui.label(RichText::new(format!("{} was not found beside the launcher: pick it on the Game folder page.", launch::GAME_EXE)).color(BAD));
+        }
+        if let Some(home) = self.home.as_ref() {
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("Co-op uses the game's own saves, settings, mods and logs, in {}", home.root.display())).small().color(WEAK));
         }
     }
 
@@ -607,6 +718,7 @@ impl eframe::App for App {
             Page::Settings => self.settings_page(ui),
             Page::Mods => self.mods_page(ui),
             Page::Game => self.game_page(ui),
+            Page::Coop => self.coop_page(ui),
         });
         // Last, after everything that can draw a link (a post's Markdown is in the central
         // panel): egui's own link opening would skip the https rule.
@@ -714,7 +826,7 @@ impl App {
     fn nav(&mut self, root: &mut egui::Ui) {
         egui::Panel::left("nav").exact_size(210.0).resizable(false).frame(Frame::new().fill(theme::PANEL).inner_margin(Margin::same(12))).show(root, |ui| {
             ui.add_space(4.0);
-            for (page, name) in [(Page::Home, "HOME"), (Page::Settings, "SETTINGS"), (Page::Mods, "MODS"), (Page::Game, "GAME FOLDER")] {
+            for (page, name) in [(Page::Home, "HOME"), (Page::Settings, "SETTINGS"), (Page::Mods, "MODS"), (Page::Game, "GAME FOLDER"), (Page::Coop, "CO-OP")] {
                 if nav_button(ui, name, self.page == page).clicked() {
                     self.page = page;
                     self.message = None;
@@ -774,6 +886,9 @@ impl App {
                                 self.start(ctx, s);
                             }
                         }
+                        if self.exe.is_some() && !running && big_button(ui, "Play Co-Op", "the main menu: then host or join", false).clicked() {
+                            self.start_coop(ctx);
+                        }
                         if self.newest.is_some() && !running && big_button(ui, "Main menu", "load or start a game", false).clicked() {
                             self.start(ctx, Start::MainMenu);
                         }
@@ -787,7 +902,14 @@ impl App {
     }
 }
 
-const REPO: &str = "https://github.com/LootJunkieAzza/NVForever";
+const REPO: &str = crate::fork::REPO;
+
+/// How Play Co-Op starts the game: the same program and main menu start as Play, nothing
+/// co-op on the command line, so co-op stays as the game's own Co-op switch has it [design].
+const COOP_START: Start = Start::MainMenu;
+
+/// The Co-op page's text: the game's own menu names (nvf-play `lobby.rs`, `main_menu.rs`, `pause.rs`).
+const COOP_ABOUT: &str = "Play the Mojave with friends: one player hosts a lobby and the others join it with its code. Co-op is off until you turn it on in the game's Settings, under Gameplay, with the Co-op row. The host then loads a game, opens the pause menu's Co-op and picks Create Lobby; friends (they turn Co-op on too) pick Join Lobby on their main menu and type the code.";
 
 /// A page button of the left bar; the open page's has a gold edge and mark.
 fn nav_button(ui: &mut egui::Ui, name: &str, on: bool) -> egui::Response {
@@ -880,7 +1002,24 @@ fn menu_fits(kind: &menu::Kind, v: &str) -> bool {
     match kind {
         menu::Kind::Switch => matches!(v.trim(), "0" | "1"),
         menu::Kind::Slider { .. } => v.trim().parse::<f32>().is_ok(),
-        menu::Kind::List { choices } => choices.iter().any(|c| c.name == v),
+        menu::Kind::List { choices } => list_choice(choices, v).is_some(),
+    }
+}
+
+/// A list row's choice for the INI's value `v`: by its name, any case, before a `;` (rows
+/// that keep more after their choice, HDR Output's `On;peak=600;paper=80`) [observed: the
+/// owner's NVForever.ini, 2026-11-27: the page showed that row as a text box]. Nuclear
+/// Sunset fork.
+fn list_choice<'a>(choices: &'a [menu::Choice], v: &str) -> Option<&'a menu::Choice> {
+    let head = v.split(';').next().unwrap_or(v).trim();
+    choices.iter().find(|c| c.name == head).or_else(|| choices.iter().find(|c| c.name.eq_ignore_ascii_case(head)))
+}
+
+/// `name` in place of `v`'s choice, keeping what `v` holds after its first `;`.
+fn with_list_choice(v: &str, name: &str) -> String {
+    match v.split_once(';') {
+        Some((_, rest)) => format!("{name};{rest}"),
+        None => name.to_string(),
     }
 }
 
@@ -911,12 +1050,14 @@ fn menu_control(ui: &mut egui::Ui, key: &str, kind: &menu::Kind, v: &str, contro
             ui.add_sized([control_w, 20.0], s).changed().then(|| part_text(game_fit(f, *min, *step)))
         }
         menu::Kind::List { choices } => {
-            let shown = choices.iter().find(|c| c.name == v).map_or(v.to_string(), |c| c.label.clone());
+            let now = list_choice(choices, v);
+            let shown = now.map_or(v.to_string(), |c| c.label.clone());
             let mut picked = None;
             egui::ComboBox::from_id_salt(key).width(control_w - 8.0).selected_text(shown).show_ui(ui, |ui| {
                 for c in choices {
-                    if ui.selectable_label(c.name == v, &c.label).clicked() && c.name != v {
-                        picked = Some(c.name.clone());
+                    let on = now.is_some_and(|n| n.name == c.name);
+                    if ui.selectable_label(on, &c.label).clicked() && !on {
+                        picked = Some(with_list_choice(v, &c.name));
                     }
                 }
             });
@@ -1042,7 +1183,14 @@ impl App {
             ui.heading("Settings");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let dirty = !self.edits.is_empty();
-                if ui.add_enabled(dirty, gold_button("Save", dirty)).clicked() {
+                // Nuclear Sunset fork: while the game runs, its next settings write puts every
+                // row back as the game holds it (nvf-play settings.rs `store_now` writes all of
+                // them), so a Save here would be lost. Saved once the game has closed.
+                let game_on = self.running();
+                if game_on && dirty {
+                    ui.label(RichText::new("Close the game to save: it rewrites these when it saves its own").small().color(GOLD));
+                }
+                if ui.add_enabled(dirty && !game_on, gold_button("Save", dirty)).clicked() {
                     let r = self.save_settings();
                     self.after_write(r, Some("Settings saved: the game uses them at its next start."));
                 }
@@ -1341,7 +1489,15 @@ impl App {
         if let Some(r) = self.reports_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.reports_rx = None;
             self.message = Some(match r {
-                Ok(n) => (format!("The server was asked to delete the reports of {n} install ID(s) from this PC (it removes them within 7 days). Later reports get a new ID."), false),
+                Ok(d) => {
+                    let mut m = format!("The server was asked to delete the reports of {} install ID(s) from this PC (it removes them within 7 days). Later reports get a new ID.", d.ids);
+                    // A report not sent yet that could not be removed would still be sent (#4591).
+                    if d.left > 0 {
+                        let dir = self.home.as_ref().map(|h| h.reports().join("pending").display().to_string()).unwrap_or_default();
+                        m.push_str(&format!(" {} report(s) not sent yet could not be deleted. Delete them by hand from {dir}.", d.left));
+                    }
+                    (m, d.left > 0)
+                }
                 Err(e) => (format!("Could not delete the reports: {e}"), true),
             });
             self.reload_ini();
@@ -1582,7 +1738,102 @@ impl App {
         self.mods = std::fs::read_to_string(home.plugins_file()).ok().map(|t| plugins::PluginList::parse(&t));
     }
 
+    /// The Mods page for a Mod Organizer 2 profile: its mods (modlist.txt, MO2's priority
+    /// order, separators as headings) or its plugins (plugins.txt, load order), with a search
+    /// box. Read only: MO2 owns the order, so it is changed there [design].
+    fn mo2_mods_page(&mut self, ui: &mut egui::Ui, dir: &std::path::Path, check: &launch::Mo2Check) {
+        let layout = fnv_install::mo2::Layout::open(dir, Some(&check.profile)).ok();
+        ui.horizontal(|ui| {
+            ui.heading("Mods");
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if let Some(l) = &layout {
+                    if ui.button("Open profile folder").clicked() {
+                        launch::open_folder(&l.profile);
+                    }
+                    if ui.button("Open mods folder").clicked() {
+                        launch::open_folder(&l.mods);
+                    }
+                }
+            });
+        });
+        ui.label(
+            RichText::new(format!(
+                "From Mod Organizer 2, profile \"{}\" ({}). NVForever plays these as MO2 orders them and never changes them: reorder or switch mods in MO2, then come back. Change the profile on the Game folder page.",
+                check.profile,
+                dir.display()
+            ))
+            .small()
+            .color(WEAK),
+        );
+        self.start_box(ui);
+        ui.separator();
+        let Some(layout) = layout else {
+            ui.label(RichText::new("This profile could not be read.").color(BAD));
+            return;
+        };
+        // Mods: modlist.txt lists the highest priority first; `+` on, `-` off, `*` unmanaged
+        // (the game's own files), and names ending `_separator` are MO2's headings
+        // [documented: MO2 modlist.txt].
+        let modlist = std::fs::read_to_string(layout.profile.join("modlist.txt")).unwrap_or_default();
+        let mods: Vec<(char, String)> = modlist
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim_end();
+                let c = l.chars().next()?;
+                matches!(c, '+' | '-' | '*').then(|| (c, l[1..].to_string()))
+            })
+            .collect();
+        let plugins = layout.profile_plugins().unwrap_or_default();
+        let enabled = mods.iter().filter(|(c, n)| *c == '+' && !n.ends_with("_separator")).count();
+        ui.horizontal(|ui| {
+            if ui.selectable_label(!self.mo2_plugins, format!("Mods ({enabled} on of {})", mods.iter().filter(|(_, n)| !n.ends_with("_separator")).count())).clicked() {
+                self.mo2_plugins = false;
+            }
+            if ui.selectable_label(self.mo2_plugins, format!("Plugins ({})", plugins.len())).clicked() {
+                self.mo2_plugins = true;
+            }
+            ui.add_space(12.0);
+            ui.add(egui::TextEdit::singleline(&mut self.mo2_filter).hint_text("Search").desired_width(220.0));
+        });
+        let filter = self.mo2_filter.trim().to_ascii_lowercase();
+        let shown = |name: &str| filter.is_empty() || name.to_ascii_lowercase().contains(&filter);
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            if self.mo2_plugins {
+                for (i, p) in plugins.iter().enumerate().filter(|(_, p)| shown(p)) {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{i:>3}")).monospace().color(WEAK));
+                        ui.label(p.as_str());
+                    });
+                }
+            } else {
+                // Lowest priority at the bottom of modlist.txt: shown top to bottom as MO2's
+                // left pane shows it, lowest first.
+                for (c, name) in mods.iter().rev().filter(|(_, n)| shown(n)) {
+                    if let Some(heading) = name.strip_suffix("_separator") {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(heading.to_uppercase()).small().strong().color(theme::GOLD_TEXT));
+                        continue;
+                    }
+                    let (mark, colour) = match c {
+                        '+' => ("on ", GOOD),
+                        '-' => ("off", WEAK),
+                        _ => ("game", WEAK),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(mark).monospace().color(colour));
+                        ui.label(RichText::new(name.as_str()).color(if *c == '-' { WEAK } else { ui.visuals().text_color() }));
+                    });
+                }
+            }
+        });
+    }
+
     fn mods_page(&mut self, ui: &mut egui::Ui) {
+        // Playing through a Mod Organizer 2 profile: its mods and plugins, as MO2 has them.
+        if let Some((dir, check)) = self.saved_mo2() {
+            self.mo2_mods_page(ui, &dir, &check);
+            return;
+        }
         ui.horizontal(|ui| {
             ui.heading("Mods");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1851,6 +2102,9 @@ impl App {
                 Err(_) => {}
             }
         });
+        ui.add_space(12.0);
+        ui.label(RichText::new("MOD ORGANIZER 2").small().strong().color(theme::GOLD_TEXT));
+        self.mo2_card(ui);
         ui.add_space(12.0);
         ui.label(RichText::new("PROGRAM").small().strong().color(theme::GOLD_TEXT));
         card(ui, |ui| {
@@ -2206,7 +2460,43 @@ fn preview(body: &str, open: bool) -> (&str, bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_list_row_with_more_after_its_choice_keeps_it() {
+        let c = |n: &str| menu::Choice { name: n.into(), label: n.into() };
+        let hdr = vec![c("Off"), c("On")];
+        assert_eq!(list_choice(&hdr, "On;peak=600;paper=80").map(|c| c.name.as_str()), Some("On"));
+        assert_eq!(list_choice(&hdr, "off").map(|c| c.name.as_str()), Some("Off"));
+        assert!(list_choice(&hdr, "Maybe").is_none());
+        assert!(menu_fits(&menu::Kind::List { choices: hdr }, "On;peak=600;paper=80"));
+        assert_eq!(with_list_choice("On;peak=600;paper=80", "Off"), "Off;peak=600;paper=80");
+        assert_eq!(with_list_choice("Quality", "Balanced"), "Balanced");
+    }
+
     use super::*;
+
+    /// Azza's review of #3723 item 10: Play Co-Op starts the plain game, as Play's main
+    /// menu start does, with no co-op program and no co-op arguments.
+    #[test]
+    fn play_coop_starts_the_plain_game_at_its_main_menu() {
+        assert_eq!(COOP_START.args(), Start::MainMenu.args());
+        assert!(COOP_START.args().iter().all(|a| !a.contains("coop") && a != "--host" && a != "--join"));
+        assert!(launch::GAME_EXE == "nvforever.exe" || launch::GAME_EXE == "nvforever");
+    }
+
+    /// The page names the game's own menu entries, so a renamed entry shows up here.
+    #[test]
+    fn coop_page_names_the_games_menu_entries() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../engine/nvf-play/src/");
+        let lobby = std::fs::read_to_string(format!("{root}lobby.rs")).unwrap();
+        let menu = std::fs::read_to_string(format!("{root}main_menu.rs")).unwrap();
+        for name in ["Create Lobby", "Join Lobby"] {
+            assert!(COOP_ABOUT.contains(name) && (lobby.contains(&format!("\"{name}\"")) || menu.contains(&format!("\"{name}\""))), "{name}");
+        }
+        assert!(lobby.contains("const TITLE: &str = \"Co-op\";") && lobby.contains("key: COOP_KEY") && lobby.contains("label: \"Co-op\"") && lobby.contains("pub const COOP_KEY: &str = \"coop\";"));
+        let pause = std::fs::read_to_string(format!("{root}pause.rs")).unwrap();
+        assert!(lobby.contains("group: crate::pause::GROUP_MENUS"));
+        assert!(pause.contains("pub const GROUP_MENUS: &str = \"Gameplay\";") && COOP_ABOUT.contains("Gameplay") && COOP_ABOUT.contains("Settings"));
+    }
 
     /// #3117: the close guard holds the window only during the swap; once the new launcher
     /// was started the old one's own close goes through.

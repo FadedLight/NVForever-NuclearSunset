@@ -191,6 +191,10 @@ pub struct Vfs {
     index: HashMap<String, Location>,
     /// Lower-cased loose path → winning physical path (preserving filesystem casing).
     loose: HashMap<String, PathBuf>,
+    /// [`Vfs::loose`]'s keys sorted, made at the first folder listing and dropped when a
+    /// root is indexed: a listing is then a range of it, not a pass over every key
+    /// [observed: Nuclear Sunset's GetFilesInFolder ~200 ms a call, 2026-11-25].
+    loose_sorted: Mutex<Option<Vec<String>>>,
     /// The folders loose files were indexed from, lowest precedence first: `Data`, then
     /// the mods folders (#1526).
     loose_roots: Vec<PathBuf>,
@@ -283,12 +287,25 @@ impl Vfs {
         // A plugin owns `<stem>.bsa`, `<stem> - *.bsa` and the numbered pieces a packer
         // splits a big archive into, `<stem>N.bsa` / `<stem>N - *.bsa` (#2521). Returns the
         // piece's number (0 for an unnumbered archive) when `name` is `stem`'s.
+        //
+        // An archive named the stem, a space and anything (`<stem> <rest>.bsa`) is the
+        // plugin's too, after those, in name order; a name glued to the stem (`MergeExtra.bsa`
+        // for Merge.esp) still is not [observed 2026-11-20: Nuclear Sunset ships 67 archives named
+        // `NS <letter> <group> <kind> NN.bsa` ("NS A Content T 00.bsa" … "NS Z LOD Terrain T
+        // 01.bsa": its textures, meshes, sounds, LOD) in mod folders, listed by no INI's
+        // SArchiveList and no archives.txt, and the modlist plays on the original game, so the
+        // original loads them by name; with only the rule above NVForever left them all
+        // unmounted and the owner saw gray, untextured surfaces] [hypothesis: the original
+        // takes the plugin name as a prefix; the space keeps #2521's glued names out].
         let claims = |stem: &str, name: &str| -> Option<u64> {
             let l = name.to_ascii_lowercase();
             let rest = l.strip_prefix(stem)?;
             let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
             let (num, tail) = rest.split_at(digits);
-            (tail == ".bsa" || tail.starts_with(" - ")).then(|| num.parse().unwrap_or(0))
+            if tail == ".bsa" || tail.starts_with(" - ") {
+                return Some(num.parse().unwrap_or(0));
+            }
+            (rest.starts_with(' ') && l.ends_with(".bsa")).then_some(u64::MAX)
         };
         for stem in &stems {
             // An archive several plugins' stems match belongs to the longest of them:
@@ -323,6 +340,7 @@ impl Vfs {
             archive_files: Vec::new(),
             index: HashMap::new(),
             loose: HashMap::new(),
+            loose_sorted: Mutex::new(None),
             loose_roots: Vec::new(),
             under_loose: HashMap::new(),
             skipped: Vec::new(),
@@ -375,6 +393,7 @@ impl Vfs {
             }
             self.loose.insert(key, root.join(rel));
         }
+        *self.loose_sorted.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Default setup: the INI archive list, `Update.bsa`, and the base + DLC plugins.
@@ -588,6 +607,25 @@ impl Vfs {
         }
     }
 
+    /// The loose files under a folder (lower case, `\` between parts, no leading `\`), as
+    /// their whole normalized paths, sorted: every layer's (`Data` and the mods folders), from
+    /// the index, so a folder made of several mods' files lists them all without walking the
+    /// folders on disk.
+    pub fn loose_paths_under(&self, folder: &str) -> Vec<String> {
+        let mut pre = normalize(folder);
+        if !pre.is_empty() && !pre.ends_with('\\') {
+            pre.push('\\');
+        }
+        let mut sorted = self.loose_sorted.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let keys = sorted.get_or_insert_with(|| {
+            let mut k: Vec<String> = self.loose.keys().cloned().collect();
+            k.sort();
+            k
+        });
+        let start = keys.partition_point(|k| k.as_str() < pre.as_str());
+        keys[start..].iter().take_while(|k| k.starts_with(&pre)).cloned().collect()
+    }
+
     /// Every path (normalised) for which `pred` holds, sorted.
     pub fn paths(&self, pred: impl Fn(&str) -> bool) -> Vec<String> {
         let mut v: Vec<String> = self.index.keys().filter(|k| pred(k)).cloned().collect();
@@ -743,6 +781,16 @@ mod tests {
         assert_eq!(vfs.read("textures\\a\\data_only.dds").unwrap().unwrap(), b"data");
         assert_eq!(vfs.read("textures\\a\\extra_only.dds").unwrap().unwrap(), b"extra");
         assert_eq!(vfs.loose_roots().last(), Some(&extra));
+        // A folder listing takes every layer's files from the index, and an added root
+        // drops the sorted keys made for an earlier listing (#4490).
+        let listed = vfs.loose_paths_under("Textures/A");
+        assert_eq!(listed, ["textures\\a\\both.dds", "textures\\a\\data_only.dds", "textures\\a\\extra_only.dds"]);
+        let later = base.join("later");
+        std::fs::create_dir_all(later.join("textures/a")).unwrap();
+        std::fs::write(later.join("textures/a/later.dds"), b"later").unwrap();
+        vfs.add_loose_root(&later);
+        assert_eq!(vfs.loose_paths_under("textures\\a\\").len(), 4);
+        assert!(vfs.loose_paths_under("textures\\b").is_empty());
         // Nothing was written into either folder.
         assert_eq!(std::fs::read(data.join("textures/a/both.dds")).unwrap(), b"data");
         let _ = std::fs::remove_dir_all(&base);
@@ -932,6 +980,21 @@ mod tests {
         assert_eq!(order, ["Merge.bsa", "Merge1 - Textures.bsa", "Merge1.bsa", "Merge2.bsa", "Merge3.bsa", "Merge10.bsa"]);
         let order = Vfs::archive_order(&dir, &[], &["Merge.esp", "Merge3.esp"]);
         assert_eq!(order, ["Merge.bsa", "Merge1 - Textures.bsa", "Merge1.bsa", "Merge2.bsa", "Merge10.bsa", "Merge3.bsa"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Nuclear Sunset packs its files into `NS <letter> <group> <kind> NN.bsa` beside no
+    /// plugin of that name: each is NS.esp's (the stem, a space, the rest), after its own
+    /// archives, in name order; a longer plugin stem still wins its own (`NSNM.bsa`).
+    #[test]
+    fn archives_named_after_a_plugin_and_a_space_are_its() {
+        let dir = std::env::temp_dir().join(format!("nvf-vfs-spaced-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["NS Z LOD Terrain T 00.bsa", "NS A Content T 00.bsa", "NS.bsa", "NS A Content M 00.bsa", "NSNM.bsa", "NSExtra.bsa"] {
+            std::fs::write(dir.join(n), b"").unwrap();
+        }
+        let order = Vfs::archive_order(&dir, &[], &["NS.esp", "NSNM.esm"]);
+        assert_eq!(order, ["NS.bsa", "NS A Content M 00.bsa", "NS A Content T 00.bsa", "NS Z LOD Terrain T 00.bsa", "NSNM.bsa"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -428,7 +428,7 @@ pub fn convert_fos(
                 if count == 0 {
                     continue;
                 }
-                match raw_form.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_form.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(id) if matches!(data.sig(id).as_ref(), Some(b"NPC_") | Some(b"CREA")) => {
                         g.player.dead_count.insert(id, u32::from(count));
                         inc_ok("dead_counts");
@@ -516,7 +516,7 @@ pub fn convert_fos(
             inc_skip("created_ref", "32-byte header not understood");
             continue;
         };
-        let base_id = match cr.base.ok_or("not in save form ID array").and_then(&map_id) {
+        let base_id = match cr.base.ok_or("not in save form ID array").and_then(map_id) {
             Ok(id) => id,
             Err(why) => {
                 inc_skip("created_ref", why);
@@ -559,7 +559,7 @@ pub fn convert_fos(
             inc_skip("created_actor", "32-byte header not understood");
             continue;
         };
-        let base_id = match ca.base.ok_or("not in save form ID array").and_then(&map_id) {
+        let base_id = match ca.base.ok_or("not in save form ID array").and_then(map_id) {
             Ok(id) => id,
             Err(why) => {
                 inc_skip("created_actor", why);
@@ -724,7 +724,7 @@ pub fn convert_fos(
                 inc_ok("player_sex");
             }
             for raw_sp in &p.spells {
-                match raw_sp.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_sp.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(sid) if data.sig(sid).as_ref() == Some(b"SPEL") => {
                         let list = &mut g.extra.entry(FormId::PLAYER_REF).or_default().spells;
                         if !list.contains(&sid) {
@@ -918,7 +918,7 @@ pub fn convert_fos(
             }
 
             for &(raw_fac, rank) in &p.factions {
-                match raw_fac.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_fac.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(fid) if data.sig(fid).as_ref() == Some(b"FACT") => {
                         g.extra.entry(FormId::PLAYER_REF).or_default().factions.insert(fid, rank);
                         inc_ok("player_factions");
@@ -929,7 +929,7 @@ pub fn convert_fos(
             }
 
             for &raw_tm in &p.teammates {
-                match raw_tm.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_tm.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(tid) if refs.get(tid).is_some() => {
                         g.extra.entry(tid).or_default().teammate = true;
                         inc_ok("player_teammates");
@@ -981,7 +981,7 @@ pub fn convert_fos(
                 if rank == 0 {
                     continue;
                 }
-                match raw_perk.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_perk.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(pid) if data.perks.contains_key(&pid) || data.sig(pid).as_ref() == Some(b"PERK") => {
                         g.player.perks.insert(pid, rank);
                         inc_ok("player_perks");
@@ -995,7 +995,7 @@ pub fn convert_fos(
                 if rank == 0 {
                     continue;
                 }
-                match raw_perk.ok_or("not in save form ID array").and_then(&map_id) {
+                match raw_perk.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(pid) if data.perks.contains_key(&pid) || data.sig(pid).as_ref() == Some(b"PERK") => {
                         g.player.teammate_perks.insert(pid);
                         inc_ok("player_teammate_perks");
@@ -1037,7 +1037,7 @@ pub fn convert_fos(
                 if ae.duration <= 0.0 || ae.worn_item.is_some() || ae.elapsed >= ae.duration {
                     continue;
                 }
-                let source = match ae.source.ok_or("not in save form ID array").and_then(&map_id) {
+                let source = match ae.source.ok_or("not in save form ID array").and_then(map_id) {
                     Ok(id) => id,
                     Err(why) => {
                         inc_skip("player_active_effect", why);
@@ -1245,7 +1245,7 @@ pub fn convert_fos(
             }
         }
         for &(raw_fac, rank) in &ac.factions {
-            match raw_fac.ok_or("not in save form ID array").and_then(&map_id) {
+            match raw_fac.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(fid) if data.sig(fid).as_ref() == Some(b"FACT") => {
                     g.extra.entry(rid).or_default().factions.insert(fid, rank);
                     inc_ok("actor_factions");
@@ -1480,7 +1480,7 @@ pub fn convert_fos(
             }
         }
         if let Some(raw_owner) = re.owner {
-            match raw_owner.ok_or("not in save form ID array").and_then(&map_id) {
+            match raw_owner.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(oid) if matches!(data.sig(oid).as_ref(), Some(b"NPC_" | b"FACT")) => {
                     if let Ok(st) = g.world.get(rid) {
                         st.extra.owner = Some(oid);
@@ -1593,7 +1593,7 @@ pub fn convert_fos(
             }
         }
         for &(raw_fac, rank) in &ca.factions {
-            if let Ok(fid) = raw_fac.ok_or("not in save form ID array").and_then(&map_id) {
+            if let Ok(fid) = raw_fac.ok_or("not in save form ID array").and_then(map_id) {
                 if data.sig(fid).as_ref() == Some(b"FACT") {
                     g.extra.entry(placed_id).or_default().factions.insert(fid, rank);
                     inc_ok("actor_factions");
@@ -1740,7 +1740,7 @@ pub fn convert_fos(
             handled_factions.insert(f.form);
         }
         for (other, modifier, reaction) in f.relations {
-            match other.ok_or("not in save form ID array").and_then(&map_id) {
+            match other.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(oid) => {
                     if reaction <= 3 {
                         g.forms.faction_reactions.entry(fid).or_default().insert(oid, i64::from(reaction));
@@ -1782,7 +1782,7 @@ pub fn convert_fos(
         };
         let mut members = Vec::new();
         for entry in fl.forms {
-            match entry.ok_or("not in save form ID array").and_then(&map_id) {
+            match entry.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(id) => members.push(id),
                 Err(why) => inc_skip("form_list_entry", why),
             }
@@ -1812,7 +1812,7 @@ pub fn convert_fos(
         };
         let mut added_any = false;
         for entry in lv.entries {
-            match entry.item.ok_or("not in save form ID array").and_then(&map_id) {
+            match entry.item.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(item_id) => {
                     if !entry.condition.is_finite() {
                         inc_skip("leveled_list_condition", "non-finite value");
@@ -1995,7 +1995,7 @@ pub fn convert_fos(
             applied_any = true;
         }
         if let Some(raw_owner) = cell.owner {
-            match raw_owner.ok_or("not in save form ID array").and_then(&map_id) {
+            match raw_owner.ok_or("not in save form ID array").and_then(map_id) {
                 Ok(oid) if matches!(data.sig(oid).as_ref(), Some(b"NPC_" | b"FACT")) => {
                     g.forms.cell_owners.insert(cid, oid);
                     inc_ok("cell_owners");

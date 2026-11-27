@@ -2456,11 +2456,12 @@ pub fn interior_clip(sky: Res<SkyState>, mut cam: Query<&mut Projection, With<Fl
 /// [design: docs/design/tweaks.md].
 const NO_FOG_FAR: f32 = 1_000_000.0;
 
-/// The sky's colours now, for GetCurrentSkyColor (`fnv_game::nvse_jg9`); none in an
-/// interior, which shows no sky.
+/// The sky's colours now, for GetCurrentSkyColor (`fnv_game::nvse_jg9`); populated in
+/// interiors as well as exteriors [observed: `w6_t1_09_jg_sky_color_interior`,
+/// `docs/spec-notes/ext-jg9.md` §6].
 pub fn tell_sky_colors(sky: Res<SkyState>, mut script: Option<ResMut<nvf_play::script::ScriptState>>) {
     let Some(rt) = script.as_deref_mut().and_then(|s| s.rt.as_mut()) else { return };
-    rt.game.other.jg9.sky_colors = sky.interior.is_none().then(|| sky.all_color_bytes());
+    rt.game.other.jg9.sky_colors = Some(sky.all_color_bytes());
 }
 
 /// Whether an interior cell's fog range is active.
@@ -2476,6 +2477,12 @@ pub(crate) fn interior_fog_active(l: fnv_world::lighting::CellLighting) -> bool 
 /// Compose the current cell/weather fog for the main camera. Underwater fog uses
 /// the same composition on exit, without waiting for the next weather refresh.
 pub(crate) fn apply_cell_fog(sky: &SkyState, fog: &mut DistanceFog, emissive_mod: f32, no_interior_fog: bool) {
+    apply_cell_fog_spread(sky, fog, emissive_mod, no_interior_fog, 1.0);
+}
+
+/// [`apply_cell_fog`] with an exterior weather's fog range stretched by `spread` (the
+/// Outdoor Fog Distance tweak, 1: the weather's own) [design: owner 2026-11-20].
+pub(crate) fn apply_cell_fog_spread(sky: &SkyState, fog: &mut DistanceFog, emissive_mod: f32, no_interior_fog: bool, spread: f32) {
     if let Some(l) = sky.interior {
         let color = to_color(l.fog_color.map(fnv_world::sky::srgb_to_linear));
         if interior_fog_active(l) {
@@ -2491,6 +2498,7 @@ pub(crate) fn apply_cell_fog(sky: &SkyState, fog: &mut DistanceFog, emissive_mod
     } else {
         let range = sky.fog_override.map(|(n, f)| (n, f, 1.0)).or_else(|| sky.fog());
         let (near, far, strength) = range.unwrap_or((0.0, 0.0, 0.0));
+        let (near, far) = (near * spread, far * spread);
         fog.color = to_color(sky.color(ColorType::Fog)).with_alpha(strength);
         fog.falloff = crate::fog::falloff(near.max(0.0), far, sky.fog_power(), true, sky.emissive_scale() * emissive_mod);
     }
@@ -2675,8 +2683,11 @@ pub fn update_sky(
     // No fog: the fog colour's alpha scales the whole effect, so zero turns it off.
     let range = sky.fog_override.map(|(n, f)| (n, f, 1.0)).or_else(|| sky.fog());
     let (near, far, strength) = range.unwrap_or((0.0, 0.0, 0.0));
+    // The player's Outdoor Fog Distance tweak (1: the weather's own) [design: owner 2026-11-20].
+    let spread = if sky.fog_override.is_some() { 1.0 } else { tweaks.as_ref().map_or(1.0, |t| t.outdoor_fog_distance).clamp(1.0, 4.0) };
+    let (near, far) = (near * spread, far * spread);
     let power = sky.fog_power();
-    apply_cell_fog(&sky, &mut fog, emissive_mod, false);
+    apply_cell_fog_spread(&sky, &mut fog, emissive_mod, false, spread);
     // A lightning flash changes the light each frame it lasts: not worth a line each.
     let flashing = std::mem::replace(&mut *flashed, flash != Vec3::ZERO);
     if sky.time_scale <= 0.0 && flash == Vec3::ZERO && !flashing {
@@ -2767,7 +2778,7 @@ mod session_lighting_tests;
 
 #[cfg(test)]
 #[path = "cartographer_live_tests.rs"]
-mod cartographer_live_tests;
+pub(crate) mod cartographer_live_tests;
 
 #[cfg(test)]
 pub(crate) fn authored_session_sky() -> SkyState {

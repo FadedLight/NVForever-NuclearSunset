@@ -1207,6 +1207,13 @@ impl<'a> Gen<'a> {
                 Some((q, v)) => self.var(q).is_none() && self.form(q).is_some_and(|f| self.env.script_vars(f.form).is_some_and(|vs| vs.iter().any(|x| x.name.eq_ignore_ascii_case(v)))),
                 // `refVar.Name`, or `Form.Name` where the form's script has no such variable.
                 None if self.var(h).is_some() => true,
+                // `Quest.name` reads the quest's variable, never a call: when the quest's script
+                // lacks it the source is stale and is a remote-variable failure, so the unit runs
+                // its compiled bytes [observed: STAR TTW 2.esp reads
+                // `QSTStartupSTARS.fVisionRemainingSeconds`, its quest script SCPTStartupSTARS
+                // declares fVisionRemainingPerc; EDGE TTW.esm's unresolved remote variable
+                // already runs its bytes].
+                None if self.form(h).is_some_and(|f| &f.sig == b"QUST") => false,
                 None => self.form(h).is_some_and(|f| !self.env.script_vars(f.form).is_some_and(|vs| vs.iter().any(|x| x.name.eq_ignore_ascii_case(name)))),
             },
         }

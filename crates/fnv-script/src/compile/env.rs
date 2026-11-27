@@ -44,6 +44,11 @@ pub struct LoadOrderIndex<'a> {
     scripts: HashMap<u32, Vec<(usize, Vec<VarDecl>)>>,
 }
 
+/// The end of the game's own FormID range: forms below it are the engine's (the player
+/// 0x14, the time globals) [observed: FalloutNV.esm GLOB 0x38 GameHour, 0x39 GameDaysPassed,
+/// 0x3A TimeScale].
+const HARDCODED_END: u32 = 0x800;
+
 fn formid(data: &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(data.get(..4)?.try_into().ok()?))
 }
@@ -125,7 +130,15 @@ impl<'a> LoadOrderIndex<'a> {
     }
 
     fn def(&self, form: u32, viewer: usize) -> Option<&Def> {
-        self.defs.get(&form)?.iter().rev().find(|d| self.visible[viewer][d.plugin])
+        let all = self.defs.get(&form)?;
+        all.iter().rev().find(|d| self.visible[viewer][d.plugin]).or_else(|| {
+            // The game's own forms (FormIDs below 0x800 of the first file) are seen by every
+            // plugin, master or not [observed: Helmet Overlay.esm has no masters, and its
+            // compiled SCPT 0x816 lists SCRO 0x00000014 (the player) and 0x00000038 for its
+            // source's `float fHour = GameHour`; FalloutNV.esm's GLOB 0x38 is GameHour]
+            // [hypothesis: the editor resolves this whole range without the master].
+            (form < HARDCODED_END).then(|| all.iter().rev().find(|d| d.plugin == 0)).flatten()
+        })
     }
 
     /// Every record the winning plugin holds under `form`, last first. A plugin can hold

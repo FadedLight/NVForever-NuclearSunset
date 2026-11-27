@@ -11,7 +11,7 @@ const ICON: &[u8] = include_bytes!("../assets/icon-64.png");
 
 fn main() -> eframe::Result {
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("NVForever Launcher")
+        .with_title("NVForever Launcher - Nuclear Sunset")
         .with_inner_size([1180.0, 760.0])
         .with_min_inner_size([900.0, 560.0]);
 

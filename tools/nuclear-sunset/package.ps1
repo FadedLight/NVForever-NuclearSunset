@@ -35,9 +35,16 @@ foreach ($f in 'README.md', 'LICENSE', 'LEGAL.md', 'NUCLEAR-SUNSET.md', 'tools\r
 }
 New-Item -ItemType Directory -Force "$dist\docs\nuclear-sunset" | Out-Null
 Copy-Item "$Src\docs\nuclear-sunset\*.md" "$dist\docs\nuclear-sunset"
-$py = if (Test-Path 'D:\ai stuff\tools\python\python.exe') { 'D:\ai stuff\tools\python\python.exe' } else { 'python' }
-& $py "$Src\tools\release\third_party_licenses.py" --target x86_64-pc-windows-msvc --out "$dist\THIRD-PARTY-LICENSES.txt"
-if ($LASTEXITCODE -ne 0) { Write-Warning 'third_party_licenses.py failed; THIRD-PARTY-LICENSES.txt left out' }
+# The licence list asks cargo; the owner's PC keeps a portable toolchain off PATH.
+$tools = 'D:\ai stuff\tools'
+if (-not (Get-Command cargo -ErrorAction SilentlyContinue) -and (Test-Path "$tools\rust\cargo\bin\cargo.exe")) {
+    $env:CARGO_HOME = "$tools\rust\cargo"; $env:RUSTUP_HOME = "$tools\rust\rustup"; $env:PATH = "$tools\rust\cargo\bin;$env:PATH"
+}
+$py = if (Test-Path "$tools\python\python.exe") { "$tools\python\python.exe" } else { 'python' }
+$ErrorActionPreference = 'Continue'
+& $py "$Src\tools\release\third_party_licenses.py" --target x86_64-pc-windows-msvc --out "$dist\THIRD-PARTY-LICENSES.txt" 2>&1 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'third_party_licenses.py failed' }
+$ErrorActionPreference = 'Stop'
 
 $zip = Join-Path $Out "$name.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }

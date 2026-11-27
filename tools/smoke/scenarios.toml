@@ -14,6 +14,8 @@
 #   are written here. `offset` moves a member's timed test aids in a shared run.
 # - `requires = ["VAR", …]`: the scenario is skipped unless these environment variables
 #   are set (NVIDIA's files: NVF_DLSS_DIR); `"!VAR"` skips it when that one is set.
+# - `data_files = ["Mod.esp", …]`: the scenario is skipped unless the Data folder holds these
+#   files (a mod the repository cannot ship, such as Just Assorted Mods; names without case).
 # - NVF_SMOKE_DEV_AIDS=1 says the exe was built with the developer aids (`cargo build --release
 #   -p nvforever --features dev-aids`; engine/nvforever/src/dev_aids.rs): scenarios that set one
 #   of those aids require it, the one that checks a release build ignores them runs only
@@ -565,6 +567,23 @@ forbid = [
   { text = "still being retried after", label = "water effects pipeline retry cap" },
   { text = "DeviceLost", label = "GPU device loss" },
 ]
+
+[[scenario]]
+name = "water-volumetric-cloud-reflection"
+source = "[design] The Cottonwood Cove mirror draws the live volumetric sky on reflective water, including when the player looks down. Switching clouds off and back on must hand the mirror back to the newly prepared volume."
+areas = ["renderer", "graphics", "water", "sky"]
+paths = ["engine/nvforever/src/reflection*", "engine/nvforever/src/reflection/**", "engine/nvforever/src/medium*", "engine/nvforever/src/medium/**", "engine/nvforever/src/volumetric_clouds*"]
+env = { NVF_PLAY_TEST_LOOK = "3:107:1,19:107:-36", NVF_PLAY_TEST_PAUSE = "24:27,36:39", NVF_PLAY_TEST_SETTINGS = "25:volumetric-clouds=Off,37:volumetric-clouds=High" }
+args = ["--play", "--cell", "17,-23", "--pos=65664,-90752,-2178", "--heading", "107", "--pitch=1", "--hour", "7.3", "--weather", "NVWastelandClear", "--no-actors", "--no-messages", "--no-voice", "--graphics-only", "volumetric-clouds-high,water-effects,water-reflections"]
+run_seconds = 57
+order = [[
+  "water reflection: volumetric clouds ready",
+  "test aid: look heading 107.0 pitch -36.0",
+  "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=Off",
+  "test aid NVF_PLAY_TEST_SETTINGS: volumetric-clouds=High",
+  "water reflection: volumetric clouds ready",
+]]
+forbid = ["Caught rendering error", "failed and will not be tried again", "DeviceLost"]
 
 [[scenario]]
 name = "water-effects-submerged"
@@ -14314,11 +14333,11 @@ env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_PAUSE = "10:16", NVF_P
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--window", "borderless"]
 run_seconds = 18
 expect = [
-  { re = 'window: borderless full screen$', label = "--window borderless starts borderless full screen" },
+  { re = 'window: borderless full screen, \d+x\d+$', label = "--window borderless starts borderless full screen, at the display's surface size" },
   { text = "settings: borderless off", label = "the Display switch is flipped" },
   { text = 'window: windowed, 1280x800', label = "the live window turns into a window of --size again" },
 ]
-order = [[{ re = 'window: borderless full screen$' }, "settings: borderless off", { text = 'window: windowed, 1280x800' }]]
+order = [[{ re = 'window: borderless full screen, \d+x\d+$' }, "settings: borderless off", { text = 'window: windowed, 1280x800' }]]
 
 [[scenario]]
 name = "resolution-revert"
@@ -15251,6 +15270,23 @@ expect = [
   { re = 'crosshair: hidden down the true iron sights', label = "no crosshair down the sights" },
   { re = 'crosshair: shown again', label = "the crosshair is back after aiming" },
 ]
+
+[[scenario]]
+name = "no-crosshair-reloading-only-while-reloading"
+source = "issue #4611 (player report R-UTJBMC55): with the No Crosshair While Reloading tweak on, the crosshair and every activation prompt were hidden from the load on, unarmed: the reticle read `WeaponAnim::reload` (the weapon's reload clip, set for every weapon held) as reloading. Now it reads the weapon's cycle (`Combat::player_reloading`); No Hotkeys While Reloading read the same and now the same"
+note = "the tweak flipped on the settings page at 3.5 s; the 10mm pistol (0000434F) drawn at 16 s, two shots at 19 s, a reload at 21 s (no god mode: it never reloads): after the message boxes the scripts open about 5 to 13 s in, which take the inputs while they show (as in shoot-bottles)"
+areas = ["combat", "ui"]
+paths = ["engine/nvf-play/src/reticle.rs", "engine/nvf-play/src/weapon_wheel.rs"]
+env = { NVF_PLAY_TEST_SCRIPT_MENUS = "0.05", NVF_PLAY_TEST_PAUSE = "3:5", NVF_PLAY_TEST_SETTINGS = "3.5:tweak-hide-crosshair-reloading", NVF_PLAY_TEST_EQUIP = "0000434F", NVF_PLAY_TEST_GIVE = "00004241:50", NVF_PLAY_TEST_CONTROL = "16:weapon,19:fire,19.4:fire,21:reload" }
+args = ["--cell", "Goodsprings", "--play", "--no-voice", "--no-messages", "--hour", "12"]
+run_seconds = 28
+expect = [
+  { text = "settings: tweak-hide-crosshair-reloading on", label = "the tweak is switched on" },
+  { text = "crosshair: hidden while reloading", count = 1, label = "the reload hides the crosshair, once" },
+  { text = "crosshair: shown again", label = "it is back after the reload" },
+  { re = 'crosshair: hidden down the true iron sights', count = 0, label = "nothing else hides it: not the weapon held, not the load" },
+]
+order = [["settings: tweak-hide-crosshair-reloading on", "crosshair: hidden while reloading", "crosshair: shown again"]]
 
 [[scenario]]
 name = "aim-reload-lowers-sights"
@@ -21569,6 +21605,20 @@ expect = [
   { re = 'speech look: line \S+ over: GoodspringsSettler04Ref has the player [+-][0-5]° off its front', label = "she faces the player by the end of the line" },
   { re = 'ai summary.*GoodspringsSettler04Ref: GSSettler04SleepPackage22x8, (on its way|there)', label = "her package goes on after the lines" },
   { re = 'ai summary.*\b0 unreachable', label = "no walk left unreachable" },
+]
+
+[[scenario]]
+name = "goodbye-greeting-plays-out"
+source = "issue #4683: talking to an actor again while it says its Goodbye greeting at the player does nothing; the line plays to its end and no second line starts [player report: \"New phrase should trigger only after previous phrase has ended\"] (dialogue.md section 5, script.rs talk_after_except)"
+areas = ["dialogue"]
+paths = ["engine/nvf-play/src/script.rs"]
+note = "GoodspringsSettler04Ref says a Goodbye greeting (goodbye-greeting-stops-walker); the second talk 0.4 s after the first lands while she is still saying it"
+env = { NVF_PLAY_TEST_TALK = "20:GoodspringsSettler04Ref=;20.4:GoodspringsSettler04Ref=" }
+args = ["--cell", "Goodsprings", "--play", "--npc-packages", "GoodspringsSettler04Ref", "--hour", "21.9", "--no-voice"]
+run_seconds = 30
+expect = [
+  { re = 'dialogue: \S+ says its greeting \S+ at the player \(a Goodbye line: no conversation\)', count = 1, label = "one greeting said" },
+  { re = 'dialogue: the player talks to \S+, still saying its greeting: it says it to the end', count = 1, label = "the second talk lets the line play out" },
 ]
 
 [[scenario]]
@@ -28393,13 +28443,14 @@ name = "hv-sandstorm-scroll"
 source = "#2450 (docs/spec-notes/activators.md §6.1): the Hidden Valley dust storm (HVSandStormNight, effects/nv/nvsandstormnight.nif) scrolls all 18 of its dust sheets: SpecialIdle's texture scroll names NVSandstorm01:0 only, the other 17 list the same NiTexturingProperty and move with it"
 note = "HVDustStorm forced at the owner's spot in Hidden Valley (-5,-2) at 22:00; the console enables the storm references 0x000E18D7 and 0x000E18D9 (initially disabled, enabled by VHiddenValleyDustStormQuestScript in a playthrough); a frame at 14 s in target/smoke"
 areas = ["activators", "effects"]
-paths = ["engine/nvf-assets/src/model.rs", "engine/nvf-assets/src/material_anim.rs"]
+paths = ["engine/nvf-assets/src/model.rs", "engine/nvf-assets/src/material_anim.rs", "engine/nvf-play/src/fade.rs"]
 env = { NVF_PLAY_TEST_GOD = "1", NVF_PLAY_TEST_SCRIPT_MENUS = "1", NVF_PLAY_TEST_CONSOLE = "4:000E18D7.enable;000E18D9.enable;4.3:close", NVF_PLAY_TEST_SHOTS = "14:hv_sandstorm.png" }
 args = ["--cell", "HiddenValley", "--pos=-17863,-4814,6498", "--heading", "200", "--play", "--hour", "22", "--weather", "HVDustStorm", "--no-voice", "--no-messages"]
 run_seconds = 18
 expect = [
   { re = 'nvsandstormnight[.]nif: shapes sharing a driven texturing property move their texture with it: NVSandstorm02:0, .*NVSandstorm18:0', label = "the storm's other 17 dust sheets scroll with NVSandstorm01:0" },
   { re = 'test aid: screenshot .*hv_sandstorm[.]png', label = "the frame is saved" },
+  { re = 'fade: 0x000E18D7 in done; [1-9]\d* meshes given their own material anew while it ran, drawn after it', label = "#3919: the storm fades in and its own scrolling material is drawn after the fade, not the one from before it was bound" },
 ]
 
 [[scenario]]
@@ -28795,6 +28846,7 @@ areas = ["ui", "menus", "scripts"]
 paths = ["engine/nvf-play/src/tiles/mods.rs", "engine/nvf-play/src/pause.rs", "engine/nvf-play/src/tiles/input.rs", "crates/fnv-game/src/game.rs"]
 env = { NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_PAUSE = "16:28", NVF_PLAY_TEST_PAUSE_MENU = "17:mods,20:shot,22:back" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 32
 expect = [
   "tiles: StartMenu/NOGLOW_BRANCH/main_container: the original's column traits written for MCM",
@@ -28812,6 +28864,7 @@ areas = ["ui", "menus", "scripts", "save"]
 paths = ["engine/nvf-play/src/tiles/mods.rs", "engine/nvf-play/src/pause.rs", "crates/fnv-game/src/game.rs"]
 env = { NVFOREVER_HOME = "mcm-load-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_PAUSE = "9:14", NVF_PLAY_TEST_PAUSE_MENU = "10:mods,13:back", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "16:save smoke-mcm;17:close" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 20
 expect = [
   { text = "tiles: MCM's window is open on the Mods page", label = "the Mods page ran JAM's MenuMode 1013 block in play, so its timer is at 1 when saved" },
@@ -28827,6 +28880,7 @@ areas = ["ui", "menus", "scripts", "save"]
 paths = ["engine/nvf-play/src/tiles/mods.rs", "engine/nvf-play/src/pause.rs", "crates/fnv-game/src/game.rs"]
 env = { NVFOREVER_HOME = "mcm-load-home", NVF_PLAY_TEST_PAUSE = "10:24", NVF_PLAY_TEST_PAUSE_MENU = "11:mods,16:shot,18:back" }
 args = ["--play", "--load", "smoke-mcm", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 26
 expect = [
   { re = 'load: restored .*smoke-mcm\.nvfsave', label = "the save is loaded" },
@@ -28859,6 +28913,7 @@ areas = ["ui", "menus", "scripts", "save"]
 paths = ["engine/nvf-play/src/tiles/mods.rs", "engine/nvf-play/src/script.rs", "crates/fnv-game/src/game.rs"]
 env = { NVFOREVER_HOME = "mcm-added-home", NVF_PLAY_TEST_PAUSE = "10:24", NVF_PLAY_TEST_PAUSE_MENU = "11:mods,16:shot,18:back", NVF_PLAY_TEST_CONSOLE = "8:PrintC \"nvf mcm running %g\" (GetQuestRunning MCM);8.5:close" }
 args = ["--play", "--load", "smoke-no-mcm", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 26
 expect = [
   { re = 'load: restored .*smoke-no-mcm\.nvfsave', label = "the save from before MCM is loaded" },
@@ -28876,6 +28931,7 @@ areas = ["ui", "menus", "scripts"]
 paths = ["engine/nvf-play/src/tiles/mods.rs", "engine/nvf-play/src/tiles/input.rs", "engine/nvf-play/src/tiles/mod.rs", "crates/fnv-ui/src/tree.rs", "crates/fnv-ui/src/xml.rs", "crates/fnv-ui/src/input.rs", "crates/fnv-game/src/ui_functions.rs"]
 env = { NVF_PLAY_TEST_MOD_LOG = "1", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_PAUSE = "16:30", NVF_PLAY_TEST_PAUSE_MENU = "17:mods,25.5:shot,27:back", NVF_PLAY_TEST_POINTER = "19:338:188,19.5:338:188:click,21:600:190,21.5:600:190:click,23:600:190:click,24.5:900:900" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 32
 expect = [
   { text = "tiles: clicked StartMenu/MCM/MCM_ModList/Mod1", label = "the pointer clicks Just Mods' line" },
@@ -28899,6 +28955,7 @@ areas = ["scripts", "nvse", "input"]
 paths = ["crates/fnv-game/src/jip_events.rs"]
 env = { NVFOREVER_HOME = "jam-sprint-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "4:set JVSEnabled to 0;4.2:set JVS.iSettingUpdate to 1;4.4:close;12.5:PrintC \"nvf jvs sprint %g enabled %g\" JVS.iSprint JVSEnabled;12.7:close;17:PrintC \"nvf jvs sprint %g enabled %g\" JVS.iSprint JVSEnabled;17.2:close", NVF_PLAY_TEST_KEYS = "10:w:9,11:shift:3" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 20
 expect = [
   { text = "nvf jvs sprint 0 enabled 0", min = 2, label = "with the sprint turned off, Shift starts none (12.5 s) and none is left on (17 s)" },
@@ -28913,6 +28970,7 @@ areas = ["scripts", "nvse", "input"]
 paths = ["crates/fnv-game/src/jip_events.rs"]
 env = { NVFOREVER_HOME = "jam-sprint-home", NVF_PLAY_TEST_GOTO = "1:-68375:4800:8600", NVF_PLAY_TEST_SCRIPT_MENUS = "0.3", NVF_PLAY_TEST_CONSOLE = "12.5:PrintC \"nvf jvs sprint %g enabled %g\" JVS.iSprint JVSEnabled;12.7:close;17:PrintC \"nvf jvs sprint %g enabled %g\" JVS.iSprint JVSEnabled;17.2:close", NVF_PLAY_TEST_KEYS = "10:w:9,11:shift:3" }
 args = ["--cell", "Goodsprings", "--play", "--pos=-68375,4800,8700", "--no-voice", "--no-messages", "--plugins", "FalloutNV.esm", "DeadMoney.esm", "HonestHearts.esm", "OldWorldBlues.esm", "LonesomeRoad.esm", "GunRunnersArsenal.esm", "ClassicPack.esm", "MercenaryPack.esm", "TribalPack.esm", "CaravanPack.esm", "The Mod Configuration Menu.esp", "JustAssortedMods.esp"]
+data_files = ["JustAssortedMods.esp"]
 run_seconds = 20
 expect = [
   { text = "nvf jvs sprint 1 enabled 1", label = "Shift held while running starts the sprint" },
@@ -33795,7 +33853,7 @@ expect = [
 order = [[
   { text = "pause menu: open", label = "the pause menu is open" },
   { text = "full screen key: Alt+Enter: full screen on", label = "the first Alt+Enter turns full screen on" },
-  { re = 'window: borderless full screen$', label = "the window goes full screen" },
+  { re = 'window: borderless full screen, \d+x\d+$', label = "the window goes full screen, at the display's surface size" },
   { text = "full screen key: Alt+Enter: full screen off", label = "the second turns it off" },
   { re = 'window: windowed, 1280x800', label = "and the window is a window of its own size again" },
   { text = "test aid NVF_PLAY_TEST_PAUSE: Esc (resume)", label = "the pause menu's test aid resumes it" },

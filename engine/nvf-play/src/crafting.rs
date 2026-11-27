@@ -418,7 +418,7 @@ pub(crate) fn view(rt: &mut crate::script::Runtime, sim: &mut SimState, open: &O
         let selected = open.selected.min(rows.len().saturating_sub(1));
         let subcategory = filter.map(|_| subs[open.filter - 1].0.clone());
         let title = match filter {
-            None => "RECIPES".to_string(),
+            None => crate::pipboy::labels::built_in_label("sRecipes").to_uppercase(),
             Some(_) => subs[open.filter - 1].0.to_uppercase(),
         };
         let chosen = shown.get(selected).copied();
@@ -973,17 +973,23 @@ fn spawn(commands: &mut Commands, look: &RecipeLook, presentation:(&View,crate::
             }
             // The recipe's box.
             let rx = RIGHT_AT.x;
-            let mw = look.title.width("Made at ...");
+            // The titles are the settings recipe_menu.xml names (`sMadeAt`,
+            // `sSkillRequirement`, `sIngredients`; the list's `sRecipes`): the load order's
+            // text, else NVForever's own label [design, #4495: in place of the words read
+            // from the original's screen].
+            let [made_at, skill_needed, ingredients] =
+                ["sMadeAt", "sSkillRequirement", "sIngredients"].map(crate::pipboy::labels::built_in_label);
+            let mw = look.title.width(made_at);
             brackets(m, rx, RIGHT_AT.y, BOX_WIDTH, RIGHT_AT.y + 515.0, (25.0, 50.0 + mw + 20.0));
             m.spawn(at(rx, RIGHT_AT.y - 28.0, BOX_WIDTH, 600.0)).with_children(|b| {
-                text(b, &look.title, "Made at ...", 50.0, 0.0, bright);
+                text(b, &look.title, made_at, 50.0, 0.0, bright);
                 text(b, &look.value, &v.made_at, 60.0, 78.0, bright);
                 if let Some((name, have, need)) = &v.skill {
-                    text(b, &look.title, "Skill Requirement", 50.0, 128.0, bright);
+                    text(b, &look.title, skill_needed, 50.0, 128.0, bright);
                     let ok = have >= need;
                     text(b, &look.value, &format!("{name} ({have}/{need})"), 60.0, 188.0, if ok { bright } else { amber(NOT_READY) });
                 }
-                text(b, &look.title, "Ingredients", 50.0, 238.0, bright);
+                text(b, &look.title, ingredients, 50.0, 238.0, bright);
                 let mut y = 298.0;
                 for (idx, (_, name, have, need)) in v.ingredients.iter().enumerate() {
                     let ok = have >= need;

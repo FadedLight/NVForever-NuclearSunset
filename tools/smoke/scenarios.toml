@@ -6161,7 +6161,7 @@ args = ["--cell", "GSGeneralStore", "--play", "--no-voice"]
 run_seconds = 50
 expect = [
   { re = 'Player: .*Legion Denarius x3 at (\d+|0\.\d)', label = "the denarii have a price (their Absolute Value)" },
-  { re = 'menu: figures of 10mm Pistol: DAM \d+, WG [\d.]+, VAL \d+, .*DPS \d+, .*CND', label = "the pistol's figures as the Pip-Boy's: damage, weight, value, DPS, condition" },
+  { re = 'menu: figures of 10mm Pistol: Damage \d+, WEIGHT [\d.]+, Value \d+, .*DPS \d+, .*Condition', label = "the pistol's figures as the Pip-Boy's: damage, weight, value, DPS, condition" },
 ]
 order = [["menu: a script opens the barter menu with 0x00104C79", "menu: figures of 10mm Pistol", "menu: close"]]
 
@@ -6247,7 +6247,7 @@ expect = [
   { text = "tiles: BarterMenu", count = 0, label = "no barter adapter runs" },
   { text = "tiles: QuantityMenu", count = 0, label = "no prompt adapter runs" },
   { text = "tile menu blur:", count = 0, label = "no tile blur" },
-  { re = 'menu: figures of 10mm Pistol: DAM \d+, WG [\d.]+, VAL \d+, .*DPS \d+, .*CND', label = "hand-built item card" },
+  { re = 'menu: figures of 10mm Pistol: Damage \d+, WEIGHT [\d.]+, Value \d+, .*DPS \d+, .*Condition', label = "hand-built item card" },
   { text = "menu: Accept: Traded", count = 1, label = "A accepts once" },
 ]
 order = [["menu: a script opens the barter menu with 0x00104C79", "stock in 0x00104C7A", "Selling 10mm Pistol x1", "Took back 10mm Pistol x1", "menu: Accept: Traded", "menu: close"]]

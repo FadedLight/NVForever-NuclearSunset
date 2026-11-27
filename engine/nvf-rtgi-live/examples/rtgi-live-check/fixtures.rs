@@ -603,6 +603,7 @@ pub fn run(gpu: &Gpu) -> Result<bool, String> {
     close_spot(&mut all);
     grid(&mut all)?;
     all.push(seam("the edge of two walls", PLACES[0].0, room(V3::ZERO, V3([128.0; 3])), V3::ZERO, v(128.0, 128.0, 10.0)));
+    crate::corpus::add(&mut all);
     let (mut failed, mut known) = (0, 0);
     for f in &all {
         let (passed, is_known) = check(gpu, f).map_err(|e| format!("{}: {e}", f.name))?;

@@ -607,7 +607,6 @@ impl Vfs {
         }
     }
 
-    /// Every path (normalised) for which `pred` holds, sorted.
     /// The loose files under a folder (lower case, `\` between parts, no leading `\`), as
     /// their whole normalized paths, sorted: every layer's (`Data` and the mods folders), from
     /// the index, so a folder made of several mods' files lists them all without walking the
@@ -627,6 +626,7 @@ impl Vfs {
         keys[start..].iter().take_while(|k| k.starts_with(&pre)).cloned().collect()
     }
 
+    /// Every path (normalised) for which `pred` holds, sorted.
     pub fn paths(&self, pred: impl Fn(&str) -> bool) -> Vec<String> {
         let mut v: Vec<String> = self.index.keys().filter(|k| pred(k)).cloned().collect();
         v.sort();
@@ -781,6 +781,16 @@ mod tests {
         assert_eq!(vfs.read("textures\\a\\data_only.dds").unwrap().unwrap(), b"data");
         assert_eq!(vfs.read("textures\\a\\extra_only.dds").unwrap().unwrap(), b"extra");
         assert_eq!(vfs.loose_roots().last(), Some(&extra));
+        // A folder listing takes every layer's files from the index, and an added root
+        // drops the sorted keys made for an earlier listing (#4490).
+        let listed = vfs.loose_paths_under("Textures/A");
+        assert_eq!(listed, ["textures\\a\\both.dds", "textures\\a\\data_only.dds", "textures\\a\\extra_only.dds"]);
+        let later = base.join("later");
+        std::fs::create_dir_all(later.join("textures/a")).unwrap();
+        std::fs::write(later.join("textures/a/later.dds"), b"later").unwrap();
+        vfs.add_loose_root(&later);
+        assert_eq!(vfs.loose_paths_under("textures\\a\\").len(), 4);
+        assert!(vfs.loose_paths_under("textures\\b").is_empty());
         // Nothing was written into either folder.
         assert_eq!(std::fs::read(data.join("textures/a/both.dds")).unwrap(), b"data");
         let _ = std::fs::remove_dir_all(&base);

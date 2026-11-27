@@ -99,10 +99,6 @@ use fnv_script::FunctionTable;
 use fnv_sim::world::{Activation, Outcome};
 use crate::game_start::GameStart;
 use fnv_sim::{FormId, RefTable, World};
-
-/// Frames a new game's Script Runner files wait at most for the player's models [engineering
-/// choice: about 5 s at 60 FPS; the models are usually in place within a few frames].
-const NEW_GAME_FILES_WAIT: u32 = 300;
 use fnv_world::WorldIndex;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
@@ -110,6 +106,11 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Mutex;
 use std::time::Instant;
+
+/// Frames a new game's or a load's Script Runner files wait at most for the player's
+/// models [engineering choice: about 5 s at 60 FPS; the models are usually in place within
+/// a few frames] (#4491).
+const NEW_GAME_FILES_WAIT: u32 = 300;
 
 /// MenuMode code while a message box is open (`fnv_game::game::menus::MESSAGE`): shipped
 /// scripts read the chosen button in `Begin MenuMode 1001` blocks [observed: FalloutNV
@@ -939,6 +940,7 @@ impl Runtime {
         if cell.is_some() && cell != self.player_cell {
             self.player_cell = cell;
             self.game.player_entered(cell);
+            self.triggers.prune_unloaded_projectile_zones(&self.game);
             debug!("script: player in cell {:?}; {} cells loaded for scripts", cell, self.game.loaded_cells.len());
             self.log_level_news();
         }
@@ -1179,6 +1181,16 @@ impl Runtime {
         let mut done = None;
         for (i, actor) in wanted {
             let g = &mut self.game;
+            // Still saying its Goodbye greeting at the player: the line plays to its end and
+            // the activation does nothing, neither cutting it nor saying another
+            // [player report #4683: "New phrase should trigger only after previous phrase
+            // has ended"; dialogue.md §5].
+            if g.greets_player(actor) {
+                self.skip.insert(i);
+                info!("dialogue: the player talks to {}, still saying its greeting: it says it to the end", g.data.name(actor));
+                done = done.or(Some(ByHand::Greeted));
+                continue;
+            }
             // A teammate: the companion wheel opens instead (`crate::companion_wheel`).
             if g.has_companion_wheel(actor) {
                 if g.open_companion_wheel(actor) {
@@ -2219,6 +2231,8 @@ type UsesAndLoads<'w> = (
     Option<ResMut<'w, crate::doors::Doors>>,
     MessageWriter<'w, crate::save::LoadRefused>,
     Option<Res<'w, crate::save::PendingEngine>>,
+    // A co-op guest's join in progress: its triggers are not fired (`crate::save::KeepSolo`).
+    Option<Res<'w, crate::save::KeepSolo>>,
     Option<Res<'w, crate::tweaks::TweakSettings>>,
 );
 
@@ -2283,7 +2297,7 @@ pub(crate) fn run_scripts(
     mut travel: MessageWriter<TravelRequest>,
     mut open: MessageWriter<OpenContainer>,
     mut used: MessageReader<ItemUsed>,
-    (mut sit, mut terminals, mut doors, mut refused, pending_engine, tweak_settings): UsesAndLoads,
+    (mut sit, mut terminals, mut doors, mut refused, pending_engine, joining, tweak_settings): UsesAndLoads,
     paused: Res<crate::pause::Paused>,
     (mut screen, bindings, tiles, page, mut mods_ticks, menu_to_open): ScreenAndMenus,
 ) {
@@ -2462,9 +2476,10 @@ pub(crate) fn run_scripts(
     }
     if mods_ticks.frames > 0 {
         info!("scripts: the Mods page closed after {} MenuMode frames", mods_ticks.frames);
-        mods_ticks.frames = 0;
         if let Some(rt) = st.rt.as_mut() {
-            with_world(rt, &mut sim, |rt| rt.game.page_menu_event(fnv_game::game::menus::START, false));
+            with_world(rt, &mut sim, |rt| crate::tiles::mods::close(&mut rt.game, &mut mods_ticks));
+        } else {
+            *mods_ticks = Default::default();
         }
     }
     if paused.0 || screen.active() {
@@ -2673,7 +2688,7 @@ pub(crate) fn run_scripts(
         // `script_trigger::update`, #2571).
         rt.game.loading = loading;
         if !rt.game.paused() {
-            crate::script_trigger::update(rt, &play, &phys, player_capsule);
+            crate::script_trigger::update(rt, &play, &phys, player_capsule, joining.is_some());
         }
         rt.game.cfg.frame_seconds = dt;
         // Scripts' GetFallTimeElapsed (`fnv_game::nvse_gaps`).

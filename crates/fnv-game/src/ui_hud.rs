@@ -272,7 +272,7 @@ pub const MEASURED_MARK: &str = "_NVFMeasured";
 /// The HUD's text tiles that mods add and that read their own size: every `text` under
 /// HUDMainMenu not in [`measured_texts`] whose file gives no `width` of its own (or whose
 /// width the engine wrote before, [`MEASURED_MARK`]). The original measures every text
-/// tile [hypothesis, ui-tile-tree.md §4.1]; the vanilla pieces keep their own path.
+/// tile [hypothesis, menu-xml.md §3.1.2]; the vanilla pieces keep their own path (#4493).
 pub fn unmeasured_texts(ui: &Ui) -> Vec<fnv_ui::TileId> {
     let Some(root) = ui.find_tile("HUDMainMenu") else { return Vec::new() };
     let known = measured_texts(ui);

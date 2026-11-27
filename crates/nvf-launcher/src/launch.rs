@@ -88,11 +88,14 @@ pub fn check_mo2(instance: &Path, profile: &str) -> Result<Mo2Check, String> {
     let ini = std::fs::read_to_string(instance.join(fnv_install::mo2::INI_FILE))
         .map_err(|_| format!("No ModOrganizer.ini in {}: pick the folder that holds ModOrganizer.exe (a portable instance) or the instance's folder.", instance.display()))?;
     let game = fnv_install::mo2::ini_game_path(&ini).ok_or("This Mod Organizer 2 instance names no game folder (gamePath).")?;
-    let any = fnv_install::mo2::Layout::from_ini(instance, &ini).or_else(|| fnv_install::mo2::Layout::from_ini_profile(instance, &ini, Some("Default")));
-    let mut profiles: Vec<String> = any
-        .as_ref()
+    // The profiles folder: the selected profile's parent, else the one upstream's `open`
+    // falls back to (an only or "Default" profile), else the instance's `profiles`.
+    let dir = fnv_install::mo2::Layout::from_ini(instance, &ini)
+        .or_else(|| fnv_install::mo2::Layout::open(instance, None).ok())
         .and_then(|l| l.profile.parent().map(Path::to_path_buf))
-        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .unwrap_or_else(|| instance.join("profiles"));
+    let mut profiles: Vec<String> = std::fs::read_dir(dir)
+        .ok()
         .map(|rd| rd.flatten().filter(|e| e.path().join("modlist.txt").is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
         .unwrap_or_default();
     profiles.sort_by_key(|p| p.to_ascii_lowercase());
